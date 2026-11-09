@@ -203,7 +203,9 @@ Bularni buzgan o'zgarish avtomatik rad etiladi. Bular MiniERP'da amalda sinalgan
 ### 3.6. Git
 
 - Har vazifa alohida branch: `gemini/T0.2-money-types`.
-- `main`ga to'g'ridan-to'g'ri push qilinmaydi, o'zingiz merge qilmaysiz.
+- `main`ga to'g'ridan-to'g'ri push va force push qilinmaydi.
+- PR faqat ikki shart birga bajarilganda Squash and merge qilinadi: shu PR'ning oxirgi commit'i uchun Claude `QABUL` bergan va CI Ubuntu hamda Windows'da yashil. `QABUL`dan keyin yangi commit qo'shilsa, qayta tekshiruv kerak.
+- Merge'dan keyin merge commit SHA'sini hisobotga yoz va vazifa branch'ini o'chir.
 - Commit: `T0.2: qisqa mazmun`. Bitta PR — bitta vazifa.
 
 ---
@@ -255,7 +257,7 @@ Bu loyihaning eng xavfli qismi. Spetsifikatsiyadan chetlanish faqat Claude tasdi
 
 ```text
 Gemini vazifani bajaradi → PR + hisobot → Egasi Claude'ga beradi
-Claude tekshiradi → QABUL / QAYTA ISHLASH / TO'XTATILDI → Egasi merge qiladi
+Claude tekshiradi → QABUL / QAYTA ISHLASH / TO'XTATILDI → QABUL bo'lsa Gemini merge qiladi
 ```
 
 Kod yozishdan oldin qisqa reja bering: fayllar, yondashuv, testlar.

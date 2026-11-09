@@ -2,26 +2,54 @@
 module.exports = {
   forbidden: [
     {
-      name: 'domain-imports-nothing',
+      name: 'domain-src-imports-nothing',
       comment:
-        'packages/domain must not import anything (no node builtins, no npm packages, no other workspace packages)',
+        'packages/domain source files must not import anything (no node builtins, no npm packages, no other workspace packages)',
       severity: 'error',
       from: {
-        path: '^packages/domain',
+        path: '^packages/domain/src/',
+        pathNot: '\\.test\\.ts$',
       },
       to: {
-        pathNot: '^packages/domain',
+        pathNot: '^packages/domain/src/',
       },
     },
     {
-      name: 'rules-imports-only-domain',
-      comment: 'packages/rules can only import from packages/domain or within packages/rules',
+      name: 'domain-tests-imports-only-testing',
+      comment:
+        'packages/domain test files can only import internal source files, vitest, and fast-check',
       severity: 'error',
       from: {
-        path: '^packages/rules',
+        path: '^packages/domain/src/.*\\.test\\.ts$',
       },
       to: {
-        pathNot: '^(packages/rules|packages/domain)',
+        pathNot: '^(packages/domain/src/|node_modules/(\\.pnpm/)?(fast-check|vitest)@)',
+      },
+    },
+    {
+      name: 'rules-src-imports-only-domain',
+      comment:
+        'packages/rules source files can only import within packages/rules/src or from packages/domain',
+      severity: 'error',
+      from: {
+        path: '^packages/rules/src/',
+        pathNot: '\\.test\\.ts$',
+      },
+      to: {
+        pathNot: '^(packages/rules/src/|packages/domain/)',
+      },
+    },
+    {
+      name: 'rules-tests-imports-only-testing-and-domain',
+      comment:
+        'packages/rules test files can only import internal source files, packages/domain, vitest, and fast-check',
+      severity: 'error',
+      from: {
+        path: '^packages/rules/src/.*\\.test\\.ts$',
+      },
+      to: {
+        pathNot:
+          '^(packages/rules/src/|packages/domain/|node_modules/(\\.pnpm/)?(fast-check|vitest)@)',
       },
     },
     {

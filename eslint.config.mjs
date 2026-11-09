@@ -108,6 +108,18 @@ export default tseslint.config(
           name: 'setImmediate',
           message: 'setImmediate is forbidden in domain/rules.',
         },
+        {
+          name: 'Number',
+          message: 'Number is forbidden in domain/rules. All math must use bigint tiyin/milli.',
+        },
+        {
+          name: 'parseFloat',
+          message: 'parseFloat is forbidden in domain/rules. All math must use bigint tiyin/milli.',
+        },
+        {
+          name: 'parseInt',
+          message: 'parseInt is forbidden in domain/rules. Use BigInt for parsing integers.',
+        },
       ],
       'no-restricted-syntax': [
         'error',
