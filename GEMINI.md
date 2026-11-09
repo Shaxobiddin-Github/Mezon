@@ -60,7 +60,8 @@ Soliq/OFD · UzQR · Payme/Click/Uzum · Asl belgisi · yetkazib berish
 
 | Soha | Tanlov |
 |---|---|
-| Til | TypeScript 7.x (`strict`) |
+| Til | TypeScript 6.0.3 (`strict`, `skipLibCheck: true`) |
+| Linter | ESLint 10.14, typescript-eslint 8.72 (tipga asoslangan qoidalar bilan) |
 | Runtime | Node.js 24 LTS |
 | Monorepo | pnpm 12 + Turborepo 2 |
 | Validatsiya va kontrakt | Zod 4 |
@@ -89,7 +90,9 @@ Soliq/OFD · UzQR · Payme/Click/Uzum · Asl belgisi · yetkazib berish
 
 Aniq versiyalar `pnpm-lock.yaml` bilan mahkamlanadi. Almashtirish faqat Claude tasdig'i bilan. Yuqori versiya bir-biriga mos kelmasa, jimgina pasaytirmang: to'xtab xabar bering.
 
-**Muhim tekshiruvlar (`T0.1`):** Electron ichidagi Node major versiyasi; better-sqlite3 va koffi Electron bilan yig'ilishi; TypeScript 7 bilan Drizzle, Zod va ESLint mosligi.
+**Muhim tekshiruvlar (`T0.1`):** Electron ichidagi Node major versiyasi; better-sqlite3 va koffi Electron bilan yig'ilishi; TypeScript 6.0.3 bilan Drizzle, Zod va ESLint mosligi.
+
+**TypeScript 7:** hozircha ishlatilmaydi, chunki typescript-eslint 8.72 faqat `<6.1.0` ni qo'llab-quvvatlaydi va TS 7.0.2 bilan ishdan chiqadi. typescript-eslint rasmiy qo'llab-quvvatlashni e'lon qilgach, o'tish alohida vazifa bo'ladi.
 
 **Yangilash siyosati:** Electron har chorakda qo'llab-quvvatlanadigan versiyaga ko'tariladi. Drizzle `0.x`, shuning uchun yangilash faqat alohida vazifa bilan. exceljs kam yangilanadi, shuning uchun port orqasida turadi va faqat hub ichida ishlaydi.
 
