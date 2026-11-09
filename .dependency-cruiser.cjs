@@ -32,7 +32,7 @@ module.exports = {
         path: '^packages/',
       },
       to: {
-        path: '^apps/',
+        path: '^(apps/|@mezon/(desktop|hub|pos|android|cloud|admin|bot))',
       },
     },
     {
@@ -43,17 +43,14 @@ module.exports = {
         path: '^apps/([^/]+)',
       },
       to: {
-        path: '^apps/',
+        path: '^(apps/|@mezon/(desktop|hub|pos|android|cloud|admin|bot))',
         pathNot: '^apps/$1',
       },
     },
   ],
   options: {
     doNotFollow: {
-      path: ['node_modules', 'dist'],
-    },
-    exclude: {
-      path: ['(^|/)dist/'],
+      path: 'node_modules',
     },
     tsPreCompilationDeps: true,
     tsConfig: {
