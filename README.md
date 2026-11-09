@@ -22,11 +22,12 @@ pnpm install --frozen-lockfile && pnpm verify
 
 `pnpm verify` buyrug'i quyidagi tekshiruvlarni ketma-ket bajaradi:
 
-1. **Lint:** `pnpm run lint` (`eslint .` — tipga asoslangan qoidalar bilan)
-2. **Typecheck:** `pnpm run typecheck` (`turbo run typecheck`)
-3. **Test:** `pnpm run test` (`vitest run`)
-4. **Dependency boundaries:** `pnpm run depcruise` (`dependency-cruiser` qat'iy chegaralari)
-5. **Build:** `pnpm run build` (`turbo run build`)
+1. **Format check:** `pnpm run format:check` (`prettier --check .`)
+2. **Build:** `pnpm run build` (`turbo run build` — workspace `dist` artefaktlarini tayyorlaydi)
+3. **Lint:** `pnpm run lint` (`eslint .` — tipga asoslangan qoidalar bilan)
+4. **Typecheck:** `pnpm run typecheck` (`turbo run typecheck`)
+5. **Test:** `pnpm run test` (`vitest run`)
+6. **Dependency boundaries:** `pnpm run depcruise` (`dependency-cruiser` qat'iy chegaralari)
 
 ---
 

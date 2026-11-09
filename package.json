@@ -15,7 +15,7 @@
     "depcruise": "depcruise --config .dependency-cruiser.cjs apps/*/src packages/*/src",
     "format": "prettier --write .",
     "format:check": "prettier --check .",
-    "verify": "pnpm run format:check && pnpm run lint && pnpm run build && pnpm run typecheck && pnpm run test && pnpm run depcruise"
+    "verify": "pnpm run format:check && pnpm run build && pnpm run lint && pnpm run typecheck && pnpm run test && pnpm run depcruise"
   },
   "devDependencies": {
     "@types/node": "24.19.2",
