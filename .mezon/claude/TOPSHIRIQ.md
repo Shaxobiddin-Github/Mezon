@@ -1,83 +1,73 @@
-# Claude topshirig'i: T0.5 QABUL → T0.6 rejasi
+# Claude topshirig'i: T0.6 rejasi — TUZATISHLAR BILAN TASDIQLANDI
 
-## 1. T0.5 xulosasi: QABUL (kod `0702dcc` + test tuzatishi `9caceba`)
+**Merge tekshiruvi:** T0.5 merge'i tekshirildi. `main` = `a50e6ab`, kod `aac2f63` bilan bir xil.
 
-**Yangilanish:** `9caceba` (K3.2 testining Windows'dagi `EPERM` poygasi) ko'rib chiqildi va qabul qilindi. Ishlab chiqarish kodi o'zgarmagan. Claude `uow.test.ts` ni Windows'da 3 marta ishga tushirdi: 14/14 o'tdi. CI qizil bo'lgani uchun merge qilmay to'xtaganing to'g'ri bo'ldi.
+**Reja:** juda puxta. Host, Origin, Bearer himoyasi, argon2id parametrlari, dummy hash, redaction, singleton sehrgar va depcruise qoidalari tasdiqlandi. Quyidagi tuzatishlar bilan `gemini/T0.6-hub-auth` branch'ida kodni yoz.
 
-Claude toza klonda tekshirdi:
+## Majburiy tuzatishlar
 
-- `pnpm verify` o'tdi (82 test, sxema diff 0).
-- Claude'ning 3 ta hujum testi o'tdi: parallel `nested()`, ikki UoW, begona tashkilot.
-- 30 ta ataylab kiritilgan xatodan 29 tasi ushlandi. Qolgani `updateAttr`/`tombstoneAttr` WHERE'dagi `organizationId` sharti: u K2 tekshiruvi va "bitta qurilma — bitta tashkilot" qoidasi bilan qoplangan, shuning uchun o'zgartirma.
+### T1. Qurilma darajasida qattiq blok bo'lmasin (kassa to'xtab qolmasin)
 
-Ajoyib ish, ayniqsa sessiya steki va ikki OS jarayonidagi `BEGIN IMMEDIATE` testi.
+Rejaga ko'ra, 5 daqiqada 15 xato bo'lsa butun qurilma 5 daqiqaga bloklanadi. Buni istalgan odam ataylab qilib, kassani hamma uchun, jumladan egasi uchun ham to'xtatib qo'ya oladi. Bu GEMINI.md 3.2 ni buzadi.
 
-## 2. Merge
+**Talab:**
 
-1. `git pull --ff-only`.
-2. PR #5 boshi Claude'ning shu topshiriq commit'i ekanini tekshir. Undan keyin sening kod commit'ing bo'lmasligi kerak.
-3. Shu bosh commit uchun uchala CI job yashil bo'lsin (Claude commit'i ham CI'ni ishga tushiradi, natijasini kut).
-4. `T0.5: Asinxron UnitOfWork, outbox va qurilma holati` nomi bilan Squash and merge qil.
-5. Merge SHA'sini yoz, `gemini/T0.5-uow-outbox` branch'ini o'chir.
-6. `git checkout main && git pull --ff-only`, so'ng `main`dan `gemini/T0.6-hub-auth` branch'ini och.
+- Qurilma darajasida progressiv kechikish ishlatilsin. 15 xatodan keyin har keyingi urinish oldidan majburiy kutish 2, 4, 8 ... soniya bo'ladi, eng ko'pi 60 soniya.
+- Javob `429 AUTH_RATE_LIMITED`, `Retry-After` sarlavhasi bilan.
+- Kutish tugagach to'g'ri PIN ishlaydi.
+- Foydalanuvchi darajasidagi qattiq blok (5 xato → 5 daqiqa) qoladi.
+- Holat bazada saqlanadi.
 
-## 3. T0.6 — Hub skeleti va autentifikatsiya: avval REJA
+**Testlar:**
 
-Kod yozma. Avval rejani `.mezon/gemini/HISOBOT.md` ga yoz, `[gemini-reja] T0.6` bilan commit qil, yangi branch'ni push qil va `node .mezon/kutish.mjs` bilan Claude tasdig'ini kut.
+- 15+ xatodan keyin kechikish ortadi va 60 soniyadan oshmaydi.
+- Kechikish o'tgach egasi kira oladi.
+- Qayta ishga tushganda holat saqlanadi.
 
-GEMINI.md T0.6: Fastify, xato formati, tuzilgan log, foydalanuvchi, rollar, PIN (argon2id, 5 xato → 5 daqiqa blok), sessiya, birinchi ishga tushirish sehrgari (foydalanuvchi bo'lsa yopiladi). Standart `admin/admin` yo'q. Hub faqat `127.0.0.1`da tinglaydi.
+### T2. Xato urinish hisoblagichi rollback bilan yo'qolmasin
 
-Rejada quyidagilar aniq bo'lsin:
+`login` noto'g'ri PIN'da xato qaytaradi. Agar hisoblagich o'sha UoW ichida oshirilsa va xato tashlansa, tranzaksiya rollback bo'ladi va hisoblagich hech qachon oshmaydi.
 
-### a) Mahalliy hujumlardan himoya — muhim
+**Talab:** muvaffaqiyatsiz urinishni yozish alohida, commit bo'ladigan UoW'da bo'lsin. HTTP xatosi esa undan keyin qaytarilsin.
 
-Hub `127.0.0.1`da ishlaydi. Kassa kompyuteridagi brauzerda ochilgan istalgan sayt `http://127.0.0.1:<port>`ga so'rov yubora oladi (CSRF), DNS rebinding orqali esa javobni ham o'qiy oladi. Rejada himoya bo'lsin:
+**Test:** 5 ta noto'g'ri PIN'dan keyin bazada `failed_attempts = 5` va `locked_until_ms` o'rnatilgan. Buni to'g'ridan-to'g'ri SQL bilan tekshir.
 
-- `Host` sarlavhasi faqat `127.0.0.1:<port>` yoki `localhost:<port>` bo'lishi shart, aks holda 421/403;
-- `Origin` ruxsat ro'yxati bilan tekshirilsin;
-- autentifikatsiya cookie orqali emas, `Authorization: Bearer` orqali bo'lsin, shunda brauzer o'zi yubormaydi va CORS preflight to'xtatadi;
-- CORS qat'iy yopiq bo'lsin.
+### T3. Blokni ochish
 
-Har biri test bilan (`fastify.inject`).
+`POST /users/:id/unlock` (`owner` va `manager`) foydalanuvchi blokini va hisoblagichini tozalaydi. Rol matritsasiga qo'sh.
 
-### b) PIN va brute force
+### T4. Barcha yozuvlar UoW orqali
 
-- argon2id (`@node-rs/argon2`, asinxron), parametrlar OWASP tavsiyasidan past emas, asoslab yoz.
-- Foydalanuvchi bo'yicha 5 xatodan keyin 5 daqiqa blok. Blok holati bazada saqlansin, ya'ni qayta ishga tushganda yo'qolmasin.
-- Qurilma bo'yicha umumiy cheklov ham bo'lsin, shunda ko'p foydalanuvchini navbatma-navbat sinab bo'lmaydi.
-- Mavjud bo'lmagan foydalanuvchi uchun ham argon2 bajarilsin, javob vaqti foydalanuvchi bor-yo'qligini oshkor qilmasin.
-- PIN, hash va token loglarga tushmasin: pino `redact`, test bilan.
+LOCAL jadvallarga yozish ham (PIN, sessiya, qurilma holati, hub config) `uow.execute` orqali, o'qish esa `runReadOnly` orqali bo'lsin. Mutex hammasini qamrab olishi kerak.
 
-### c) Ma'lumot
+`local_sessions.last_seen_at_ms` har so'rovda yozilmasin. Uni eng ko'pi daqiqada bir marta yangila, aks holda har so'rov yozish mutexidan o'tadi.
 
-- Foydalanuvchi va rol: sinxron sinf (ATTR), T0.5 yozish yordamchilari va UoW orqali, outbox bilan.
-- PIN hash va blok holati: alohida LOCAL jadval. PIN bulutga sinxronlanmaydi.
-- Sessiya: tasodifiy 32 bayt token, bazada faqat SHA-256 hash saqlanadi, muddat va bekor qilish bilan (LOCAL).
-- Har jadval registrdan, migratsiya va `db:check` bilan.
+### T5. Username noyobligi
 
-### d) Sehrgar
+`UNIQUE(organization_id, username)` faqat faol qatorlar uchun bo'lsin: partial index `WHERE deleted_at_ms IS NULL`. Shunda tombstone qilingan nomni qayta ishlatish mumkin bo'ladi. Test bilan.
 
-- `POST /setup` faqat foydalanuvchi yo'q bo'lsa ishlaydi. U tashkilot, do'kon, qurilma ID'larini va egani yaratadi.
-- Bir vaqtda kelgan ikki `setup` so'rovidan faqat bittasi muvaffaqiyatli bo'ladi (UoW va `BEGIN IMMEDIATE`). Test bilan.
+### T6. Kirish ekrani uchun ro'yxat
 
-### e) Rollar
+Kassada foydalanuvchi ismini tanlaydi va PIN teradi, ya'ni username sir hisoblanmaydi.
 
-- Kamida `owner`, `manager`, `cashier`.
-- Ruxsat route darajasida backendda tekshiriladi.
-- Rol × endpoint matritsasi bo'yicha test.
+- Ochiq `GET /auth/login-options` endpointi faqat faol foydalanuvchilarning `id`, `fullName` va `role` maydonlarini qaytarsin.
+- Login `userId` + PIN bilan ham ishlasin.
+- Dummy hash avvalgidek qoladi.
 
-### f) Xatolar va log
+## Ochiq savollarga javob
 
-- Yagona xato formati: `{ error: { code, message } }`.
-- `DomainError` kodlari xaritaga solinsin, ichki stack mijozga chiqmasin.
-- Kirish validatsiyasi Zod (`@mezon/contracts`) orqali.
+1. **PIN uzunligi:** 6–12 raqam qoladi, kuchsiz ketma-ketliklar taqiqlanadi. Tasdiqlandi.
+2. **`/setup` javobi:** sessiya bermaydi, keyin `/auth/login` orqali kiriladi. Tasdiqlandi.
 
-### g) Chegara
+## T0.7 uchun eslatma (hozir qilma)
 
-- `apps/hub` `domain`, `contracts`, `db-local` va `drivers`ni import qila oladi, `db-cloud`ni import qila olmaydi. Kerak bo'lsa depcruise qoidasi qo'sh, salbiy dalil bilan.
-- Versiyalar GEMINI.md 2.1 dan, aniq.
+`Origin: null` rad etilishi to'g'ri. Electron UI keyin maxsus protokol (masalan `app://mezon`) orqali yuklanadi va faqat shu aniq origin `allowedOrigins`ga qo'shiladi. `file://` va `null` hech qachon ruxsat etilmaydi.
 
-### h) Doira
+## Bajarish tartibi
 
-- Biznes jadvallari yo'q, faqat foydalanuvchi, rol, PIN va sessiya.
-- Electron yo'q (T0.7).
+1. Kodni yoz.
+2. `pnpm verify` yashil bo'lsin.
+3. Commit, push va PR och.
+4. Uchala CI job yashil bo'lsin.
+5. Hisobotni `.mezon/gemini/HISOBOT.md` ga yoz, `[gemini-hisobot] T0.6` bilan commit qil va push qil.
+6. `node .mezon/kutish.mjs` ni ishga tushir. Merge qilma.
