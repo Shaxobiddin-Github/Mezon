@@ -11,7 +11,11 @@ export type HubPermission =
   | 'catalog:read'
   | 'catalog:write'
   | 'stock:read'
-  | 'stock:write';
+  | 'stock:write'
+  | 'cart:write'
+  | 'promotions:read'
+  | 'promotions:write'
+  | 'discounts:config';
 
 const ROLE_PERMISSION_TABLE: Readonly<Record<UserRole, ReadonlySet<HubPermission>>> = {
   owner: new Set<HubPermission>([
@@ -23,6 +27,10 @@ const ROLE_PERMISSION_TABLE: Readonly<Record<UserRole, ReadonlySet<HubPermission
     'catalog:write',
     'stock:read',
     'stock:write',
+    'cart:write',
+    'promotions:read',
+    'promotions:write',
+    'discounts:config',
   ]),
   manager: new Set<HubPermission>([
     'auth:self',
@@ -32,8 +40,17 @@ const ROLE_PERMISSION_TABLE: Readonly<Record<UserRole, ReadonlySet<HubPermission
     'catalog:write',
     'stock:read',
     'stock:write',
+    'cart:write',
+    'promotions:read',
+    'promotions:write',
   ]),
-  cashier: new Set<HubPermission>(['auth:self', 'catalog:read', 'stock:read']),
+  cashier: new Set<HubPermission>([
+    'auth:self',
+    'catalog:read',
+    'stock:read',
+    'cart:write',
+    'promotions:read',
+  ]),
 };
 
 export function isUserRole(value: unknown): value is UserRole {

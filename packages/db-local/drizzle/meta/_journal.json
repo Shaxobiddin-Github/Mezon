@@ -36,6 +36,13 @@
       "when": 1794319152061,
       "tag": "0004_stock",
       "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "6",
+      "when": 1794322795882,
+      "tag": "0005_cart_pricing",
+      "breakpoints": true
     }
   ]
 }

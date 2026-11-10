@@ -28,6 +28,10 @@ describe('@mezon/domain - auth rules, RBAC, and PIN security policy', () => {
     expect(roleHasPermission('owner', 'catalog:write')).toBe(true);
     expect(roleHasPermission('owner', 'stock:read')).toBe(true);
     expect(roleHasPermission('owner', 'stock:write')).toBe(true);
+    expect(roleHasPermission('owner', 'cart:write')).toBe(true);
+    expect(roleHasPermission('owner', 'promotions:read')).toBe(true);
+    expect(roleHasPermission('owner', 'promotions:write')).toBe(true);
+    expect(roleHasPermission('owner', 'discounts:config')).toBe(true);
 
     expect(roleHasPermission('manager', 'auth:self')).toBe(true);
     expect(roleHasPermission('manager', 'users:read')).toBe(true);
@@ -37,6 +41,10 @@ describe('@mezon/domain - auth rules, RBAC, and PIN security policy', () => {
     expect(roleHasPermission('manager', 'catalog:write')).toBe(true);
     expect(roleHasPermission('manager', 'stock:read')).toBe(true);
     expect(roleHasPermission('manager', 'stock:write')).toBe(true);
+    expect(roleHasPermission('manager', 'cart:write')).toBe(true);
+    expect(roleHasPermission('manager', 'promotions:read')).toBe(true);
+    expect(roleHasPermission('manager', 'promotions:write')).toBe(true);
+    expect(roleHasPermission('manager', 'discounts:config')).toBe(false);
 
     expect(roleHasPermission('cashier', 'auth:self')).toBe(true);
     expect(roleHasPermission('cashier', 'users:read')).toBe(false);
@@ -46,6 +54,10 @@ describe('@mezon/domain - auth rules, RBAC, and PIN security policy', () => {
     expect(roleHasPermission('cashier', 'catalog:write')).toBe(false);
     expect(roleHasPermission('cashier', 'stock:read')).toBe(true);
     expect(roleHasPermission('cashier', 'stock:write')).toBe(false);
+    expect(roleHasPermission('cashier', 'cart:write')).toBe(true);
+    expect(roleHasPermission('cashier', 'promotions:read')).toBe(true);
+    expect(roleHasPermission('cashier', 'promotions:write')).toBe(false);
+    expect(roleHasPermission('cashier', 'discounts:config')).toBe(false);
   });
 
   it('validates 6-12 digit PINs and rejects trivial or leaking error messages', () => {

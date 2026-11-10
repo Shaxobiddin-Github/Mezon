@@ -401,4 +401,57 @@ describe('@mezon/domain - stock costing (FIFO, average, value remainder, negativ
       { numRuns: 200 },
     );
   });
+
+  it('T1.2 test debt: rounds up 10,000 / 3 * 2 = 6,667 and drains remBatchMilli === needMilli without conflict', () => {
+    // 1) computeProportionalCost upward rounding check (caught if integer truncation is used)
+    expect(
+      computeProportionalCost(
+        moneyFromTiyin(10_000n),
+        quantityFromMilli(3_000n),
+        quantityFromMilli(2_000n),
+      ),
+    ).toBe(moneyFromTiyin(6_667n));
+    expect(
+      computeProportionalCost(
+        moneyFromTiyin(5n),
+        quantityFromMilli(2_000n),
+        quantityFromMilli(1_000n),
+      ),
+    ).toBe(moneyFromTiyin(3n));
+
+    // 2) applyReplayStockMove exact boundary remBatchMilli === needMilli (caught if >= becomes >)
+    const state = createEmptyStockPoolState();
+    const bExact = mkId(99);
+    const inConflicts = applyReplayStockMove(state, {
+      moveId: mkId(100),
+      productId: PROD_ID,
+      variantId: null,
+      batchId: bExact,
+      hlc: '001',
+      reason: 'purchase',
+      qtyDelta: quantityFromMilli(3_000n),
+      costValueDelta: moneyFromTiyin(10_000n),
+      trackBatches: true,
+    });
+    expect(inConflicts).toEqual([]);
+
+    const outConflicts = applyReplayStockMove(state, {
+      moveId: mkId(101),
+      productId: PROD_ID,
+      variantId: null,
+      batchId: bExact,
+      hlc: '002',
+      reason: 'sale',
+      qtyDelta: quantityFromMilli(-3_000n),
+      costValueDelta: moneyFromTiyin(-10_000n),
+      trackBatches: true,
+    });
+    expect(outConflicts).toEqual([]);
+    expect(state.batches.get(bExact)?.remainingQty).toBe(quantityFromMilli(0n));
+    expect(state.batches.get(bExact)?.remainingValue).toBe(ZERO_MONEY);
+    expect(state.qtyOnHand).toBe(quantityFromMilli(0n));
+    expect(state.totalValue).toBe(ZERO_MONEY);
+    expect(state.deficitQty).toBe(quantityFromMilli(0n));
+    expect(state.costVarianceValue).toBe(ZERO_MONEY);
+  });
 });

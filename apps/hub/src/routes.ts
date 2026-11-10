@@ -11,6 +11,8 @@ import type { FastifyInstance, FastifyRequest } from 'fastify';
 import type { HubAuthService } from './auth-service.js';
 import { registerCatalogRoutes } from './catalog-routes.js';
 import type { HubCatalogService } from './catalog-service.js';
+import { registerCartRoutes } from './cart-routes.js';
+import type { HubCartService } from './cart-service.js';
 import { registerStockRoutes } from './stock-routes.js';
 import type { HubStockService } from './stock-service.js';
 
@@ -29,6 +31,7 @@ export function registerHubRoutes(
   authService: HubAuthService,
   catalogService?: HubCatalogService,
   stockService?: HubStockService,
+  cartService?: HubCartService,
 ): void {
   app.get('/health', async () => {
     return authService.getHealth();
@@ -102,5 +105,8 @@ export function registerHubRoutes(
   }
   if (stockService) {
     registerStockRoutes(app, authService, stockService);
+  }
+  if (cartService) {
+    registerCartRoutes(app, authService, cartService);
   }
 }

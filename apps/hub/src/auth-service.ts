@@ -19,6 +19,7 @@ import type {
 } from '@mezon/contracts';
 import type {
   AuthenticatedSessionSnapshot,
+  LoginCredentialSnapshot,
   LoginSelector,
   SqliteHubAuthStore,
   StoredUserRecord,
@@ -29,9 +30,12 @@ import {
   PIN_SECURITY_CONSTANTS,
   type PinHasher,
   type RandomSource,
+  type UserRole,
   type UuidV7,
   roleHasPermission,
 } from '@mezon/domain';
+
+const SUPERVISOR_ROLES: readonly UserRole[] = ['owner', 'manager'];
 
 export function hashBearerToken(rawToken: string): string {
   return createHash('sha256').update(rawToken, 'utf8').digest('hex');
@@ -140,7 +144,12 @@ export class HubAuthService {
     };
   }
 
-  async login(input: LoginRequestDto): Promise<LoginResponseDto> {
+  private async verifyPinLockFreePhase(input: LoginRequestDto): Promise<{
+    readonly selector: LoginSelector;
+    readonly snap: LoginCredentialSnapshot;
+    readonly verifiedPinForUserId: UuidV7 | null;
+    readonly verifiedPinHash: string | null;
+  }> {
     const selector: LoginSelector =
       'username' in input
         ? { kind: 'username', username: input.username }
@@ -162,6 +171,18 @@ export class HubAuthService {
         ? snap.user.id
         : null;
 
+    return {
+      selector,
+      snap,
+      verifiedPinForUserId,
+      verifiedPinHash: verifiedPinForUserId !== null ? snap.pinHash : null,
+    };
+  }
+
+  async login(input: LoginRequestDto): Promise<LoginResponseDto> {
+    const { selector, verifiedPinForUserId, verifiedPinHash } =
+      await this.verifyPinLockFreePhase(input);
+
     const rawBytes = this.random.nextBytes(PIN_SECURITY_CONSTANTS.SESSION_TOKEN_BYTES);
     const rawToken = Buffer.from(rawBytes).toString('base64url');
     const tokenHash = hashBearerToken(rawToken);
@@ -170,7 +191,7 @@ export class HubAuthService {
     const committed = await this.store.commitLoginOutcome({
       selector,
       verifiedPinForUserId,
-      verifiedPinHash: verifiedPinForUserId !== null ? snap.pinHash : null,
+      verifiedPinHash,
       tokenHashToMint: tokenHash,
     });
 
@@ -190,6 +211,37 @@ export class HubAuthService {
       expiresAtMs: committed.expiresAtMs.toString(),
       user: toUserSummaryDto(committed.user),
     };
+  }
+
+  /**
+   * Verifies a supervisor (`owner` / `manager`) PIN using the same lock-free Argon2id,
+   * TOCTOU guard, 5-attempt lockout, and progressive device backoff rules as `/auth/login`,
+   * without minting a login session (`T1.3`).
+   */
+  async verifySupervisorPin(input: LoginRequestDto): Promise<StoredUserRecord> {
+    const { selector, verifiedPinForUserId, verifiedPinHash } =
+      await this.verifyPinLockFreePhase(input);
+
+    const committed = await this.store.commitPinVerificationOutcome({
+      selector,
+      verifiedPinForUserId,
+      verifiedPinHash,
+      allowedRoles: SUPERVISOR_ROLES,
+    });
+
+    if (committed.kind === 'rate_limited') {
+      throw new DomainError('AUTH_RATE_LIMITED', 'Too many failed PIN attempts', {
+        retryAfterSeconds: committed.retryAfterSeconds,
+      });
+    }
+    if (committed.kind === 'role_forbidden') {
+      throw new DomainError('AUTH_FORBIDDEN', 'Only owner or manager may authorize overrides');
+    }
+    if (committed.kind === 'invalid_credentials') {
+      throw new DomainError('AUTH_INVALID_CREDENTIALS', 'Invalid supervisor PIN');
+    }
+
+    return committed.user;
   }
 
   async authenticate(
