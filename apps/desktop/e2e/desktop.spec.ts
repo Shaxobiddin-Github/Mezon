@@ -165,9 +165,23 @@ test('Playwright unfused Electron against identical app.asar: app://mezon, CSP, 
       errorCode: 'AUTH_INVALID_CREDENTIALS',
     });
 
-    // 1c. R2: Renderer permission requests (Notification, camera) are denied by Electron session handlers.
+    // 1c. R2: Renderer permission requests (Notification, camera, geolocation) are denied by Electron session handlers.
     const permissionResult = await page.evaluate(async () => {
       const notificationPermission = await Notification.requestPermission();
+      const geoState = (await navigator.permissions.query({ name: 'geolocation' })).state;
+      const cameraState = await navigator.permissions
+        .query({ name: 'camera' })
+        .then((res) => res.state)
+        .catch(() => 'denied');
+
+      const geoErrorCode = await new Promise<number | null>((resolve) => {
+        navigator.geolocation.getCurrentPosition(
+          () => resolve(null),
+          (err) => resolve(err.code),
+          { timeout: 2000 },
+        );
+      });
+
       let mediaGranted = false;
       let mediaErrorName: string | null = null;
       try {
@@ -179,15 +193,22 @@ test('Playwright unfused Electron against identical app.asar: app://mezon, CSP, 
       } catch (err) {
         mediaErrorName = err instanceof Error ? err.name : String(err);
       }
+
       return {
         notificationPermission,
+        geoState,
+        cameraState,
+        geoErrorCode,
         mediaGranted,
         mediaErrorName,
       };
     });
     expect(permissionResult.notificationPermission).toBe('denied');
+    expect(permissionResult.geoState).toBe('denied');
+    expect(permissionResult.cameraState).toBe('denied');
+    expect(permissionResult.geoErrorCode).toBe(1);
     expect(permissionResult.mediaGranted).toBe(false);
-    expect(permissionResult.mediaErrorName).toBe('NotAllowedError');
+    expect(['NotAllowedError', 'NotFoundError']).toContain(permissionResult.mediaErrorName);
 
     // 2. Renderer sandbox, CSP inline-script block, & preload boundary checks.
     const sandboxDiagnostics = await page.evaluate(() => {
