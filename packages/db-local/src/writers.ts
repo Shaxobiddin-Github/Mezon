@@ -1,4 +1,5 @@
 import {
+  DomainError,
   type OutboxEntityClass,
   type UnixMs,
   type UuidV7,
@@ -108,6 +109,12 @@ function prepareSyncedWriteContext(
   }
 
   const validOrgId = parseUuidV7(organizationId);
+  if (validOrgId !== session.organizationId) {
+    throw new DomainError(
+      'UNIT_OF_WORK_TENANT_MISMATCH',
+      `Write organizationId "${validOrgId}" does not match UnitOfWork organizationId "${session.organizationId}"`,
+    );
+  }
   let validStoreId: UuidV7 | null = null;
   if (meta.tenantScope === 'store') {
     if (storeId === undefined) {

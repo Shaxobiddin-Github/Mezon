@@ -147,6 +147,12 @@ export class SqliteUnitOfWorkSession implements UnitOfWorkSession, SqliteSession
         'Operation requires an open SQLite transaction',
       );
     }
+    if (this.uow.topActiveSession() !== this) {
+      throw new DomainError(
+        'UNIT_OF_WORK_CONCURRENT_NESTED',
+        'Only the innermost active UnitOfWork session may write or open nested savepoints',
+      );
+    }
   }
 
   /**
@@ -164,6 +170,7 @@ export class SqliteUnitOfWorkSession implements UnitOfWorkSession, SqliteSession
 
     sqlite.exec(`SAVEPOINT ${spName}`);
     savepointCreated = true;
+    this.uow.pushActiveSession(childSession);
 
     try {
       let result: T;
@@ -171,6 +178,7 @@ export class SqliteUnitOfWorkSession implements UnitOfWorkSession, SqliteSession
         result = await fn(childSession);
       } finally {
         childSession.close();
+        this.uow.popActiveSession(childSession);
       }
       sqlite.exec(`RELEASE SAVEPOINT ${spName}`);
       released = true;
@@ -270,6 +278,7 @@ export class SqliteUnitOfWorkSession implements UnitOfWorkSession, SqliteSession
  */
 export class SqliteUnitOfWork implements UnitOfWork<SqliteUnitOfWorkSession> {
   private readonly mutex = new AsyncMutex();
+  private readonly activeSessionStack: SqliteUnitOfWorkSession[] = [];
   private savepointSeq = 0;
 
   readonly organizationId: UuidV7;
@@ -418,12 +427,14 @@ export class SqliteUnitOfWork implements UnitOfWork<SqliteUnitOfWorkSession> {
       const session = new SqliteUnitOfWorkSession(this);
       const nextActiveSet = new Set(outerActiveSet);
       nextActiveSet.add(this);
+      this.pushActiveSession(session);
 
       let result: T;
       try {
         result = await activeUowContext.run(nextActiveSet, () => fn(session));
       } finally {
         session.close();
+        this.activeSessionStack.length = 0;
       }
 
       sqlite.exec('COMMIT');
@@ -463,6 +474,24 @@ export class SqliteUnitOfWork implements UnitOfWork<SqliteUnitOfWorkSession> {
     } finally {
       release();
     }
+  }
+
+  /** @internal */
+  pushActiveSession(session: SqliteUnitOfWorkSession): void {
+    this.activeSessionStack.push(session);
+  }
+
+  /** @internal */
+  popActiveSession(session: SqliteUnitOfWorkSession): void {
+    const popped = this.activeSessionStack.pop();
+    if (popped !== session) {
+      throw new Error('Corrupted UnitOfWork session stack state');
+    }
+  }
+
+  /** @internal */
+  topActiveSession(): SqliteUnitOfWorkSession | undefined {
+    return this.activeSessionStack.at(-1);
   }
 
   /** @internal */

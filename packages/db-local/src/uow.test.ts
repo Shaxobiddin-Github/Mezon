@@ -1,4 +1,4 @@
-import { execFileSync, spawnSync } from 'node:child_process';
+import { execFileSync, spawn, spawnSync } from 'node:child_process';
 import fs from 'node:fs';
 import { createRequire } from 'node:module';
 import os from 'node:os';
@@ -30,6 +30,7 @@ import {
   insertAttr,
   insertFact,
   listAllOutboxRecordsSync,
+  localOutbox,
   migrateLocalDatabase,
   openLocalSqliteDatabase,
   readDeviceStateRowSync,
@@ -38,6 +39,7 @@ import {
   tombstoneAttr,
   updateAttr,
 } from './index.js';
+import { appendOutboxEventSync } from './outbox.js';
 
 interface DrizzleSqliteKitApi {
   readonly generateSQLiteDrizzleJson: (
@@ -245,14 +247,39 @@ describe('@mezon/db-local - Async UnitOfWork, Outbox, DeviceState & SQLite Trigg
         expect(storedAttrAfterUpdate.hlc).toBe(updRes.hlc);
         expect(storedAttrAfterUpdate.priceTiyin).toBe(3500n);
 
-        // Wrong tenant update fails before touching device_seq
+        // Non-existent id within own org fails before touching device_seq
         expect(() =>
           updateAttr(session, attrItems, {
-            id: attrRes.entityId,
-            organizationId: otherOrgId,
-            values: { title: 'Hacked' },
+            id: idGen.nextId(),
+            organizationId: orgId,
+            values: { title: 'Ghost' },
           }),
         ).toThrowError(/not found, belongs to another tenant, or is already tombstoned/);
+
+        // Organization-scoped ATTR table rejects unexpected storeId (K3.5)
+        expect(() =>
+          insertAttr(session, attrItems, {
+            organizationId: orgId,
+            storeId,
+            values: { title: 'BadScope', priceTiyin: moneyFromTiyin(10n) },
+          }),
+        ).toThrowError(/must not receive a storeId/);
+
+        // Store-scoped FACT table rejects omitted storeId
+        expect(() =>
+          insertFact(session, factSales, {
+            organizationId: orgId,
+            values: { totalTiyin: hugeMoney, note: 'missing-store' },
+          }),
+        ).toThrowError(/requires storeId/);
+
+        // Cross-tenant write rejected immediately (K2)
+        expect(() =>
+          insertAttr(session, attrItems, {
+            organizationId: otherOrgId,
+            values: { title: 'OtherOrg', priceTiyin: moneyFromTiyin(10n) },
+          }),
+        ).toThrowError(DomainError);
 
         // Wrong class writer rejected cleanly
         expect(() =>
@@ -1218,5 +1245,630 @@ describe('@mezon/db-local - Async UnitOfWork, Outbox, DeviceState & SQLite Trigg
       }),
       { numRuns: 15 },
     );
+  });
+
+  it('K1: rejects concurrent parallel nested() calls and parent-session writes while child savepoint is active, while allowing deep & sequential nested()', async () => {
+    const dbPath = path.join(makeTempDir(), 'k1-nested-stack.db');
+    const conn = openLocalSqliteDatabase(dbPath);
+    const { registry, factSales, attrItems } = buildTestTables();
+    const idGen = new DeterministicUuidV7Generator();
+    const orgId = idGen.nextId();
+    const storeId = idGen.nextId();
+    const deviceId = idGen.nextId();
+    const delay = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
+
+    try {
+      migrateLocalDatabase(conn.db);
+      await applyTestTables(conn, registry, { factSales, attrItems });
+
+      const uow = await createSqliteUnitOfWork({
+        connection: conn,
+        organizationId: orgId,
+        deviceId,
+        registry,
+        clock: new FixedClock(1_700_000_000_000n),
+        random: new SeededRandomSource(20),
+      });
+
+      // (a) Claude's exact parallel Promise.allSettled([p1, p2]) reproduction: p2 MUST reject immediately
+      await uow.execute(async (s) => {
+        const p1 = s.nested(async () => {
+          await delay(30);
+          throw new Error('p1 savepoint failed');
+        });
+        const p2 = s.nested(async (c) => {
+          await delay(5);
+          return insertAttr(c, attrItems, {
+            organizationId: orgId,
+            values: { title: 'lost-row-if-allowed', priceTiyin: moneyFromTiyin(10n) },
+          });
+        });
+
+        const settled = await Promise.allSettled([p1, p2]);
+        expect(settled[0].status).toBe('rejected');
+        expect(settled[1].status).toBe('rejected');
+        if (settled[1].status === 'rejected') {
+          expect(settled[1].reason).toBeInstanceOf(DomainError);
+          expect((settled[1].reason as DomainError).code).toBe('UNIT_OF_WORK_CONCURRENT_NESTED');
+        }
+      });
+
+      expect(conn.db.select().from(attrItems).all()).toHaveLength(0);
+      expect(listAllOutboxRecordsSync(conn.db)).toHaveLength(0);
+
+      // Even if p1 succeeds slowly, concurrent p2 MUST NOT steal or hide under p1's savepoint
+      await uow.execute(async (s) => {
+        const p1 = s.nested(async (c1) => {
+          await delay(25);
+          return insertAttr(c1, attrItems, {
+            organizationId: orgId,
+            values: { title: 'ok-1', priceTiyin: moneyFromTiyin(11n) },
+          });
+        });
+        const p2 = s.nested(async (c2) => {
+          await delay(5);
+          return insertAttr(c2, attrItems, {
+            organizationId: orgId,
+            values: { title: 'rejected-concurrent', priceTiyin: moneyFromTiyin(12n) },
+          });
+        });
+        const settled = await Promise.allSettled([p1, p2]);
+        expect(settled[0].status).toBe('fulfilled');
+        expect(settled[1].status).toBe('rejected');
+        if (settled[1].status === 'rejected') {
+          expect((settled[1].reason as DomainError).code).toBe('UNIT_OF_WORK_CONCURRENT_NESTED');
+        }
+      });
+
+      expect(
+        conn.db
+          .select()
+          .from(attrItems)
+          .all()
+          .map((a) => a.title),
+      ).toEqual(['ok-1']);
+      expect(listAllOutboxRecordsSync(conn.db).map((e) => e.deviceSeq)).toEqual([1n]);
+
+      // (b) Parent-session write while inner savepoint is active MUST reject with UNIT_OF_WORK_CONCURRENT_NESTED
+      await uow.execute(async (s) => {
+        const preParent = insertAttr(s, attrItems, {
+          organizationId: orgId,
+          values: { title: 'parent-before', priceTiyin: moneyFromTiyin(20n) },
+        });
+        await expect(
+          s.nested(async (c1) => {
+            expect(() =>
+              insertAttr(s, attrItems, {
+                organizationId: orgId,
+                values: { title: 'parent-during-child', priceTiyin: moneyFromTiyin(21n) },
+              }),
+            ).toThrowError(/UNIT_OF_WORK_CONCURRENT_NESTED/);
+
+            expect(() =>
+              insertFact(s, factSales, {
+                organizationId: orgId,
+                storeId,
+                values: { totalTiyin: moneyFromTiyin(22n), note: 'parent-fact' },
+              }),
+            ).toThrowError(/UNIT_OF_WORK_CONCURRENT_NESTED/);
+
+            expect(() =>
+              updateAttr(s, attrItems, {
+                id: preParent.entityId,
+                organizationId: orgId,
+                values: { title: 'parent-update' },
+              }),
+            ).toThrowError(/UNIT_OF_WORK_CONCURRENT_NESTED/);
+
+            expect(() =>
+              tombstoneAttr(s, attrItems, {
+                id: preParent.entityId,
+                organizationId: orgId,
+              }),
+            ).toThrowError(/UNIT_OF_WORK_CONCURRENT_NESTED/);
+
+            // (c) Deep nested inside c1 is allowed; while c2 is open, BOTH s and c1 are rejected
+            await c1.nested(async (c2) => {
+              expect(() =>
+                insertAttr(c1, attrItems, {
+                  organizationId: orgId,
+                  values: { title: 'c1-during-c2', priceTiyin: moneyFromTiyin(23n) },
+                }),
+              ).toThrowError(/UNIT_OF_WORK_CONCURRENT_NESTED/);
+              expect(() =>
+                insertAttr(s, attrItems, {
+                  organizationId: orgId,
+                  values: { title: 's-during-c2', priceTiyin: moneyFromTiyin(24n) },
+                }),
+              ).toThrowError(/UNIT_OF_WORK_CONCURRENT_NESTED/);
+
+              insertFact(c2, factSales, {
+                organizationId: orgId,
+                storeId,
+                values: { totalTiyin: moneyFromTiyin(30n), note: 'deep-ok' },
+              });
+              await Promise.resolve();
+            });
+            throw new Error('rollback c1 cleanly without hurting parent-before');
+          }),
+        ).rejects.toThrow('rollback c1 cleanly without hurting parent-before');
+
+        // Sequential nested after c1 popped works cleanly on s
+        await s.nested(async (cSeq) => {
+          insertFact(cSeq, factSales, {
+            organizationId: orgId,
+            storeId,
+            values: { totalTiyin: moneyFromTiyin(40n), note: 'seq-nested-ok' },
+          });
+          await Promise.resolve();
+        });
+      });
+
+      expect(
+        conn.db
+          .select()
+          .from(factSales)
+          .all()
+          .map((f) => f.note),
+      ).toEqual(['seq-nested-ok']);
+      expect(listAllOutboxRecordsSync(conn.db).map((e) => e.deviceSeq)).toEqual([1n, 2n, 3n]);
+    } finally {
+      conn.close();
+    }
+  });
+
+  it('K2: rejects writes with foreign organizationId across all 4 writers with UNIT_OF_WORK_TENANT_MISMATCH', async () => {
+    const dbPath = path.join(makeTempDir(), 'k2-tenant.db');
+    const conn = openLocalSqliteDatabase(dbPath);
+    const { registry, factSales, attrItems } = buildTestTables();
+    const idGen = new DeterministicUuidV7Generator();
+    const orgA = idGen.nextId();
+    const orgB = idGen.nextId();
+    const storeId = idGen.nextId();
+    const deviceId = idGen.nextId();
+
+    try {
+      migrateLocalDatabase(conn.db);
+      await applyTestTables(conn, registry, { factSales, attrItems });
+
+      const uow = await createSqliteUnitOfWork({
+        connection: conn,
+        organizationId: orgA,
+        deviceId,
+        registry,
+        clock: new FixedClock(1_700_000_000_000n),
+        random: new SeededRandomSource(21),
+      });
+
+      let ownAttrId: ReturnType<typeof idGen.nextId>;
+      await uow.execute(async (session) => {
+        const res = insertAttr(session, attrItems, {
+          organizationId: orgA,
+          values: { title: 'legit', priceTiyin: moneyFromTiyin(100n) },
+        });
+        ownAttrId = res.entityId;
+        await Promise.resolve();
+      });
+
+      await uow.execute(async (session) => {
+        await expectDomainErrorAsync(async () => {
+          insertFact(session, factSales, {
+            organizationId: orgB,
+            storeId,
+            values: { totalTiyin: moneyFromTiyin(1n), note: 'evil' },
+          });
+          return Promise.resolve();
+        }, 'UNIT_OF_WORK_TENANT_MISMATCH');
+
+        await expectDomainErrorAsync(async () => {
+          insertAttr(session, attrItems, {
+            organizationId: orgB,
+            values: { title: 'evil', priceTiyin: moneyFromTiyin(1n) },
+          });
+          return Promise.resolve();
+        }, 'UNIT_OF_WORK_TENANT_MISMATCH');
+
+        await expectDomainErrorAsync(async () => {
+          updateAttr(session, attrItems, {
+            id: ownAttrId,
+            organizationId: orgB,
+            values: { title: 'evil-upd' },
+          });
+          return Promise.resolve();
+        }, 'UNIT_OF_WORK_TENANT_MISMATCH');
+
+        await expectDomainErrorAsync(async () => {
+          tombstoneAttr(session, attrItems, {
+            id: ownAttrId,
+            organizationId: orgB,
+          });
+          return Promise.resolve();
+        }, 'UNIT_OF_WORK_TENANT_MISMATCH');
+      });
+
+      expect(conn.db.select().from(factSales).all()).toHaveLength(0);
+      expect(
+        conn.db
+          .select()
+          .from(attrItems)
+          .all()
+          .map((a) => a.title),
+      ).toEqual(['legit']);
+      expect(listAllOutboxRecordsSync(conn.db).map((e) => e.deviceSeq)).toEqual([1n]);
+    } finally {
+      conn.close();
+    }
+  });
+
+  it('K3.1: closes child savepoint session immediately on exit or rollback while outer UoW is still active', async () => {
+    const dbPath = path.join(makeTempDir(), 'k3-child-closed.db');
+    const conn = openLocalSqliteDatabase(dbPath);
+    const { registry, factSales, attrItems } = buildTestTables();
+    const idGen = new DeterministicUuidV7Generator();
+    const orgId = idGen.nextId();
+    const storeId = idGen.nextId();
+    const deviceId = idGen.nextId();
+
+    try {
+      migrateLocalDatabase(conn.db);
+      await applyTestTables(conn, registry, { factSales, attrItems });
+
+      const uow = await createSqliteUnitOfWork({
+        connection: conn,
+        organizationId: orgId,
+        deviceId,
+        registry,
+        clock: new FixedClock(1_700_000_000_000n),
+        random: new SeededRandomSource(22),
+      });
+
+      await uow.execute(async (outer) => {
+        let leakedOkChild: typeof outer | undefined;
+        let leakedErrChild: typeof outer | undefined;
+
+        await outer.nested(async (child) => {
+          leakedOkChild = child;
+          await Promise.resolve();
+        });
+        expect(leakedOkChild?.isClosed()).toBe(true);
+
+        await expectDomainErrorAsync(async () => {
+          insertAttr(leakedOkChild!, attrItems, {
+            organizationId: orgId,
+            values: { title: 'stale-child', priceTiyin: moneyFromTiyin(1n) },
+          });
+          return Promise.resolve();
+        }, 'UNIT_OF_WORK_SESSION_CLOSED');
+        await expectDomainErrorAsync(
+          () => leakedOkChild!.nested(async () => Promise.resolve()),
+          'UNIT_OF_WORK_SESSION_CLOSED',
+        );
+
+        await expect(
+          outer.nested(async (child) => {
+            leakedErrChild = child;
+            await Promise.resolve();
+            throw new Error('child aborted');
+          }),
+        ).rejects.toThrow('child aborted');
+        expect(leakedErrChild?.isClosed()).toBe(true);
+
+        await expectDomainErrorAsync(async () => {
+          insertFact(leakedErrChild!, factSales, {
+            organizationId: orgId,
+            storeId,
+            values: { totalTiyin: moneyFromTiyin(2n), note: 'stale-err-child' },
+          });
+          return Promise.resolve();
+        }, 'UNIT_OF_WORK_SESSION_CLOSED');
+      });
+    } finally {
+      conn.close();
+    }
+  });
+
+  it('K3.2: BEGIN IMMEDIATE acquires write lock upfront across two separate OS connections preventing SQLITE_BUSY write-upgrade error', async () => {
+    const dir = makeTempDir();
+    const dbPath = path.join(dir, 'k3-begin-immediate.db');
+    const conn1 = openLocalSqliteDatabase(dbPath);
+    const { registry, factSales } = buildTestTables();
+    const idGen = new DeterministicUuidV7Generator();
+    const orgId = idGen.nextId();
+    const storeId = idGen.nextId();
+    const device1 = idGen.nextId();
+    const device2 = idGen.nextId();
+    const delay = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
+
+    const builtDistIndex = ensureLocalPackagesBuiltForChild();
+    const domainDistUrl = pathToFileURL(
+      path.resolve(path.dirname(builtDistIndex), '..', '..', 'domain', 'dist', 'index.js'),
+    ).href;
+    const dbLocalDistUrl = pathToFileURL(builtDistIndex).href;
+    const workerScriptPath = path.join(dir, 'conn2-worker.mjs');
+
+    fs.writeFileSync(
+      workerScriptPath,
+      `
+      import { createRequire } from 'node:module';
+      import {
+        SqliteSchemaRegistry,
+        sqliteMoney,
+        openLocalSqliteDatabase,
+        createSqliteUnitOfWork,
+        insertFact,
+      } from ${JSON.stringify(dbLocalDistUrl)};
+      import { parseUuidV7 } from ${JSON.stringify(domainDistUrl)};
+
+      const localReq = createRequire(${JSON.stringify(dbLocalDistUrl)});
+      const { text } = localReq('drizzle-orm/sqlite-core');
+
+      const [dbPathArg, orgIdStr, storeIdStr, deviceIdStr] = process.argv.slice(2);
+      const orgId = parseUuidV7(orgIdStr);
+      const storeId = parseUuidV7(storeIdStr);
+      const deviceId = parseUuidV7(deviceIdStr);
+
+      const registry = new SqliteSchemaRegistry();
+      const factSales = registry.defineTable(
+        { name: 'uow_test_fact_sales', tableClass: 'FACT', tenantScope: 'store' },
+        (c) => ({
+          ...c,
+          totalTiyin: sqliteMoney('total_tiyin').notNull(),
+          note: text('note').notNull(),
+        }),
+      );
+
+      const conn = openLocalSqliteDatabase(dbPathArg);
+      const uow = await createSqliteUnitOfWork({
+        connection: conn,
+        organizationId: orgId,
+        deviceId,
+        registry,
+        clock: { now: () => 1_700_000_000_050n },
+        random: { nextBytes: (n) => new Uint8Array(n).fill(9) },
+      });
+
+      process.on('message', (msg) => {
+        if (msg !== 'write') return;
+        void (async () => {
+          try {
+            const res = await uow.execute(async (s2) => {
+              await Promise.resolve();
+              return insertFact(s2, factSales, {
+                organizationId: orgId,
+                storeId,
+                values: { totalTiyin: 200n, note: 'conn2-concurrent-write' },
+              });
+            });
+            process.send?.({ status: 'ok', deviceSeq: res.deviceSeq.toString() });
+          } catch (err) {
+            process.send?.({
+              status: 'error',
+              message: err instanceof Error ? err.message : String(err),
+            });
+          } finally {
+            conn.close();
+            process.exit(0);
+          }
+        })();
+      });
+
+      process.send?.({ status: 'ready' });
+      `,
+      'utf8',
+    );
+
+    migrateLocalDatabase(conn1.db);
+    await applyTestTables(conn1, registry, { factSales });
+
+    const uow1 = await createSqliteUnitOfWork({
+      connection: conn1,
+      organizationId: orgId,
+      deviceId: device1,
+      registry,
+      clock: new FixedClock(1_700_000_000_000n),
+      random: new SeededRandomSource(23),
+    });
+
+    const child = spawn(process.execPath, [workerScriptPath, dbPath, orgId, storeId, device2], {
+      stdio: ['ignore', 'pipe', 'pipe', 'ipc'],
+    });
+    let childStderr = '';
+    child.stderr?.on('data', (chunk: Buffer) => {
+      childStderr += chunk.toString('utf8');
+    });
+
+    const readyPromise = new Promise<void>((resolve, reject) => {
+      const onMessage = (msg: unknown) => {
+        if (
+          typeof msg === 'object' &&
+          msg !== null &&
+          (msg as { status?: string }).status === 'ready'
+        ) {
+          child.off('message', onMessage);
+          resolve();
+        }
+      };
+      child.on('message', onMessage);
+      child.once('error', reject);
+      child.once('exit', (code) => {
+        if (code !== 0) {
+          reject(new Error(`conn2-worker exited early with code ${String(code)}: ${childStderr}`));
+        }
+      });
+    });
+
+    const resultPromise = new Promise<{ status: string; deviceSeq?: string; message?: string }>(
+      (resolve, reject) => {
+        const onMessage = (msg: unknown) => {
+          if (typeof msg === 'object' && msg !== null) {
+            const status = (msg as { status?: string }).status;
+            if (status === 'ok' || status === 'error') {
+              child.off('message', onMessage);
+              resolve(msg as { status: string; deviceSeq?: string; message?: string });
+            }
+          }
+        };
+        child.on('message', onMessage);
+        child.once('error', reject);
+        child.once('exit', (code) => {
+          if (code !== 0) {
+            reject(new Error(`conn2-worker failed with code ${String(code)}: ${childStderr}`));
+          }
+        });
+      },
+    );
+
+    try {
+      await readyPromise;
+
+      // Connection 1 (main process) reads inside tx, signals Connection 2 (child OS process) to write concurrently,
+      // then awaits before writing itself. With BEGIN IMMEDIATE, conn1 holds the write lock from t=0 and conn2 waits
+      // cleanly within SQLite busy_timeout until conn1 commits. With plain BEGIN, conn2 steals the write lock first
+      // and conn1 hits SQLITE_BUSY when upgrading its stale read snapshot to write.
+      const p1 = uow1.execute(async (s1) => {
+        const beforeCount = s1.db.select().from(factSales).all().length;
+        expect(beforeCount).toBe(0);
+        child.send('write');
+        await delay(150);
+        return insertFact(s1, factSales, {
+          organizationId: orgId,
+          storeId,
+          values: { totalTiyin: moneyFromTiyin(100n), note: 'conn1-read-then-write' },
+        });
+      });
+
+      const [r1, r2] = await Promise.all([p1, resultPromise]);
+      expect(r1.deviceSeq).toBe(1n);
+      expect(r2).toEqual({ status: 'ok', deviceSeq: '1' });
+      expect(
+        conn1.db
+          .select()
+          .from(factSales)
+          .all()
+          .map((f) => f.note),
+      ).toEqual(['conn1-read-then-write', 'conn2-concurrent-write']);
+    } finally {
+      if (child.exitCode === null) {
+        child.kill();
+      }
+      conn1.close();
+    }
+  });
+
+  it('K3.3, K3.4, K3.6: enforces appendOutboxEventSync inTransaction check, listPending status filtering, and mid-callback ROLLBACK/close guard', async () => {
+    const dbPath = path.join(makeTempDir(), 'k3-guards.db');
+    const conn = openLocalSqliteDatabase(dbPath);
+    const { registry, factSales } = buildTestTables();
+    const idGen = new DeterministicUuidV7Generator();
+    const orgId = idGen.nextId();
+    const storeId = idGen.nextId();
+    const deviceId = idGen.nextId();
+
+    try {
+      migrateLocalDatabase(conn.db);
+      await applyTestTables(conn, registry, { factSales });
+
+      const uow = await createSqliteUnitOfWork({
+        connection: conn,
+        organizationId: orgId,
+        deviceId,
+        registry,
+        clock: new FixedClock(1_700_000_000_000n),
+        random: new SeededRandomSource(25),
+      });
+
+      // K3.3: appendOutboxEventSync outside SQLite transaction rejects immediately
+      expect(() =>
+        appendOutboxEventSync(conn.sqlite, conn.db, {
+          eventId: idGen.nextId(),
+          organizationId: orgId,
+          storeId,
+          deviceId,
+          hlc: `001700000000000:00000:${deviceId}`,
+          uuidMs: unixMsFromBigInt(1_700_000_000_000n),
+          nowMs: unixMsFromBigInt(1_700_000_000_000n),
+          type: 'test.created',
+          entity: 'uow_test_fact_sales',
+          entityId: idGen.nextId(),
+          entityClass: 'FACT',
+          schemaVersion: 1,
+          payload: {},
+        }),
+      ).toThrowError(/requires an active SQLite transaction/);
+
+      // K3.4: SqliteOutboxRepository.listPending skips 'acked' and 'rejected', preserves 'pending' order
+      const outboxRepo = new SqliteOutboxRepository();
+      await uow.execute(async (session) => {
+        const e1 = insertFact(session, factSales, {
+          organizationId: orgId,
+          storeId,
+          values: { totalTiyin: moneyFromTiyin(1n), note: 'e1' },
+        });
+        const e2 = insertFact(session, factSales, {
+          organizationId: orgId,
+          storeId,
+          values: { totalTiyin: moneyFromTiyin(2n), note: 'e2' },
+        });
+        const e3 = insertFact(session, factSales, {
+          organizationId: orgId,
+          storeId,
+          values: { totalTiyin: moneyFromTiyin(3n), note: 'e3' },
+        });
+        const e4 = insertFact(session, factSales, {
+          organizationId: orgId,
+          storeId,
+          values: { totalTiyin: moneyFromTiyin(4n), note: 'e4' },
+        });
+
+        session.db
+          .update(localOutbox)
+          .set({ status: 'acked' })
+          .where(eq(localOutbox.id, e1.eventId))
+          .run();
+        session.db
+          .update(localOutbox)
+          .set({ status: 'rejected', lastError: 'permanent test reject' })
+          .where(eq(localOutbox.id, e3.eventId))
+          .run();
+
+        const pendingAll = await outboxRepo.listPending(session);
+        expect(pendingAll.map((r) => [r.eventId, r.deviceSeq])).toEqual([
+          [e2.eventId, 2n],
+          [e4.eventId, 4n],
+        ]);
+        const pendingOne = await outboxRepo.listPending(session, 1);
+        expect(pendingOne.map((r) => r.eventId)).toEqual([e2.eventId]);
+      });
+
+      // K3.6: sqlite.inTransaction check inside assertActiveTransaction IS reachable when raw SQLite
+      // rolls back mid-callback (e.g. OR ROLLBACK / raw ROLLBACK) while session & ALS are still active
+      await expectDomainErrorAsync(
+        () =>
+          uow.execute(async (session) => {
+            getSessionSqlite(session).exec('ROLLBACK');
+            expect(conn.sqlite.inTransaction).toBe(false);
+            insertFact(session, factSales, {
+              organizationId: orgId,
+              storeId,
+              values: { totalTiyin: moneyFromTiyin(9n), note: 'after-raw-rollback' },
+            });
+            return Promise.resolve();
+          }),
+        'UNIT_OF_WORK_REQUIRED',
+      );
+
+      // Mutex was still released cleanly after mid-callback raw ROLLBACK
+      await uow.execute(async (session) => {
+        const res = insertFact(session, factSales, {
+          organizationId: orgId,
+          storeId,
+          values: { totalTiyin: moneyFromTiyin(5n), note: 'e5-after-rollback-guard' },
+        });
+        expect(res.deviceSeq).toBe(5n);
+        await Promise.resolve();
+      });
+    } finally {
+      conn.close();
+    }
   });
 });

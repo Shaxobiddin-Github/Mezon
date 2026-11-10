@@ -18,7 +18,9 @@ export type DomainErrorCode =
   | 'INVALID_MAX_SKEW'
   | 'UNIT_OF_WORK_REENTRANCY'
   | 'UNIT_OF_WORK_REQUIRED'
-  | 'UNIT_OF_WORK_SESSION_CLOSED';
+  | 'UNIT_OF_WORK_SESSION_CLOSED'
+  | 'UNIT_OF_WORK_CONCURRENT_NESTED'
+  | 'UNIT_OF_WORK_TENANT_MISMATCH';
 
 export class DomainError extends Error {
   readonly code: DomainErrorCode;
