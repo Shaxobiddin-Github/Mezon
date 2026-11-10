@@ -192,7 +192,16 @@ export class SqliteHubAuthStore {
 
   static async create(options: CreateSqliteHubAuthStoreOptions): Promise<SqliteHubAuthStore> {
     const existingConfig = await runConnectionReadOnly(options.connection, () => {
-      const rows = options.connection.db.select().from(localHubConfig).limit(1).all();
+      const rows = options.connection.db
+        .select({
+          organizationId: localHubConfig.organizationId,
+          storeId: localHubConfig.storeId,
+          deviceId: localHubConfig.deviceId,
+          setupCompletedAtMs: localHubConfig.setupCompletedAtMs,
+        })
+        .from(localHubConfig)
+        .limit(1)
+        .all();
       const row = rows[0];
       if (!row) {
         return Promise.resolve<HubConfigSnapshot | null>(null);
@@ -322,19 +331,18 @@ export class SqliteHubAuthStore {
       },
       fn: (session) => {
         const nowMs = session.nowUnixMs();
-        session.db
-          .insert(localHubConfig)
-          .values({
-            id: session.nextId(),
-            organizationId,
-            storeId,
-            deviceId,
-            singletonGuard: 1,
-            setupCompletedAtMs: nowMs,
-            createdAtMs: nowMs,
-            updatedAtMs: nowMs,
-          })
-          .run();
+        // Omit defaulted config columns so SQLite applies schema DDL defaults cleanly (and stays compatible with older migration baselines in tests).
+        session
+          .internalGetSqlite()
+          .prepare(
+            `
+            INSERT INTO "local_hub_config" (
+              "id", "organization_id", "store_id", "device_id",
+              "singleton_guard", "setup_completed_at_ms", "created_at_ms", "updated_at_ms"
+            ) VALUES (?, ?, ?, ?, 1, ?, ?, ?)
+            `,
+          )
+          .run(session.nextId(), organizationId, storeId, deviceId, nowMs, nowMs, nowMs);
 
         const ownerWrite = insertAttr(session, users, {
           organizationId,

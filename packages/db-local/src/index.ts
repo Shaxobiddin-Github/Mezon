@@ -46,6 +46,8 @@ export {
   readDeviceStateRowSync,
   advanceReceiptSeqSync,
   readReceiptSeqSync,
+  advanceReturnSeqSync,
+  readReturnSeqSync,
   SqliteDeviceStateRepository,
 } from './device-state.js';
 
@@ -110,6 +112,9 @@ export {
   saleLines,
   payments,
   cashMoves,
+  returns,
+  returnLines,
+  returnPayments,
 } from './schema/index.js';
 
 export {
@@ -122,7 +127,12 @@ export {
   assertStockMigrationsComplete,
 } from './stock-migrations.js';
 
-export { buildSaleMonotoneTriggersSql, assertSaleMigrationsComplete } from './sale-migrations.js';
+export {
+  buildSaleMonotoneTriggersSql,
+  assertSaleMigrationsComplete,
+  buildSalesLinesViewSql,
+  assertReturnAndViewMigrationsComplete,
+} from './sale-migrations.js';
 
 export {
   type HubConfigSnapshot,
@@ -212,3 +222,21 @@ export {
   SqliteSaleStore,
   createSqliteSaleStore,
 } from './sale-repo.js';
+
+export {
+  type ReturnRuntimeContext,
+  type ReturnStoreTestHooks,
+  type CreateSqliteReturnStoreOptions,
+  type VoidSaleInput,
+  type StoredVoidedSaleRecord,
+  type VoidSaleOutcome,
+  type CreateReturnLineInput,
+  type CreateReturnInput,
+  type StoredReturnLineRecord,
+  type StoredReturnPaymentRecord,
+  type StoredReturnRecord,
+  type CreateReturnOutcome,
+  type SalesLinesReportSummaryRecord,
+  SqliteReturnStore,
+  createSqliteReturnStore,
+} from './return-repo.js';

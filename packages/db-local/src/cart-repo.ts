@@ -253,7 +253,19 @@ function toPromotionRule(row: StoredPromotionRecord): PromotionRule {
   };
 }
 
-function toDiscountSettings(row: typeof localHubConfig.$inferSelect): StoredCartDiscountSettings {
+export interface StoredHubCartConfigRow {
+  readonly id: UuidV7;
+  readonly organizationId: UuidV7;
+  readonly negativeStockPolicy: string;
+  readonly cashierDiscountPercentUnlimited: boolean;
+  readonly cashierMaxDiscountPercentBp: number;
+  readonly cashierDiscountAmountUnlimited: boolean;
+  readonly cashierMaxDiscountAmount: Money;
+  readonly quickSaleDefaultMxik: string | null;
+  readonly quickSaleDefaultVatRateBp: number | null;
+}
+
+function toDiscountSettings(row: StoredHubCartConfigRow): StoredCartDiscountSettings {
   const percentUnlimited = Boolean(row.cashierDiscountPercentUnlimited);
   const amountUnlimited = Boolean(row.cashierDiscountAmountUnlimited);
   return {
@@ -307,9 +319,19 @@ function isSqliteCheckOrConstraintError(err: unknown): boolean {
 export function readHubConfigRowInDbSync(
   db: BetterSQLite3Database,
   organizationId: UuidV7,
-): typeof localHubConfig.$inferSelect {
+): StoredHubCartConfigRow {
   const row = db
-    .select()
+    .select({
+      id: localHubConfig.id,
+      organizationId: localHubConfig.organizationId,
+      negativeStockPolicy: localHubConfig.negativeStockPolicy,
+      cashierDiscountPercentUnlimited: localHubConfig.cashierDiscountPercentUnlimited,
+      cashierMaxDiscountPercentBp: localHubConfig.cashierMaxDiscountPercentBp,
+      cashierDiscountAmountUnlimited: localHubConfig.cashierDiscountAmountUnlimited,
+      cashierMaxDiscountAmount: localHubConfig.cashierMaxDiscountAmount,
+      quickSaleDefaultMxik: localHubConfig.quickSaleDefaultMxik,
+      quickSaleDefaultVatRateBp: localHubConfig.quickSaleDefaultVatRateBp,
+    })
     .from(localHubConfig)
     .where(eq(localHubConfig.organizationId, organizationId))
     .limit(1)
@@ -490,7 +512,7 @@ export function evaluateCartRowInDbSync(params: {
   };
 }): {
   readonly detail: StoredCartDetailRecord;
-  readonly hubConfig: typeof localHubConfig.$inferSelect;
+  readonly hubConfig: StoredHubCartConfigRow;
   readonly lineRows: readonly (typeof localCartLines.$inferSelect)[];
   readonly productsById: Map<UuidV7, typeof products.$inferSelect>;
   readonly variantsById: Map<UuidV7, typeof productVariants.$inferSelect>;

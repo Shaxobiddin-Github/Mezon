@@ -220,7 +220,7 @@ function deserializeWarnings(rawJson: string | null): StockMoveWarningRecord[] {
   }));
 }
 
-function toStoredSaleLine(row: typeof saleLines.$inferSelect): StoredSaleLineRecord {
+export function toStoredSaleLine(row: typeof saleLines.$inferSelect): StoredSaleLineRecord {
   return {
     id: row.id,
     sortOrder: row.sortOrder,
@@ -249,7 +249,7 @@ function toStoredSaleLine(row: typeof saleLines.$inferSelect): StoredSaleLineRec
   };
 }
 
-function toStoredSalePayment(row: typeof payments.$inferSelect): StoredSalePaymentRecord {
+export function toStoredSalePayment(row: typeof payments.$inferSelect): StoredSalePaymentRecord {
   return {
     id: row.id,
     method: row.method as PaymentMethod,
@@ -726,6 +726,8 @@ export class SqliteSaleStore {
           voidedAtMs: null,
           voidedByUserId: null,
           voidReason: null,
+          voidClientRequestId: null,
+          voidRequestHash: null,
         },
         eventType: 'sale.completed',
         schemaVersion: 1,

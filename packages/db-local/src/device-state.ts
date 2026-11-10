@@ -40,7 +40,16 @@ export function readDeviceStateRowSync(
 ): DeviceStateSnapshot | null {
   const validDeviceId = parseUuidV7(deviceId);
   const rows = db
-    .select()
+    .select({
+      id: localDeviceState.id,
+      organizationId: localDeviceState.organizationId,
+      deviceId: localDeviceState.deviceId,
+      lastDeviceSeq: localDeviceState.lastDeviceSeq,
+      lastHlc: localDeviceState.lastHlc,
+      lastUuidMs: localDeviceState.lastUuidMs,
+      createdAtMs: localDeviceState.createdAtMs,
+      updatedAtMs: localDeviceState.updatedAtMs,
+    })
     .from(localDeviceState)
     .where(eq(localDeviceState.deviceId, validDeviceId))
     .all();
@@ -199,6 +208,53 @@ export function readReceiptSeqSync(db: BetterSQLite3Database, deviceId: UuidV7):
     .limit(1)
     .all();
   return rows[0]?.lastReceiptSeq ?? 0n;
+}
+
+/**
+ * Atomically allocates the next gapless per-device `return_no` (`last_return_seq + 1`) inside the
+ * caller's active `BEGIN IMMEDIATE` transaction so failed returns and crashes never consume numbers.
+ */
+export function advanceReturnSeqSync(
+  sqlite: Database.Database,
+  params: {
+    readonly deviceId: UuidV7;
+    readonly updatedAtMs: bigint;
+  },
+): bigint {
+  const validDeviceId = parseUuidV7(params.deviceId);
+  const validUpdatedAtMs = unixMsFromBigInt(params.updatedAtMs);
+
+  const result = sqlite
+    .prepare<[bigint, string], { readonly last_return_seq: unknown }>(
+      `
+      UPDATE local_device_state
+      SET
+        last_return_seq = last_return_seq + 1,
+        updated_at_ms = ?
+      WHERE device_id = ?
+      RETURNING last_return_seq
+      `,
+    )
+    .get(validUpdatedAtMs, validDeviceId);
+
+  if (!result || typeof result.last_return_seq !== 'bigint') {
+    throw new Error(
+      `Cannot allocate return_no: local_device_state row missing or invalid for device "${validDeviceId}"`,
+    );
+  }
+
+  return result.last_return_seq;
+}
+
+export function readReturnSeqSync(db: BetterSQLite3Database, deviceId: UuidV7): bigint {
+  const validDeviceId = parseUuidV7(deviceId);
+  const rows = db
+    .select({ lastReturnSeq: localDeviceState.lastReturnSeq })
+    .from(localDeviceState)
+    .where(eq(localDeviceState.deviceId, validDeviceId))
+    .limit(1)
+    .all();
+  return rows[0]?.lastReturnSeq ?? 0n;
 }
 
 export class SqliteDeviceStateRepository implements DeviceStateRepository<SqliteSessionDbAccess> {

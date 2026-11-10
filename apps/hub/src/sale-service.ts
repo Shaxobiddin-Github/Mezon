@@ -25,7 +25,7 @@ import {
  * Maps a persisted `StoredSaleLineRecord` to the HTTP DTO using an explicit allow-list so internal
  * COGS (`costValue`), unit cost, and profit margin can NEVER leak to cashier/API responses.
  */
-function toSaleLineDto(line: StoredSaleLineRecord): SaleLineDto {
+export function toSaleLineDto(line: StoredSaleLineRecord): SaleLineDto {
   return {
     id: line.id,
     sortOrder: line.sortOrder,
@@ -53,7 +53,7 @@ function toSaleLineDto(line: StoredSaleLineRecord): SaleLineDto {
   };
 }
 
-function toSalePaymentDto(payment: StoredSalePaymentRecord): SalePaymentDto {
+export function toSalePaymentDto(payment: StoredSalePaymentRecord): SalePaymentDto {
   return {
     id: payment.id,
     method: payment.method,

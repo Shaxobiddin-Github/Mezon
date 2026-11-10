@@ -57,6 +57,13 @@
       "when": 1794329370565,
       "tag": "0007_payments_cash_moves",
       "breakpoints": true
+    },
+    {
+      "idx": 8,
+      "version": "6",
+      "when": 1794333988551,
+      "tag": "0008_void_return",
+      "breakpoints": true
     }
   ]
 }

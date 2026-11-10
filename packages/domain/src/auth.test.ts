@@ -32,6 +32,9 @@ describe('@mezon/domain - auth rules, RBAC, and PIN security policy', () => {
     expect(roleHasPermission('owner', 'promotions:read')).toBe(true);
     expect(roleHasPermission('owner', 'promotions:write')).toBe(true);
     expect(roleHasPermission('owner', 'discounts:config')).toBe(true);
+    expect(roleHasPermission('owner', 'sale:void')).toBe(true);
+    expect(roleHasPermission('owner', 'sale:return')).toBe(true);
+    expect(roleHasPermission('owner', 'reports:profit')).toBe(true);
 
     expect(roleHasPermission('manager', 'auth:self')).toBe(true);
     expect(roleHasPermission('manager', 'users:read')).toBe(true);
@@ -45,6 +48,9 @@ describe('@mezon/domain - auth rules, RBAC, and PIN security policy', () => {
     expect(roleHasPermission('manager', 'promotions:read')).toBe(true);
     expect(roleHasPermission('manager', 'promotions:write')).toBe(true);
     expect(roleHasPermission('manager', 'discounts:config')).toBe(false);
+    expect(roleHasPermission('manager', 'sale:void')).toBe(true);
+    expect(roleHasPermission('manager', 'sale:return')).toBe(true);
+    expect(roleHasPermission('manager', 'reports:profit')).toBe(false);
 
     expect(roleHasPermission('cashier', 'auth:self')).toBe(true);
     expect(roleHasPermission('cashier', 'users:read')).toBe(false);
@@ -58,6 +64,9 @@ describe('@mezon/domain - auth rules, RBAC, and PIN security policy', () => {
     expect(roleHasPermission('cashier', 'promotions:read')).toBe(true);
     expect(roleHasPermission('cashier', 'promotions:write')).toBe(false);
     expect(roleHasPermission('cashier', 'discounts:config')).toBe(false);
+    expect(roleHasPermission('cashier', 'sale:void')).toBe(false);
+    expect(roleHasPermission('cashier', 'sale:return')).toBe(false);
+    expect(roleHasPermission('cashier', 'reports:profit')).toBe(false);
   });
 
   it('validates 6-12 digit PINs and rejects trivial or leaking error messages', () => {

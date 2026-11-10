@@ -15,7 +15,10 @@ export type HubPermission =
   | 'cart:write'
   | 'promotions:read'
   | 'promotions:write'
-  | 'discounts:config';
+  | 'discounts:config'
+  | 'sale:void'
+  | 'sale:return'
+  | 'reports:profit';
 
 const ROLE_PERMISSION_TABLE: Readonly<Record<UserRole, ReadonlySet<HubPermission>>> = {
   owner: new Set<HubPermission>([
@@ -31,6 +34,9 @@ const ROLE_PERMISSION_TABLE: Readonly<Record<UserRole, ReadonlySet<HubPermission
     'promotions:read',
     'promotions:write',
     'discounts:config',
+    'sale:void',
+    'sale:return',
+    'reports:profit',
   ]),
   manager: new Set<HubPermission>([
     'auth:self',
@@ -43,6 +49,8 @@ const ROLE_PERMISSION_TABLE: Readonly<Record<UserRole, ReadonlySet<HubPermission
     'cart:write',
     'promotions:read',
     'promotions:write',
+    'sale:void',
+    'sale:return',
   ]),
   cashier: new Set<HubPermission>([
     'auth:self',

@@ -295,6 +295,29 @@ export interface OutboundStockMoveSessionOutcome {
   readonly warnings: readonly StockMoveWarningRecord[];
 }
 
+export interface ReturnStockLegSessionInput {
+  readonly batchId: UuidV7 | null;
+  readonly qty: Quantity;
+  readonly costValue: Money;
+}
+
+export interface ReturnStockMoveSessionParams {
+  readonly organizationId: UuidV7;
+  readonly storeId: UuidV7;
+  readonly productId: UuidV7;
+  readonly variantId: UuidV7 | null;
+  readonly legs: readonly ReturnStockLegSessionInput[];
+  readonly fallbackBatchNumber: string;
+  readonly sourceId: UuidV7;
+  readonly note: string | null;
+  readonly actorUserId: UuidV7;
+  readonly sessionPoolCache?: Map<string, ReplayStockPoolState>;
+}
+
+export interface ReturnStockMoveSessionOutcome {
+  readonly moves: readonly StoredStockMoveRecord[];
+}
+
 function requireTrackedProductSync(
   session: SqliteUnitOfWorkSession,
   organizationId: UuidV7,
@@ -787,6 +810,169 @@ export function applyOutboundStockMoveSync(
   );
 
   return { moves: writtenMoves, warnings };
+}
+
+/**
+ * Authoritative internal session helper for restoring inventory on sale void or customer return:
+ * - Restores Variant 1 original batch (`leg.batchId`) & proportional cost (`batches` FACT untouched).
+ * - If a `trackBatches = true` item had an explicit unbatched deficit leg (`batchId = null` under `'warn'`),
+ *   creates/reuses one deterministic fallback return batch (`fallbackBatchNumber`) so live state matches
+ *   single full return and `rebuildStockProjections()` identically (V4.1 & V4.2).
+ * - Drives all projection updates exclusively through `applyReplayStockMove`.
+ */
+export function applyReturnStockMoveSync(
+  session: SqliteUnitOfWorkSession,
+  params: ReturnStockMoveSessionParams,
+): ReturnStockMoveSessionOutcome {
+  session.assertActiveTransaction();
+  if (params.legs.length === 0) {
+    return { moves: [] };
+  }
+
+  const product = session.db
+    .select()
+    .from(products)
+    .where(
+      and(eq(products.id, params.productId), eq(products.organizationId, params.organizationId)),
+    )
+    .limit(1)
+    .all()[0];
+  if (!product) {
+    throw new DomainError('PRODUCT_NOT_FOUND', `Product "${params.productId}" was not found`);
+  }
+  if (Boolean(product.unlimited)) {
+    throw new DomainError(
+      'UNLIMITED_PRODUCT_STOCK_NOT_TRACKED',
+      `Unlimited product "${product.name}" does not track stock`,
+    );
+  }
+
+  const unit = parseProductUnit(product.unit);
+  const trackBatches = Boolean(product.trackBatches);
+  const nowMs = session.nowUnixMs();
+
+  const key = poolKey(params.productId, params.variantId);
+  const cachedState = params.sessionPoolCache?.get(key);
+  const poolState =
+    cachedState ??
+    loadMutablePoolStateSync(
+      session,
+      params.organizationId,
+      params.storeId,
+      params.productId,
+      params.variantId,
+      trackBatches,
+    );
+  if (params.sessionPoolCache && !cachedState) {
+    params.sessionPoolCache.set(key, poolState);
+  }
+
+  const writtenMoves: StoredStockMoveRecord[] = [];
+  const touchedBatchIds: UuidV7[] = [];
+
+  for (const leg of params.legs) {
+    const validQty = validatePositiveStockQuantity(unit, leg.qty);
+    if (moneyToTiyin(leg.costValue) < 0n) {
+      throw new DomainError('VALIDATION_ERROR', 'Return stock leg cost must be non-negative');
+    }
+
+    let targetBatchId = leg.batchId;
+    if (!trackBatches && targetBatchId !== null) {
+      throw new DomainError(
+        'VALIDATION_ERROR',
+        'Non-batched product cannot receive a batched return leg',
+      );
+    }
+
+    if (trackBatches && targetBatchId === null) {
+      const existingFallback = session.db
+        .select({ id: batches.id })
+        .from(batches)
+        .where(
+          and(
+            eq(batches.organizationId, params.organizationId),
+            eq(batches.storeId, params.storeId),
+            eq(batches.productId, params.productId),
+            params.variantId === null
+              ? isNull(batches.variantId)
+              : eq(batches.variantId, params.variantId),
+            eq(batches.batchNumber, params.fallbackBatchNumber),
+          ),
+        )
+        .limit(1)
+        .all()[0];
+
+      if (existingFallback) {
+        targetBatchId = existingFallback.id;
+      } else {
+        const createdBatch = insertFact(session, batches, {
+          organizationId: params.organizationId,
+          storeId: params.storeId,
+          values: {
+            productId: params.productId,
+            variantId: params.variantId,
+            batchNumber: params.fallbackBatchNumber,
+            expiryDateMs: null,
+            initialQty: validQty,
+            initialCostValue: leg.costValue,
+            supplierId: null,
+          },
+          eventType: 'batch.created',
+          schemaVersion: 1,
+        });
+        targetBatchId = createdBatch.entityId;
+      }
+    }
+
+    const moveWrite = insertFact(session, stockMoves, {
+      organizationId: params.organizationId,
+      storeId: params.storeId,
+      values: {
+        productId: params.productId,
+        variantId: params.variantId,
+        batchId: targetBatchId,
+        qtyDelta: validQty,
+        costValueDelta: leg.costValue,
+        reason: 'return',
+        sourceType: 'return',
+        sourceId: params.sourceId,
+        createdByUserId: params.actorUserId,
+        note: params.note,
+      },
+      eventType: 'stock_move.created',
+      schemaVersion: 1,
+    });
+
+    applyReplayStockMove(poolState, {
+      moveId: moveWrite.entityId,
+      productId: params.productId,
+      variantId: params.variantId,
+      batchId: targetBatchId,
+      hlc: moveWrite.hlc,
+      reason: 'return',
+      qtyDelta: validQty,
+      costValueDelta: leg.costValue,
+      trackBatches,
+    });
+
+    if (targetBatchId !== null) {
+      touchedBatchIds.push(targetBatchId);
+    }
+    writtenMoves.push(toStoredMove(moveWrite.row));
+  }
+
+  savePoolAndBatchesSync(
+    session,
+    params.organizationId,
+    params.storeId,
+    params.productId,
+    params.variantId,
+    poolState,
+    nowMs,
+    [...new Set(touchedBatchIds)],
+  );
+
+  return { moves: writtenMoves };
 }
 
 function parsePositiveBigInt(
