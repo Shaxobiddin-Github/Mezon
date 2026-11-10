@@ -20,7 +20,7 @@ import {
   unixMsFromBigInt,
 } from '@mezon/domain';
 import { FixedClock, SeededRandomSource } from '@mezon/test-utils';
-import { eq } from 'drizzle-orm';
+import { and, asc, eq } from 'drizzle-orm';
 import fc from 'fast-check';
 import { afterEach, describe, expect, it } from 'vitest';
 import {
@@ -41,7 +41,9 @@ import {
   getStoreCashBalanceSync,
   insertMonotone,
   listAllOutboxRecordsSync,
+  localBatchBalances,
   localCarts,
+  localStockBalances,
   migrateLocalDatabase,
   openLocalSqliteDatabase,
   payments,
@@ -1984,6 +1986,273 @@ describe('@mezon/db-local - T1.4 completeSale atomic TX, receipts, stock policy,
       console.info(
         `[PERF T1.5 db-local] 20-line completeSale (3 payments: card+payme+cash) median=${medianMs.toFixed(2)} ms samples=[${samplesMs.map((v) => v.toFixed(2)).join(', ')}]`,
       );
+    } finally {
+      env.connection.close();
+    }
+  }, 30_000);
+
+  it('B1 regression: 36-step seeded differential test matches completeSale vs recordOutboundMove on all 6 local_stock_balances fields, cost_value_delta, FIFO batches & rebuildProjections', async () => {
+    const env = await setupSaleEnv();
+    try {
+      await env.stockStore.setNegativeStockPolicy('warn');
+
+      const avgSale = await env.catalogStore.createProduct({
+        name: 'Un (completeSale avg)',
+        unit: 'kg',
+        trackBatches: false,
+        salePrice: '10000',
+        vatRateBp: 0,
+        actorUserId: env.ownerId,
+      });
+      const avgDirect = await env.catalogStore.createProduct({
+        name: 'Un (recordOutboundMove avg)',
+        unit: 'kg',
+        trackBatches: false,
+        salePrice: '10000',
+        vatRateBp: 0,
+        actorUserId: env.ownerId,
+      });
+      const fifoSale = await env.catalogStore.createProduct({
+        name: 'Shakar (completeSale fifo)',
+        unit: 'kg',
+        trackBatches: true,
+        salePrice: '12000',
+        vatRateBp: 0,
+        actorUserId: env.ownerId,
+      });
+      const fifoDirect = await env.catalogStore.createProduct({
+        name: 'Shakar (recordOutboundMove fifo)',
+        unit: 'kg',
+        trackBatches: true,
+        salePrice: '12000',
+        vatRateBp: 0,
+        actorUserId: env.ownerId,
+      });
+
+      const readPoolSnapshot = (productId: UuidV7) => {
+        const row = env.connection.db
+          .select()
+          .from(localStockBalances)
+          .where(
+            and(
+              eq(localStockBalances.organizationId, env.organizationId),
+              eq(localStockBalances.storeId, env.storeId),
+              eq(localStockBalances.productId, productId),
+            ),
+          )
+          .all()[0];
+        expect(row).toBeDefined();
+        return {
+          qtyOnHand: row.qtyOnHand,
+          totalValue: row.totalValue,
+          deficitQty: row.deficitQty,
+          provisionalDeficitValue: row.provisionalDeficitValue,
+          costVarianceValue: row.costVarianceValue,
+          lastUnitCost: row.lastUnitCost,
+        };
+      };
+
+      const readOutboundCostSum = (productId: UuidV7) => {
+        const rows = env.connection.db
+          .select({ qtyDelta: stockMoves.qtyDelta, costValueDelta: stockMoves.costValueDelta })
+          .from(stockMoves)
+          .where(
+            and(
+              eq(stockMoves.organizationId, env.organizationId),
+              eq(stockMoves.storeId, env.storeId),
+              eq(stockMoves.productId, productId),
+            ),
+          )
+          .orderBy(asc(stockMoves.hlc), asc(stockMoves.id))
+          .all();
+        return rows
+          .filter((r) => (r.qtyDelta as bigint) < 0n)
+          .reduce((acc, r) => acc + moneyToTiyin(r.costValueDelta), 0n);
+      };
+
+      const readBatchQtyAndValues = (productId: UuidV7) =>
+        env.connection.db
+          .select({
+            remainingQty: localBatchBalances.remainingQty,
+            remainingValue: localBatchBalances.remainingValue,
+          })
+          .from(localBatchBalances)
+          .where(
+            and(
+              eq(localBatchBalances.organizationId, env.organizationId),
+              eq(localBatchBalances.storeId, env.storeId),
+              eq(localBatchBalances.productId, productId),
+            ),
+          )
+          .orderBy(asc(localBatchBalances.hlc), asc(localBatchBalances.batchId))
+          .all();
+
+      const assertPairedParity = () => {
+        expect(readPoolSnapshot(avgSale.product.id)).toEqual(
+          readPoolSnapshot(avgDirect.product.id),
+        );
+        expect(readPoolSnapshot(fifoSale.product.id)).toEqual(
+          readPoolSnapshot(fifoDirect.product.id),
+        );
+        expect(readOutboundCostSum(avgSale.product.id)).toBe(
+          readOutboundCostSum(avgDirect.product.id),
+        );
+        expect(readOutboundCostSum(fifoSale.product.id)).toBe(
+          readOutboundCostSum(fifoDirect.product.id),
+        );
+        expect(readBatchQtyAndValues(fifoSale.product.id)).toEqual(
+          readBatchQtyAndValues(fifoDirect.product.id),
+        );
+      };
+
+      // Step 1: initial inbound batches (exact 1707n avg unit cost counterexample + FIFO initial batch)
+      for (const p of [avgSale, avgDirect]) {
+        await env.stockStore.recordInboundMove({
+          productId: p.product.id,
+          reason: 'initial',
+          qty: '3000',
+          totalCostValue: '5121', // 5121 / 3 = 1707 tiyin/kg
+          actorUserId: env.ownerId,
+        });
+      }
+      for (const p of [fifoSale, fifoDirect]) {
+        await env.stockStore.recordInboundMove({
+          productId: p.product.id,
+          reason: 'initial',
+          qty: '4000',
+          totalCostValue: '9600',
+          batchNumber: 'INIT-B1',
+          actorUserId: env.ownerId,
+        });
+      }
+      assertPairedParity();
+
+      // Deterministic PRNG for 35 randomized operations (covering normal outs, deficit transition,
+      // repeated deficit outs using lastUnitCost, partial/full restocks with cost variance, & FIFO multi-batch outs)
+      let rngState = 0x51a7b1n;
+      const nextRand = (mod: bigint): bigint => {
+        rngState = (rngState * 6364136223846793005n + 1442695040888963407n) & ((1n << 64n) - 1n);
+        return (rngState >> 16n) % mod;
+      };
+
+      for (let step = 2; step <= 36; step += 1) {
+        env.clock.advance(1_000n);
+        // Ensure explicit deficit & recovery transitions early (steps 2..5) + mixed seeded steps afterwards
+        const isRestock =
+          step === 6 || step === 14 || step === 24 || (step > 6 && nextRand(10n) < 3n);
+
+        if (isRestock) {
+          const avgQty = 2_000n + nextRand(5_000n); // milli
+          const avgUnitCost = 1_500n + nextRand(1_800n);
+          const avgCostVal = (avgQty * avgUnitCost) / 1_000n;
+          for (const p of [avgSale, avgDirect]) {
+            await env.stockStore.recordInboundMove({
+              productId: p.product.id,
+              reason: 'purchase',
+              qty: avgQty.toString(),
+              totalCostValue: avgCostVal.toString(),
+              actorUserId: env.ownerId,
+            });
+          }
+
+          const fifoQty = 2_500n + nextRand(4_500n);
+          const fifoUnitCost = 2_000n + nextRand(2_000n);
+          const fifoCostVal = (fifoQty * fifoUnitCost) / 1_000n;
+          for (const p of [fifoSale, fifoDirect]) {
+            await env.stockStore.recordInboundMove({
+              productId: p.product.id,
+              reason: 'purchase',
+              qty: fifoQty.toString(),
+              totalCostValue: fifoCostVal.toString(),
+              batchNumber: `STEP-${step}`,
+              actorUserId: env.ownerId,
+            });
+          }
+        } else {
+          // Force deficit by step 3 & keep trading inside deficit in steps 4..5, then randomized qty
+          const avgNeed =
+            step === 2
+              ? 2_000n // leaves 1.000 kg -> keeps lastUnitCost = 1707n
+              : step === 3
+                ? 2_500n // goes -1.500 kg into deficit!
+                : 500n + nextRand(3_500n);
+          const fifoNeed = step === 2 ? 2_500n : step === 3 ? 3_000n : 500n + nextRand(4_000n);
+
+          // Path A: completeSale (1 cart containing BOTH avgSale & fifoSale)
+          const cart = await env.cartStore.openCart(env.cashierId);
+          await env.cartStore.addLine(cart.id, {
+            kind: 'catalog',
+            productId: avgSale.product.id,
+            variantId: null,
+            qty: quantityFromMilli(avgNeed),
+          });
+          const detail = await env.cartStore.addLine(cart.id, {
+            kind: 'catalog',
+            productId: fifoSale.product.id,
+            variantId: null,
+            qty: quantityFromMilli(fifoNeed),
+          });
+          const completed = await env.saleStore.completeSale({
+            cartId: cart.id,
+            actorUserId: env.cashierId,
+            clientRequestId: parseUuidV7(
+              `01950000-0000-7000-8000-d1ff${String(step).padStart(8, '0')}`,
+            ),
+            expectedTotal: detail.totalFinal,
+            payments: [{ method: 'card', amount: detail.totalFinal, providerRef: `D-${step}` }],
+          });
+
+          // Path B: direct recordOutboundMove (separate T1.2 ledger path)
+          const outAvg = await env.stockStore.recordOutboundMove({
+            productId: avgDirect.product.id,
+            reason: 'sale',
+            qty: avgNeed.toString(),
+            policy: 'warn',
+            actorUserId: env.cashierId,
+          });
+          const outFifo = await env.stockStore.recordOutboundMove({
+            productId: fifoDirect.product.id,
+            reason: 'sale',
+            qty: fifoNeed.toString(),
+            policy: 'warn',
+            actorUserId: env.cashierId,
+          });
+
+          // Verify per-step sale_lines.costValue === direct outbound -SUM(costValueDelta)
+          const directAvgCost = outAvg.moves.reduce(
+            (acc, m) => acc + -moneyToTiyin(m.costValueDelta),
+            0n,
+          );
+          const directFifoCost = outFifo.moves.reduce(
+            (acc, m) => acc + -moneyToTiyin(m.costValueDelta),
+            0n,
+          );
+          expect(moneyToTiyin(completed.sale.lines[0].costValue)).toBe(directAvgCost);
+          expect(moneyToTiyin(completed.sale.lines[1].costValue)).toBe(directFifoCost);
+        }
+
+        assertPairedParity();
+      }
+
+      // Final verification (B1 item 3): rebuildProjections() matches live balances across all 4 products
+      const beforeRebuild = {
+        avgSale: readPoolSnapshot(avgSale.product.id),
+        avgDirect: readPoolSnapshot(avgDirect.product.id),
+        fifoSale: readPoolSnapshot(fifoSale.product.id),
+        fifoDirect: readPoolSnapshot(fifoDirect.product.id),
+        fifoSaleBatches: readBatchQtyAndValues(fifoSale.product.id),
+        fifoDirectBatches: readBatchQtyAndValues(fifoDirect.product.id),
+      };
+      await env.stockStore.rebuildProjections();
+      const afterRebuild = {
+        avgSale: readPoolSnapshot(avgSale.product.id),
+        avgDirect: readPoolSnapshot(avgDirect.product.id),
+        fifoSale: readPoolSnapshot(fifoSale.product.id),
+        fifoDirect: readPoolSnapshot(fifoDirect.product.id),
+        fifoSaleBatches: readBatchQtyAndValues(fifoSale.product.id),
+        fifoDirectBatches: readBatchQtyAndValues(fifoDirect.product.id),
+      };
+      expect(afterRebuild).toEqual(beforeRebuild);
     } finally {
       env.connection.close();
     }

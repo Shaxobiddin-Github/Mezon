@@ -276,6 +276,23 @@ describe('@mezon/domain - sale payments, mixed methods, debt, cash_moves & invar
         ],
       }),
     ).toThrow(DomainError);
+
+    // B2: tenderedAmount passed directly on non-cash row to validateSalePaymentsInvariant must fail VALIDATION_ERROR
+    expect(() =>
+      validateSalePaymentsInvariant({
+        totalFinal: moneyFromTiyin(100_000n),
+        debtAmount: ZERO_MONEY,
+        customerId: null,
+        payments: [
+          {
+            method: 'card',
+            amount: moneyFromTiyin(100_000n),
+            tenderedAmount: moneyFromTiyin(100_000n),
+            changeAmount: ZERO_MONEY,
+          },
+        ],
+      }),
+    ).toThrowError(expect.objectContaining({ code: 'VALIDATION_ERROR' }));
   });
 
   it('canonicalizes completeSale requests deterministically across equivalent inputs and differentiates changes', () => {

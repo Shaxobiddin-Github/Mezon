@@ -31,7 +31,7 @@ import {
   validatePositiveStockQuantity,
   validateStockMoveDirection,
 } from '@mezon/domain';
-import { and, asc, desc, eq, isNull, sql } from 'drizzle-orm';
+import { and, asc, desc, eq, inArray, isNull, sql } from 'drizzle-orm';
 import type { LocalSqliteConnection } from './connection.js';
 import {
   batches,
@@ -192,8 +192,18 @@ export interface RebuildStockProjectionsResult {
   readonly conflictsDetected: number;
 }
 
-function poolKey(productId: UuidV7, variantId: UuidV7 | null): string {
+export interface StockPoolPrefetchTarget {
+  readonly productId: UuidV7;
+  readonly variantId: UuidV7 | null;
+  readonly trackBatches: boolean;
+}
+
+export function stockPoolKey(productId: UuidV7, variantId: UuidV7 | null): string {
   return `${productId}:${variantId ?? ''}`;
+}
+
+function poolKey(productId: UuidV7, variantId: UuidV7 | null): string {
+  return stockPoolKey(productId, variantId);
 }
 
 function toStoredMove(row: typeof stockMoves.$inferSelect): StoredStockMoveRecord {
@@ -372,6 +382,18 @@ function readPoolRowSync(
   );
 }
 
+function applyPoolBalanceRowToState(
+  state: ReplayStockPoolState,
+  row: typeof localStockBalances.$inferSelect,
+): void {
+  state.qtyOnHand = row.qtyOnHand;
+  state.totalValue = row.totalValue;
+  state.deficitQty = row.deficitQty;
+  state.provisionalDeficitValue = row.provisionalDeficitValue;
+  state.costVarianceValue = row.costVarianceValue;
+  state.lastUnitCost = row.lastUnitCost;
+}
+
 function loadMutablePoolStateSync(
   session: SqliteUnitOfWorkSession,
   organizationId: UuidV7,
@@ -383,12 +405,7 @@ function loadMutablePoolStateSync(
   const state = createEmptyStockPoolState();
   const row = readPoolRowSync(session, organizationId, storeId, productId, variantId);
   if (row) {
-    state.qtyOnHand = row.qtyOnHand;
-    state.totalValue = row.totalValue;
-    state.deficitQty = row.deficitQty;
-    state.provisionalDeficitValue = row.provisionalDeficitValue;
-    state.costVarianceValue = row.costVarianceValue;
-    state.lastUnitCost = row.lastUnitCost;
+    applyPoolBalanceRowToState(state, row);
   }
 
   if (trackBatches) {
@@ -419,6 +436,94 @@ function loadMutablePoolStateSync(
   }
 
   return state;
+}
+
+/**
+ * Batch-prefetches full mutable pool states (all 6 costing fields + ordered FIFO batches) for
+ * multi-line operations like `completeSale`, sharing `applyPoolBalanceRowToState` with single-pool reads.
+ */
+export function prefetchMutablePoolStatesSync(
+  session: SqliteUnitOfWorkSession,
+  params: {
+    readonly organizationId: UuidV7;
+    readonly storeId: UuidV7;
+    readonly targets: readonly StockPoolPrefetchTarget[];
+  },
+): Map<string, ReplayStockPoolState> {
+  const cache = new Map<string, ReplayStockPoolState>();
+  if (params.targets.length === 0) {
+    return cache;
+  }
+
+  const trackedProdIds: UuidV7[] = [];
+  const batchedProdIds: UuidV7[] = [];
+  const batchedKeys = new Set<string>();
+
+  for (const target of params.targets) {
+    const key = stockPoolKey(target.productId, target.variantId);
+    if (!cache.has(key)) {
+      cache.set(key, createEmptyStockPoolState());
+      trackedProdIds.push(target.productId);
+      if (target.trackBatches) {
+        batchedProdIds.push(target.productId);
+        batchedKeys.add(key);
+      }
+    }
+  }
+
+  const uniqueTrackedProdIds = [...new Set(trackedProdIds)];
+  const poolRows = session.db
+    .select()
+    .from(localStockBalances)
+    .where(
+      and(
+        eq(localStockBalances.organizationId, params.organizationId),
+        eq(localStockBalances.storeId, params.storeId),
+        inArray(localStockBalances.productId, uniqueTrackedProdIds),
+      ),
+    )
+    .all();
+
+  for (const row of poolRows) {
+    const state = cache.get(stockPoolKey(row.productId, row.variantId));
+    if (state) {
+      applyPoolBalanceRowToState(state, row);
+    }
+  }
+
+  if (batchedProdIds.length > 0) {
+    const uniqueBatchedProdIds = [...new Set(batchedProdIds)];
+    const batchRows = session.db
+      .select()
+      .from(localBatchBalances)
+      .where(
+        and(
+          eq(localBatchBalances.organizationId, params.organizationId),
+          eq(localBatchBalances.storeId, params.storeId),
+          inArray(localBatchBalances.productId, uniqueBatchedProdIds),
+        ),
+      )
+      .orderBy(asc(localBatchBalances.hlc), asc(localBatchBalances.batchId))
+      .all();
+
+    for (const b of batchRows) {
+      const key = stockPoolKey(b.productId, b.variantId);
+      if (!batchedKeys.has(key)) {
+        continue;
+      }
+      const state = cache.get(key);
+      if (state) {
+        state.batches.set(b.batchId, {
+          batchId: b.batchId,
+          hlc: b.hlc,
+          remainingQty: b.remainingQty,
+          remainingValue: b.remainingValue,
+        });
+      }
+    }
+  }
+
+  return cache;
 }
 
 function savePoolAndBatchesSync(

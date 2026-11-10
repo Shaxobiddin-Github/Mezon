@@ -9,14 +9,12 @@ import {
   type PaymentMethod,
   type ProductUnit,
   type Quantity,
-  type ReplayStockPoolState,
   type SalePaymentInput,
   type UnixMs,
   type UuidV7,
   ZERO_MONEY,
   assertCartDiscountAuthorized,
   canonicalizeCompleteSaleRequest,
-  createEmptyStockPoolState,
   formatReceiptCode,
   moneyFromTiyin,
   moneyToTiyin,
@@ -29,7 +27,7 @@ import {
   resolveSalePayments,
   validateSalePaymentsInvariant,
 } from '@mezon/domain';
-import { and, asc, eq, inArray } from 'drizzle-orm';
+import { and, asc, eq } from 'drizzle-orm';
 import type { BetterSQLite3Database } from 'drizzle-orm/better-sqlite3';
 import {
   evaluateCartRowInDbSync,
@@ -38,16 +36,14 @@ import {
 } from './cart-repo.js';
 import type { LocalSqliteConnection } from './connection.js';
 import { advanceReceiptSeqSync } from './device-state.js';
+import { cashMoves, localCarts, payments, saleLines, sales } from './schema/index.js';
 import {
-  cashMoves,
-  localBatchBalances,
-  localCarts,
-  localStockBalances,
-  payments,
-  saleLines,
-  sales,
-} from './schema/index.js';
-import { type StockMoveWarningRecord, applyOutboundStockMoveSync } from './stock-repo.js';
+  type StockMoveWarningRecord,
+  type StockPoolPrefetchTarget,
+  applyOutboundStockMoveSync,
+  prefetchMutablePoolStatesSync,
+  stockPoolKey,
+} from './stock-repo.js';
 import { type SqliteUnitOfWork, runConnectionReadOnly } from './uow.js';
 import { insertFact, insertMonotone } from './writers.js';
 
@@ -178,10 +174,6 @@ export interface CompleteSaleOutcome {
   readonly sale: StoredSaleRecord;
   readonly warnings: readonly StockMoveWarningRecord[];
   readonly idempotentReplay: boolean;
-}
-
-function poolKey(productId: UuidV7, variantId: UuidV7 | null): string {
-  return `${productId}:${variantId ?? ''}`;
 }
 
 function computeCompleteSaleRequestHash(params: {
@@ -601,11 +593,9 @@ export class SqliteSaleStore {
       // 25M UZS limit, prescription/expiry checks) AFTER server totals & payment invariants pass and
       // BEFORE allocating `receipt_no` or modifying inventory/sales/payments/cash_moves.
 
-      // 5) Validate catalog integrity & batch-prefetch stock pools for all tracked lines
+      // 5) Validate catalog integrity & batch-prefetch full mutable pool states via stock-repo's single loader
       const negativeStockPolicy = parseNegativeStockPolicy(hubConfig.negativeStockPolicy);
-      const trackedProdIds: UuidV7[] = [];
-      const batchedProdIds: UuidV7[] = [];
-      const trackedKeys = new Set<string>();
+      const trackedTargets: StockPoolPrefetchTarget[] = [];
 
       for (const line of detail.lines) {
         if (line.lineKind !== 'catalog' || line.productId === null) {
@@ -628,75 +618,22 @@ export class SqliteSaleStore {
           }
         }
         if (!prod.unlimited) {
-          trackedProdIds.push(prod.id);
-          trackedKeys.add(poolKey(prod.id, line.variantId));
-          if (Boolean(prod.trackBatches)) {
-            batchedProdIds.push(prod.id);
-          }
+          trackedTargets.push({
+            productId: prod.id,
+            variantId: line.variantId,
+            trackBatches: Boolean(prod.trackBatches),
+          });
         }
       }
 
-      const uniqueTrackedProdIds = [...new Set(trackedProdIds)];
-      const uniqueBatchedProdIds = [...new Set(batchedProdIds)];
-      const sessionPoolCache = new Map<string, ReplayStockPoolState>();
-
-      if (uniqueTrackedProdIds.length > 0) {
-        for (const key of trackedKeys) {
-          sessionPoolCache.set(key, createEmptyStockPoolState());
-        }
-
-        const poolRows = session.db
-          .select()
-          .from(localStockBalances)
-          .where(
-            and(
-              eq(localStockBalances.organizationId, ctx.organizationId),
-              eq(localStockBalances.storeId, ctx.storeId),
-              inArray(localStockBalances.productId, uniqueTrackedProdIds),
-            ),
-          )
-          .all();
-
-        for (const p of poolRows) {
-          const key = poolKey(p.productId, p.variantId);
-          const state = sessionPoolCache.get(key);
-          if (state) {
-            state.qtyOnHand = p.qtyOnHand;
-            state.totalValue = p.totalValue;
-          }
-        }
-
-        if (uniqueBatchedProdIds.length > 0) {
-          const batchRows = session.db
-            .select()
-            .from(localBatchBalances)
-            .where(
-              and(
-                eq(localBatchBalances.organizationId, ctx.organizationId),
-                eq(localBatchBalances.storeId, ctx.storeId),
-                inArray(localBatchBalances.productId, uniqueBatchedProdIds),
-              ),
-            )
-            .orderBy(asc(localBatchBalances.hlc), asc(localBatchBalances.batchId))
-            .all();
-
-          for (const b of batchRows) {
-            const key = poolKey(b.productId, b.variantId);
-            const state = sessionPoolCache.get(key);
-            if (state) {
-              state.batches.set(b.batchId, {
-                batchId: b.batchId,
-                hlc: b.hlc,
-                remainingQty: b.remainingQty,
-                remainingValue: b.remainingValue,
-              });
-            }
-          }
-        }
-      }
+      const sessionPoolCache = prefetchMutablePoolStatesSync(session, {
+        organizationId: ctx.organizationId,
+        storeId: ctx.storeId,
+        targets: trackedTargets,
+      });
 
       // Cumulative check in 'block' mode so ALL short lines (including duplicate-product lines) fail clearly
-      if (negativeStockPolicy === 'block' && trackedKeys.size > 0) {
+      if (negativeStockPolicy === 'block' && sessionPoolCache.size > 0) {
         const remainingAvailableMilli = new Map<string, bigint>();
         for (const [key, state] of sessionPoolCache.entries()) {
           const onHand = quantityToMilli(state.qtyOnHand);
@@ -721,7 +658,7 @@ export class SqliteSaleStore {
           if (!prod || prod.unlimited) {
             continue;
           }
-          const key = poolKey(prod.id, line.variantId);
+          const key = stockPoolKey(prod.id, line.variantId);
           const avail = remainingAvailableMilli.get(key) ?? 0n;
           const need = quantityToMilli(line.qty);
           if (avail < need) {
