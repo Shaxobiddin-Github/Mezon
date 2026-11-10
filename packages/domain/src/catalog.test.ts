@@ -182,9 +182,18 @@ describe('@mezon/domain - catalog units, barcodes, transliteration, and attribut
       format: 'ean8',
     });
 
-    // Bad GS1 check digit rejected unless explicitly marked internal/other
+    // Bad GS1 check digit rejected unless explicitly marked internal/other (EAN-13, UPC-A, and EAN-8)
     expect(() => prepareBarcodeForStorage('4006381333932', 'ean13')).toThrow(DomainError);
     expect(() => prepareBarcodeForStorage('4006381333932')).toThrow(DomainError);
+    expect(() => prepareBarcodeForStorage('036000291453', 'upca')).toThrow(DomainError);
+    expect(() => prepareBarcodeForStorage('96385075', 'ean8')).toThrowError(
+      /INVALID_BARCODE_CHECK_DIGIT/,
+    );
+    expect(() => prepareBarcodeForStorage('96385075')).toThrowError(/INVALID_BARCODE_CHECK_DIGIT/);
+    expect(prepareBarcodeForStorage('96385075', 'internal')).toEqual({
+      barcode: '96385075',
+      format: 'internal',
+    });
     expect(prepareBarcodeForStorage('4006381333932', 'internal')).toEqual({
       barcode: '4006381333932',
       format: 'internal',
@@ -228,6 +237,45 @@ describe('@mezon/domain - catalog units, barcodes, transliteration, and attribut
           chars[corruptIdx] = String((orig + delta) % 10);
           const corrupted = chars.join('');
           expect(verifyGs1CheckDigit(corrupted)).toBe(false);
+        },
+      ),
+    );
+
+    // Property test: any valid 8-digit EAN-8 succeeds, and any 1-digit corruption throws INVALID_BARCODE_CHECK_DIGIT
+    fc.assert(
+      fc.property(
+        fc.array(fc.integer({ min: 0, max: 9 }), { minLength: 7, maxLength: 7 }),
+        fc.integer({ min: 0, max: 7 }),
+        fc.integer({ min: 1, max: 9 }),
+        (digits, corruptIdx, delta) => {
+          const payload = digits.join('');
+          const check = computeGs1CheckDigit(payload);
+          const ean8 = `${payload}${String(check)}`;
+
+          expect(prepareBarcodeForStorage(ean8, 'ean8')).toEqual({
+            barcode: ean8,
+            format: 'ean8',
+          });
+          expect(prepareBarcodeForStorage(ean8)).toEqual({
+            barcode: ean8,
+            format: 'ean8',
+          });
+
+          const chars = ean8.split('');
+          const ch = chars[corruptIdx];
+          if (ch === undefined) {
+            throw new Error('Missing character at index');
+          }
+          const orig = ch.charCodeAt(0) - 48;
+          chars[corruptIdx] = String((orig + delta) % 10);
+          const corrupted = chars.join('');
+
+          expect(() => prepareBarcodeForStorage(corrupted, 'ean8')).toThrowError(
+            /INVALID_BARCODE_CHECK_DIGIT/,
+          );
+          expect(() => prepareBarcodeForStorage(corrupted)).toThrowError(
+            /INVALID_BARCODE_CHECK_DIGIT/,
+          );
         },
       ),
     );

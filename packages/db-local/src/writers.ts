@@ -144,19 +144,22 @@ function requireColumn(
   return col;
 }
 
-function buildActiveAttrPredicates(
+function buildEntityPredicates(
   table: SQLiteTable,
   tableName: string,
   entityId: UuidV7,
   organizationId: UuidV7,
   storeId: UuidV7 | null,
+  requireNotDeleted: boolean,
 ): SQL[] {
   const cols = getTableColumns(table);
   const predicates: SQL[] = [
     eq(requireColumn(cols, tableName, 'id'), entityId),
     eq(requireColumn(cols, tableName, 'organizationId'), organizationId),
-    isNull(requireColumn(cols, tableName, 'deletedAtMs')),
   ];
+  if (requireNotDeleted) {
+    predicates.push(isNull(requireColumn(cols, tableName, 'deletedAtMs')));
+  }
   if (storeId !== null) {
     predicates.push(eq(requireColumn(cols, tableName, 'storeId'), storeId));
   }
@@ -177,7 +180,7 @@ function extractSingleReturnedRow(raw: unknown): Record<string, unknown> | null 
 function insertSyncedRecord<TTable extends SQLiteTable>(
   session: SqliteUnitOfWorkSession,
   table: TTable,
-  expectedClass: 'FACT' | 'ATTR',
+  expectedClass: 'FACT' | 'ATTR' | 'MONOTONE',
   options: InsertEntityOptions<BusinessInsertValues<TTable>>,
 ): SyncedWriteResult<TTable['$inferSelect']> {
   const { meta, organizationId, storeId } = prepareSyncedWriteContext(
@@ -202,7 +205,11 @@ function insertSyncedRecord<TTable extends SQLiteTable>(
     deviceId: session.deviceId,
     hlc,
     createdAtMs: nowMs,
-    ...(expectedClass === 'ATTR' ? { updatedAtMs: nowMs, deletedAtMs: null } : {}),
+    ...(expectedClass === 'ATTR'
+      ? { updatedAtMs: nowMs, deletedAtMs: null }
+      : expectedClass === 'MONOTONE'
+        ? { updatedAtMs: nowMs }
+        : {}),
   };
 
   session.db
@@ -232,11 +239,12 @@ function insertSyncedRecord<TTable extends SQLiteTable>(
   };
 }
 
-function mutateActiveAttr<TTable extends SQLiteTable>(
+function mutateMutableSyncedRecord<TTable extends SQLiteTable>(
   session: SqliteUnitOfWorkSession,
   table: TTable,
+  expectedClass: 'ATTR' | 'MONOTONE',
   options: {
-    readonly opName: 'updateAttr' | 'tombstoneAttr';
+    readonly opName: 'updateAttr' | 'tombstoneAttr' | 'updateMonotone';
     readonly id: UuidV7;
     readonly organizationId: UuidV7;
     readonly storeId?: UuidV7;
@@ -250,7 +258,7 @@ function mutateActiveAttr<TTable extends SQLiteTable>(
   const { meta, organizationId, storeId } = prepareSyncedWriteContext(
     session,
     table,
-    'ATTR',
+    expectedClass,
     options.organizationId,
     options.storeId,
   );
@@ -258,12 +266,13 @@ function mutateActiveAttr<TTable extends SQLiteTable>(
   const validEntityId = parseUuidV7(options.id);
   const hlc = serializeHlc(session.nextHlc());
   const nowMs = session.nowUnixMs();
-  const predicates = buildActiveAttrPredicates(
+  const predicates = buildEntityPredicates(
     table,
     meta.tableName,
     validEntityId,
     organizationId,
     storeId,
+    expectedClass === 'ATTR',
   );
 
   const setPatch = options.buildPatch(nowMs, hlc);
@@ -289,7 +298,7 @@ function mutateActiveAttr<TTable extends SQLiteTable>(
     type: options.eventType ?? `${meta.tableName}.${options.defaultVerb}`,
     entity: meta.tableName,
     entityId: validEntityId,
-    entityClass: 'ATTR',
+    entityClass: expectedClass,
     schemaVersion: options.schemaVersion ?? 1,
     payload: options.payload ?? updatedRow,
   });
@@ -342,7 +351,7 @@ export function updateAttr<TTable extends SQLiteTable>(
     throw new TypeError('updateAttr requires at least one business field to update');
   }
 
-  return mutateActiveAttr(session, table, {
+  return mutateMutableSyncedRecord(session, table, 'ATTR', {
     opName: 'updateAttr',
     id: options.id,
     organizationId: options.organizationId,
@@ -369,7 +378,7 @@ export function tombstoneAttr<TTable extends SQLiteTable>(
   table: TTable,
   options: TombstoneAttrOptions,
 ): SyncedWriteResult<TTable['$inferSelect']> {
-  return mutateActiveAttr(session, table, {
+  return mutateMutableSyncedRecord(session, table, 'ATTR', {
     opName: 'tombstoneAttr',
     id: options.id,
     organizationId: options.organizationId,
@@ -383,6 +392,50 @@ export function tombstoneAttr<TTable extends SQLiteTable>(
       hlc,
       updatedAtMs: nowMs,
       deletedAtMs: nowMs,
+    }),
+  });
+}
+
+/**
+ * Inserts a `MONOTONE` record inside an active `SqliteUnitOfWorkSession` (`deletedAtMs` excluded).
+ */
+export function insertMonotone<TTable extends SQLiteTable>(
+  session: SqliteUnitOfWorkSession,
+  table: TTable,
+  options: InsertEntityOptions<BusinessInsertValues<TTable>>,
+): SyncedWriteResult<TTable['$inferSelect']> {
+  return insertSyncedRecord(session, table, 'MONOTONE', options);
+}
+
+/**
+ * Advances a `MONOTONE` record inside an active `SqliteUnitOfWorkSession`, subject to SQLite
+ * database-level MONOTONE transition triggers and atomically writing `local_outbox`.
+ */
+export function updateMonotone<TTable extends SQLiteTable>(
+  session: SqliteUnitOfWorkSession,
+  table: TTable,
+  options: UpdateAttrOptions<BusinessUpdateValues<TTable>>,
+): SyncedWriteResult<TTable['$inferSelect']> {
+  const rawValues = options.values as Record<string, unknown>;
+  assertNoReservedOverrides(rawValues);
+  if (Object.keys(rawValues).length === 0) {
+    throw new TypeError('updateMonotone requires at least one business field to update');
+  }
+
+  return mutateMutableSyncedRecord(session, table, 'MONOTONE', {
+    opName: 'updateMonotone',
+    id: options.id,
+    organizationId: options.organizationId,
+    storeId: options.storeId,
+    defaultVerb: 'updated',
+    eventType: options.eventType,
+    schemaVersion: options.schemaVersion,
+    payload: options.payload,
+    buildPatch: (nowMs, hlc) => ({
+      ...rawValues,
+      deviceId: session.deviceId,
+      hlc,
+      updatedAtMs: nowMs,
     }),
   });
 }

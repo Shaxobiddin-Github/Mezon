@@ -2,8 +2,10 @@ import {
   type LocalSqliteConnection,
   SqliteCatalogStore,
   SqliteHubAuthStore,
+  SqliteStockStore,
   createSqliteCatalogStore,
   createSqliteHubAuthStore,
+  createSqliteStockStore,
   migrateLocalDatabase,
   openLocalSqliteDatabase,
 } from '@mezon/db-local';
@@ -19,6 +21,7 @@ import { registerHubErrorHandlers } from './error-handler.js';
 import { createHubLogger } from './logger.js';
 import { registerHubRoutes } from './routes.js';
 import { createHostAllowlistState, registerHubSecurityHooks } from './security.js';
+import { HubStockService } from './stock-service.js';
 
 export interface CreateHubServerOptions {
   readonly dbPath: string;
@@ -44,8 +47,10 @@ export interface HubServer {
   readonly connection: LocalSqliteConnection;
   readonly store: SqliteHubAuthStore;
   readonly catalogStore: SqliteCatalogStore;
+  readonly stockStore: SqliteStockStore;
   readonly authService: HubAuthService;
   readonly catalogService: HubCatalogService;
+  readonly stockService: HubStockService;
   listen(): Promise<{ readonly host: typeof DEFAULT_HUB_HOST; readonly port: number }>;
   close(): Promise<void>;
 }
@@ -68,8 +73,10 @@ export async function createHubServer(options: CreateHubServerOptions): Promise<
   const connection = openLocalSqliteDatabase(options.dbPath);
   let store: SqliteHubAuthStore;
   let catalogStore: SqliteCatalogStore;
+  let stockStore: SqliteStockStore;
   let authService: HubAuthService;
   let catalogService: HubCatalogService;
+  let stockService: HubStockService;
   let app: FastifyInstance;
 
   try {
@@ -92,12 +99,26 @@ export async function createHubServer(options: CreateHubServerOptions): Promise<
         return ctx ? { uow: ctx.uow, organizationId: ctx.config.organizationId } : null;
       },
     });
+    stockStore = createSqliteStockStore({
+      connection,
+      getRuntimeContext: () => {
+        const ctx = store.getActiveRuntimeContext();
+        return ctx
+          ? {
+              uow: ctx.uow,
+              organizationId: ctx.config.organizationId,
+              storeId: ctx.config.storeId,
+            }
+          : null;
+      },
+    });
     authService = await HubAuthService.create({
       store,
       pinHasher,
       random,
     });
     catalogService = new HubCatalogService(catalogStore);
+    stockService = new HubStockService(stockStore);
 
     app = Fastify({
       loggerInstance: logger as unknown as FastifyBaseLogger,
@@ -106,7 +127,7 @@ export async function createHubServer(options: CreateHubServerOptions): Promise<
     const hostState = createHostAllowlistState(securityConfig.port);
     registerHubSecurityHooks(app, securityConfig, hostState);
     registerHubErrorHandlers(app);
-    registerHubRoutes(app, authService, catalogService);
+    registerHubRoutes(app, authService, catalogService, stockService);
     options.registerExtraTestRoutes?.(app);
 
     let boundPort: number | null = securityConfig.port > 0 ? securityConfig.port : null;
@@ -116,8 +137,10 @@ export async function createHubServer(options: CreateHubServerOptions): Promise<
       connection,
       store,
       catalogStore,
+      stockStore,
       authService,
       catalogService,
+      stockService,
       async listen() {
         await app.listen({
           host: DEFAULT_HUB_HOST,

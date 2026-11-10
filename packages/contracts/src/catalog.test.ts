@@ -71,6 +71,7 @@ describe('@mezon/contracts - catalog schemas and strict validation', () => {
         unlimited: false,
         minStock: null,
         hasVariants: false,
+        trackBatches: false,
         salePrice: '1000',
         mxik: null,
         packageCode: null,

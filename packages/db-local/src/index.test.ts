@@ -2,7 +2,14 @@ import fs from 'node:fs';
 import { createRequire } from 'node:module';
 import os from 'node:os';
 import path from 'node:path';
-import { HlcClock, type UnixMs, parseUuidV7, serializeHlc, unixMsFromBigInt } from '@mezon/domain';
+import {
+  HlcClock,
+  type UnixMs,
+  createHlcTimestamp,
+  parseUuidV7,
+  serializeHlc,
+  unixMsFromBigInt,
+} from '@mezon/domain';
 import { DeterministicUuidV7Generator, FixedClock } from '@mezon/test-utils';
 import { count, eq } from 'drizzle-orm';
 import { integer, numeric, real, sqliteTable, text } from 'drizzle-orm/sqlite-core';
@@ -13,11 +20,17 @@ import {
   SqliteSchemaRegistry,
   assertCatalogSearchMigrationsComplete,
   assertSqliteTriggersMigrationsComplete,
+  assertStockMigrationsComplete,
+  batches,
   buildAllSqliteTriggersSql,
   buildCatalogSearchFtsSql,
   buildSqliteImmutabilityTriggersSql,
+  buildStockMonotoneTriggersSql,
   categories,
   getDefaultLocalMigrationsFolder,
+  inventoryCountLines,
+  inventoryCounts,
+  localBatchBalances,
   localDeviceAuthState,
   localDeviceState,
   localHubConfig,
@@ -25,6 +38,8 @@ import {
   localPinCredentials,
   localSchemaRegistry,
   localSessions,
+  localStockBalances,
+  localStockConflicts,
   migrateLocalDatabase,
   openLocalSqliteDatabase,
   priceChanges,
@@ -37,6 +52,7 @@ import {
   sqliteMoney,
   sqliteQuantity,
   sqliteUnixMs,
+  stockMoves,
   users,
   validateSqliteSchemaRegistry,
 } from './index.js';
@@ -86,6 +102,13 @@ describe('@mezon/db-local - Schema foundation, registry, pragmas, and bigint saf
       ['product_variants', 'ATTR'],
       ['product_barcodes', 'ATTR'],
       ['price_changes', 'FACT'],
+      ['batches', 'FACT'],
+      ['stock_moves', 'FACT'],
+      ['inventory_counts', 'MONOTONE'],
+      ['inventory_count_lines', 'MONOTONE'],
+      ['local_stock_balances', 'LOCAL'],
+      ['local_batch_balances', 'LOCAL'],
+      ['local_stock_conflicts', 'LOCAL'],
     ]);
     expect(() =>
       validateSqliteSchemaRegistry(
@@ -102,6 +125,13 @@ describe('@mezon/db-local - Schema foundation, registry, pragmas, and bigint saf
           productVariants,
           productBarcodes,
           priceChanges,
+          batches,
+          stockMoves,
+          inventoryCounts,
+          inventoryCountLines,
+          localStockBalances,
+          localBatchBalances,
+          localStockConflicts,
         },
         localSchemaRegistry,
       ),
@@ -279,7 +309,7 @@ describe('@mezon/db-local - Schema foundation, registry, pragmas, and bigint saf
       const migCountRow = conn.sqlite
         .prepare('SELECT COUNT(*) as cnt FROM __drizzle_migrations')
         .get() as { cnt: bigint };
-      expect(migCountRow.cnt).toBe(4n);
+      expect(migCountRow.cnt).toBe(5n);
     } finally {
       conn.close();
     }
@@ -637,5 +667,137 @@ describe('@mezon/db-local - Schema foundation, registry, pragmas, and bigint saf
     expect(() => assertCatalogSearchMigrationsComplete(brokenUpdateTriggerDir)).toThrowError(
       /delete stale "products_fts" rows by product_id = OLD\.id/,
     );
+
+    // S3 negative proof: missing inventory_counts or inventory_count_lines MONOTONE triggers fails db:check
+    const validStockTrig = buildStockMonotoneTriggersSql().join('\n');
+    const okStockDir = makeMigDir();
+    fs.writeFileSync(path.join(okStockDir, '0004.sql'), validStockTrig);
+    expect(() => assertStockMigrationsComplete(okStockDir)).not.toThrow();
+
+    const missingLineUpdateDir = makeMigDir();
+    fs.writeFileSync(
+      path.join(missingLineUpdateDir, '0004.sql'),
+      validStockTrig.replace(
+        /CREATE TRIGGER "trg_inventory_count_lines_parent_open_update"[\s\S]*$/i,
+        '',
+      ),
+    );
+    expect(() => assertStockMigrationsComplete(missingLineUpdateDir)).toThrowError(
+      /BEFORE UPDATE trigger on "inventory_count_lines"/,
+    );
+
+    const missingLineInsertDir = makeMigDir();
+    fs.writeFileSync(
+      path.join(missingLineInsertDir, '0004.sql'),
+      validStockTrig.replace(
+        /CREATE TRIGGER "trg_inventory_count_lines_parent_open_insert"[\s\S]*$/i,
+        '',
+      ),
+    );
+    expect(() => assertStockMigrationsComplete(missingLineInsertDir)).toThrowError(
+      /BEFORE INSERT trigger on "inventory_count_lines"/,
+    );
+  });
+
+  it('cleanly upgrades a pre-populated 0003 database to 0004 without losing products or FTS triggers', () => {
+    const migDir = getDefaultLocalMigrationsFolder();
+    const partialMigDir = path.join(os.tmpdir(), `mezon-mig-0003-${Date.now()}-${Math.random()}`);
+    fs.mkdirSync(path.join(partialMigDir, 'meta'), { recursive: true });
+    tempDirs.push(partialMigDir);
+
+    for (const fname of [
+      '0000_init.sql',
+      '0001_uow_outbox_device_state.sql',
+      '0002_hub_auth.sql',
+      '0003_catalog.sql',
+    ]) {
+      fs.copyFileSync(path.join(migDir, fname), path.join(partialMigDir, fname));
+    }
+    const journal = JSON.parse(
+      fs.readFileSync(path.join(migDir, 'meta', '_journal.json'), 'utf8'),
+    ) as {
+      readonly version: string;
+      readonly dialect: string;
+      entries: Array<{ readonly idx: number }>;
+    };
+    fs.writeFileSync(
+      path.join(partialMigDir, 'meta', '_journal.json'),
+      JSON.stringify({ ...journal, entries: journal.entries.filter((e) => e.idx <= 3) }, null, 2),
+    );
+
+    const dbPath = makeTempDbPath('upgrade-0003-to-0004.db');
+    const conn = openLocalSqliteDatabase(dbPath);
+    try {
+      migrateLocalDatabase(conn.db, partialMigDir);
+
+      const hlc58 = serializeHlc(
+        createHlcTimestamp(
+          unixMsFromBigInt(1_760_000_000_000n),
+          0,
+          parseUuidV7('01950000-0000-7000-8000-000000000001'),
+        ),
+      );
+      expect(hlc58.length).toBe(58);
+      conn.sqlite
+        .prepare(
+          `INSERT INTO "local_hub_config" (
+            "id", "organization_id", "created_at_ms", "updated_at_ms",
+            "store_id", "device_id", "singleton_guard", "setup_completed_at_ms"
+          ) VALUES (?, ?, 1760000000000, 1760000000000, ?, ?, 1, 1760000000000)`,
+        )
+        .run(
+          '01950000-0000-7000-8000-000000000010',
+          '01950000-0000-7000-8000-000000000011',
+          '01950000-0000-7000-8000-000000000012',
+          '01950000-0000-7000-8000-000000000001',
+        );
+      conn.sqlite
+        .prepare(
+          `INSERT INTO "products" (
+            "id", "organization_id", "device_id", "hlc", "created_at_ms", "updated_at_ms",
+            "deleted_at_ms", "category_id", "sku", "sku_search", "name", "name_search",
+            "unit", "unlimited", "min_stock", "has_variants", "sale_price", "mxik", "package_code", "vat_rate_bp"
+          ) VALUES (?, ?, ?, ?, 1760000000000, 1760000000000, NULL, NULL, NULL, NULL, 'Old Milk', 'old milk', 'dona', 0, NULL, 0, 100000, NULL, NULL, 0)`,
+        )
+        .run(
+          '01950000-0000-7000-8000-000000000020',
+          '01950000-0000-7000-8000-000000000011',
+          '01950000-0000-7000-8000-000000000001',
+          hlc58,
+        );
+
+      // Upgrade cleanly to 0004
+      migrateLocalDatabase(conn.db, migDir);
+
+      const hubCfg = conn.sqlite
+        .prepare(
+          'SELECT "negative_stock_policy" FROM "local_hub_config" WHERE "singleton_guard" = 1',
+        )
+        .get() as { readonly negative_stock_policy: string };
+      expect(hubCfg.negative_stock_policy).toBe('warn');
+
+      const prod = conn.sqlite
+        .prepare('SELECT "name", "track_batches" FROM "products" WHERE "id" = ?')
+        .get('01950000-0000-7000-8000-000000000020') as {
+        readonly name: string;
+        readonly track_batches: bigint;
+      };
+      expect(prod.name).toBe('Old Milk');
+      expect(prod.track_batches).toBe(0n);
+
+      // Products FTS trigger & immutability trigger survived upgrade intact
+      const ftsRow = conn.sqlite
+        .prepare('SELECT "product_id" FROM "products_fts" WHERE "products_fts" MATCH ?')
+        .get('"milk"*') as { readonly product_id: string } | undefined;
+      expect(ftsRow?.product_id).toBe('01950000-0000-7000-8000-000000000020');
+
+      expect(() =>
+        conn.sqlite
+          .prepare('DELETE FROM "products" WHERE "id" = ?')
+          .run('01950000-0000-7000-8000-000000000020'),
+      ).toThrow(/forbids physical DELETE/);
+    } finally {
+      conn.close();
+    }
   });
 });

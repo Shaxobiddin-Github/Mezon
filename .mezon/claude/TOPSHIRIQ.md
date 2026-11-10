@@ -1,108 +1,97 @@
-# Claude topshirig'i: T1.1 QABUL → T1.2 rejasi
+# Claude topshirig'i: T1.2 QABUL → T1.3 rejasi
 
-## 1. T1.1 xulosasi: QABUL (kod `d8f4e77`)
+## 1. T1.2 xulosasi: QABUL (kod `facc046`)
 
 Claude tekshirdi:
 
-- `pnpm verify` o'tdi: 135 test, sxema diff 0.
-- **Mustaqil qidiruv modeli:** 400 ta tasodifiy yaratish/tahrirlash/o'chirishdan keyin 120 ta lotin, kirill va apostrofli so'rovda FTS natijalari oddiy prefiks modeli bilan aynan teng chiqdi.
-- **Sahifalash:** bir xil nomli 30 mahsulotda takror ham, tushib qolish ham yo'q.
-- **Mutatsiya:** 16 ta ataylab kiritilgan xatodan 15 tasi ushlandi.
+- `pnpm verify`: 150 test o'tdi, sxema diff 0. Pragma o'zgarishi xavfsiz, `synchronous = FULL` saqlangan.
+- **Mustaqil model O1:** 3 ta seed × 120 tasodifiy kirim/chiqim. FIFO va o'rtacha tannarx har chiqimda tiyinigacha model bilan teng. Qayta qurishdan keyin natija o'zgarmadi.
+- **O2:** 200 ta amal manfiy qoldiq bilan. Qiymat tenglamasi tiyinigacha saqlandi, qayta qurish natijasi bir xil.
+- **O3:** inventarizatsiya S1 stsenariylari to'g'ri (8, 7, sanalmagan 10).
+- **O4:** sanoqda 0 qabul qilinadi.
+- Katalog qidiruvi modeli o'zgarishlardan keyin ham to'g'ri.
+- **Mutatsiya:** 10 tadan 7 tasi ushlandi.
 
-Ajoyib ish, ayniqsa VACUUM xavfsiz FTS va unumdorlik optimizatsiyasi.
+**Test qarzi.** T1.3 PR'ining birinchi alohida commit'i: `T1.2 test qarzi: yaxlitlash va partiyani aniq tugatish`. Har birini mutatsiya bilan isbotla.
 
-**Test qarzi.** T1.2 PR'ining birinchi alohida commit'i: `T1.1 test qarzi: EAN-8 va FTS tartibi`.
-
-1. EAN-8 nazorat raqami tekshiruvi o'chirilganda (`prepareBarcodeForStorage` ichidagi EAN-8 `verifyGs1CheckDigit` sharti) testlar yiqilmadi. Noto'g'ri nazorat raqamli EAN-8 rad etilishini tekshiruvchi test qo'sh va buni mutatsiya bilan isbotla.
-2. FTS qidiruvi `ORDER BY f.rank ASC` bo'yicha tartiblanadi. Teng reytingda sahifalash barqaror bo'lishi uchun ikkinchi kalit `p.id` qo'shilsin. B-tree yo'lida bu allaqachon bor.
+1. `computeProportionalCost` da `divideRoundHalfAwayFromZero` oddiy butun bo'lishga (kesish) almashtirilganda testlar yiqilmadi. Sabab: 2-misolda `3333.33` ikkala usulda ham `3333` chiqadi. Yuqoriga yaxlitlanadigan holat qo'sh: `10 000` tiyin / `3 kg` dan `2 kg` chiqim → `6 667`. Domen va ombor darajasida ham bo'lsin.
+2. `applyReplayStockMove` da `remBatchMilli >= needMilli` sharti `>` ga almashtirilganda testlar yiqilmadi. Partiya aynan to'liq ishlatilgan holatda qayta qurish `local_stock_conflicts` ga soxta konflikt yozmasligini va qiymatlar o'zgarmasligini tekshiradigan test qo'sh.
 
 ## 2. Merge
 
 1. `git pull --ff-only`.
-2. PR #8 boshi Claude'ning shu topshiriq commit'i bo'lsin, to'rtala CI job yashil bo'lsin.
-3. `T1.1: Katalog, shtrix-kod va qidiruv` nomi bilan Squash and merge qil, SHA'ni yoz va branch'ni o'chir.
-4. `main`dan `gemini/T1.2-stock` branch'ini och.
+2. PR #9 boshi Claude'ning shu topshiriq commit'i bo'lsin. To'rtala CI job yashil bo'lsin.
+3. `T1.2: Ombor, partiya va inventarizatsiya` nomi bilan Squash and merge qil, SHA'ni yoz va branch'ni o'chir.
+4. `main`dan `gemini/T1.3-cart-pricing` branch'ini och.
 
-## 3. T1.2 — Ombor va partiya: avval REJA
+## 3. T1.3 — Savat va narx: avval REJA
 
-Kod yozma. Rejani `.mezon/gemini/HISOBOT.md` ga yoz, `[gemini-reja] T1.2` bilan commit qil va push qil, so'ng `node .mezon/kutish.mjs` bilan kut.
+Kod yozma. Rejani `.mezon/gemini/HISOBOT.md` ga yoz, `[gemini-reja] T1.3` bilan commit qil va push qil, so'ng `node .mezon/kutish.mjs` bilan kut.
 
-GEMINI.md T1.2 talablari:
+GEMINI.md T1.3:
 
-- `stock_move` sabablari: boshlang'ich, kirim, savdo, qaytarish, inventarizatsiya, tuzatish, buzildi, sindi, shaxsiy, yo'qoldi;
-- `batch` (muddat, tannarx);
-- partiyali tovarda FIFO, boshqasida o'rtacha tannarx;
-- qoldiq proyeksiyasi va inventarizatsiya.
+- savat holati;
+- aksiyalar (foiz, summa, N+M, muddat, qamrov);
+- savdolashuv chegirmasi (ruxsat va limit);
+- tez savdo qatori (katalogda yo'q tovar, nomi saqlanadi).
 
 Mezonlar:
 
-- proyeksiya = ledger yig'indisi;
-- FIFO qo'lda hisoblangan misollar bilan teng;
-- qayta qurish natijasi teng.
+- chegirma qatorlarga aniq taqsimlanadi, jami tiyinigacha teng;
+- kassir limitdan oshira olmaydi.
 
 Rejada quyidagilar aniq bo'lsin:
 
-### a) Ledger va sinflar
+### a) Savat qayerda yashaydi
 
-- `stock_moves`: FACT, do'kon darajasida.
-  - Ishorali `Quantity`, `reason` va manba hujjat (`source_type`, `source_id`).
-  - Ixtiyoriy `batch_id` va tannarx qiymati snapshot'i.
-  - Faqat qo'shiladi, tuzatish teskari harakat bilan.
-- `batches`: kirim paytida yaratiladigan FACT. Muddat va kirim tannarxi saqlanadi.
-- Qoldiq va partiya qoldig'i: LOCAL proyeksiya jadvallari. Ular sinxronlanmaydi va ledgerdan qayta quriladi (GEMINI.md 3.1 5-band).
-- `unlimited` mahsulotlar uchun qoldiq hisoblanmaydi. Siyosatni yoz.
-- Har harakatda miqdor T1.1 birlik qoidasi bilan tekshirilsin.
+- Savat hisob-kitobi `packages/domain`da sof funksiya bo'lsin.
+- Ochiq savat LOCAL jadvalda saqlansin (sinxronlanmaydi), shunda ilova yiqilsa ham kassirning savati yo'qolmaydi.
+- Kechiktirilgan chek (park/resume) shu jadvaldan foydalanadi.
+- Savat chek bo'lmaguncha ombor va outbox'ga hech narsa yozilmaydi. Bular T1.4 `completeSale` da bo'ladi.
 
-### b) Tannarx aniqligi: tiyin yo'qolmasin
+### b) Narx snapshot'i
 
-- Tannarx birlik narxi × miqdor bilan qayta hisoblanib, yaxlitlash qoldig'i yig'ilib bormasin.
-- Qiymatga asoslangan hisob yuritilsin: har partiya `remaining_qty` va `remaining_value` saqlaydi.
-- Chiqim qiymati `remaining_value × olinadigan / remaining_qty` (T0.2 `divideRoundHalfAwayFromZero`). Partiyaning oxirgi miqdori qolgan qiymatni to'liq oladi.
-- O'rtacha tannarx uchun ham xuddi shu qoida: umumiy qiymat va umumiy miqdor yuritiladi.
+- Qator qo'shilganda narx yozib olinadi.
+- Savat ochiq turganda katalogdagi narx o'zgarsa nima bo'ladi? Tanlovingni asosla, masalan kassirga ogohlantirish bilan qayta narxlash.
 
-**Invariant (property test):** har partiya va har mahsulot uchun `kirim qiymati = chiqim qiymatlari yig'indisi + qoldiq qiymat`, tiyinigacha aniq.
+### c) Aksiyalar
 
-### c) Manfiy qoldiq
+- `promotions` jadvali: ATTR. Turi: foiz, summa, N+M. Qamrovi: mahsulot, kategoriya yoki hammasi. Amal qilish oralig'i ms'da: boshlanishi kiradi, tugashi kirmaydi.
+- **Kunlik vaqt:** "dushanbadan jumagacha 18:00 gacha" kabi qoidalar keyinroq qo'shiladi. Lekin vaqt mintaqasi siyosatini hozir yoz (Asia/Tashkent, UTC+5, yozgi vaqt yo'q).
+- **Ustma-ust qo'llash:** bitta qatorga ko'pi bilan bitta aksiya, xaridor uchun eng foydalisi. Tenglikda deterministik tanlov (masalan `id`). Buyurtma darajasidagi qo'lda chegirma aksiyalardan keyin qo'llanadi. Boshqa variant taklif qilsang, asosla.
+- **N+M:** faqat butun birlikli tovarlar uchun (`dona`/`qadoq`). Tekin birliklar soni `floor(qty / (N+M)) × M`. Misollar bilan.
+- **Qiymat chegarasi:** chegirma qator summasidan oshmaydi, narx manfiy bo'lmaydi.
 
-Kassa savdoni to'xtatmasligi kerak (GEMINI.md 3.2). Real hayotda hisob xato bo'ladi.
+### d) Qo'lda chegirma va ruxsat
 
-Rejada yoz:
+- Kassir uchun limit: foiz va/yoki summa. Egasi sozlaydi.
+- Limitdan oshsa, menejer yoki ega PIN'i bilan tasdiqlanadi. Tasdiqlagan foydalanuvchi savatda yozib qo'yiladi (audit T3.8 da).
+- Tekshiruv backendda bo'lsin, UI'da emas.
+- **Test:** kassir limitdan oshira olmaydi, to'g'ri PIN bilan menejer tasdig'i ishlaydi, noto'g'ri PIN ishlamaydi. T0.6 dagi PIN blok qoidalari bu yerda ham amal qiladi.
 
-- siyosat (rad etish yoki ogohlantirish) qayerda saqlanadi va standart qiymati nima;
-- manfiy qoldiqda FIFO va o'rtacha tannarx qanday ishlaydi (masalan, "partiyasiz kamomad" va keyingi kirim kelganda uni yopish);
-- tannarx qiymati qanday aniqlanadi.
+### e) Taqsimlash va yaxlitlash
 
-Qo'lda hisoblangan misollar bilan.
+- Qator summasi `multiply(narx, miqdor)` bilan hisoblanadi.
+- Buyurtma darajasidagi chegirma qatorlarga T0.2 `allocate` bilan, qator sof summasiga mutanosib taqsimlanadi.
+- QQS keyin har qator bo'yicha hisoblanadi.
 
-### d) Tartib va sinxron
+**Property test:**
 
-O'rtacha tannarx va FIFO hodisalar tartibiga bog'liq. Boshqa qurilmadan kech kelgan harakat qayta qurishda natijani o'zgartirishi mumkin.
+- `Σ qator sof summasi = savat jami`;
+- `Σ taqsimlangan chegirma = chegirma`;
+- hech bir qator manfiy emas.
 
-Rejada yoz:
+### f) Tez savdo qatori
 
-- qayta qurish qaysi tartibda ketadi (HLC);
-- allaqachon yozilgan savdo tannarxi snapshot'i o'zgarmaydi;
-- proyeksiya qayta qurilganda farq qanday hisobga olinadi.
+- Erkin nom, narx, miqdor va birlik.
+- Fiskal chek uchun MXIK va QQS kerak bo'ladi (F3). Hozirdan tez savdo uchun standart MXIK va QQS sozlamasi joyi ko'rsatilsin, ular nullable bo'lishi mumkin. Tez savdo qatori qanday qilib F3 ga to'sqinlik qilmasligini yoz.
 
-### e) Inventarizatsiya
+### g) Hub API va RBAC
 
-- Sanoq hujjati boshlanganda kutilgan qoldiq yozib olinadi.
-- Sanoq paytida bo'lgan savdolar ikki marta hisoblanmasin: tuzatish = sanalgan − sanoq boshlangandagi kutilgan qoldiq.
-- Tuzatish harakatlari bitta UoW'da yoziladi.
+- Savat endpointlari kassirga ochiq: ochish, skaner yoki ID orqali qator qo'shish, miqdorni o'zgartirish, o'chirish, chegirma, park, resume.
+- Aksiya CRUD: `owner`/`manager`.
+- Kassir javobida tannarx va foyda yo'q.
 
-Test bilan: sanoq davomida savdo bo'lganda yakuniy qoldiq to'g'ri chiqadi.
+### h) Doiradan tashqari
 
-### f) Hub API va RBAC
-
-- Qoldiqni ko'rish: `cashier` ham, lekin tannarxsiz.
-- Kirim, tuzatish, hisobdan chiqarish va inventarizatsiya: `owner`/`manager`.
-- Tannarx va foyda faqat `owner`/`manager` javobida bo'ladi. Kassir javobida bu maydonlar umuman yo'qligi test bilan tekshirilsin.
-- Kirim hujjati va ta'minotchi T1.8'da bo'ladi. Bu yerda faqat partiya yaratadigan asosiy kirim harakati.
-
-### g) Qayta qurish
-
-- `rebuildStockProjections()` ledgerdan hamma proyeksiyani noldan quradi.
-- **Property test:** tasodifiy harakatlar ketma-ketligidan keyin oddiy, sekin, lekin aniq model bilan solishtir:
-  - qoldiq;
-  - partiya qoldig'i;
-  - qoldiq qiymati.
+`completeSale`, to'lov va ombordan chiqim (T1.4/T1.5), naqd pulni so'mga yaxlitlash (T1.5), UI (T1.11).

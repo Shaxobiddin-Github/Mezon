@@ -63,6 +63,7 @@ function toProductDto(product: StoredProductRecord): ProductSummaryDto {
     unlimited: product.unlimited,
     minStock: product.minStock !== null ? product.minStock.toString() : null,
     hasVariants: product.hasVariants,
+    trackBatches: product.trackBatches,
     salePrice: product.salePrice.toString(),
     mxik: product.mxik,
     packageCode: product.packageCode,

@@ -301,6 +301,7 @@ export const ProductSummarySchema = z.strictObject({
   unlimited: z.boolean(),
   minStock: BigIntStringSchema.nullable(),
   hasVariants: z.boolean(),
+  trackBatches: z.boolean(),
   salePrice: BigIntStringSchema,
   mxik: z.string().nullable(),
   packageCode: z.string().nullable(),
@@ -330,6 +331,7 @@ export const CreateProductRequestSchema = z.strictObject({
   unlimited: z.boolean().optional(),
   minStock: BigIntStringSchema.nullable().optional(),
   hasVariants: z.boolean().optional(),
+  trackBatches: z.boolean().optional(),
   salePrice: BigIntStringSchema,
   mxik: MxikSchema.optional(),
   packageCode: PackageCodeSchema.optional(),
@@ -348,6 +350,7 @@ export const UpdateProductRequestSchema = z
     unlimited: z.boolean().optional(),
     minStock: BigIntStringSchema.nullable().optional(),
     hasVariants: z.boolean().optional(),
+    trackBatches: z.boolean().optional(),
     salePrice: BigIntStringSchema.optional(),
     mxik: MxikSchema.optional(),
     packageCode: PackageCodeSchema.optional(),
@@ -363,6 +366,7 @@ export const UpdateProductRequestSchema = z
       data.unlimited !== undefined ||
       data.minStock !== undefined ||
       data.hasVariants !== undefined ||
+      data.trackBatches !== undefined ||
       data.salePrice !== undefined ||
       data.mxik !== undefined ||
       data.packageCode !== undefined ||

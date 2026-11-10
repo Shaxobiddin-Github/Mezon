@@ -245,7 +245,8 @@ Bu loyihaning eng xavfli qismi. Spetsifikatsiyadan chetlanish faqat Claude tasdi
 - Server `MAX_SKEW` (5 daqiqa) dan oldindagi hodisani server vaqtiga tushiradi va qayd etadi.
 - Soati noto'g'ri qurilmaning tahriri to'g'ri ma'lumotni bosib keta olmaydi.
 
-**Konfliktlar:** manfiy qoldiq, rad etilgan hodisa. Savdo bekor qilinmaydi, egasi panelida ko'rsatiladi.
+**Konfliktlar:** manfiy qoldiq, rad etilgan hodisa, partiyadan ortiqcha chiqim. Savdo bekor qilinmaydi, egasi panelida ko'rsatiladi.
+- **Yagona yozuvchi qoidasi (`stock_moves`, `batches`):** zaxira harakatlari va partiyalar faqat o'sha do'kon hub'ida yaratiladi (bitta do'kon — bitta yozuvchi); bulut tomonida majburlash F2 da qo'llanadi.
 
 **Bootstrap:** snapshot va `position`. Tenant filtri majburiy. Filtri yo'q jadval xato beradi.
 

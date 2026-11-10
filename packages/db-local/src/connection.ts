@@ -42,6 +42,9 @@ export function openLocalSqliteDatabase<
   // Synchronous FULL guarantees fsync durability on power loss right after completed sales.
   sqlite.pragma('synchronous = FULL');
   sqlite.pragma('foreign_keys = ON');
+  sqlite.pragma('temp_store = MEMORY');
+  // 16 MB page cache avoids hot FTS5 / index re-reads on low-RAM Windows POS hosts.
+  sqlite.pragma('cache_size = -16384');
   sqlite.pragma(`busy_timeout = ${busyTimeoutMs}`);
 
   const pragmas: LocalSqlitePragmas = {

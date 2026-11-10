@@ -132,10 +132,12 @@ export const localHubConfig = localSchemaRegistry.defineTable(
     deviceId: sqliteUuidV7('device_id').notNull(),
     singletonGuard: sqliteInt('singleton_guard').notNull(),
     setupCompletedAtMs: sqliteUnixMs('setup_completed_at_ms').notNull(),
+    negativeStockPolicy: text('negative_stock_policy').notNull().default('warn'),
   }),
   (self) => [
     uniqueIndex('uidx_local_hub_config_singleton').on(self.singletonGuard),
     check('chk_local_hub_config_singleton', sql`${self.singletonGuard} = 1`),
+    check('chk_local_hub_config_neg_policy', sql`${self.negativeStockPolicy} IN ('warn', 'block')`),
   ],
 );
 
@@ -275,6 +277,7 @@ export const products = localSchemaRegistry.defineTable(
     unlimited: sqliteBoolean('unlimited').notNull().default(false),
     minStock: sqliteQuantity('min_stock'),
     hasVariants: sqliteBoolean('has_variants').notNull().default(false),
+    trackBatches: sqliteBoolean('track_batches').notNull().default(false),
     salePrice: sqliteMoney('sale_price').notNull(),
     mxik: text('mxik'),
     packageCode: text('package_code'),
@@ -303,6 +306,7 @@ export const products = localSchemaRegistry.defineTable(
     ),
     check('chk_products_unlimited', sql`${self.unlimited} IN (0, 1)`),
     check('chk_products_has_variants', sql`${self.hasVariants} IN (0, 1)`),
+    check('chk_products_track_batches', sql`${self.trackBatches} IN (0, 1)`),
     check('chk_products_min_stock_nonneg', sql`${self.minStock} IS NULL OR ${self.minStock} >= 0`),
     check(
       'chk_products_min_stock_unit_int',
@@ -421,5 +425,287 @@ export const priceChanges = localSchemaRegistry.defineTable(
       sql`${self.oldPrice} IS NULL OR ${self.oldPrice} >= 0`,
     ),
     check('chk_price_changes_new_price_nonneg', sql`${self.newPrice} >= 0`),
+  ],
+);
+
+/**
+ * Store-scoped inbound inventory lots/batches (`FACT`, T1.2).
+ * Single-writer architectural rule (`GEMINI.md` Section 4): stock batches and stock moves are
+ * created strictly on the owning store's hub; server-side enforcement will be added in F2.
+ */
+export const batches = localSchemaRegistry.defineTable(
+  {
+    name: 'batches',
+    tableClass: 'FACT',
+    tenantScope: 'store',
+  },
+  (common) => ({
+    ...common,
+    productId: sqliteUuidV7('product_id')
+      .notNull()
+      .references(() => products.id),
+    variantId: sqliteUuidV7('variant_id').references(() => productVariants.id),
+    batchNumber: text('batch_number'),
+    expiryDateMs: sqliteUnixMs('expiry_date_ms'),
+    initialQty: sqliteQuantity('initial_qty').notNull(),
+    initialCostValue: sqliteMoney('initial_cost_value').notNull(),
+    supplierId: sqliteUuidV7('supplier_id'),
+  }),
+  (self) => [
+    index('idx_batches_store_prod_fifo').on(
+      self.organizationId,
+      self.storeId,
+      self.productId,
+      self.variantId,
+      self.hlc,
+      self.id,
+    ),
+    check('chk_batches_initial_qty_pos', sql`${self.initialQty} > 0`),
+    check('chk_batches_initial_cost_nonneg', sql`${self.initialCostValue} >= 0`),
+  ],
+);
+
+/**
+ * Append-only store inventory movement ledger (`FACT`, T1.2).
+ * Single-writer architectural rule (`GEMINI.md` Section 4): stock_moves are created strictly at
+ * that store's hub (`reason` in initial/purchase/sale/return/inventory/adjustment/damaged/broken/personal/lost).
+ */
+export const stockMoves = localSchemaRegistry.defineTable(
+  {
+    name: 'stock_moves',
+    tableClass: 'FACT',
+    tenantScope: 'store',
+  },
+  (common) => ({
+    ...common,
+    productId: sqliteUuidV7('product_id')
+      .notNull()
+      .references(() => products.id),
+    variantId: sqliteUuidV7('variant_id').references(() => productVariants.id),
+    batchId: sqliteUuidV7('batch_id').references(() => batches.id),
+    qtyDelta: sqliteQuantity('qty_delta').notNull(),
+    costValueDelta: sqliteMoney('cost_value_delta').notNull(),
+    reason: text('reason').notNull(),
+    sourceType: text('source_type').notNull(),
+    sourceId: sqliteUuidV7('source_id').notNull(),
+    createdByUserId: sqliteUuidV7('created_by_user_id')
+      .notNull()
+      .references(() => users.id),
+    note: text('note'),
+  }),
+  (self) => [
+    index('idx_stock_moves_store_prod_hlc').on(
+      self.organizationId,
+      self.storeId,
+      self.productId,
+      self.variantId,
+      self.hlc,
+      self.id,
+    ),
+    index('idx_stock_moves_store_batch').on(
+      self.organizationId,
+      self.storeId,
+      self.batchId,
+      self.hlc,
+      self.id,
+    ),
+    index('idx_stock_moves_store_source').on(
+      self.organizationId,
+      self.storeId,
+      self.sourceType,
+      self.sourceId,
+    ),
+    check('chk_stock_moves_qty_nonzero', sql`${self.qtyDelta} <> 0`),
+    check(
+      'chk_stock_moves_sign_match',
+      sql`(${self.qtyDelta} > 0 AND ${self.costValueDelta} >= 0) OR (${self.qtyDelta} < 0 AND ${self.costValueDelta} <= 0)`,
+    ),
+    check(
+      'chk_stock_moves_reason',
+      sql`${self.reason} IN ('initial', 'purchase', 'sale', 'return', 'inventory', 'adjustment', 'damaged', 'broken', 'personal', 'lost')`,
+    ),
+    check(
+      'chk_stock_moves_source_type',
+      sql`${self.sourceType} IN ('stock_entry', 'inventory_count', 'sale', 'return', 'purchase', 'adjustment')`,
+    ),
+  ],
+);
+
+/**
+ * Physical inventory count documents (`MONOTONE`, store-scoped, T1.2).
+ * One-way transition from `'open'` to `'finalized'` or `'cancelled'`.
+ */
+export const inventoryCounts = localSchemaRegistry.defineTable(
+  {
+    name: 'inventory_counts',
+    tableClass: 'MONOTONE',
+    tenantScope: 'store',
+    monotoneColumns: ['status', 'finalized_at_ms'],
+  },
+  (common) => ({
+    ...common,
+    status: text('status').notNull().default('open'),
+    startedByUserId: sqliteUuidV7('started_by_user_id')
+      .notNull()
+      .references(() => users.id),
+    finalizedByUserId: sqliteUuidV7('finalized_by_user_id').references(() => users.id),
+    finalizedAtMs: sqliteUnixMs('finalized_at_ms'),
+    note: text('note'),
+  }),
+  (self) => [
+    index('idx_inventory_counts_store_status').on(
+      self.organizationId,
+      self.storeId,
+      self.status,
+      self.createdAtMs,
+    ),
+    check('chk_inventory_counts_status', sql`${self.status} IN ('open', 'finalized', 'cancelled')`),
+    check(
+      'chk_inventory_counts_finalized_consistency',
+      sql`(${self.status} = 'open' AND ${self.finalizedAtMs} IS NULL) OR (${self.status} <> 'open' AND ${self.finalizedAtMs} IS NOT NULL)`,
+    ),
+  ],
+);
+
+/**
+ * Lines within an inventory count (`MONOTONE`, store-scoped, T1.2, S1 + S3).
+ * SQLite triggers forbid inserting/modifying lines once parent count leaves `'open'`.
+ */
+export const inventoryCountLines = localSchemaRegistry.defineTable(
+  {
+    name: 'inventory_count_lines',
+    tableClass: 'MONOTONE',
+    tenantScope: 'store',
+    monotoneColumns: ['expected_qty_at_count', 'counted_qty', 'adjustment_qty'],
+  },
+  (common) => ({
+    ...common,
+    countId: sqliteUuidV7('count_id')
+      .notNull()
+      .references(() => inventoryCounts.id),
+    productId: sqliteUuidV7('product_id')
+      .notNull()
+      .references(() => products.id),
+    variantId: sqliteUuidV7('variant_id').references(() => productVariants.id),
+    expectedQtyAtCount: sqliteQuantity('expected_qty_at_count'),
+    countedQty: sqliteQuantity('counted_qty'),
+    adjustmentQty: sqliteQuantity('adjustment_qty'),
+  }),
+  (self) => [
+    uniqueIndex('uidx_inv_count_lines_prod')
+      .on(self.countId, self.productId)
+      .where(sql`${self.variantId} IS NULL`),
+    uniqueIndex('uidx_inv_count_lines_var')
+      .on(self.countId, self.productId, self.variantId)
+      .where(sql`${self.variantId} IS NOT NULL`),
+    check(
+      'chk_inv_count_lines_counted_snapshot',
+      sql`${self.countedQty} IS NULL OR (${self.countedQty} >= 0 AND ${self.expectedQtyAtCount} IS NOT NULL)`,
+    ),
+  ],
+);
+
+/**
+ * Non-synced local stock balance cache (`LOCAL`, T1.2).
+ * Deliberately carries zero value/qty sign CHECKs (`S2`) so `rebuildStockProjections()` never fails.
+ */
+export const localStockBalances = localSchemaRegistry.defineTable(
+  {
+    name: 'local_stock_balances',
+    tableClass: 'LOCAL',
+    tenantScope: 'store',
+  },
+  (common) => ({
+    ...common,
+    productId: sqliteUuidV7('product_id')
+      .notNull()
+      .references(() => products.id),
+    variantId: sqliteUuidV7('variant_id').references(() => productVariants.id),
+    qtyOnHand: sqliteQuantity('qty_on_hand').notNull(),
+    totalValue: sqliteMoney('total_value').notNull(),
+    deficitQty: sqliteQuantity('deficit_qty').notNull(),
+    provisionalDeficitValue: sqliteMoney('provisional_deficit_value').notNull(),
+    costVarianceValue: sqliteMoney('cost_variance_value').notNull(),
+    lastUnitCost: sqliteMoney('last_unit_cost'),
+  }),
+  (self) => [
+    uniqueIndex('uidx_local_stock_balances_prod')
+      .on(self.organizationId, self.storeId, self.productId)
+      .where(sql`${self.variantId} IS NULL`),
+    uniqueIndex('uidx_local_stock_balances_var')
+      .on(self.organizationId, self.storeId, self.productId, self.variantId)
+      .where(sql`${self.variantId} IS NOT NULL`),
+  ],
+);
+
+/**
+ * Non-synced local FIFO batch balance cache (`LOCAL`, T1.2).
+ * Deliberately carries zero non-negative CHECKs (`S2`) so rebuild always succeeds cleanly.
+ */
+export const localBatchBalances = localSchemaRegistry.defineTable(
+  {
+    name: 'local_batch_balances',
+    tableClass: 'LOCAL',
+    tenantScope: 'store',
+  },
+  (common) => ({
+    ...common,
+    batchId: sqliteUuidV7('batch_id')
+      .notNull()
+      .references(() => batches.id),
+    productId: sqliteUuidV7('product_id')
+      .notNull()
+      .references(() => products.id),
+    variantId: sqliteUuidV7('variant_id').references(() => productVariants.id),
+    hlc: sqliteHlc('hlc').notNull(),
+    remainingQty: sqliteQuantity('remaining_qty').notNull(),
+    remainingValue: sqliteMoney('remaining_value').notNull(),
+  }),
+  (self) => [
+    uniqueIndex('uidx_local_batch_balances_batch').on(self.batchId),
+    index('idx_local_batch_balances_fifo').on(
+      self.organizationId,
+      self.storeId,
+      self.productId,
+      self.variantId,
+      self.hlc,
+      self.batchId,
+    ),
+  ],
+);
+
+/**
+ * Owner-visible stock anomalies detected live or during rebuild (`S2` / `S4`, `LOCAL`).
+ */
+export const localStockConflicts = localSchemaRegistry.defineTable(
+  {
+    name: 'local_stock_conflicts',
+    tableClass: 'LOCAL',
+    tenantScope: 'store',
+  },
+  (common) => ({
+    ...common,
+    productId: sqliteUuidV7('product_id')
+      .notNull()
+      .references(() => products.id),
+    variantId: sqliteUuidV7('variant_id').references(() => productVariants.id),
+    batchId: sqliteUuidV7('batch_id'),
+    moveId: sqliteUuidV7('move_id'),
+    conflictQty: sqliteQuantity('conflict_qty').notNull(),
+    reason: text('reason').notNull(),
+    detail: text('detail'),
+    resolvedAtMs: sqliteUnixMs('resolved_at_ms'),
+  }),
+  (self) => [
+    index('idx_local_stock_conflicts_store_open').on(
+      self.organizationId,
+      self.storeId,
+      self.resolvedAtMs,
+      self.createdAtMs,
+    ),
+    check(
+      'chk_local_stock_conflicts_reason',
+      sql`${self.reason} IN ('BATCH_OVERCONSUMED', 'UNKNOWN_COST_SURPLUS', 'ORPHAN_BATCH_REFERENCE')`,
+    ),
   ],
 );
