@@ -65,7 +65,12 @@ function makeTempDir(prefix = 'mezon-uow-test-'): string {
 
 afterEach(() => {
   while (tempDirs.length > 0) {
-    fs.rmSync(tempDirs.pop()!, { recursive: true, force: true });
+    fs.rmSync(tempDirs.pop()!, {
+      recursive: true,
+      force: true,
+      maxRetries: 5,
+      retryDelay: 50,
+    });
   }
 });
 
@@ -1630,6 +1635,7 @@ describe('@mezon/db-local - Async UnitOfWork, Outbox, DeviceState & SQLite Trigg
       process.on('message', (msg) => {
         if (msg !== 'write') return;
         void (async () => {
+          let reply;
           try {
             const res = await uow.execute(async (s2) => {
               await Promise.resolve();
@@ -1639,14 +1645,18 @@ describe('@mezon/db-local - Async UnitOfWork, Outbox, DeviceState & SQLite Trigg
                 values: { totalTiyin: 200n, note: 'conn2-concurrent-write' },
               });
             });
-            process.send?.({ status: 'ok', deviceSeq: res.deviceSeq.toString() });
+            reply = { status: 'ok', deviceSeq: res.deviceSeq.toString() };
           } catch (err) {
-            process.send?.({
+            reply = {
               status: 'error',
               message: err instanceof Error ? err.message : String(err),
-            });
+            };
           } finally {
             conn.close();
+          }
+          if (typeof process.send === 'function') {
+            process.send(reply, () => process.exit(0));
+          } else {
             process.exit(0);
           }
         })();
@@ -1671,6 +1681,9 @@ describe('@mezon/db-local - Async UnitOfWork, Outbox, DeviceState & SQLite Trigg
 
     const child = spawn(process.execPath, [workerScriptPath, dbPath, orgId, storeId, device2], {
       stdio: ['ignore', 'pipe', 'pipe', 'ipc'],
+    });
+    const closedPromise = new Promise<void>((resolve) => {
+      child.once('close', () => resolve());
     });
     let childStderr = '';
     child.stderr?.on('data', (chunk: Buffer) => {
@@ -1738,6 +1751,7 @@ describe('@mezon/db-local - Async UnitOfWork, Outbox, DeviceState & SQLite Trigg
       });
 
       const [r1, r2] = await Promise.all([p1, resultPromise]);
+      await closedPromise;
       expect(r1.deviceSeq).toBe(1n);
       expect(r2).toEqual({ status: 'ok', deviceSeq: '1' });
       expect(
@@ -1751,6 +1765,7 @@ describe('@mezon/db-local - Async UnitOfWork, Outbox, DeviceState & SQLite Trigg
       if (child.exitCode === null) {
         child.kill();
       }
+      await closedPromise;
       conn1.close();
     }
   });
