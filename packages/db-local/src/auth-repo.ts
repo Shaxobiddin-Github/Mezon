@@ -236,6 +236,16 @@ export class SqliteHubAuthStore {
     return { uow: this.uow, config: this.hubConfig };
   }
 
+  getActiveRuntimeContext(): {
+    readonly uow: SqliteUnitOfWork;
+    readonly config: HubConfigSnapshot;
+  } | null {
+    if (this.uow === null || this.hubConfig === null) {
+      return null;
+    }
+    return { uow: this.uow, config: this.hubConfig };
+  }
+
   async getHealthStatus(): Promise<{ readonly needsSetup: boolean }> {
     return this.runSerializedRead(() => {
       const cfgCount = this.connection.db

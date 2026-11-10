@@ -1,10 +1,12 @@
 import { sql } from 'drizzle-orm';
-import { check, index, text, uniqueIndex } from 'drizzle-orm/sqlite-core';
+import { type AnySQLiteColumn, check, index, text, uniqueIndex } from 'drizzle-orm/sqlite-core';
 import {
   sqliteBigint,
   sqliteBoolean,
   sqliteHlc,
   sqliteInt,
+  sqliteMoney,
+  sqliteQuantity,
   sqliteUnixMs,
   sqliteUuidV7,
 } from '../columns.js';
@@ -214,5 +216,210 @@ export const localSessions = localSchemaRegistry.defineTable(
     uniqueIndex('uidx_local_sessions_token_hash').on(self.tokenHash),
     index('idx_local_sessions_user_revoked').on(self.userId, self.revokedAtMs),
     check('chk_local_sessions_token_hash_len', sql`length(${self.tokenHash}) = 64`),
+  ],
+);
+
+/**
+ * Organization-wide product category hierarchy (`ATTR`, T1.1).
+ */
+export const categories = localSchemaRegistry.defineTable(
+  {
+    name: 'categories',
+    tableClass: 'ATTR',
+    tenantScope: 'organization',
+  },
+  (common) => ({
+    ...common,
+    name: text('name').notNull(),
+    nameSearch: text('name_search').notNull(),
+    parentId: sqliteUuidV7('parent_id').references((): AnySQLiteColumn => categories.id),
+    sortOrder: sqliteInt('sort_order').notNull().default(0),
+  }),
+  (self) => [
+    uniqueIndex('uidx_categories_org_root_name')
+      .on(self.organizationId, self.nameSearch)
+      .where(sql`${self.parentId} IS NULL AND ${self.deletedAtMs} IS NULL`),
+    uniqueIndex('uidx_categories_org_child_name')
+      .on(self.organizationId, self.parentId, self.nameSearch)
+      .where(sql`${self.parentId} IS NOT NULL AND ${self.deletedAtMs} IS NULL`),
+    index('idx_categories_org_parent')
+      .on(self.organizationId, self.parentId)
+      .where(sql`${self.deletedAtMs} IS NULL`),
+    check('chk_categories_name_nonempty', sql`length(trim(${self.name})) >= 1`),
+    check(
+      'chk_categories_not_self_parent',
+      sql`${self.parentId} IS NULL OR ${self.parentId} <> ${self.id}`,
+    ),
+  ],
+);
+
+/**
+ * Organization-scoped product catalog (`ATTR`, T1.1).
+ * Carries fiscal fields (`mxik`, `package_code`, `vat_rate_bp`) upfront for F3 compliance.
+ * Indexed by normalized `name_search` / `sku_search` plus `products_fts` FTS5 triggers.
+ */
+export const products = localSchemaRegistry.defineTable(
+  {
+    name: 'products',
+    tableClass: 'ATTR',
+    tenantScope: 'organization',
+  },
+  (common) => ({
+    ...common,
+    categoryId: sqliteUuidV7('category_id').references(() => categories.id),
+    sku: text('sku'),
+    skuSearch: text('sku_search'),
+    name: text('name').notNull(),
+    nameSearch: text('name_search').notNull(),
+    unit: text('unit').notNull(),
+    unlimited: sqliteBoolean('unlimited').notNull().default(false),
+    minStock: sqliteQuantity('min_stock'),
+    hasVariants: sqliteBoolean('has_variants').notNull().default(false),
+    salePrice: sqliteMoney('sale_price').notNull(),
+    mxik: text('mxik'),
+    packageCode: text('package_code'),
+    vatRateBp: sqliteInt('vat_rate_bp').notNull().default(0),
+  }),
+  (self) => [
+    uniqueIndex('uidx_products_org_sku')
+      .on(self.organizationId, self.sku)
+      .where(sql`${self.sku} IS NOT NULL AND ${self.deletedAtMs} IS NULL`),
+    index('idx_products_org_name_search')
+      .on(self.organizationId, self.nameSearch, self.id)
+      .where(sql`${self.deletedAtMs} IS NULL`),
+    index('idx_products_org_sku_search')
+      .on(self.organizationId, self.skuSearch, self.id)
+      .where(sql`${self.skuSearch} IS NOT NULL AND ${self.deletedAtMs} IS NULL`),
+    index('idx_products_org_category')
+      .on(self.organizationId, self.categoryId)
+      .where(sql`${self.deletedAtMs} IS NULL`),
+    index('idx_products_active_join')
+      .on(self.id, self.organizationId, self.categoryId)
+      .where(sql`${self.deletedAtMs} IS NULL`),
+    check('chk_products_name_nonempty', sql`length(trim(${self.name})) >= 1`),
+    check(
+      'chk_products_unit',
+      sql`${self.unit} IN ('dona', 'kg', 'g', 'litr', 'metr', 'm2', 'qadoq')`,
+    ),
+    check('chk_products_unlimited', sql`${self.unlimited} IN (0, 1)`),
+    check('chk_products_has_variants', sql`${self.hasVariants} IN (0, 1)`),
+    check('chk_products_min_stock_nonneg', sql`${self.minStock} IS NULL OR ${self.minStock} >= 0`),
+    check(
+      'chk_products_min_stock_unit_int',
+      sql`${self.minStock} IS NULL OR ${self.unit} NOT IN ('dona', 'qadoq') OR (${self.minStock} % 1000) = 0`,
+    ),
+    check('chk_products_sale_price_nonneg', sql`${self.salePrice} >= 0`),
+    check('chk_products_vat_rate_bp', sql`${self.vatRateBp} >= 0 AND ${self.vatRateBp} <= 10000`),
+  ],
+);
+
+/**
+ * Product variants (`ATTR`, T1.1) with canonical sorted JSON attributes and optional price override.
+ */
+export const productVariants = localSchemaRegistry.defineTable(
+  {
+    name: 'product_variants',
+    tableClass: 'ATTR',
+    tenantScope: 'organization',
+  },
+  (common) => ({
+    ...common,
+    productId: sqliteUuidV7('product_id')
+      .notNull()
+      .references(() => products.id),
+    name: text('name').notNull(),
+    nameSearch: text('name_search').notNull(),
+    sku: text('sku'),
+    skuSearch: text('sku_search'),
+    attributesJson: text('attributes_json').notNull(),
+    salePrice: sqliteMoney('sale_price'),
+  }),
+  (self) => [
+    index('idx_product_variants_org_product')
+      .on(self.organizationId, self.productId)
+      .where(sql`${self.deletedAtMs} IS NULL`),
+    uniqueIndex('uidx_product_variants_org_sku')
+      .on(self.organizationId, self.sku)
+      .where(sql`${self.sku} IS NOT NULL AND ${self.deletedAtMs} IS NULL`),
+    check('chk_product_variants_name_nonempty', sql`length(trim(${self.name})) >= 1`),
+    check('chk_product_variants_attrs_json', sql`json_valid(${self.attributesJson}) = 1`),
+    check(
+      'chk_product_variants_sale_price_nonneg',
+      sql`${self.salePrice} IS NULL OR ${self.salePrice} >= 0`,
+    ),
+  ],
+);
+
+/**
+ * Product & variant barcode mappings (`ATTR`, T1.1).
+ * Partial unique index guarantees one active barcode maps to a single product/variant within an org.
+ * 12-digit UPC-A codes are stored in canonical 13-digit EAN-13 form (`'0' + upca`).
+ */
+export const productBarcodes = localSchemaRegistry.defineTable(
+  {
+    name: 'product_barcodes',
+    tableClass: 'ATTR',
+    tenantScope: 'organization',
+  },
+  (common) => ({
+    ...common,
+    productId: sqliteUuidV7('product_id')
+      .notNull()
+      .references(() => products.id),
+    variantId: sqliteUuidV7('variant_id').references(() => productVariants.id),
+    barcode: text('barcode').notNull(),
+    format: text('format').notNull(),
+  }),
+  (self) => [
+    uniqueIndex('uidx_product_barcodes_org_barcode')
+      .on(self.organizationId, self.barcode)
+      .where(sql`${self.deletedAtMs} IS NULL`),
+    index('idx_product_barcodes_org_product')
+      .on(self.organizationId, self.productId)
+      .where(sql`${self.deletedAtMs} IS NULL`),
+    index('idx_product_barcodes_org_variant')
+      .on(self.organizationId, self.variantId)
+      .where(sql`${self.variantId} IS NOT NULL AND ${self.deletedAtMs} IS NULL`),
+    check('chk_product_barcodes_barcode_nonempty', sql`length(trim(${self.barcode})) >= 1`),
+    check(
+      'chk_product_barcodes_format',
+      sql`${self.format} IN ('ean13', 'ean8', 'upca', 'internal', 'other')`,
+    ),
+  ],
+);
+
+/**
+ * Append-only sale price change audit trail (`FACT`, T1.1).
+ */
+export const priceChanges = localSchemaRegistry.defineTable(
+  {
+    name: 'price_changes',
+    tableClass: 'FACT',
+    tenantScope: 'organization',
+  },
+  (common) => ({
+    ...common,
+    productId: sqliteUuidV7('product_id')
+      .notNull()
+      .references(() => products.id),
+    variantId: sqliteUuidV7('variant_id').references(() => productVariants.id),
+    oldPrice: sqliteMoney('old_price'),
+    newPrice: sqliteMoney('new_price').notNull(),
+    changedByUserId: sqliteUuidV7('changed_by_user_id')
+      .notNull()
+      .references(() => users.id),
+    reason: text('reason'),
+  }),
+  (self) => [
+    index('idx_price_changes_org_product_time').on(
+      self.organizationId,
+      self.productId,
+      self.createdAtMs,
+    ),
+    check(
+      'chk_price_changes_old_price_nonneg',
+      sql`${self.oldPrice} IS NULL OR ${self.oldPrice} >= 0`,
+    ),
+    check('chk_price_changes_new_price_nonneg', sql`${self.newPrice} >= 0`),
   ],
 );

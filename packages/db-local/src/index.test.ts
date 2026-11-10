@@ -11,9 +11,12 @@ import {
   DB_LOCAL_PACKAGE,
   SchemaValidationError,
   SqliteSchemaRegistry,
+  assertCatalogSearchMigrationsComplete,
   assertSqliteTriggersMigrationsComplete,
   buildAllSqliteTriggersSql,
+  buildCatalogSearchFtsSql,
   buildSqliteImmutabilityTriggersSql,
+  categories,
   getDefaultLocalMigrationsFolder,
   localDeviceAuthState,
   localDeviceState,
@@ -24,6 +27,10 @@ import {
   localSessions,
   migrateLocalDatabase,
   openLocalSqliteDatabase,
+  priceChanges,
+  productBarcodes,
+  productVariants,
+  products,
   sqliteBigint,
   sqliteBoolean,
   sqliteInt,
@@ -74,6 +81,11 @@ describe('@mezon/db-local - Schema foundation, registry, pragmas, and bigint saf
       ['local_pin_credentials', 'LOCAL'],
       ['local_device_auth_state', 'LOCAL'],
       ['local_sessions', 'LOCAL'],
+      ['categories', 'ATTR'],
+      ['products', 'ATTR'],
+      ['product_variants', 'ATTR'],
+      ['product_barcodes', 'ATTR'],
+      ['price_changes', 'FACT'],
     ]);
     expect(() =>
       validateSqliteSchemaRegistry(
@@ -85,6 +97,11 @@ describe('@mezon/db-local - Schema foundation, registry, pragmas, and bigint saf
           localPinCredentials,
           localDeviceAuthState,
           localSessions,
+          categories,
+          products,
+          productVariants,
+          productBarcodes,
+          priceChanges,
         },
         localSchemaRegistry,
       ),
@@ -262,7 +279,7 @@ describe('@mezon/db-local - Schema foundation, registry, pragmas, and bigint saf
       const migCountRow = conn.sqlite
         .prepare('SELECT COUNT(*) as cnt FROM __drizzle_migrations')
         .get() as { cnt: bigint };
-      expect(migCountRow.cnt).toBe(3n);
+      expect(migCountRow.cnt).toBe(4n);
     } finally {
       conn.close();
     }
@@ -576,5 +593,49 @@ describe('@mezon/db-local - Schema foundation, registry, pragmas, and bigint saf
     expect(() =>
       assertSqliteTriggersMigrationsComplete(attrUpdateBlockDir, [attrMeta]),
     ).toThrowError(/must not define an unconditional BEFORE UPDATE RAISE\(ABORT\)/);
+  });
+
+  it('F4 negative proof: rejects migrations missing products_fts, rowid coupling, or broken FTS sync triggers', () => {
+    const makeMigDir = () => {
+      const dir = path.join(os.tmpdir(), `mezon-fts-check-${Date.now()}-${Math.random()}`);
+      fs.mkdirSync(dir, { recursive: true });
+      tempDirs.push(dir);
+      return dir;
+    };
+
+    const validSql = buildCatalogSearchFtsSql().join('\n');
+    const okDir = makeMigDir();
+    fs.writeFileSync(path.join(okDir, '0003.sql'), validSql);
+    expect(() => assertCatalogSearchMigrationsComplete(okDir)).not.toThrow();
+
+    // Missing products_fts virtual table
+    const noFtsDir = makeMigDir();
+    fs.writeFileSync(path.join(noFtsDir, '0003.sql'), 'CREATE TABLE "other" ("id" text);');
+    expect(() => assertCatalogSearchMigrationsComplete(noFtsDir)).toThrowError(
+      /Missing active FTS5 virtual table "products_fts"/,
+    );
+
+    // Unsafe content='products' external content rowid coupling (F1 violation)
+    const contentRowidDir = makeMigDir();
+    fs.writeFileSync(
+      path.join(contentRowidDir, '0003.sql'),
+      validSql.replace("prefix = '2 3'", "content = 'products',\n  prefix = '2 3'"),
+    );
+    expect(() => assertCatalogSearchMigrationsComplete(contentRowidDir)).toThrowError(
+      /must not use "content=" rowid coupling/,
+    );
+
+    // Trigger missing delete by product_id
+    const brokenUpdateTriggerDir = makeMigDir();
+    fs.writeFileSync(
+      path.join(brokenUpdateTriggerDir, '0003.sql'),
+      validSql.replace(
+        'DELETE FROM "products_fts" WHERE "product_id" = OLD."id";',
+        'DELETE FROM "products_fts" WHERE "rowid" = OLD."rowid";',
+      ),
+    );
+    expect(() => assertCatalogSearchMigrationsComplete(brokenUpdateTriggerDir)).toThrowError(
+      /delete stale "products_fts" rows by product_id = OLD\.id/,
+    );
   });
 });

@@ -1,6 +1,8 @@
 import {
   type LocalSqliteConnection,
+  SqliteCatalogStore,
   SqliteHubAuthStore,
+  createSqliteCatalogStore,
   createSqliteHubAuthStore,
   migrateLocalDatabase,
   openLocalSqliteDatabase,
@@ -11,6 +13,7 @@ import Fastify, { type FastifyBaseLogger, type FastifyInstance } from 'fastify';
 import type { DestinationStream, LevelWithSilent } from 'pino';
 import { Argon2PinHasher } from './argon2-pin-hasher.js';
 import { HubAuthService } from './auth-service.js';
+import { HubCatalogService } from './catalog-service.js';
 import { DEFAULT_HUB_HOST, resolveHubSecurityConfig } from './config.js';
 import { registerHubErrorHandlers } from './error-handler.js';
 import { createHubLogger } from './logger.js';
@@ -40,7 +43,9 @@ export interface HubServer {
   readonly app: FastifyInstance;
   readonly connection: LocalSqliteConnection;
   readonly store: SqliteHubAuthStore;
+  readonly catalogStore: SqliteCatalogStore;
   readonly authService: HubAuthService;
+  readonly catalogService: HubCatalogService;
   listen(): Promise<{ readonly host: typeof DEFAULT_HUB_HOST; readonly port: number }>;
   close(): Promise<void>;
 }
@@ -62,7 +67,9 @@ export async function createHubServer(options: CreateHubServerOptions): Promise<
 
   const connection = openLocalSqliteDatabase(options.dbPath);
   let store: SqliteHubAuthStore;
+  let catalogStore: SqliteCatalogStore;
   let authService: HubAuthService;
+  let catalogService: HubCatalogService;
   let app: FastifyInstance;
 
   try {
@@ -78,11 +85,19 @@ export async function createHubServer(options: CreateHubServerOptions): Promise<
       maxDeviceFailedAttempts: options.maxDeviceFailedAttempts,
       deviceFailureWindowMs: options.deviceFailureWindowMs,
     });
+    catalogStore = createSqliteCatalogStore({
+      connection,
+      getRuntimeContext: () => {
+        const ctx = store.getActiveRuntimeContext();
+        return ctx ? { uow: ctx.uow, organizationId: ctx.config.organizationId } : null;
+      },
+    });
     authService = await HubAuthService.create({
       store,
       pinHasher,
       random,
     });
+    catalogService = new HubCatalogService(catalogStore);
 
     app = Fastify({
       loggerInstance: logger as unknown as FastifyBaseLogger,
@@ -91,7 +106,7 @@ export async function createHubServer(options: CreateHubServerOptions): Promise<
     const hostState = createHostAllowlistState(securityConfig.port);
     registerHubSecurityHooks(app, securityConfig, hostState);
     registerHubErrorHandlers(app);
-    registerHubRoutes(app, authService);
+    registerHubRoutes(app, authService, catalogService);
     options.registerExtraTestRoutes?.(app);
 
     let boundPort: number | null = securityConfig.port > 0 ? securityConfig.port : null;
@@ -100,7 +115,9 @@ export async function createHubServer(options: CreateHubServerOptions): Promise<
       app,
       connection,
       store,
+      catalogStore,
       authService,
+      catalogService,
       async listen() {
         await app.listen({
           host: DEFAULT_HUB_HOST,

@@ -654,6 +654,23 @@ export async function runConnectionReadOnly<T>(
 }
 
 /**
+ * Executes a synchronous projection/index maintenance transaction (`BEGIN IMMEDIATE ... COMMIT`)
+ * under the connection FIFO mutex without emitting business outbox events (e.g. F4 search index rebuild).
+ */
+export async function runConnectionProjectionMaintenance<T>(
+  connection: LocalSqliteConnection,
+  fn: (sqlite: Database.Database, db: BetterSQLite3Database) => T,
+): Promise<T> {
+  const release = await getConnectionMutex(connection.sqlite).acquire();
+  try {
+    const runTx = connection.sqlite.transaction(() => fn(connection.sqlite, connection.db));
+    return await Promise.resolve(runTx.immediate());
+  } finally {
+    release();
+  }
+}
+
+/**
  * Helper to read the active transaction's `Database.Database` strictly inside an active UoW scope.
  * Intended for test diagnostics and constrained SQL checks inside transactions.
  */

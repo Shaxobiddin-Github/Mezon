@@ -3,12 +3,26 @@ import { DomainError } from './errors.js';
 export const USER_ROLES = ['owner', 'manager', 'cashier'] as const;
 export type UserRole = (typeof USER_ROLES)[number];
 
-export type HubPermission = 'auth:self' | 'users:read' | 'users:write' | 'users:unlock';
+export type HubPermission =
+  'auth:self' | 'users:read' | 'users:write' | 'users:unlock' | 'catalog:read' | 'catalog:write';
 
 const ROLE_PERMISSION_TABLE: Readonly<Record<UserRole, ReadonlySet<HubPermission>>> = {
-  owner: new Set<HubPermission>(['auth:self', 'users:read', 'users:write', 'users:unlock']),
-  manager: new Set<HubPermission>(['auth:self', 'users:read', 'users:unlock']),
-  cashier: new Set<HubPermission>(['auth:self']),
+  owner: new Set<HubPermission>([
+    'auth:self',
+    'users:read',
+    'users:write',
+    'users:unlock',
+    'catalog:read',
+    'catalog:write',
+  ]),
+  manager: new Set<HubPermission>([
+    'auth:self',
+    'users:read',
+    'users:unlock',
+    'catalog:read',
+    'catalog:write',
+  ]),
+  cashier: new Set<HubPermission>(['auth:self', 'catalog:read']),
 };
 
 export function isUserRole(value: unknown): value is UserRole {
