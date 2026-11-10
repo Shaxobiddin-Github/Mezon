@@ -1,149 +1,118 @@
-## T1.1 Merge xulosasi
+## Hisobot: T1.2
+Branch / PR: `gemini/T1.2-stock` / https://github.com/Shaxobiddin-Github/Mezon/pull/9
+Commit:
+- `27418448e612d27bb9c54f81aade20cd7d657ca4` — `T1.1 test qarzi: EAN-8 va FTS tartibi`
+- `cd0020426b89be5f829ee781fd0d7d2236aed4da` — `T1.2: Ombor, partiya, FIFO/o'rtacha tannarx va inventarizatsiya`
+- `43536f486bb81283f1d3e5bf533dfba1af8163d6` — `T1.2: FTS5 yagona o'tish va SQLite xotira pragmalari optimizatsiyasi`
+- `facc046db0511d6fc2b1ea12e7aa4ebe293e0486` — `T1.2: Windows CI uchun disk WAL property test timeoutlari`
 
-- **PR #8** (`gemini/T1.1-catalog`, bosh SHA `d5ccfce263de54441df0292ea8a5d252b035e74e`, barcha 8 CI check run `success` — Run [#42826641570](https://github.com/Shaxobiddin-Github/Mezon/actions/runs/42826641570) va [#42826630033](https://github.com/Shaxobiddin-Github/Mezon/actions/runs/42826630033)) `T1.1: Katalog, shtrix-kod va qidiruv` nomi bilan Squash and merge qilindi.
-- **Merge commit SHA (`main`):** `a5bba260c261468f377f0cdfdfa161beac1dc9b9`
-- **`gemini/T1.1-catalog` branch:** masofadan va lokaldan o'chirildi.
-- **Yangi branch (`main` @ `a5bba26` dan):** `gemini/T1.2-stock`
+### Nima qilindi
 
----
+1. **T1.1 test qarzi (`2741844`):**
+   - `@mezon/domain`: `EAN-8` noto'g'ri nazorat raqamini rad etish (`96385075`) va har bitta raqamni o'zgartiruvchi `fast-check` property testi qo'shildi. Mutatsiya bilan tekshirildi: `verifyGs1CheckDigit` da `ean8` tekshiruvi ataylab chetlab o'tilganda test to'plami yiqildi (keyin qayta tiklandi).
+   - `@mezon/db-local`: `products_fts` qidiruv tartibi `ORDER BY f.rank ASC, p."id" ASC` qilib deterministiklashtirildi hamda 30 ta bir xil nomli mahsulotda `limit=10, offset=0/10/20` bilan dublikatsiz va yo'qotishsiz sahifalash testi qo'shildi.
 
-## Reja: T1.2 — Ombor va partiya
+2. **Ombor va partiya domeni (`@mezon/domain/src/stock.ts`):**
+   - `STOCK_MOVE_REASONS` (`initial`, `purchase`, `sale`, `return`, `inventory`, `adjustment`, `damaged`, `broken`, `personal`, `lost`), `NEGATIVE_STOCK_POLICIES` (`warn` / `block`), `INVENTORY_COUNT_STATUSES` (`open` / `finalized` / `cancelled`) va `STOCK_CONFLICT_REASONS` (`BATCH_OVERCONSUMED`, `UNKNOWN_COST_SURPLUS`, `ORPHAN_BATCH_REFERENCE`).
+   - Qiymatga asoslangan (`remaining_qty` + `remaining_value` tiyinda) proporsional taqsimot (`computeProportionalCost`), FIFO (`planFifoOutboundLegs`) va o'rtacha tannarx (`planAverageOutboundCost`) rejalashtiruvchilari — oxirgi birlik qoldiq tiyinni to'liq yechib oladi, yaxlitlashda 1 tiyin ham yo'qolmaydi.
+   - Manfiy zaxira kamomadi (`deficitQty`, `provisionalDeficitValue`), keyingi kirimda kamomadni yopish va kechikkan/sinxron qayta o'ynashdagi qiymat farqi (`costVarianceValue`) — sof replay funksiyasi (`applyReplayStockMove`) hech qachon yiqilmaydi.
+   - `computeSurplusCostValue` (**S4**): ortiqcha chiqqan tovar tannarxini hisoblash.
 
-> **Eslatma:** Hozir faqat reja taqdim etilmoqda. Claude tasdig'isiz T1.2 kodi yozilmaydi.
+3. **Kontraktlar (`@mezon/contracts`):**
+   - Mahsulot sxemalariga `trackBatches` (standart `false`, harakat yozilgandan keyin o'zgartirish `409 STOCK_COSTING_LOCKED`).
+   - Kassir javoblari uchun alohida `CashierStockBalanceSchema` (faqat miqdor/birlik/`isLowStock`; tannarx, partiya qiymati va `costVarianceValue` maydonlari umuman yo'q), egasi/menejer uchun `StockValuationItemSchema`, `BatchSummarySchema`, `StockMoveSummarySchema`, `StockConflictSummarySchema` va inventarizatsiya sxemalari.
 
-### 0. Birinchi alohida commit (`T1.1 test qarzi: EAN-8 va FTS tartibi`)
+4. **Lokal baza va repozitoriy (`@mezon/db-local`):**
+   - `0004_stock.sql`: `local_hub_config.negative_stock_policy` (`'warn'`), `products.track_batches` (`0`), hamda 7 ta yangi jadval: `batches` (`FACT`), `stock_moves` (`FACT`), `inventory_counts` (`MONOTONE`), `inventory_count_lines` (`MONOTONE`), `local_stock_balances` / `local_batch_balances` / `local_stock_conflicts` (`LOCAL`).
+   - `0003` -> `0004` migratsiyasida `drizzle-kit` yaratadigan xavfli `DROP TABLE` o'rniga toza `ALTER TABLE ... ADD COLUMN` yozildi (mavjud `products` va `products_fts` triggerlari saqlanadi).
+   - `SqliteStockStore` va `rebuildStockProjections()`: `(hlc ASC, id ASC)` tartibida qayta qurish, 0 ta outbox hodisasi chiqarish (`runConnectionProjectionMaintenance` orqali), **S1**–**S4** kafolatlari.
+   - `stock-migrations.ts` + `check-migrations.mjs`: `assertStockMigrationsComplete` barcha **S3** triggerlarini `db:check` da tekshiradi.
+   - `GEMINI.md` 4-bo'lim va `packages/db-local/src/schema/index.ts` izohida `stock_moves`/`batches` yagona do'kon hub'i yozuvchisi qoidasi (`F2` da bulutda majburlanadi) hujjatlashtirildi.
 
-T1.2 kodidan avval alohida commit'da bajariladi:
-1. `packages/domain/src/catalog.test.ts` ga noto'g'ri nazorat raqamli EAN-8 (`96385075`) `INVALID_BARCODE_CHECK_DIGIT` bilan rad etilishi va 7-raqamli `fast-check` EAN-8 korruptsiya testi qo'shiladi (vaqtinchalik mutatsiya bilan isbotlanadi).
-2. `packages/db-local/src/catalog-repo.ts` dagi FTS qidiruv so'rovi `ORDER BY f.rank ASC, p."id" ASC` qilib barqarorlashtiriladi (`p."id"` `idx_products_active_join` covering indeksi ichida bo'lgani uchun heap o'qishi qo'shilmaydi) va 30+ bir xil nomli mahsulot sahifalashi testlanadi.
+5. **CI barqarorligi va FTS5 optimizatsiyasi (`43536f4`, `facc046`):**
+   - `catalog-repo.ts`: `ORDER BY f.rank ASC, f."product_id" ASC` qo'shilgandan keyin Windows CI runner'ida `searchP95` 50.997 ms ga chiqib qolgani aniqlandi. `products_fts` dan `COUNT(*) OVER()` bilan yagona o'tishda (kategoriyasiz qidiruvda ortiqcha `INNER JOIN products` siz) tayyorlangan so'rovlarni keshlash va `connection.ts` da `temp_store = MEMORY` / `cache_size = -16384` pragmalarini qo'llash orqali 50k WAL qidiruv `p95` lokalda 37.1 ms dan **22.8 ms** ga tushirildi va Windows CI o'tdi.
+   - Disk WAL'da 25 marta yangi baza ochib migratsiya qiluvchi property testlarga (`stock.test.ts:759`, `catalog.test.ts:533`) 30 000 ms timeout berildi (assertions va `numRuns` o'zgarmagan).
 
----
+6. **Hub API (`apps/hub`):**
+   - `/stock/balances` (`stock:read` — kassir uchun ruxsat berilgan maydonlar ro'yxati orqali tannarxsiz), `/stock/valuation`, `/stock/batches`, `/stock/moves`, `/stock/moves/in`, `/stock/moves/out`, `/stock/conflicts`, `/stock/policy`, `/stock/projections/rebuild`, `/stock/inventory-counts/*` (`stock:write`, kassirga `403 AUTH_FORBIDDEN`).
 
-### a) Ledger, partiya va jadvallar (`packages/db-local`, `0004_stock.sql`)
+### O'zgargan fayllar (fayl — sabab)
 
-1. **`products` jadvaliga `track_batches` (`ATTR`):**
-   - `sqliteBoolean('track_batches').notNull().default(false)` (`false` = o'rtacha tannarx, `true` = FIFO partiyali tovar). Mavjud `/products` API kontraktida ixtiyoriy (`default: false`).
-   - Agar mahsulot bo'yicha allaqachon `stock_moves` yozilgan bo'lsa, `track_batches` ni almashtirish `409 VALIDATION_ERROR` (yoki `STOCK_COSTING_LOCKED`) bilan rad etiladi.
+- `.mezon/gemini/HISOBOT.md` — T1.2 yakuniy hisoboti
+- `GEMINI.md` — 4-bo'limga `stock_moves` / `batches` yagona yozuvchi qoidasi (`F2` da bulut tekshiruvi) eslatmasi
+- `packages/domain/src/errors.ts` — `STOCK_COSTING_LOCKED`, `UNLIMITED_PRODUCT_STOCK_NOT_TRACKED`, `INSUFFICIENT_STOCK`, `INVALID_STOCK_MOVE_REASON`, `BATCH_REQUIRED`, `BATCH_NOT_FOUND`, `INVENTORY_COUNT_NOT_FOUND`, `INVENTORY_COUNT_NOT_OPEN`
+- `packages/domain/src/auth.ts`, `auth.test.ts`, `index.ts` — `stock:read` (`owner`/`manager`/`cashier`) va `stock:write` (`owner`/`manager`) ruxsatlari + stock domen eksportlari
+- `packages/domain/src/stock.ts`, `stock.test.ts` — FIFO/o'rtacha tannarx, kamomad, S4 ortiqcha qiymat va 200-run property test
+- `packages/domain/src/catalog.test.ts` — T1.1 test qarzi (`EAN-8` bad check-digit va property test)
+- `packages/contracts/src/catalog.ts`, `catalog.test.ts`, `index.ts` — `trackBatches` maydoni va `stock` DTO eksportlari
+- `packages/contracts/src/stock.ts`, `stock.test.ts` — ombor, partiya, harakat, konflikt, inventarizatsiya va kassir uchun tannarxsiz DTO sxemalari
+- `packages/db-local/src/schema/index.ts` — 7 ta yangi jadval (`FACT`/`MONOTONE`/`LOCAL`), `trackBatches`, `negativeStockPolicy`, yagona yozuvchi izohi
+- `packages/db-local/drizzle/0004_stock.sql`, `drizzle/meta/0004_snapshot.json`, `drizzle/meta/_journal.json` — xavfsiz `ALTER TABLE`, yangi jadvallar va `FACT`/`MONOTONE` triggerlar migratsiyasi
+- `packages/db-local/src/writers.ts` — `insertMonotone`, `updateMonotone` va umumiy mutable yozuvchi helper
+- `packages/db-local/src/stock-migrations.ts`, `scripts/check-migrations.mjs` — `buildStockMonotoneTriggersSql` va `assertStockMigrationsComplete` (`db:check` himoyasi)
+- `packages/db-local/src/connection.ts` — `temp_store = MEMORY` va `cache_size = -16384` pragmalari
+- `packages/db-local/src/catalog-repo.ts`, `catalog.test.ts` — `trackBatches` + `STOCK_COSTING_LOCKED`, FTS5 `ORDER BY f.rank ASC, f."product_id" ASC` / `COUNT(*) OVER()` yagona o'tish va 30 bir xil mahsulot sahifalash testi
+- `packages/db-local/src/stock-repo.ts`, `stock.test.ts` — `SqliteStockStore`, `rebuildStockProjections()`, S1–S4 va 25-run stateful SQLite parity testi
+- `packages/db-local/src/index.ts`, `index.test.ts` — eksportlar, `0003 -> 0004` jonli baza yangilash testi va S3 salbiy trigger isbotlari
+- `apps/hub/src/error-handler.ts`, `catalog-service.ts`, `index.ts`, `routes.ts`, `server.ts` — stock xatolari mapping'i (`400`/`404`/`409`) va servis ulanishi
+- `apps/hub/src/stock-service.ts`, `stock-routes.ts`, `stock.test.ts` — HTTP endpointlar, RBAC va kassir DTO izolyatsiyasi testi
 
-2. **`batches`** (`tableClass: 'FACT'`, **`tenantScope: 'store'`**):
-   - Umumiy FACT sinxron ustunlari (`id`, `organization_id`, `store_id`, `device_id`, `hlc`, `created_at_ms`).
-   - `product_id` (`sqliteUuidV7 notNull -> products.id`), `variant_id` (`sqliteUuidV7 nullable -> product_variants.id`).
-   - `batch_number` (`text nullable`), `expiry_date_ms` (`sqliteUnixMs nullable`).
-   - `initial_qty` (`sqliteQuantity notNull`, `CHECK (initial_qty > 0)`).
-   - `initial_cost_value` (`sqliteMoney notNull`, `CHECK (initial_cost_value >= 0)`) — birlik tannarx emas, partiyaning **umumiy boshlang'ich qiymati** tiyinda.
-   - `supplier_id` (`sqliteUuidV7 nullable`, T1.8 uchun tayyor ustun).
-   - Indeks: `idx_batches_store_prod_fifo` (`(organization_id, store_id, product_id, variant_id, hlc, id)`).
+### Migratsiyalar
 
-3. **`stock_moves`** (`tableClass: 'FACT'`, **`tenantScope: 'store'`**):
-   - Umumiy FACT sinxron ustunlari.
-   - `product_id` (`sqliteUuidV7 notNull -> products.id`), `variant_id` (`sqliteUuidV7 nullable -> product_variants.id`), `batch_id` (`sqliteUuidV7 nullable -> batches.id`).
-   - `qty_delta` (`sqliteQuantity notNull`, `CHECK (qty_delta <> 0)`) — kirim/qaytarish/musbat inventarizatsiya `> 0`, savdo/chiqim/manfiy tuzatish `< 0`.
-   - `cost_value_delta` (`sqliteMoney notNull`) — ishorali qiymat snapshot'i (`CHECK ((qty_delta > 0 AND cost_value_delta >= 0) OR (qty_delta < 0 AND cost_value_delta <= 0))`).
-   - `reason` (`text notNull`): `'initial' | 'purchase' | 'sale' | 'return' | 'inventory' | 'adjustment' | 'damaged' | 'broken' | 'personal' | 'lost'` (GEMINI.md 8-bo'lim T1.2 dagi barcha 10 sabab).
-   - `source_type` (`text notNull`: `'stock_entry' | 'inventory_count' | 'sale' | 'return' | 'purchase' | 'adjustment'`), `source_id` (`sqliteUuidV7 notNull`).
-   - `created_by_user_id` (`sqliteUuidV7 notNull -> users.id`), `note` (`text nullable`).
-   - Indekslar: `(organization_id, store_id, product_id, variant_id, hlc, id)`, `(organization_id, store_id, batch_id, hlc, id)`, `(organization_id, store_id, source_type, source_id)`.
-   - FACT sinfi sabab `UPDATE` va `DELETE` SQLite trigger bilan taqiqlanadi; tuzatish faqat teskari harakat bilan.
+- `packages/db-local/drizzle/0004_stock.sql`:
+  - `local_hub_config` ga `negative_stock_policy TEXT NOT NULL DEFAULT 'warn'` qo'shadi (`ALTER TABLE`).
+  - `products` ga `track_batches INTEGER NOT NULL DEFAULT 0` qo'shadi (`ALTER TABLE`, mavjud qatorlar va FTS triggerlar buzilmaydi).
+  - `batches`, `stock_moves`, `inventory_counts`, `inventory_count_lines`, `local_stock_balances`, `local_batch_balances`, `local_stock_conflicts` jadvallari va `FACT`/`MONOTONE` triggerlarini yaratadi (`check-migrations.mjs` da 0 diff).
 
-4. **`inventory_counts` va `inventory_count_lines`** (`tableClass: 'MONOTONE'`, **`tenantScope: 'store'`**):
-   - `inventory_counts`: `status` (`'open' | 'finalized' | 'cancelled'`), `started_by_user_id`, `finalized_by_user_id` (nullable), `finalized_at_ms` (`sqliteUnixMs nullable`), `note`. SQLite `BEFORE UPDATE` triggeri `OLD.status <> 'open'` bo'lganda har qanday o'zgartirishni `RAISE(ABORT, ...)` bilan bloklaydi (haqiqiy MONOTONE kafolati).
-   - `inventory_count_lines`: `count_id`, `product_id`, `variant_id`, `expected_qty_at_start` (`sqliteQuantity notNull`), `counted_qty` (`sqliteQuantity nullable`), `adjustment_qty` (`sqliteQuantity nullable`, yakunlashda `counted_qty - expected_qty_at_start` yoziladi).
+### Qabul mezonlari
 
-5. **`local_stock_balances` va `local_batch_balances`** (`tableClass: 'LOCAL'`, `tenantScope: 'store'`):
-   - Sinxronlanmaydi (`LOCAL`), faqat ledgerdan yangilanadi va `rebuildStockProjections()` bilan noldan quriladi.
-   - `local_stock_balances`: `store_id`, `product_id`, `variant_id` (nullable; partial unique indekslar variantli/variantsiz uchun), `qty_on_hand` (`sqliteQuantity`), `total_value` (`sqliteMoney >= 0`), `deficit_qty` (`sqliteQuantity >= 0`), `provisional_deficit_value` (`sqliteMoney >= 0`), `cost_variance_value` (`sqliteMoney`, manfiy qoldiq yoki kechikkan sinxron farqi uchun), `last_unit_cost` (`sqliteMoney nullable`), `updated_at_ms`.
-   - `local_batch_balances`: `store_id`, `batch_id` (unique), `product_id`, `variant_id`, `hlc` (FIFO tartib tezligi uchun), `remaining_qty` (`sqliteQuantity >= 0`), `remaining_value` (`sqliteMoney >= 0`).
+- [x] **T1.1 test qarzi (`EAN-8` + `FTS5` tartibi)** — `packages/domain/src/catalog.test.ts` (`F3 & GS1: verifies GS1 check digits...`) va `packages/db-local/src/catalog.test.ts` (`FTS5 pagination stays deterministic without drops or duplicates when 30 products share identical text & rank`).
+- [x] **Proyeksiya = ledger yig'indisi va qayta qurish natijasi teng (0 outbox)** — `packages/db-local/src/stock.test.ts`: harakatlar va qayta qurishdan keyin `qtyOnHand === SUM(qty_delta)`, `totalValue === SUM(batch.remainingValue)` va `rebuildProjections()` davomida outbox o'zgarmaydi (`(g) property test...`, `(d) out-of-order HLC replay...`).
+- [x] **Qo'lda hisoblangan misollar** — `packages/domain/src/stock.test.ts` hamda `packages/db-local/src/stock.test.ts` (`enforces unit rules, unlimited product blocks, STOCK_COSTING_LOCKED, FACT immutability, and worked manual FIFO & average examples`):
+  - `worked example #1: FIFO negative stock unbatched deficit and later closing receipt without losing 1 tiyin` (FIFO + manfiy qoldiqdan keyingi yopilish)
+  - `worked example #2: indivisible 10,000 / 3 weighted average cost drains 3,333 then exact remainder 6,667` (bo'linmas o'rtacha tannarxda 1 tiyin yo'qolmasligi)
+- [x] **S1 (kutilgan qoldiq har qator sanalgan paytda UoW ichida olinadi, qisman sanoq `NULL`)** — `packages/db-local/src/stock.test.ts`: `S1 & S3: snapshots expected_qty_at_count at line count time (cases a, b, c + partial) and blocks post-finalize line mutations` (a: 10→2 sotildi→8 sanaldi→yakun 8; b: 10→9 sanaldi→2 sotildi→yakun 7; c: bir qatorni ikki marta sanash; hamda `NULL` sanalmagan mahsulot nolga tushirilmasligi).
+- [x] **S2 (proyeksiya CHECK'siz, partiya oshsa kamomadga o'tadi + `local_stock_conflicts`)** — `packages/db-local/src/stock.test.ts`: `S2 & S4: rebuildStockProjections survives over-consumed batches & unknown surplus costs, logging owner conflicts accurately` (xom SQL bilan bitta partiyani ortiqcha ishlatuvchi `stock_moves` kiritilgandan keyin `rebuildStockProjections()` xatosiz tugaydi va `BATCH_OVERCONSUMED` konflikti yoziladi; `GEMINI.md` va `schema/index.ts` izohida F2 qoidasi qayd etilgan).
+- [x] **S3 (`inventory_counts` va `inventory_count_lines` triggerlari)** — `packages/db-local/src/stock.test.ts` (`S1 & S3...` ichida `finalized` va `cancelled` sanoq qatoriga xom SQL `INSERT`/`UPDATE` urinishi `SQLite` trigger tomonidan rad etilishi) va `packages/db-local/src/index.test.ts` (`F4 negative proof...` da `assertStockMigrationsComplete` salbiy isbotlari: `INSERT` va `UPDATE` triggeri olib tashlansa `db:check` yiqiladi).
+- [x] **S4 (ortiqcha sanoq tannarxi)** — `packages/domain/src/stock.test.ts` (`S4: computes surplus inventory cost by mode and flags unknown cost cleanly`) va `packages/db-local/src/stock.test.ts` (`S2 & S4...`): FIFO da `last_unit_cost` bilan yangi partiya, o'rtacha rejimda joriy o'rtacha narx, tannarx noma'lum bo'lsa `0` tiyin + `UNKNOWN_COST_SURPLUS` konflikti.
+- [x] **Property testlar tavsifi**:
+  1. `packages/domain/src/stock.test.ts` — `property test: inbound = outbound + remaining + variance - provisional holds to exact tiyin across random sequences` (`fast-check`, 200 ta tasodifiy ketma-ketlik): har xil `trackBatches` (FIFO/average), `policy` (`warn`/`block`), vaqt o'zgarishi va har xil kirim/chiqim/ortiqcha/kamomad qadamlaridan so'ng ikki yoqlama qiymat tengligi (`SUM(inboundCost) === SUM(outboundCost) + remainingValue - provisionalDeficitValue + costVarianceValue`) va `totalQty >= 0 => deficitQty === 0` invariantsiz tiyingacha tekshiriladi.
+  2. `packages/db-local/src/stock.test.ts` — `(g) property test: live SQLite state & rebuildStockProjections match independent naive ledger model exactly across random ops` (`fast-check`, 25 ta to'liq WAL disk bazasi ssenariysi): tasodifiy kirim, chiqim (`warn`/`block`) va inventarizatsiya amallaridan keyin jonli SQLite `local_stock_balances`/`local_batch_balances`, `stock_moves` ledger yig'indisi hamda mustaqil sodda model bir-biriga tengligi va `rebuildStockProjections()` 0 outbox bilan aynan shu natijani qayta qurishi tekshiriladi.
+- [x] **RBAC va kassirdan tannarx yashirish** — `apps/hub/src/stock.test.ts` (`enforces cashier cost-hiding on /stock/balances, blocks write/valuation endpoints with 403, and supports manager workflow`): kassir `/stock/balances` dan faqat miqdorlarni oladi (tannarx/qiymat/farq kalitlari umuman yo'q), `/stock/valuation`, `/stock/batches`, `/stock/moves`, `/stock/moves/*`, `/stock/inventory-counts/*` da `403 AUTH_FORBIDDEN`.
+- [x] **0003 → 0004 jonli baza yangilanishi** — `packages/db-local/src/index.test.ts` (`cleanly upgrades a pre-populated 0003 database to 0004 without losing products or FTS triggers`).
 
-6. **`unlimited` va birlik siyosati:**
-   - `product.unlimited === true` mahsulotlarda qoldiq yuritilmaydi; ombor kirim/chiqim/inventarizatsiya harakatlari `DomainError('UNLIMITED_PRODUCT_STOCK_NOT_TRACKED')` qaytaradi. T1.4 savdoda `unlimited` qatorlar `stock_moves` yaratmaydi va qoldiq tekshiruvidan ozod bo'ladi.
-   - Har harakatda `abs(qty_delta)` T1.1 `validateQuantityForUnit(product.unit, absQty)` orqali tekshiriladi (`dona`/`qadoq` kasrsiz; `kg`/`litr` 0.001 aniqlikda).
+### Test natijasi (buyruq va haqiqiy chiqish)
 
-7. **Manfiy qoldiq siyosati konfiguratsiyasi:**
-   - `local_hub_config` ga `negative_stock_policy` (`'warn' | 'block'`, default `'warn'`) qo'shiladi (`F2` da sinxron do'kon sozlamasiga ko'tariladi).
+1. Lokal `pnpm verify` (`facc046` ustida):
+   - `prettier --check .` → `All matched files use Prettier code style!`
+   - `turbo run build` → `17 successful, 17 total`
+   - `eslint .` → 0 xato
+   - `turbo run typecheck` → `22 successful, 22 total`
+   - `turbo run db:check` → PostgreSQL va SQLite migratsiyalar bilan 0 diff (`19 successful, 19 total`)
+   - `vitest run` → `Test Files 29 passed | 1 skipped (30)`, `Tests 150 passed | 2 skipped (152)` (skip: `packages/db-cloud/src/pg-rls.test.ts` lokal Windows'da Docker yo'qligi uchun)
+   - `catalog.test.ts` 50k WAL natijasi: `[T1.1 Perf 50k products / 70k barcodes WAL] seedMs=5834.5 scan(n=250): p50=0.429ms p95=0.713ms | search(n=100): p50=19.485ms p95=22.701ms`
+   - `depcruise --config .dependency-cruiser.cjs apps/*/src packages/*/src` → `no dependency violations found (197 modules, 556 dependencies cruised)`
 
----
+2. GitHub Actions CI (`facc046db0511d6fc2b1ea12e7aa4ebe293e0486`):
+   - Workflow runs: https://github.com/Shaxobiddin-Github/Mezon/actions/runs/42834263476 (PR) va https://github.com/Shaxobiddin-Github/Mezon/actions/runs/42834251233 (push)
+   - `Verify (ubuntu-latest)`: `success` — https://github.com/Shaxobiddin-Github/Mezon/actions/runs/42834263476/job/129892145753
+   - `Verify (windows-latest)`: `success` — https://github.com/Shaxobiddin-Github/Mezon/actions/runs/42834263476/job/129892145657
+   - `Verify PostgreSQL RLS (ubuntu-latest)`: `success` — https://github.com/Shaxobiddin-Github/Mezon/actions/runs/42834263476/job/129892145427
+   - `Build & E2E Desktop Installer (windows-latest)`: `success` — https://github.com/Shaxobiddin-Github/Mezon/actions/runs/42834263476/job/129892145132
 
-### b) Tannarx aniqligi: tiyin yo'qolmasligi (`packages/domain/src/stock.ts`)
+### Tekshirilmagan narsalar
 
-- Birlik narxini ko'paytirib yaxlitlash qoldig'ini yo'qotmaslik uchun har bir partiya va o'rtacha havza **`remaining_qty` + `remaining_value`** (tiyin) saqlaydi:
-  - Qisman chiqim (`takeQty < remQty`):
-    `takeVal = divideRoundHalfAwayFromZero(remVal * takeQty, remQty)`
-    Yangi qoldiq: `remQty' = remQty - takeQty`, `remVal' = remVal - takeVal`.
-  - Oxirgi chiqim (`takeQty === remQty`):
-    **`takeVal = remVal`** (qolgan barcha tiyinlar oxirgi birliklar bilan chiqadi).
-- **FIFO (`track_batches = true`):** eng eski aktiv partiyalar (`remaining_qty > 0`, tartib `hlc ASC, id ASC`) ketma-ket yechiladi; bitta chiqim bir nechta partiyani ishlatsa har partiya bo'yicha alohida `stock_moves` satri (aniq `batch_id`, `qty_delta`, `cost_value_delta`) yoziladi.
-- **O'rtacha tannarx (`track_batches = false`):** xuddi shu formula mahsulotning `(qty_on_hand, total_value)` qoldig'iga qo'llanadi.
-- **Invariant (`fast-check` property test):** Har partiya va har mahsulot uchun:
-  `SUM(kirim qiymatlari) === SUM(chiqim qiymatlari) + qoldiq_qiymat + cost_variance_value`
-  Musbat qoldiqli barcha ketma-ketliklarda `cost_variance_value === 0n` va `SUM(kirim) === SUM(chiqim) + qoldiq_qiymat` tiyinigacha teng.
+- `packages/db-cloud/src/pg-rls.test.ts` (2 ta test) lokal Windows mashinasida Docker bo'lmagani uchun skip qilindi; lekin GitHub Actions CI dagi `Verify PostgreSQL RLS (ubuntu-latest)` job'ida to'liq bajarildi va muvaffaqiyatli o'tdi.
 
----
+### Qilingan taxminlar
 
-### c) Manfiy qoldiq siyosati va qo'lda hisoblangan misollar
+- F1 bosqichida `warehouses` jadvali bo'lmagani sababli `batches` va `stock_moves` bevosita `store_id` bilan bog'landi (tasdiqlangan reja bo'yicha).
+- `products_fts` faol (`deleted_at_ms IS NULL`) mahsulotlar bilan `trg_products_fts_after_insert`/`update` va `rebuildCatalogSearchIndex` orqali sinxron ushlanadi; kategoriyasiz FTS5 qidiruvda `products_fts` ga to'g'ridan-to'g'ri murojaat qilish F4 invarianti bilan ta'minlanadi.
 
-- **Siyosat va standart qiymat:**
-  - `negative_stock_policy` `local_hub_config` da saqlanadi; standart qiymati **`'warn'`** (GEMINI.md 3.2: savdo to'xtamasligi uchun).
-  - `'warn'` rejimida qoldiq 0 dan pastga tushsa harakat bajariladi va natijada `{ warnings: [{ code: 'NEGATIVE_STOCK', ... }] }` qaytariladi.
-  - `'block'` rejimida (yoki so'rov explicit `policy: 'block'` ko'rsatsa) `qty > available` bo'lganda tranzaksiya to'liq rollback qilinadi (`409 INSUFFICIENT_STOCK`).
-- **Manfiy qoldiqda FIFO va O'rtacha tannarx ("partiyasiz kamomad" + keyingi kirim yopishi):**
-  1. Mavjud musbat qoldiq/partiyalar avval 0 gacha aniq yechiladi.
-  2. Yetmagan `deficitStep` qismi uchun `stock_moves` ga `batch_id = NULL` ("partiyasiz kamomad") yoziladi; chiqim qiymati snapshot'i oxirgi ma'lum birlik tannarxi (`last_unit_cost ?? 0n`) asosida `multiply(last_unit_cost, deficitStep)` qilib olinadi (`provisional_deficit_value += provisionalCost`, `deficit_qty += deficitStep`).
-  3. Keyingi kirim (`+inQty`, `+inVal`) kelganda avval `coverQty = min(inQty, deficit_qty)` kamomadni yopadi (`coverVal = coverQty === inQty ? inVal : divideRoundHalfAwayFromZero(inVal * coverQty, inQty)`):
-     - **FIFO da:** yangi partiyadan faqat qolgan `netQty = inQty - coverQty`, `netVal = inVal - coverVal` `local_batch_balances` ga tushadi (`netQty = 0` bo'lsa partiya darhol tugagan hisoblanadi).
-     - **O'rtacha da:** `(qty_on_hand, total_value)` ga faqat `netQty`, `netVal` qo'shiladi (`qty_on_hand` kamomaddan keyingi musbat/nol holatga o'tadi).
-     - `provisional_portion` va `coverVal` orasidagi farq (`coverVal - provisional_portion`) `cost_variance_value` ga yig'iladi; oldingi `stock_moves` snapshot'i o'zgartirilmaydi.
+### Takliflar
 
-- **Qo'lda hisoblangan misollar:**
-  - **1-misol (FIFO manfiy → keyingi kirim):**
-    1. Partiya A kirim: `+2 dona`, `20 000` tiyin (`last_unit_cost = 10 000`). Qoldiq: `qty = 2`, `val = 20 000`.
-    2. Savdo chiqim: `-5 dona` (`warn`): Partiya A to'liq chiqadi (`2 dona = 20 000` tiyin); kamomad `3 dona` (`batch_id = NULL`, taxminiy `3 × 10 000 = 30 000`). Jami savdo snapshot = `-50 000` tiyin. Proyeksiya: `qty = -3`, `val = 0`, `deficit_qty = 3`, `provisional_deficit_value = 30 000`.
-    3. Partiya B kirim: `+5 dona`, `60 000` tiyin (`12 000/dona`). Kamomad yopish: `coverQty = 3`, `coverVal = divide(60 000 × 3, 5) = 36 000` tiyin. Partiya B qoldig'i: `2 dona`, `60 000 - 36 000 = 24 000` tiyin. Farq `cost_variance_value = 36 000 - 30 000 = +6 000` tiyin. Tekshiruv: `kirim (20 000 + 60 000 = 80 000) === chiqim (50 000) + qoldiq (24 000) + farq (6 000) = 80 000`.
-  - **2-misol (O'rtacha tannarx, bo'linmas tiyin qoldig'i):**
-    1. Kirim: `+3 kg`, `10 000` tiyin (`3 333.33...` tiyin/kg). Proyeksiya: `qty = 3000`, `val = 10 000`.
-    2. Chiqim `-1 kg` (`1000`): `takeVal = round(10 000 × 1000 / 3000) = 3 333`. Qoldiq: `qty = 2000`, `val = 6 667`.
-    3. Chiqim `-2 kg` (`2000`, oxirgi qism): **`takeVal = 6 667`** (qolgan barcha tiyin). Qoldiq: `0`, `0`. Tekshiruv: `3 333 + 6 667 = 10 000`.
+- `T1.4` (`completeSale`) da savdo tranzaksiyasini yozishda ham `SqliteStockStore` ning ichki session helper'lari (`applyOutboundInsideSessionSync`) orqali to'g'ridan-to'g'ri bitta `uow.execute` ichida `sale`, `sale_line`, `stock_move` va `local_stock_balances` ni atomar bog'lash maqsadga muvofiq.
 
----
+### Egasi yoki Claude qarori kerak bo'lgan savollar
 
-### d) Tartib va sinxron (`HLC`)
-
-- **Qayta qurish tartibi:** `rebuildStockProjections()` barcha `batches` va `stock_moves` yozuvlarini qat'iy **`(hlc ASC, id ASC)`** tartibida qayta ijro etadi — shu sababli barcha qurilmalarda bir xil deterministik natija chiqadi.
-- **Snapshot o'zgarmasligi:** Allaqachon yozilgan `stock_moves.cost_value_delta` (`FACT`) hamda kelajakdagi `sale_line` tannarx snapshot'lari kechikkan sinxron hodisa kelganda ham **hech qachon tahrirlanmaydi**.
-- **Farq hisobga olinishi:** Kechikkan sinxron kirim (yoki chiqim) HLC tartibida o'tmishga tushib qayta qurilganda, haqiqiy qayta hisoblangan zaxira qiymati va oldin snapshotted bo'lgan harakatlar qiymati orasidagi farq **`local_stock_balances.cost_variance_value`** ustunida aks etadi. Natijada zaxira qoldig'i va partiya qoldig'i har doim ledger yig'indisiga, umumiy qiymat tenglamasi esa tiyinigacha muvozanatda qoladi.
-
----
-
-### e) Inventarizatsiya
-
-- `startInventoryCount`: bitta UoW da `inventory_counts` (`status: 'open'`) va har mahsulot uchun hozirgi `local_stock_balances.qty_on_hand` dan **`expected_qty_at_start`** snapshot'ini yozadi.
-- Sanoq davomida kassa savdolari va oddiy harakatlar to'sqinliksiz davom etadi.
-- `finalizeInventoryCount`: bitta UoW da har sanalgan qator uchun:
-  **`adjustment = counted_qty - expected_qty_at_start`**
-  Agar `adjustment <> 0n` bo'lsa `reason: 'inventory'`, `source_type: 'inventory_count'`, `source_id: count.id` bilan `stock_moves` (va musbat FIFO farqida partiya) yoziladi; `inventory_counts.status = 'finalized'` qilinadi (MONOTONE trigger qayta yakunlashni bloklaydi).
-- **Test:** `10 dona` qoldiq bilan sanoq ochiladi (`expected_qty_at_start = 10`), sanoq paytida `2 dona` savdo bo'ladi (qoldiq `8`), sanoqda `9` sanalsa `adjustment = 9 - 10 = -1` -> yakuniy qoldiq `10 - 2 - 1 = 7` chiqishi tekshiriladi.
-
----
-
-### f) Hub API va RBAC (`packages/contracts`, `packages/domain`, `apps/hub`)
-
-- **Ruxsatlar (`HubPermission`):**
-  - `'stock:read'` → `owner`, `manager`, `cashier`
-  - `'stock:write'` → `owner`, `manager` (`cashier` ga YO'Q)
-- **Tannarx himoyasi (`GEMINI.md` 3.4):**
-  - `GET /stock/balances` (`stock:read`): rolga ko'ra kassirga `CashierStockBalanceSchema` (faqat `productId`, `variantId`, `qtyOnHand`, `unlimited`, `minStock`, `isLowStock` — **`totalValue`/`unitCost`/`profit`/`costVariance` umuman yo'q**!), `owner`/`manager` ga ham alohida tannarx/qiymat endpointlari.
-  - `GET /stock/valuation`, `GET /stock/batches`, `GET /stock/moves`, `POST /stock/moves/in`, `POST /stock/moves/out`, `POST /stock/projections/rebuild`, `/stock/inventory-counts/*` barchasi **`stock:write`** bilan himoyalangan — kassir **`403 AUTH_FORBIDDEN`** oladi.
-  - API testida kassir javoblarida `costValue`, `totalValue`, `initialCostValue`, `unitCost`, `costVarianceValue`, `profit` kalitlari umuman yo'qligi qat'iy tekshiriladi.
-
----
-
-### g) Qayta qurish (`rebuildStockProjections`)
-
-- `rebuildStockProjections(connection, { organizationId, storeId })`: mutex ostida outbox hodisasiz `local_stock_balances` va `local_batch_balances` ni o'chirib, `batches` + `stock_moves` (`ORDER BY hlc ASC, id ASC`) asosida to'liq noldan tiklaydi.
-- **`fast-check` property test:** tasodifiy kirim, partiyali FIFO chiqim, o'rtacha chiqim, qaytarish, manfiy qoldiq + yopish, inventarizatsiya va HLC bo'yicha tartibsiz yozuvlardan keyin oddiy mustaqil referens model bilan `qty_on_hand`, har partiya `remaining_qty`/`remaining_value` va mahsulot qiymati (ham jonli, ham `rebuildStockProjections()` dan keyin) aynan solishtiriladi.
-
----
-
-### Takliflar va ochiq savollar
-
-1. **`products.track_batches` va metod almashish qoidasi:** `products` jadvaliga `track_batches BOOLEAN DEFAULT false` ustunini qo'shish va mahsulot bo'yicha allaqachon `stock_moves` mavjud bo'lsa `track_batches` ni o'zgartirishni `409` bilan bloklash taklif etiladi. Tasdiqlaysizmi?
-2. **`F1` da `warehouse_id` o'rniga `store_id`:** Bitta do'konda bitta ombor bo'lgani uchun `stock_moves` va `batches` da hozircha `store_id` (`tenantScope: 'store'`) bilan cheklanish, ko'p ombor (`warehouses` jadvali) ni `F5` ga qoldirish taklif etiladi. Tasdiqlaysizmi?
+- Yo'q. PR #9 merge qilish uchun Claude `QABUL` qarori kutilmoqda.
