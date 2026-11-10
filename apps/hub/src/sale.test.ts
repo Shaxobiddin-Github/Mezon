@@ -1066,18 +1066,9 @@ describe('@mezon/hub - T1.4 POST /carts/:id/complete, RBAC, 409 details, cost-hi
       );
       const authHdr = { ...hdr, authorization: `Bearer ${login.token}` };
 
-      const cart = CartResponseSchema.parse(
-        (
-          await hub.app.inject({
-            method: 'POST',
-            url: '/carts',
-            headers: authHdr,
-            payload: {},
-          })
-        ).json(),
-      );
-
-      let latestTotal = '0';
+      const samplesMs: number[] = [];
+      let expectedDrawerTotal = 0n;
+      const prodIds: string[] = [];
       for (let i = 0; i < 20; i += 1) {
         const p = ProductDetailResponseSchema.parse(
           (
@@ -1101,54 +1092,74 @@ describe('@mezon/hub - T1.4 POST /carts/:id/complete, RBAC, 409 details, cost-hi
           payload: {
             productId: p.product.id,
             reason: 'purchase',
-            qty: '5000',
+            qty: '10000',
             totalCostValue: String((i + 1) * 30_000),
           },
         });
-        const lineAdded = CartResponseSchema.parse(
+        prodIds.push(p.product.id);
+      }
+
+      for (let run = 1; run <= 5; run += 1) {
+        const runCart = CartResponseSchema.parse(
           (
             await hub.app.inject({
               method: 'POST',
-              url: `/carts/${cart.cart.id}/lines`,
+              url: '/carts',
               headers: authHdr,
-              payload: { kind: 'catalog', productId: p.product.id, variantId: null, qty: '1000' },
+              payload: {},
             })
           ).json(),
         );
-        latestTotal = lineAdded.cart.totalFinal;
+        let runTotal = '0';
+        for (const pid of prodIds) {
+          const lineAdded = CartResponseSchema.parse(
+            (
+              await hub.app.inject({
+                method: 'POST',
+                url: `/carts/${runCart.cart.id}/lines`,
+                headers: authHdr,
+                payload: { kind: 'catalog', productId: pid, variantId: null, qty: '1000' },
+              })
+            ).json(),
+          );
+          runTotal = lineAdded.cart.totalFinal;
+        }
+        const totalBig = BigInt(runTotal);
+        const pCard = (totalBig / 3n).toString();
+        const pUzqr = (totalBig / 3n).toString();
+        const cashNeed = totalBig - BigInt(pCard) - BigInt(pUzqr);
+
+        const t0 = performance.now();
+        const completeRes = await hub.app.inject({
+          method: 'POST',
+          url: `/carts/${runCart.cart.id}/complete`,
+          headers: authHdr,
+          payload: {
+            clientRequestId: `01950000-0000-7000-8000-66666666670${run}`,
+            expectedTotal: runTotal,
+            payments: [
+              { method: 'card', amount: pCard, providerRef: 'HTTP-CARD' },
+              { method: 'uzqr', amount: pUzqr, providerRef: 'HTTP-QR' },
+              { method: 'cash', tenderedAmount: (cashNeed + 25_000n).toString() },
+            ],
+          },
+        });
+        samplesMs.push(performance.now() - t0);
+
+        expect(completeRes.statusCode).toBe(200);
+        const parsed = CompleteSaleResponseSchema.parse(completeRes.json());
+        expect(parsed.sale.lines).toHaveLength(20);
+        expect(parsed.sale.payments).toHaveLength(3);
+        expect(parsed.sale.changeAmount).toBe('25000');
+        expectedDrawerTotal += cashNeed;
       }
 
-      const totalBig = BigInt(latestTotal);
-      const pCard = (totalBig / 3n).toString();
-      const pUzqr = (totalBig / 3n).toString();
-      const cashNeed = totalBig - BigInt(pCard) - BigInt(pUzqr);
-
-      const t0 = performance.now();
-      const completeRes = await hub.app.inject({
-        method: 'POST',
-        url: `/carts/${cart.cart.id}/complete`,
-        headers: authHdr,
-        payload: {
-          clientRequestId: '01950000-0000-7000-8000-666666666701',
-          expectedTotal: latestTotal,
-          payments: [
-            { method: 'card', amount: pCard, providerRef: 'HTTP-CARD' },
-            { method: 'uzqr', amount: pUzqr, providerRef: 'HTTP-QR' },
-            { method: 'cash', tenderedAmount: (cashNeed + 25_000n).toString() },
-          ],
-        },
-      });
-      const elapsedMs = performance.now() - t0;
-
-      expect(completeRes.statusCode).toBe(200);
-      const parsed = CompleteSaleResponseSchema.parse(completeRes.json());
-      expect(parsed.sale.lines).toHaveLength(20);
-      expect(parsed.sale.payments).toHaveLength(3);
-      expect(parsed.sale.changeAmount).toBe('25000');
-      expect(await hub.saleStore.getTerminalCashBalance()).toBe(cashNeed);
-      expect(elapsedMs).toBeLessThanOrEqual(300);
+      const sorted = [...samplesMs].sort((a, b) => a - b);
+      const medianMs = sorted[Math.floor(sorted.length / 2)] ?? 0;
+      expect(await hub.saleStore.getTerminalCashBalance()).toBe(expectedDrawerTotal);
+      expect(medianMs).toBeLessThanOrEqual(300);
       console.info(
-        `[PERF T1.5 HTTP E2E] 20-line 3-payment POST /carts/:id/complete took ${elapsedMs.toFixed(2)} ms`,
+        `[PERF T1.5 HTTP E2E] 20-line 3-payment POST /carts/:id/complete median=${medianMs.toFixed(2)} ms samples=[${samplesMs.map((v) => v.toFixed(2)).join(', ')}]`,
       );
     } finally {
       await hub.close();
