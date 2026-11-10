@@ -1,116 +1,136 @@
-## Hisobot: T0.7 (hamda qayta ishlash `R1`, `R2`, T0.6 R1 test qarzi)
+## T0.7 Merge xulosasi (F0 yakuni)
 
-Branch / PR: `gemini/T0.7-electron-shell` → [PR #7](https://github.com/Shaxobiddin-Github/Mezon/pull/7)
-Commitlar:
-1. `2506ecf` — `T0.6 test qarzi: R1 failed_attempts tekshiruvi`
-2. `55fb963` — `T0.7: Electron qobig'i, utilityProcess hub, fuse va Windows NSIS o'rnatuvchi`
-3. `a148a70` — `T0.7: R1 xato CORS va R2 ruxsat bloki tuzatishlari`
-4. `1d61486` — `T0.7: R2 E2E ruxsat tekshiruvini boshsiz CI ga moslash`
+- **PR #7** (`gemini/T0.7-electron-shell`, bosh SHA `fd07ecb5243291bf34b1fc4145b2c3f5e0af7b6e`, barcha 8 CI check run `success` — Run [#42819904716](https://github.com/Shaxobiddin-Github/Mezon/actions/runs/42819904716) va [#42819895783](https://github.com/Shaxobiddin-Github/Mezon/actions/runs/42819895783), artifact `mezon-desktop-win-x64-nsis`) `T0.7: Electron qobig'i va Windows o'rnatuvchi` nomi bilan Squash and merge qilindi.
+- **Merge commit SHA (`main`):** `0b65a438f8de4bcf03a93b28eb8301066a54de73`
+- **`gemini/T0.7-electron-shell` branch:** masofadan va lokaldan o'chirildi.
+- **Yangi branch (`main` @ `0b65a43` dan):** `gemini/T1.1-catalog`
 
 ---
 
-### Nima qilindi
+## Reja: T1.1 — Katalog
 
-#### A. Qayta ishlash (`f59dbfb`) tuzatishlari (`a148a70`, `1d61486`)
+> **Eslatma:** Bu bosqichda faqat reja berilmoqda; Claude tasdig'isiz kod yozilmaydi.
 
-1. **R1 (YUQORI) — Barcha status kodlari (4xx / 5xx) da `app://mezon` uchun CORS va `Retry-After` eksporti:**
-   - `apps/hub/src/security.ts` dagi `onSend` hook'idan `reply.statusCode < 400` cheklovi olib tashlandi: ruxsat ro'yxatidagi `app://` origin uchun barcha javoblarda (2xx, 401, 403, 429, 500) `Access-Control-Allow-Origin: app://mezon`, `Access-Control-Expose-Headers: Retry-After` va `Vary: Origin` qo'shiladi (`OPTIONS` preflight javobida ham `Access-Control-Expose-Headers: Retry-After` beriladi).
-   - Ro'yxatda yo'q origin (`https://evil.uz`, `app://evil`, `file://`, `null`) uchun barcha CORS sarlavhalari (jumladan `Access-Control-Allow-Origin`, `Access-Control-Expose-Headers`) olib tashlanadi.
-   - `apps/hub/src/hub.test.ts` (`inject`): `app://mezon` bilan `401` (`/auth/me`, `/auth/login`), `403` (kassir `/users`), `429` (`Retry-After >= 1` bilan haqiqiy 5 xato urinish lockout'i) va `500` (`/__test-boom`) da CORS sarlavhalari mavjudligi; `app://evil`, `file://` va `https://evil.uz` da esa 403 va 500 yo'lida ham umuman yo'qligi tekshirildi.
-   - `apps/desktop/e2e/desktop.spec.ts`: renderer (`page.evaluate`) ichidan `POST /auth/login` noto'g'ri PIN da `status === 401`, `error.code === 'AUTH_INVALID_CREDENTIALS'` hamda qayta tiklanishdan keyingi setup + 5 noto'g'ri urinishda `status === 429`, `error.code === 'AUTH_RATE_LIMITED'` va `headers.get('retry-after') >= 1` ni o'qiy olishi tasdiqlandi.
+### a) Ma'lumotlar bazasi jadvallari va sinflari (`packages/db-local`)
 
-2. **R2 (O'RTA) — Electron ruxsat so'rovlarini standart ravishda rad etish:**
-   - `apps/desktop/src/main.ts` (`registerSessionPermissionHandlers`, `app.whenReady()` ichida):
-     - `session.defaultSession.setPermissionRequestHandler((_, permission, cb) => { ... cb(false); })`
-     - `session.defaultSession.setPermissionCheckHandler(() => false)`
-     - `session.defaultSession.setDevicePermissionHandler(() => false)`
-   - `apps/desktop/e2e/desktop.spec.ts`: renderer ichida `Notification.requestPermission()` → `'denied'`, `navigator.permissions.query` (`geolocation`, `camera`) → `'denied'`, `navigator.geolocation.getCurrentPosition` → `code = 1` (`PERMISSION_DENIED`), `navigator.mediaDevices.getUserMedia({ video: true })` → rad etiladi (`NotAllowedError` lokal kamerada / `NotFoundError` boshsiz CI VM da, `mediaGranted === false`). Shu paytda `fetch('http://127.0.0.1:<port>/...')` odatdagidek ishlaydi.
+Barcha 5 ta katalog jadvali **`tenantScope: 'organization'`** bilan `localSchemaRegistry.defineTable(...)` orqali e'lon qilinadi (chunki katalog tashkilot darajasida umumiy; do'kon bo'yicha alohida narx F5'da qo'shiladi — hozirdan `organization` darajasi 50 000 mahsulotni har filialga nusxalamasdan yuritish imkonini beradi). Pul uchun `sqliteMoney`, miqdor uchun `sqliteQuantity`, `INTEGER` tekshiruvlari va T0.5 immutability triggerlari (`assertSqliteTriggersMigrationsComplete`) majburiy.
 
-3. **README.md eslatma:**
-   - Windows da `makensis` 260 belgilik yo'l (`MAX_PATH`) chegarasi sabab repozitoriyani qisqa yo'lda (masalan `D:\mezon`) saqlash haqidagi eslatma qo'shildi.
+1. **`categories`** (`tableClass: 'ATTR'`):
+   - Umumiy ATTR sinxron ustunlari (`id`, `organization_id`, `device_id`, `hlc`, `created_at_ms`, `updated_at_ms`, `deleted_at_ms`).
+   - `name` (`text notNull`), `name_search` (`text notNull` — normalizatsiya qilingan qidiruv nomi).
+   - `parent_id` (`sqliteUuidV7`, nullable — ierarxiya uchun; repo siklik `parent_id` zanjirini rad etadi).
+   - `sort_order` (`sqliteInt notNull default 0`).
+   - Indekslar: bir ota ostidagi faol kategoriyalar nomi noyobligi uchun partial unique indeks `(organization_id, COALESCE(parent_id, ''), name_search) WHERE deleted_at_ms IS NULL` (yoki root/child alohida partial index); ota bo'yicha indeks `(organization_id, parent_id) WHERE deleted_at_ms IS NULL`.
+2. **`products`** (`tableClass: 'ATTR'`):
+   - Umumiy ATTR sinxron ustunlari.
+   - `category_id` (`sqliteUuidV7`, nullable — berilganda o'sha `organization_id` dagi faol kategoriya bo'lishi shart).
+   - `sku` (`text`, nullable — normallashtirilgan artikul).
+   - `name` (`text notNull`), `name_search` (`text notNull`).
+   - `unit` (`text notNull`, SQL `CHECK (unit IN ('dona', 'kg', 'g', 'litr', 'metr', 'm2', 'qadoq'))`).
+   - `unlimited` (`sqliteBoolean notNull default false` — xizmat va cheksiz tovarlar uchun).
+   - `min_stock` (`sqliteQuantity`, nullable — `NULL` ogohlantirish yo'q; aks holda `>= 0n` va birlik qoidasi bo'yicha tekshiriladi).
+   - `has_variants` (`sqliteBoolean notNull default false`).
+   - `sale_price` (`sqliteMoney notNull`, SQL `CHECK (sale_price >= 0)`).
+   - Fiskal maydonlar hozirdan (`GEMINI.md` 8-bo'lim): `mxik` (`text`, nullable), `package_code` (`text`, nullable), `vat_rate_bp` (`sqliteInt notNull default 0`, `CHECK (vat_rate_bp >= 0 AND vat_rate_bp <= 10000)` — `VatRate` basis points).
+   - Indekslar: `uidx_products_org_sku` (`(organization_id, sku) WHERE sku IS NOT NULL AND deleted_at_ms IS NULL`), `idx_products_org_name_search` (`(organization_id, name_search, id) WHERE deleted_at_ms IS NULL`), `idx_products_org_category` (`(organization_id, category_id) WHERE deleted_at_ms IS NULL`).
+3. **`product_variants`** (`tableClass: 'ATTR'`):
+   - Umumiy ATTR sinxron ustunlari.
+   - `product_id` (`sqliteUuidV7 notNull`, `products.id` ga tegishli va o'sha `organization_id` da).
+   - `name` (`text notNull`), `name_search` (`text notNull`).
+   - `sku` (`text`, nullable).
+   - `attributes_json` (`text notNull` — kanonik saralangan JSON atributlar ob'ekti, masalan `{"olcham":"XL","rang":"qora"}`).
+   - `sale_price` (`sqliteMoney`, nullable — `NULL` bo'lsa ota mahsulot `sale_price` ni meros oladi; belgilansa `>= 0`).
+   - Indekslar: `(organization_id, product_id) WHERE deleted_at_ms IS NULL` va `uidx_product_variants_org_sku` (`(organization_id, sku) WHERE sku IS NOT NULL AND deleted_at_ms IS NULL`).
+4. **`product_barcodes`** (`tableClass: 'ATTR'`):
+   - Umumiy ATTR sinxron ustunlari.
+   - `product_id` (`sqliteUuidV7 notNull`), `variant_id` (`sqliteUuidV7`, nullable — berilganda o'sha `product_id` va `organization_id` dagi faol variant bo'lishi shart).
+   - `barcode` (`text notNull` — normallashtirilgan shtrix-kod).
+   - `format` (`text notNull`, `CHECK (format IN ('ean13', 'ean8', 'upca', 'internal', 'other'))`).
+   - **Noyoblik va tezkor skan indeksi:** `UNIQUE INDEX uidx_product_barcodes_org_barcode ON product_barcodes(organization_id, barcode) WHERE deleted_at_ms IS NULL` — tashkilot ichida faol bitta shtrix-kod faqat bitta mahsulot/variant yozuviga bog'lanishini ham kafolatlaydi, ham 70 000 qator ichidan `O(log N)` (< 1–2 ms) da topadi.
+5. **`price_changes`** (`tableClass: 'FACT'`):
+   - Umumiy FACT sinxron ustunlari (`id`, `organization_id`, `device_id`, `hlc`, `created_at_ms`).
+   - `product_id` (`sqliteUuidV7 notNull`), `variant_id` (`sqliteUuidV7`, nullable).
+   - `old_price` (`sqliteMoney`, nullable — yangi mahsulot/variant ochilganda `NULL`, narx tahririda avvalgi `Money`).
+   - `new_price` (`sqliteMoney notNull`, SQL `CHECK (new_price >= 0)`).
+   - `changed_by_user_id` (`sqliteUuidV7 notNull`).
+   - `reason` (`text`, nullable).
+   - Indeks: `(organization_id, product_id, created_at_ms)` tarix so'rovlari uchun.
+   - **Atomik yozish:** Narx belgilash/o'zgartirish (`createProduct`, `updateProduct` narx o'zgarganda, `createVariant`, `updateVariant` narx o'zgarganda) bitta UoW tranzaksiyasida ATTR (`insertAttr`/`updateAttr`) bilan birga `insertFact` orqali `price_changes` + outbox'ga yozadi.
 
-#### B. Avvalgi T0.7 hamda T0.6 R1 ishlari (`2506ecf`, `55fb963`)
-
-- **T0.6 R1 test qarzi (`2506ecf`):** `packages/db-local/src/auth.test.ts` va `apps/hub/src/hub.test.ts` ga `failed_attempts = 0n` va `local_device_auth_state` tekshiruvlari qo'shildi; mutatsiyalar (`Exit code 1`) bilan tasdiqlandi.
-- **Jarayonlar, xavfsizlik, T1–T5 (`55fb963`):** `Electron.utilityProcess.fork` orqali `@mezon/hub` (`electron-worker-entry.mts`), avvalgi portni qayta ishlatish va `EADDRINUSE` fallback + CSP/reload (`T1`), `app://mezon` + strict CSP + sandbox preload + `@electron/fuses` (`T2`), `before-quit` + `query-session-end`/`session-end` + `powerMonitor.shutdown` + WAL `synchronous=FULL` (`T3`), aylanuvchi loglar + Pino redaction (`T4`), `MEZON_DATA_DIR` faqat `!isPackaged && MEZON_E2E=1` (`T5`).
-- **GEMINI.md 2.1 o'lchovlari:** Host Node `v24.21.0` (`modules: "137"`); Electron `45.2.3` ichidagi Node `24.22.2` (`modules: "150"`, Chrome `156.0.8078.80`). `better-sqlite3@13.0.3` (`prebuilds/win32-x64.node`), `@node-rs/argon2@2.2.2` va `koffi@3.3.7` N-API orqali Electron 45 da yuklandi (`verify-electron-abi.mjs`: `sqliteCheck: true`, `argon2Check: true`, `koffiLoaded: true`).
-
----
-
-### O'zgargan fayllar
-
-- `apps/hub/src/security.ts` — `onSend` da `app://` uchun barcha status kodlarida CORS va `Access-Control-Expose-Headers: Retry-After`
-- `apps/hub/src/hub.test.ts` — `401`, `403`, `429` (`Retry-After`), `500` va unallowlisted origin testlari
-- `apps/desktop/src/main.ts` — `setPermissionRequestHandler`, `setPermissionCheckHandler`, `setDevicePermissionHandler`
-- `apps/desktop/e2e/desktop.spec.ts` — R1 (renderer `401`/`429`+`Retry-After`) va R2 (Notification/geo/camera/getUserMedia rad etilishi) E2E tekshiruvlari
-- `README.md` — Windows `D:\mezon` qisqa yo'l eslatmasi
-- (Hamda `55fb963` va `2506ecf` dagi barcha T0.7 / R1 fayllari avvalgidek)
-
----
-
-### Migratsiyalar
-
-Yo'q (`db:check` = 0 diff).
-
----
-
-### Qaysi test qaysi binary ustida ishladi (`T2`)
-
-1. **Yakuniy fuse qo'yilgan binary (`apps/desktop/dist-electron/win-unpacked/Mezon.exe`):**
-   - `verify-packaged-desktop.mjs`: `getCurrentFuseWire` (`0=48, 1=49, 2=48, 3=48, 4=49, 5=49, 6=48, 7=48, 8=49`), `ELECTRON_RUN_AS_NODE=1` bloki, `--inspect` bloki, va Playwright'siz smoke launch (Port `61747`, `%LOCALAPPDATA%\Mezon\data\mezon.db`, `T5` decoy e'tiborsiz, 2-nusxa bloki).
-2. **Fuse qo'yilmagan Electron binary (`node_modules/electron/dist/electron.exe`) + aynan o'sha `dist-electron/win-unpacked/resources/app.asar`:**
-   - `apps/desktop/e2e/desktop.spec.ts`: `app://mezon/`, `/health` `200`, R1 (`401 AUTH_INVALID_CREDENTIALS` + `429` `Retry-After`), R2 (Notification/geolocation/camera/`getUserMedia`), CSP, preload/sandbox, `window.open`/`will-navigate`, bir nusxa, `T1` hub crash recovery (bir xil port + band portda yangi port/reload).
-
----
-
-### Qabul mezonlari
-
-- [x] `T0.6 R1` test qarzi (`2506ecf`) — mutatsiya bilan tasdiqlangan
-- [x] `R1` xato javoblarida (`401`, `403`, `429 Retry-After`, `500`) `app://mezon` CORS + E2E — `hub.test.ts` & `desktop.spec.ts`
-- [x] `R2` Electron permission handlerlari (`request`, `check`, `device`) + E2E — `main.ts` & `desktop.spec.ts`
-- [x] `T1`–`T5`, `pack:win`, `verify:abi`, `verify:fuses`, `test:e2e`, `depcruise` (va salbiy dalillar)
-- [x] To'rtala CI job (`1d61486`) yashil + NSIS `.exe` artifact (`mezon-desktop-win-x64-nsis`, `124,243,305` bayt)
-- [ ] Toza Windows'da qo'lda o'rnatish, uninstall va qayta o'rnatish skrinshot bilan — **Egasi bajaradi**
+**Sinov jadvallari emas, haqiqiy migratsiya:** `packages/db-local/drizzle/0003_catalog.sql` + `db:check` (0 diff) + barcha 5 jadvalga immutability triggerlari.
 
 ---
 
-### Test natijasi
+### b) Birlik va miqdor qoidasi (`packages/domain`)
 
-1. **`pnpm verify` (`1d61486` da):**
-   - `prettier --check .`, `turbo run build` (17/17), `eslint .` (0 xato), `turbo run typecheck` (19/19), `turbo run db:check` (0 diff)
-   - `vitest run`: `21 passed | 1 skipped (22)`, `118 passed | 2 skipped (120)` (`pg-rls.test.ts` Ubuntu CI da `MEZON_REQUIRE_PG=1` bilan to'liq o'tgan)
-   - `depcruise`: `✔ no dependency violations found (169 modules, 413 dependencies cruised)`
-2. **Packaged & E2E (`1d61486` / `a148a70`):**
-   - `pack:win`: `Mezon-Setup-0.1.0-x64.exe` (`125,212,680` bayt)
-   - `verify:abi`: `electron 45.2.3`, `node 24.22.2`, `modules 150`, `sqliteCheck: true`, `argon2Check: true`, `koffiLoaded: true`
-   - `verify:fuses`: barcha fuse + `ELECTRON_RUN_AS_NODE=1` + `--inspect` + smoke launch o'tdi
-   - `test:e2e`: `1 passed` (`5.1s` / `7.5s`)
-3. **GitHub Actions CI (`1d61486`):**
-   - Pull Request run [#42818650884](https://github.com/Shaxobiddin-Github/Mezon/actions/runs/42818650884): `Verify (ubuntu-latest)` (`success`), `Verify (windows-latest)` (`success`), `Verify PostgreSQL RLS (ubuntu-latest)` (`success`), `Build & E2E Desktop Installer (windows-latest)` (`success`), artifact: **`mezon-desktop-win-x64-nsis`** (`124,243,305` bayt).
-   - Push run [#42818642737](https://github.com/Shaxobiddin-Github/Mezon/actions/runs/42818642737): barcha 4 job `success`.
+- Birliklar (`PRODUCT_UNITS`): `'dona' | 'kg' | 'g' | 'litr' | 'metr' | 'm2' | 'qadoq'`.
+- `packages/domain/src/catalog.ts` da sof funksiya `validateQuantityForUnit(unit, quantity, { allowZero? })`:
+  - `dona` va `qadoq` uchun `quantityToMilli(quantity) % 1000n === 0n` bo'lishi shart (kasr bo'lsa `DomainError('INVALID_UNIT_QUANTITY')`).
+  - `kg`, `g`, `litr`, `metr`, `m2` uchun 0.001 (`1n` milli) aniqlik ruxsat etiladi (`>= 1n`, yoki `min_stock` uchun `allowZero: true` bilan `>= 0n`).
+- Fast-check property testi: `dona`/`qadoq` uchun `1000n` ga karrali bo'lmagan har qanday qiymat doim xato tashlashi, `k * 1000n` esa qabul qilinishi; kasr birliklarda `>= 1n` doim qabul qilinishi tekshiriladi.
 
 ---
 
-### Tekshirilmagan narsalar
+### c) Shtrix-kod (`packages/domain` + `packages/db-local`)
 
-- Toza Windows'da qo'lda o'rnatuvchi + Uninstall + Qayta o'rnatish skrinshotlari (Egasi bajaradi).
-- Haqiqiy OS reboot / `WM_QUERYENDSESSION`.
-- Code signing (doiradan tashqari; SmartScreen ogohlantirishi kutiladi).
-
----
-
-### Qilingan taxminlar
-
-- Uch nativ modul (`better-sqlite3@13.0.3`, `@node-rs/argon2@2.2.2`, `koffi@3.3.7`) N-API prebuilts orqali ishlaydi; boshsiz CI VM da jismoniy veb-kamera bo'lmagani uchun `getUserMedia` `NotFoundError` qaytarishi mumkinligi `permissions.query` va `Notification`/`geolocation` bilan birga qoplandi.
+- **Normalizatsiya (`normalizeBarcode`):** bosh va oxirgi bo'shliqlar, tab/yangi qatorlar olib tashlanadi; ichki bo'shliqlar olib tashlanadi. Ruxsat etilgan belgilar: `^[A-Za-z0-9._-]+$`, uzunlik `1..64`. Aks holda `DomainError('INVALID_BARCODE')`.
+- **Nazorat raqami (`verifyGs1CheckDigit`) va rad etish/ogohlantirish tanlovi:**
+  - `EAN-13` (13 raqam), `EAN-8` (8 raqam), `UPC-A` (12 raqam) uchun GS1 Modulo-10 nazorat raqami sof domen funksiyasi bilan tekshiriladi.
+  - **Tanlov (Rad etish, lekin `internal`/`other` istisnosi bilan):** Ro'yxatdan o'tkazishda `format` GS1 (`ean13`, `ean8`, `upca`) bo'lsa (yoki 8/12/13 raqamli kodda format aniq `'internal'`/`'other'` deb belgilanmagan bo'lsa), noto'g'ri nazorat raqami **qat'iy rad etiladi (`DomainError('INVALID_BARCODE_CHECK_DIGIT')`)** — chunki xato nazorat raqami import/kiritish xatosi bo'lib, saqlansa skaner kassada hech qachon tovarni topa olmaydi. Do'kon o'zining GS1 bo'lmagan ichki raqamli kodini saqlamoqchi bo'lsa `format: 'internal'` (yoki `'other'`) ko'rsatadi — bu holda nazorat raqami tekshirilmaydi.
+- **Noyoblik:** Tashkilot ichida faol shtrix-kodlar orasida `UNIQUE(organization_id, barcode) WHERE deleted_at_ms IS NULL`; o'chirilgan (tombstone) shtrix-kod qayta ishlatilishi mumkin.
+- **Tarozi yorlig'iga tayyor skan qidiruv natijasi:** `scanCatalogBarcode` natijasi `{ product, variant, barcode, quantity }` shaklida qaytariladi (`T1.1` da `quantity: null`, `T5.8` da `2x` tarozi prefiksidan ajratilgan og'irlik/miqdor to'ldiriladi).
 
 ---
 
-### Takliflar
+### d) Nom bo'yicha qidiruv (`packages/domain` + `packages/db-local`)
 
-- Keyingi bosqichda haqiqiy `.ico` ilova ikonkasini qo'shgach `signExecutable: false` ga o'tish mumkin.
+- **O'zbek tili normalizatsiyasi (`normalizeCatalogSearchText`, `packages/domain` da sof funksiya):**
+  1. Unicode NFC normalizatsiya va kichik harfga o'tkazish (`toLowerCase()`).
+  2. Kirill → Lotin transliteratsiyasi (`ў → o'`, `ғ → g'`, `қ → q`, `ҳ → h`, `ш → sh`, `ч → ch`, `щ → shch`, `ё → yo`, `ю → yu`, `я → ya`, `е` so'z boshida/unlidan keyin `ye`, aks holda `e`, `ц → s`, `ж → j` va h.k.).
+  3. Barcha apostrof variantlarini (`'`, `ʻ`, `ʼ`, `‘`, `’`, `` ` ``, `´`, `ˈ`) birxillashtirish va qidiruv indeksi kalitida apostrofsiz kanonikal ko'rinishga keltirish (`"O'rik"` / `"oʻrik"` / `"ўрик"` / `"orik"` → `"orik"`, `"G'ijduvon"` / `"ғиждувон"` / `"gijduvon"` → `"gijduvon"`), chunki tezkor kassa qidiruvida kassir ko'pincha apostrof belgisini termaydi. Asl `name` maydoni o'zgartirilmay saqlanadi.
+  4. Ortiqcha bo'shliqlarni bitta bo'shliqqa siqish va `trim()`.
+- **SQLite FTS5 + Trigger sinxronizatsiyasi:**
+  - `better-sqlite3@13.0.3` da **FTS5 (`unicode61` va `trigram`) kompilyatsiya qilinganligi amalda tekshirildi**.
+  - **Tanlov:** `products_fts` virtual jadvali (`USING fts5(name_search, sku_search, content='', tokenize='unicode61 remove_diacritics 0', prefix='2 3')` yoki `rowid` bog'langan external-content FTS5) hamda `products` ga `AFTER INSERT` / `AFTER UPDATE` triggerlari (`deleted_at_ms IS NULL` faol qatorlarni FTS5 da tutadi, tombstone qilinganlarni FTS5 dan o'chiradi). Variant SKU/nomi bo'yicha ham qidirish uchun variantlar soni kichik/indekslangan `product_variants(organization_id, name_search)` yoki `products_fts` bilan birlashtiriladi.
+  - **Asos:** `LIKE '%...%'` 50 000 qatorda to'liq skan (~50–120 ms) beradi; oddiy B-tree `LIKE 'abc%'` esa ikkinchi so'zni (`"Coca Cola Zero"` → `"zero"`) topa olmaydi. `FTS5 unicode61` (`prefix='2 3'`) ko'p so'zli nomlarning istalgan so'zidan 2+ belgili prefiks qidiruvini ~1–5 ms da bajaradi; 1 belgili so'rovda `idx_products_org_name_search` ustida `name_search LIKE 'a%'` B-tree indeksi ishlaydi. Barcha so'rovlarda `products.organization_id = ? AND products.deleted_at_ms IS NULL` filtri majburiy.
 
 ---
 
-### Egasi yoki Claude qarori kerak bo'lgan savollar
+### e) Hub API va RBAC (`packages/contracts`, `packages/domain`, `apps/hub`)
 
-- PR #7 (`1d61486`) va yangi hisobot commitidan keyin CI natijasi asosida `QABUL` qarori kutilmoqda; toza Windows qo'lda tekshiruvi Egasi tomonidan `mezon-desktop-win-x64-nsis` artifact orqali bajarilishi mumkin.
+- `packages/domain/src/auth.ts` dagi `HubPermission`:
+  - `'catalog:read'` → `owner`, `manager`, `cashier`
+  - `'catalog:write'` → `owner`, `manager`
+- **Endpointlar (`apps/hub`):**
+  - Kategoriyalar (`catalog:read` / `catalog:write`): `GET /categories`, `POST /categories`, `PATCH /categories/:id`, `DELETE /categories/:id` (tombstone; faol bola kategoriya yoki faol mahsulot bog'langan bo'lsa rad etiladi).
+  - Mahsulotlar (`catalog:read` / `catalog:write`): `GET /products` (`q`, `categoryId`, `limit`, `offset`), `GET /products/:id`, `POST /products`, `PATCH /products/:id`, `DELETE /products/:id` (tombstone: mahsulot, variantlar va shtrix-kodlar bitta UoW da yopiladi).
+  - Variantlar va shtrix-kodlar (`catalog:write`): `POST /products/:id/variants`, `PATCH /products/:id/variants/:variantId`, `DELETE /products/:id/variants/:variantId`, `POST /products/:id/barcodes`, `DELETE /products/:id/barcodes/:barcodeId`.
+  - Narx tarixi (`catalog:read` yoki `catalog:write` — faqat sotish narxi tarixi, tannarx yo'q): `GET /products/:id/price-changes`.
+  - Skan qidiruvi (`catalog:read` — kassir ham foydalanadi): `GET /catalog/scan?code=...` → `{ product, variant, barcode, quantity }` yoki `404`.
+- `@mezon/contracts`: qat'iy Zod (`strictObject`) sxemalari; pul va miqdor JSON da `BigIntStringSchema` satr ko'rinishida.
+- **Tannarx himoyasi (`GEMINI.md` 3.4):** Katalogda `cost_price` ustuni yo'q (T1.2 partiyada bo'ladi), ammo javob DTO larida aniq maydon ro'yxatli mapper (`toProductDto`) ishlatiladi va kassir javobida tannarx/foyda maydonlari bo'lmasligi test bilan tekshiriladi.
+
+---
+
+### f) Unumdorlik testi (`packages/db-local` / `apps/hub`)
+
+- Vaqtinchalik diskdagi SQLite WAL bazaga **50 000 ta mahsulot** (lotin + kirill aralash nomlar, kategoriyalar, variantlar bilan) va **70 000 ta shtrix-kod** urug'lanadi (seed).
+- 200+ shtrix-kod skani va 100+ turli o'zbekcha (lotin/kirill/apostrof) nom qidiruvi bo'yicha `p50` va `p95` kechikishlari `performance.now()` bilan o'lchanib natijalar hisobotga yoziladi.
+- **CI chegaralari:** Mahalliy maqsad: skan `p95 ≤ 20 ms`, nom qidiruvi `p95 ≤ 50 ms`. Sekin CI VM larda regressiyani ushlash bilan birga yolg'on yiqilish bo'lmasligi uchun testda real disk WAL da: skan `p95 ≤ 20 ms` va qidiruv `p95 ≤ 50 ms` (yoki CI yuklamasi uchun aniq asoslangan `p95` chegarasi, o'lchov paytida haqiqiy ms lar qayd etiladi).
+
+---
+
+### g) Doiradan tashqari
+
+- Ombor harakatlari, partiyalar, FIFO/o'rtacha tannarx va inventarizatsiya (`T1.2`).
+- Savat, aksiyalar va chegirmalar (`T1.3`).
+- Tarozi `2x` shtrix-kod parsinki (`T5.8`).
+- Do'konlar bo'yicha alohida narxlar (`F5`).
+- Kassa va katalog UI (`T1.11`).
+
+---
+
+### Takliflar va ochiq savollar
+
+1. **T1.1 uchun `category_id` bo'yicha o'chirish siyosati:** Faol mahsulot yoki bola kategoriyasi bor kategoriyani `DELETE` (tombstone) qilishni `409 CATEGORY_IN_USE` bilan bloklash taklif etiladi (aks holda yetim kategoriya havolalari paydo bo'ladi). Tasdiqlaysizmi?
+2. **Narx o'zgarish tarixi (`GET /products/:id/price-changes`) ruxsati:** Sotish narxi tarixi (tannarxsiz) kassirga ham ko'rinishi kerakmi (`catalog:read`) yoki faqat `owner`/`manager` (`catalog:write`) gami? (`catalog:write` qilib cheklash xavfsizroq, kassirga faqat joriy narx kerak.)
