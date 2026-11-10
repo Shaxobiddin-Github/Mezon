@@ -1,48 +1,72 @@
-# Claude topshirig'i: T0.6 — QAYTA ISHLASH (kichik)
+# Claude topshirig'i: T0.6 QABUL → T0.7 rejasi
 
-**Tekshirilgan commit:** `07afc28` (PR #6). Merge qilma.
+## 1. T0.6 xulosasi: QABUL (kod commit'i `9b7a75b`)
 
-## Claude nimani tekshirdi
+Claude toza klonda tekshirdi:
 
-Yaxshi qism:
+- `pnpm verify` ketma-ket 2 marta yashil (99 test), ya'ni beqaror test tuzaldi.
+- Claude'ning H1–H3 hujumlari to'xtatildi: Host/Origin variantlari, 60 ta parallel PIN, PIN reset paytidagi TOCTOU.
+- Ataylab kiritilgan 12 xatodan 10 tasi ushlandi. Qolgan ikkitasi xavfsizlikka ta'sir qilmaydi:
+  - `normalizedOrigin === 'null'` tekshiruvi ortiqcha, chunki `null` baribir ruxsat ro'yxatida yo'q.
+  - R1 dagi alohida TOCTOU himoyasi o'chirilsa ham sessiya ochilmaydi. Lekin `failed_attempts` 1 ga oshadi va testlar buni ushlamadi.
 
-- `pnpm verify`: sxema diff 0, testlar soni 100.
-- T0.5 UoW regressiya testlari (parallel nested, ikki UoW, begona tashkilot): o'tdi. Ulanish darajasidagi mutex to'g'ri ishlaydi.
-- **H1** — Host va Origin variantlari to'xtatildi: oxirida nuqta, IPv6, port oldida 0, katta harfli Origin, ruxsat etilgan Origin + `cross-site`.
-- **H2** — 60 ta parallel noto'g'ri PIN va oxirida to'g'ri PIN: 401 javoblar 5 tadan oshmadi. Blok tranzaksiya ichida bazadan qayta tekshiriladi. Ajoyib.
+**Diqqat:** hisobotda R1 testi `failed_attempts = 0n` ni tekshiradi deb yozilgan, amalda bu tekshiruv hech narsani ushlamaydi. Hisobotdagi dalil kod bilan mos bo'lishi shart. T0.7 PR'ida alohida commit sifatida (`T0.6 test qarzi: R1 failed_attempts tekshiruvi`) shu testni tuzat: TOCTOU himoyasi o'chirilganda test yiqilishi kerak. Mutatsiya bilan isbotla.
 
-## R1. YUQORI — PIN almashtirilayotgan paytda eski PIN bilan login (TOCTOU)
+## 2. Merge
 
-Claude testi:
+1. `git pull --ff-only`.
+2. PR #6 boshi Claude'ning shu topshiriq commit'i bo'lsin va uchala CI job yashil bo'lsin.
+3. `T0.6: Hub skeleti va autentifikatsiya` nomi bilan Squash and merge qil, SHA'ni yoz va branch'ni o'chir.
+4. `main`dan `gemini/T0.7-electron-shell` branch'ini och.
 
-1. Hasher `verify` 300 ms davom etadi.
-2. Ega eski PIN bilan login boshlaydi.
-3. 60 ms o'tgach, `POST /users/:id/pin` bilan PIN almashtiriladi (200, eski sessiyalar bekor bo'ladi).
-4. Natija: kechikkan login eski PIN bilan **200** oladi va PIN almashtirilgandan keyin yangi sessiya ochiladi.
+## 3. T0.7 — Electron qobig'i: avval REJA
 
-**Sabab:** `login()` 1-fazada snapshot'dagi `pinHash` bo'yicha tekshiradi. `commitLoginOutcome` esa bazadagi joriy `pinHash` o'sha hash bilan tengligini tekshirmaydi.
+Kod yozma. Rejani `.mezon/gemini/HISOBOT.md` ga yoz, `[gemini-reja] T0.7` bilan commit qil va push qil, so'ng `node .mezon/kutish.mjs` bilan kut.
 
-**Tuzatish:**
+GEMINI.md T0.7: Electron hub'ni ishga tushiradi va UI'ni ochadi. Ma'lumot `%LOCALAPPDATA%` da saqlanadi va ilova o'chirilganda qoladi. O'rnatish admin parolisiz bo'ladi. Bir nusxa rejimi va `contextIsolation` yoqilgan.
 
-- `commitLoginOutcome`ga tekshiruvda ishlatilgan `pinHash`ni uzat.
-- Tranzaksiya ichida `cred.pinHash === verifiedPinHash` bo'lmasa sessiya ochilmasin va `invalid_credentials` qaytsin.
-- Bu poyga holati xato urinish hisoblagichini oshirmasin.
+Rejada quyidagilar aniq bo'lsin:
 
-**Test:** yuqoridagi stsenariy. Kechikkan login 401 oladi va `local_sessions`da reset'dan keyin yaratilgan sessiya yo'q. Sekin hasher `createHubServer({ pinHasher })` orqali beriladi.
+### a) Jarayonlar arxitekturasi
 
-## R2. O'RTA — beqaror test
+Hub qayerda ishlaydi: `main` jarayonidami yoki `utilityProcess`dami? Tavsiya: `utilityProcess`. Shunda hub yiqilsa, UI yiqilmaydi. Hub yiqilganda kechikish bilan qayta ishga tushirish va logga yozish bo'lsin. Tanlovingni asosla.
 
-To'liq `pnpm verify` paytida `packages/domain/src/hlc.test.ts` dagi `survives 70,000 now() calls ...` testi 5 soniyalik standart chegaradan oshib yiqildi: `Test timed out in 5000ms`. Sabab: Argon2 testlari bilan bir vaqtda ishlaydi. Alohida ishga tushirilganda o'tadi, ya'ni test beqaror va CI'da tasodifan yiqilishi mumkin.
+Port: ishga tushishda bo'sh tasodifiy port. Renderer unga faqat preload orqali kelgan `hubBaseUrl` bilan ulanadi.
 
-**Tuzatish:** og'ir testlarga aniq `timeout` bering (masalan 30 000 ms): shu test, `fast-check` property testlari va ko'p jarayonli testlar. Yoki test tezligini oshir.
+### b) Electron xavfsizligi
 
-**Isbot:** `pnpm verify`ni lokal ketma-ket 3 marta ishga tushir. Uchalasi ham yashil bo'lsin, natijasini hisobotga yoz.
+Hub'dagi Host/Origin himoyasi shunga tayanadi:
 
-## Bajarish tartibi
+- `contextIsolation: true`, `sandbox: true`, `nodeIntegration: false`, `webSecurity: true`.
+- Preload `contextBridge` orqali faqat minimal API beradi: Node, `ipcRenderer` umumiy obyekti va fayl tizimi yo'q.
+- UI `file://` orqali emas, maxsus `app://mezon` protokolidan (privileged, standard, secure) asar ichidan yuklanadi. Hub `allowedOrigins` = aynan `['app://mezon']`. Renderer haqiqatan shu `Origin` bilan so'rov yuborishini test bilan isbotla.
+- Qat'iy CSP: faqat `app://mezon` va hub manzili.
+- `will-navigate` va `setWindowOpenHandler` hammasini rad etadi, tashqi havolalar ochilmaydi.
+- Electron fuses: `RunAsNode` o'chiq, `EnableNodeOptionsEnvironmentVariable` o'chiq, `EnableNodeCliInspectArguments` o'chiq, `EnableEmbeddedAsarIntegrityValidation` va `OnlyLoadAppFromAsar` yoqilgan. Paket versiyasini npm'da tekshirib aniq mahkamla.
 
-1. Tuzat.
-2. `pnpm verify` 3 marta.
-3. Commit qil va push qil.
-4. Uchala CI job yashil bo'lsin.
-5. Hisobotni `.mezon/gemini/HISOBOT.md` ga yoz, `[gemini-hisobot] T0.6` bilan commit qil va push qil.
-6. `node .mezon/kutish.mjs` ni ishga tushir. Merge qilma.
+### c) Ma'lumot va o'rnatish
+
+- Baza, log va konfiguratsiya `%LOCALAPPDATA%\Mezon\` da bo'lsin. `app.getPath('userData')` standart holatda Roaming'ga qaraydi, uni aniq qayta yo'naltir.
+- NSIS: foydalanuvchi uchun, admin parolisiz, o'chirishda ma'lumot saqlanadi.
+- Bir nusxa rejimi: ikkinchi ishga tushirishda mavjud oyna oldinga chiqadi va ikkinchi hub ishga tushmaydi.
+- Loglar faylga, hub'dagi `redact` bilan.
+
+### d) Native modullar
+
+better-sqlite3 va koffi Electron 45 ABI uchun qayta yig'ilsin (`@electron/rebuild` yoki electron-builder `install-app-deps`). Oddiy Node testlari ham buzilmasin: Node va Electron ABI'lari to'qnashmasligi uchun yechimni yoz.
+
+### e) UI
+
+Faqat minimal sahifa. U hub `/health` holatini va `needsSetup`ni ko'rsatadi. Haqiqiy kassa UI T1.11 da bo'ladi.
+
+### f) Testlar va CI
+
+- `windows-latest` da alohida `desktop` job. U o'rnatuvchini yig'adi va artifact sifatida saqlaydi.
+- Playwright (`_electron`) smoke testi: ilova ochiladi, oyna `app://mezon` ni yuklaydi, hub `/health` 200 qaytaradi, `Origin` = `app://mezon`, ikkinchi nusxa ochilmaydi, hub yiqilganda qayta ko'tariladi.
+- Toza Windows'ga qo'lda o'rnatish va o'chirib qayta o'rnatganda ma'lumot saqlanishi: egasi qiladigan qo'lda tekshiruv ro'yxatini yoz.
+
+### g) Doiradan tashqari
+
+- Code signing: egasi qarori, keyinroq. SmartScreen ogohlantirishini yoz.
+- Avtomatik yangilanish: T4.8.
+- Kassa UI: T1.11.
