@@ -1,72 +1,97 @@
-# Claude topshirig'i: T0.7 QABUL → F0 yakuni → T1.1 rejasi
+# Claude topshirig'i: T1.1 rejasi — TUZATISHLAR BILAN TASDIQLANDI
 
-## 1. T0.7 xulosasi: QABUL (kod `1d61486`)
+**Merge tekshiruvi:** T0.7 merge'i tekshirildi. `main` = `0b65a43`, kod `fd07ecb` bilan bir xil.
 
-Claude tekshirdi:
+**F0 yakuniy tekshiruvi:**
 
-- `pnpm verify` o'tdi.
-- `app://mezon` uchun 401 javoblarida ham CORS sarlavhasi bor.
-- `win-unpacked` qayta yig'ildi, `verify:fuses` va Playwright E2E o'tdi (ruxsatlar rad etilishi va xato javoblarini o'qish bilan).
+- `main` da `pnpm verify` o'tdi.
+- Ishlab chiqarish bog'liqliklarida ma'lum zaiflik yo'q.
+- Dev vositalarida 3 ta moderate zaiflik bor: esbuild (drizzle-kit orqali), glob (testcontainers), minimatch (eslint, electron-builder). Ular ilovaga kirmaydi. Hozir tegma, alohida texnik vazifa bo'ladi.
 
-## 2. Merge
+**Tasdiqlangan qismlar:**
 
-1. `git pull --ff-only`.
-2. PR #7 boshi Claude'ning shu topshiriq commit'i bo'lsin. To'rtala CI job yashil bo'lsin.
-3. `T0.7: Electron qobig'i va Windows o'rnatuvchi` nomi bilan Squash and merge qil, SHA'ni yoz va branch'ni o'chir.
-4. `main`dan `gemini/T1.1-catalog` branch'ini och.
+- jadvallar va sinflar;
+- tashkilot darajasidagi katalog;
+- birlik qoidasi va property test;
+- GS1 nazorat raqamini qat'iy tekshirish (`internal`/`other` istisnosi bilan);
+- partial unique shtrix-kod;
+- skan natijasi shakli;
+- FTS5 yondashuvi;
+- RBAC va DTO mapper;
+- unumdorlik testi.
 
-**F0 bosqichi shu bilan yakunlanadi.** Claude `main` ustida F0 bo'yicha alohida yakuniy tekshiruv o'tkazadi. Unda topilgan narsalar keyingi topshiriqlarda alohida beriladi. Sen T1.1 rejasini davom ettir.
+Quyidagi tuzatishlar bilan `gemini/T1.1-catalog` branch'ida kodni yoz.
 
-## 3. T1.1 — Katalog: avval REJA
+## Majburiy tuzatishlar
 
-Kod yozma. Rejani `.mezon/gemini/HISOBOT.md` ga yoz, `[gemini-reja] T1.1` bilan commit qil va push qil, so'ng `node .mezon/kutish.mjs` bilan kut.
+### F1. FTS rowid'ga tayanmasin (VACUUM xavfi)
 
-GEMINI.md T1.1: mahsulot, kategoriya, variant (JSON atributlar), bir nechta shtrix-kod, birliklar (dona, kg, g, litr, metr, m², qadoq), `unlimited` (xizmat/cheksiz), `min_stock`, narx tarixi, qidiruv va skan indekslari. Mezonlar:
+`products` jadvalida `INTEGER PRIMARY KEY` yo'q, kalit TEXT UUID. Bunday jadvalning yashirin `rowid`i `VACUUM` paytida o'zgarishi mumkin. Shunda `rowid` bilan bog'langan FTS (`content=''` yoki external content) noto'g'ri mahsulotlarni qaytaradi.
 
-- 50 000 mahsulotda skan ≤ 20 ms (domen va baza qismi);
-- bitta shtrix-kod faqat bitta yozuvga bog'langan.
+**Talab:**
 
-Rejada quyidagilar aniq bo'lsin:
+- FTS jadvalida mahsulot UUID'si `product_id UNINDEXED` ustuni sifatida saqlansin.
+- Natija faqat `product_id` orqali `products`ga bog'lansin.
 
-### a) Jadvallar va sinflar
+**Test:** mahsulotlarni qo'sh, o'chir, qayta qo'sh, so'ng `VACUUM` qil. Qidiruv natijalari to'g'ri mahsulot ID'larini qaytaradi.
 
-- `categories`, `products`, `product_variants`, `product_barcodes`: ATTR, T0.5 yozish yordamchilari va outbox orqali.
-- Narx tarixi `price_changes`: FACT, har narx o'zgarishida o'sha UoW ichida yoziladi.
-- Katalog tashkilot darajasida bo'ladi. Do'kon bo'yicha alohida narx F5'da. Agar boshqacha taklif qilsang, asosla.
-- Fiskal uchun kerakli maydonlar hozirdan bo'lsin (GEMINI.md 8-bo'lim): `mxik` va `package_code` (nullable), `vat_rate_bp` (VatRate).
-- Pul uchun `sqliteMoney`, miqdor uchun `sqliteQuantity` ishlatilsin. `real` ishlatilmasin.
+### F2. FTS so'rovini tozalash (sintaksis in'ektsiyasi)
 
-### b) Birlik va miqdor qoidasi (domen)
+Kassir kiritgan matn FTS5 `MATCH` sintaksisiga to'g'ridan-to'g'ri tushmasin. `"`, `*`, `-`, `:`, `(`, `NEAR`, `OR`, `AND`, `NOT` kabi kiritmalar xato bermasin va so'rov ma'nosini o'zgartirmasin.
 
-- `dona` va `qadoq` uchun miqdor faqat butun son bo'lsin (`Quantity` 1000 ga karrali). `kg`/`litr`/`metr`/`m²` uchun 0.001 aniqlik.
-- Qoida `packages/domain`da sof funksiya bo'lsin va property test bilan tekshirilsin.
+**Talab:**
 
-### c) Shtrix-kod
+- So'rov normalizatsiyadan keyin tokenlarga bo'linsin.
+- Har token qo'shtirnoq ichida prefiks sifatida berilsin: `"tok"*`, tokenlar orasida AND.
+- Bo'sh natija xato emas.
 
-- Normalizatsiya: bo'shliqlarni olib tashlash va faqat ruxsat etilgan belgilar.
-- EAN-13/EAN-8/UPC-A uchun nazorat raqami tekshiruvi. Noto'g'ri nazorat raqami ogohlantirish beradimi yoki rad etiladimi: tanlovni asosla. Ichki do'kon kodlari ham qo'llab-quvvatlanadi.
-- Noyoblik: faol shtrix-kodlar orasida tashkilot bo'yicha noyob (partial unique index, `deleted_at_ms IS NULL`).
-- Tarozi yorlig'i (EAN-13 ichida og'irlik yoki narx, `2x` prefiks) T5.8'da bo'ladi. Lekin skan qidiruv funksiyasi hozirdan `{ product, variant?, quantity? }` qaytaradigan qilib loyihalansin, keyin kengaytirish oson bo'lsin.
+**Test:** jadvalli test, yuqoridagi barcha kiritmalar bilan.
 
-### d) Nom bo'yicha qidiruv
+### F3. UPC-A va EAN-13 bitta kod
 
-- O'zbek tilining real holati: lotin va kirill aralash, `o'`/`g'` apostrof variantlari (`'`, `ʻ`, `ʼ`, `‘`).
-- Qidiruv uchun normalizatsiya funksiyasi `packages/domain`da bo'lsin: kirill → lotin, apostroflarni birxillashtirish, katta-kichik harf. Testlar bilan.
-- SQLite FTS5 yoki boshqa yondashuv: tanlovni asosla. Maqsad: 50 000 mahsulotda nom qidiruvi p95 ≤ 50 ms.
+Skaner sozlamasiga qarab bir xil tovar `036000291452` (UPC-A, 12 raqam) yoki `0036000291452` (EAN-13) bo'lib o'qiladi.
 
-### e) Hub API va RBAC
+**Talab:**
 
-- Mahsulot va kategoriya CRUD: `owner`, `manager`.
-- O'qish va skan qidiruvi: `cashier` ham.
-- Zod kontraktlari `@mezon/contracts`da.
-- Javoblarda kassirga tannarx ko'rsatilmaydi (GEMINI.md 3.4). Tannarx T1.2 partiyada bo'ladi, lekin DTO hozirdan shunga tayyor tursin.
+- UPC-A saqlashda va skan qidiruvida kanonik EAN-13 ko'rinishga keltirilsin: oldiga `0` qo'shiladi.
+- Ikkala shakl ham bitta yozuvni topsin.
+- Ikkalasi alohida-alohida ro'yxatdan o'tkazilsa, noyoblik buzilishi sifatida rad etilsin.
 
-### f) Unumdorlik testi
+**Test** bilan.
 
-- 50 000 mahsulot va 70 000 shtrix-kod bilan seed.
-- Skan va nom qidiruvining p50/p95 qiymatlari o'lchansin va hisobotga yozilsin.
-- CI'da sekin kompyuter uchun chegara oqilona bo'lsin, lekin regressiyani ushlasin.
+### F4. Qidiruv indeksi yaxlitligi va qayta qurish
 
-### g) Doiradan tashqari
+`name_search` va FTS — hosila ma'lumotlar. Ular sinxron orqali boshqa qurilmadan yoki boshqa normalizator versiyasidan kelishi mumkin.
 
-Ombor qoldig'i va partiya (T1.2), narx aksiyalari (T1.3), UI (T1.11).
+**Talab:**
+
+- `rebuildCatalogSearchIndex()` buyrug'i `name_search`ni joriy normalizator bilan qayta hisoblasin va FTS'ni noldan qursin.
+- FTS virtual jadvali va trigger'lar drizzle-kit tomonidan generatsiya qilinmaydi. Shuning uchun `db:check` ular migratsiyada borligini tekshirsin (T0.5 trigger tekshiruvi kabi) va salbiy dalil keltirilsin.
+
+**Property test:** tasodifiy yaratish, tahrirlash, tombstone va qayta yaratish ketma-ketligidan keyin FTS'dagi faol mahsulotlar to'plami `products`dagi faol mahsulotlar bilan aynan teng.
+
+### F5. Transliteratsiya aniqligi
+
+O'zbek kirillidagi `х` → `x` (`h` emas), `ҳ` → `h`. `ъ` (tutuq belgisi) va apostroflar kalitdan olib tashlanadi, `ь` ham olib tashlanadi.
+
+**Testlar:**
+
+- `хона` → `xona`
+- `ҳаво` → `havo`
+- `маъно` → `mano`
+- `Молоко` → `moloko`
+- `Coca-Cola Zero` "zero" bilan topiladi
+
+## Ochiq savollarga javob
+
+1. Faol mahsulot yoki bola kategoriyasi bor kategoriyani o'chirish `409 CATEGORY_IN_USE` bilan bloklanadi. Tasdiqlandi.
+2. Narx tarixi faqat `owner`/`manager` (`catalog:write`) uchun. Kassirga faqat joriy narx kerak. Tasdiqlandi.
+
+## Bajarish tartibi
+
+1. Kodni yoz.
+2. `pnpm verify` yashil bo'lsin.
+3. Commit, push va PR och.
+4. To'rtala CI job yashil bo'lsin.
+5. Hisobotni `.mezon/gemini/HISOBOT.md` ga yoz: p50/p95 o'lchovlari, F1–F5 dalillari va CI havolalari bilan. `[gemini-hisobot] T1.1` bilan commit qil va push qil.
+6. `node .mezon/kutish.mjs` ni ishga tushir. Merge qilma.
