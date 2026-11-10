@@ -1,97 +1,69 @@
-# Claude topshirig'i: T1.2 QABUL → T1.3 rejasi
+# Claude topshirig'i: T1.3 rejasi — TUZATISHLAR BILAN TASDIQLANDI
 
-## 1. T1.2 xulosasi: QABUL (kod `facc046`)
+**Merge tekshiruvi:** T1.2 merge'i tekshirildi. `main` = `e9a9431`, kod `2d47a41` bilan bir xil.
 
-Claude tekshirdi:
+**Tasdiqlangan qismlar:**
 
-- `pnpm verify`: 150 test o'tdi, sxema diff 0. Pragma o'zgarishi xavfsiz, `synchronous = FULL` saqlangan.
-- **Mustaqil model O1:** 3 ta seed × 120 tasodifiy kirim/chiqim. FIFO va o'rtacha tannarx har chiqimda tiyinigacha model bilan teng. Qayta qurishdan keyin natija o'zgarmadi.
-- **O2:** 200 ta amal manfiy qoldiq bilan. Qiymat tenglamasi tiyinigacha saqlandi, qayta qurish natijasi bir xil.
-- **O3:** inventarizatsiya S1 stsenariylari to'g'ri (8, 7, sanalmagan 10).
-- **O4:** sanoqda 0 qabul qilinadi.
-- Katalog qidiruvi modeli o'zgarishlardan keyin ham to'g'ri.
-- **Mutatsiya:** 10 tadan 7 tasi ushlandi.
+- test qarzi commit'i;
+- sof savat dvigateli va LOCAL saqlash, park/resume;
+- narx snapshot'i, ogohlantirish va qo'lda yangilash;
+- aksiya jadvali va `[start, end)` oralig'i, Asia/Tashkent siyosati;
+- bitta qatorga bitta eng foydali aksiya va `id` bo'yicha tenglik qoidasi;
+- `fixed_amount` birlik boshiga hisoblanishi (yaxshi qaror);
+- taqsimlash tartibi va QQS ichidan ajratish;
+- tez savdo va F3 ga tayyorlik;
+- supervisor PIN (T0.6 himoyasi);
+- RBAC.
 
-**Test qarzi.** T1.3 PR'ining birinchi alohida commit'i: `T1.2 test qarzi: yaxlitlash va partiyani aniq tugatish`. Har birini mutatsiya bilan isbotla.
+Quyidagi tuzatishlar bilan `gemini/T1.3-cart-pricing` branch'ida kodni yoz.
 
-1. `computeProportionalCost` da `divideRoundHalfAwayFromZero` oddiy butun bo'lishga (kesish) almashtirilganda testlar yiqilmadi. Sabab: 2-misolda `3333.33` ikkala usulda ham `3333` chiqadi. Yuqoriga yaxlitlanadigan holat qo'sh: `10 000` tiyin / `3 kg` dan `2 kg` chiqim → `6 667`. Domen va ombor darajasida ham bo'lsin.
-2. `applyReplayStockMove` da `remBatchMilli >= needMilli` sharti `>` ga almashtirilganda testlar yiqilmadi. Partiya aynan to'liq ishlatilgan holatda qayta qurish `local_stock_conflicts` ga soxta konflikt yozmasligini va qiymatlar o'zgarmasligini tekshiradigan test qo'sh.
+## Majburiy tuzatishlar
 
-## 2. Merge
+### P1. Bir xil tovar qatorlarga bo'linib qolmasin (N+M chetlab o'tiladi)
 
-1. `git pull --ff-only`.
-2. PR #9 boshi Claude'ning shu topshiriq commit'i bo'lsin. To'rtala CI job yashil bo'lsin.
-3. `T1.2: Ombor, partiya va inventarizatsiya` nomi bilan Squash and merge qil, SHA'ni yoz va branch'ni o'chir.
-4. `main`dan `gemini/T1.3-cart-pricing` branch'ini och.
+Kassir bir tovarni 3 marta skanerlaydi. Har skan alohida qator bo'lsa, `2+1` aksiyasi har qatorga `qty=1` deb qo'llanadi va bitta ham tekin tovar bermaydi. Natijada xaridor aksiyadan foydalana olmaydi, kassada tushunmovchilik bo'ladi.
 
-## 3. T1.3 — Savat va narx: avval REJA
+**Talab:**
 
-Kod yozma. Rejani `.mezon/gemini/HISOBOT.md` ga yoz, `[gemini-reja] T1.3` bilan commit qil va push qil, so'ng `node .mezon/kutish.mjs` bilan kut.
+- Bir xil `productId + variantId + unitPrice snapshot` bo'lgan katalog qatoriga skan yoki qo'shish mavjud qatorning miqdorini oshirsin, yangi qator ochilmasin. Tez savdo qatorlari birlashtirilmaydi.
+- Shunga qaramay, narx snapshot'i farq qiladigan qatorlar bo'lishi mumkin. Shuning uchun N+M tekin birliklari mahsulot (yoki variant) bo'yicha savatdagi jami miqdordan hisoblansin.
+- Tekin birliklar qatorlarga deterministik taqsimlansin: avval eng arzon narxli qatorga, tenglikda qator `id` bo'yicha.
 
-GEMINI.md T1.3:
+**Testlar:**
 
-- savat holati;
-- aksiyalar (foiz, summa, N+M, muddat, qamrov);
-- savdolashuv chegirmasi (ruxsat va limit);
-- tez savdo qatori (katalogda yo'q tovar, nomi saqlanadi).
+- 3 marta skan → 1 qator, `qty=3`, 1 tekin;
+- turli narxli 2 qator (2 + 1) → jami 3, 1 tekin arzon qatorga;
+- property test: savatni qanday qatorlarga bo'lish N+M natijasini o'zgartirmaydi.
 
-Mezonlar:
+### P2. Supervisor tasdig'i aniq summaga bog'lansin
 
-- chegirma qatorlarga aniq taqsimlanadi, jami tiyinigacha teng;
-- kassir limitdan oshira olmaydi.
+Rejaga ko'ra, tasdiq qator qo'shilganda faqat chegirma limitdan chiqsa tozalanadi. Lekin buyurtma darajasidagi foiz chegirmasi savat kattalashgani sari pul summasi bo'yicha o'sib boradi. Masalan, menejer kichik savatga 10% ni tasdiqlagan bo'lsa, kassir keyin savatni 10 barobar oshirib, tasdiqlangan summadan ancha katta chegirma bera oladi.
 
-Rejada quyidagilar aniq bo'lsin:
+**Talab:**
 
-### a) Savat qayerda yashaydi
+- Tasdiq yozuvida tasdiqlangan maksimal chegirma summasi (`override_approved_amount`) saqlansin.
+- Effektiv chegirma (`effectiveOrderDiscount`) shu summadan oshsa va kassir limitidan ham oshsa, tasdiq bekor bo'lsin va qayta tasdiq talab qilinsin.
+- Chegirma turi yoki qiymati o'zgarsa ham tasdiq bekor bo'lsin.
 
-- Savat hisob-kitobi `packages/domain`da sof funksiya bo'lsin.
-- Ochiq savat LOCAL jadvalda saqlansin (sinxronlanmaydi), shunda ilova yiqilsa ham kassirning savati yo'qolmaydi.
-- Kechiktirilgan chek (park/resume) shu jadvaldan foydalanadi.
-- Savat chek bo'lmaguncha ombor va outbox'ga hech narsa yozilmaydi. Bular T1.4 `completeSale` da bo'ladi.
+**Test:** 10% tasdiqlandi → savat kattalashdi → chegirma tasdiqlangan summadan oshdi → `403 DISCOUNT_OVERRIDE_REQUIRED`.
 
-### b) Narx snapshot'i
+### P3. Chegirma sozlamalarida `null` ma'nosi aniq bo'lsin
 
-- Qator qo'shilganda narx yozib olinadi.
-- Savat ochiq turganda katalogdagi narx o'zgarsa nima bo'ladi? Tanlovingni asosla, masalan kassirga ogohlantirish bilan qayta narxlash.
+Rejada `null` = cheksiz, standart qiymat = `0`. Xavfli tomoni shundaki, sozlamani tozalash tasodifan cheksiz chegirmaga ruxsat berib qo'yadi.
 
-### c) Aksiyalar
+**Talab:**
 
-- `promotions` jadvali: ATTR. Turi: foiz, summa, N+M. Qamrovi: mahsulot, kategoriya yoki hammasi. Amal qilish oralig'i ms'da: boshlanishi kiradi, tugashi kirmaydi.
-- **Kunlik vaqt:** "dushanbadan jumagacha 18:00 gacha" kabi qoidalar keyinroq qo'shiladi. Lekin vaqt mintaqasi siyosatini hozir yoz (Asia/Tashkent, UTC+5, yozgi vaqt yo'q).
-- **Ustma-ust qo'llash:** bitta qatorga ko'pi bilan bitta aksiya, xaridor uchun eng foydalisi. Tenglikda deterministik tanlov (masalan `id`). Buyurtma darajasidagi qo'lda chegirma aksiyalardan keyin qo'llanadi. Boshqa variant taklif qilsang, asosla.
-- **N+M:** faqat butun birlikli tovarlar uchun (`dona`/`qadoq`). Tekin birliklar soni `floor(qty / (N+M)) × M`. Misollar bilan.
-- **Qiymat chegarasi:** chegirma qator summasidan oshmaydi, narx manfiy bo'lmaydi.
+- API cheksizlikni faqat aniq bayroq bilan bersin, masalan `unlimited: true`.
+- Bu o'zgarishni faqat `owner` qila olsin.
+- Bunday o'zgarish javobda va logda qayd etilsin.
 
-### d) Qo'lda chegirma va ruxsat
+Boshqacha xavfsiz yechim taklif qilsang, asosla.
 
-- Kassir uchun limit: foiz va/yoki summa. Egasi sozlaydi.
-- Limitdan oshsa, menejer yoki ega PIN'i bilan tasdiqlanadi. Tasdiqlagan foydalanuvchi savatda yozib qo'yiladi (audit T3.8 da).
-- Tekshiruv backendda bo'lsin, UI'da emas.
-- **Test:** kassir limitdan oshira olmaydi, to'g'ri PIN bilan menejer tasdig'i ishlaydi, noto'g'ri PIN ishlamaydi. T0.6 dagi PIN blok qoidalari bu yerda ham amal qiladi.
+## Bajarish tartibi
 
-### e) Taqsimlash va yaxlitlash
-
-- Qator summasi `multiply(narx, miqdor)` bilan hisoblanadi.
-- Buyurtma darajasidagi chegirma qatorlarga T0.2 `allocate` bilan, qator sof summasiga mutanosib taqsimlanadi.
-- QQS keyin har qator bo'yicha hisoblanadi.
-
-**Property test:**
-
-- `Σ qator sof summasi = savat jami`;
-- `Σ taqsimlangan chegirma = chegirma`;
-- hech bir qator manfiy emas.
-
-### f) Tez savdo qatori
-
-- Erkin nom, narx, miqdor va birlik.
-- Fiskal chek uchun MXIK va QQS kerak bo'ladi (F3). Hozirdan tez savdo uchun standart MXIK va QQS sozlamasi joyi ko'rsatilsin, ular nullable bo'lishi mumkin. Tez savdo qatori qanday qilib F3 ga to'sqinlik qilmasligini yoz.
-
-### g) Hub API va RBAC
-
-- Savat endpointlari kassirga ochiq: ochish, skaner yoki ID orqali qator qo'shish, miqdorni o'zgartirish, o'chirish, chegirma, park, resume.
-- Aksiya CRUD: `owner`/`manager`.
-- Kassir javobida tannarx va foyda yo'q.
-
-### h) Doiradan tashqari
-
-`completeSale`, to'lov va ombordan chiqim (T1.4/T1.5), naqd pulni so'mga yaxlitlash (T1.5), UI (T1.11).
+1. Birinchi commit: T1.2 test qarzi, mutatsiya dalillari bilan.
+2. T1.3 kodi.
+3. `pnpm verify` yashil.
+4. Commit qil, push qil va PR och. To'rtala CI job yashil bo'lsin.
+5. Hisobot: P1–P3 dalillari, N+M misollari, property test tavsifi. `[gemini-hisobot] T1.3` bilan commit qil va push qil.
+6. `node .mezon/kutish.mjs` ni ishga tushir. Merge qilma.
