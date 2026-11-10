@@ -927,9 +927,13 @@ export const sales = localSchemaRegistry.defineTable(
     cashierUserId: sqliteUuidV7('cashier_user_id')
       .notNull()
       .references(() => users.id),
+    completedByUserId: sqliteUuidV7('completed_by_user_id')
+      .notNull()
+      .references(() => users.id),
     customerId: sqliteUuidV7('customer_id'),
     shiftId: sqliteUuidV7('shift_id'),
     clientRequestId: sqliteUuidV7('client_request_id').notNull(),
+    requestHash: text('request_hash').notNull(),
     subtotalGross: sqliteMoney('subtotal_gross').notNull(),
     totalPromoDiscount: sqliteMoney('total_promo_discount').notNull(),
     subtotalAfterPromo: sqliteMoney('subtotal_after_promo').notNull(),
@@ -965,6 +969,7 @@ export const sales = localSchemaRegistry.defineTable(
     index('idx_sales_store_cart').on(self.organizationId, self.storeId, self.sourceCartId),
     check('chk_sales_receipt_no_pos', sql`${self.receiptNo} >= 1`),
     check('chk_sales_receipt_code_nonempty', sql`length(trim(${self.receiptCode})) >= 1`),
+    check('chk_sales_request_hash_nonempty', sql`length(trim(${self.requestHash})) >= 6`),
     check('chk_sales_disc_mode', sql`${self.manualDiscountMode} IN ('none', 'percent', 'amount')`),
     check(
       'chk_sales_disc_val',
@@ -1097,10 +1102,61 @@ export const payments = localSchemaRegistry.defineTable(
       'chk_payments_method',
       sql`${self.method} IN ('cash', 'card', 'uzqr', 'payme', 'click', 'uzum', 'social_card', 'other')`,
     ),
-    check('chk_payments_nonneg', sql`${self.amount} >= 0 AND ${self.changeAmount} >= 0`),
+    check('chk_payments_nonneg', sql`${self.amount} > 0 AND ${self.changeAmount} >= 0`),
     check(
       'chk_payments_cash_balance',
-      sql`(${self.method} = 'cash' AND ${self.tenderedAmount} IS NOT NULL AND ${self.tenderedAmount} >= ${self.amount} AND ${self.tenderedAmount} - ${self.changeAmount} = ${self.amount}) OR (${self.method} <> 'cash' AND ${self.changeAmount} = 0)`,
+      sql`(${self.method} = 'cash' AND ${self.tenderedAmount} IS NOT NULL AND ${self.tenderedAmount} > 0 AND ${self.tenderedAmount} >= ${self.amount} AND ${self.tenderedAmount} - ${self.changeAmount} = ${self.amount}) OR (${self.method} <> 'cash' AND ${self.tenderedAmount} IS NULL AND ${self.changeAmount} = 0)`,
     ),
+  ],
+);
+
+/**
+ * Append-only cash drawer movement ledger (`FACT`, T1.5+):
+ * - Cash drawer balance = `SUM(amount_delta)` over `cash_moves` (`device_id` per terminal, `store_id` per store).
+ * - `shift_id` stays nullable until T1.9 makes active shifts mandatory.
+ */
+export const cashMoves = localSchemaRegistry.defineTable(
+  {
+    name: 'cash_moves',
+    tableClass: 'FACT',
+    tenantScope: 'store',
+  },
+  (common) => ({
+    ...common,
+    shiftId: sqliteUuidV7('shift_id'),
+    type: text('type').notNull(),
+    amountDelta: sqliteMoney('amount_delta').notNull(),
+    sourceType: text('source_type').notNull(),
+    sourceId: sqliteUuidV7('source_id').notNull(),
+    paymentId: sqliteUuidV7('payment_id').references(() => payments.id),
+    reason: text('reason'),
+    createdByUserId: sqliteUuidV7('created_by_user_id')
+      .notNull()
+      .references(() => users.id),
+  }),
+  (self) => [
+    index('idx_cash_moves_store_created').on(self.organizationId, self.storeId, self.createdAtMs),
+    index('idx_cash_moves_terminal').on(
+      self.organizationId,
+      self.storeId,
+      self.deviceId,
+      self.createdAtMs,
+    ),
+    index('idx_cash_moves_shift_created').on(
+      self.organizationId,
+      self.storeId,
+      self.shiftId,
+      self.createdAtMs,
+    ),
+    index('idx_cash_moves_source').on(self.sourceType, self.sourceId),
+    check(
+      'chk_cash_moves_type',
+      sql`${self.type} IN ('sale_cash_in', 'debt_payment_in', 'cash_in', 'sale_change_out', 'refund_cash_out', 'cash_out', 'encashment')`,
+    ),
+    check(
+      'chk_cash_moves_amount_sign',
+      sql`(${self.type} IN ('sale_cash_in', 'debt_payment_in', 'cash_in') AND ${self.amountDelta} > 0) OR (${self.type} IN ('sale_change_out', 'refund_cash_out', 'cash_out', 'encashment') AND ${self.amountDelta} < 0)`,
+    ),
+    check('chk_cash_moves_source_type', sql`length(trim(${self.sourceType})) >= 1`),
   ],
 );

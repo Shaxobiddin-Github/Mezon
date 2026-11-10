@@ -109,6 +109,7 @@ export {
   sales,
   saleLines,
   payments,
+  cashMoves,
 } from './schema/index.js';
 
 export {
@@ -200,8 +201,11 @@ export {
   type CompleteSaleInput,
   type StoredSaleLineRecord,
   type StoredSalePaymentRecord,
+  type StoredCashMoveRecord,
   type StoredSaleRecord,
   type CompleteSaleOutcome,
+  getCashDrawerBalanceSync,
+  getStoreCashBalanceSync,
   SqliteSaleStore,
   createSqliteSaleStore,
 } from './sale-repo.js';

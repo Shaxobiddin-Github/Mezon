@@ -1,5 +1,7 @@
+import { MAX_MONEY_TIYIN } from '@mezon/domain';
 import { describe, expect, it } from 'vitest';
 import {
+  CashMoveDtoSchema,
   CompleteSaleRequestSchema,
   CompleteSaleResponseSchema,
   SaleDtoSchema,
@@ -8,31 +10,58 @@ import {
 
 const UID = (seq: number) => `01950000-0000-7000-8000-${String(seq).padStart(12, '0')}`;
 
-describe('@mezon/contracts - T1.4 completeSale schemas & cost/fiscal boundary', () => {
-  it('validates completeSale request and requires exactly one cash payment', () => {
-    const ok = CompleteSaleRequestSchema.parse({
+describe('@mezon/contracts - T1.5 mixed payments, bounds, cash_moves & cost/fiscal boundary', () => {
+  it('validates T1.4 cash-only requests, T1.5 mixed/empty requests, MAX_MONEY_TIYIN bounds, and rejects invalid inputs', () => {
+    // T1.4 backward compatible cash request
+    const cashOnly = CompleteSaleRequestSchema.parse({
       clientRequestId: UID(1),
       expectedTotal: '150000',
       payments: [{ method: 'cash', tenderedAmount: '200000' }],
     });
-    expect(ok.payments[0]?.tenderedAmount).toBe('200000');
+    expect(cashOnly.payments[0]).toEqual({ method: 'cash', tenderedAmount: '200000' });
 
+    // T1.5 empty array allowed at contract level (for 100%-discounted totalFinal=0 sales)
+    const emptyPay = CompleteSaleRequestSchema.parse({
+      clientRequestId: UID(1),
+      expectedTotal: '0',
+      payments: [],
+    });
+    expect(emptyPay.payments).toEqual([]);
+
+    // Mixed: two card rows (with RRN ref), payme, uzqr, plus cash
+    const mixed = CompleteSaleRequestSchema.parse({
+      clientRequestId: UID(2),
+      expectedTotal: '500000',
+      payments: [
+        { method: 'card', amount: '100000', providerRef: '  RRN-1  ' },
+        { method: 'card', amount: '150000', providerRef: '   ' },
+        { method: 'uzqr', amount: '100000' },
+        { method: 'payme', amount: '50000', providerRef: 'PM-01' },
+        { method: 'cash', tenderedAmount: '150000' },
+      ],
+    });
+    expect(mixed.payments[0]).toEqual({ method: 'card', amount: '100000', providerRef: 'RRN-1' });
+    expect(mixed.payments[1]).toEqual({ method: 'card', amount: '150000', providerRef: null });
+
+    // Rejects tenderedAmount on non-cash method
     expect(() =>
       CompleteSaleRequestSchema.parse({
         clientRequestId: UID(1),
         expectedTotal: '150000',
-        payments: [],
+        payments: [{ method: 'card', amount: '150000', tenderedAmount: '150000' }],
       }),
     ).toThrow();
 
+    // Rejects providerRef on cash method
     expect(() =>
       CompleteSaleRequestSchema.parse({
         clientRequestId: UID(1),
         expectedTotal: '150000',
-        payments: [{ method: 'card', tenderedAmount: '150000' }],
+        payments: [{ method: 'cash', tenderedAmount: '150000', providerRef: 'ABC' }],
       }),
     ).toThrow();
 
+    // Rejects > 1 cash row
     expect(() =>
       CompleteSaleRequestSchema.parse({
         clientRequestId: UID(1),
@@ -43,9 +72,71 @@ describe('@mezon/contracts - T1.4 completeSale schemas & cost/fiscal boundary', 
         ],
       }),
     ).toThrow();
+
+    // Rejects zero and negative payment rows
+    expect(() =>
+      CompleteSaleRequestSchema.parse({
+        clientRequestId: UID(1),
+        expectedTotal: '150000',
+        payments: [{ method: 'cash', tenderedAmount: '0' }],
+      }),
+    ).toThrow();
+    expect(() =>
+      CompleteSaleRequestSchema.parse({
+        clientRequestId: UID(1),
+        expectedTotal: '150000',
+        payments: [{ method: 'card', amount: '0' }],
+      }),
+    ).toThrow();
+    expect(() =>
+      CompleteSaleRequestSchema.parse({
+        clientRequestId: UID(1),
+        expectedTotal: '150000',
+        payments: [{ method: 'card', amount: '-100' }],
+      }),
+    ).toThrow();
+
+    // M4 upper bound checks: MAX_MONEY_TIYIN passes, MAX_MONEY_TIYIN + 1n fails
+    const maxStr = MAX_MONEY_TIYIN.toString();
+    const overMaxStr = (MAX_MONEY_TIYIN + 1n).toString();
+    expect(() =>
+      CompleteSaleRequestSchema.parse({
+        clientRequestId: UID(1),
+        expectedTotal: maxStr,
+        payments: [{ method: 'cash', tenderedAmount: maxStr }],
+      }),
+    ).not.toThrow();
+    expect(() =>
+      CompleteSaleRequestSchema.parse({
+        clientRequestId: UID(1),
+        expectedTotal: '10000',
+        payments: [{ method: 'card', amount: maxStr }],
+      }),
+    ).not.toThrow();
+    expect(() =>
+      CompleteSaleRequestSchema.parse({
+        clientRequestId: UID(1),
+        expectedTotal: '10000',
+        payments: [{ method: 'cash', tenderedAmount: overMaxStr }],
+      }),
+    ).toThrow();
+    expect(() =>
+      CompleteSaleRequestSchema.parse({
+        clientRequestId: UID(1),
+        expectedTotal: '10000',
+        payments: [{ method: 'card', amount: overMaxStr }],
+      }),
+    ).toThrow();
+    expect(() =>
+      CompleteSaleRequestSchema.parse({
+        clientRequestId: UID(1),
+        expectedTotal: overMaxStr,
+        payments: [],
+      }),
+    ).toThrow();
   });
 
-  it('rejects any cost/profit fields on SaleLineDto and any fiscal fields on SaleDto', () => {
+  it('rejects any cost/profit fields on SaleLineDto, fiscal fields on SaleDto, and validates CashMoveDto', () => {
     const baseLine = {
       id: UID(10),
       sortOrder: 0,
@@ -83,6 +174,7 @@ describe('@mezon/contracts - T1.4 completeSale schemas & cost/fiscal boundary', 
       deviceId: UID(4),
       sourceCartId: UID(5),
       cashierUserId: UID(6),
+      completedByUserId: UID(7),
       customerId: null,
       shiftId: null,
       clientRequestId: UID(1),
@@ -123,9 +215,27 @@ describe('@mezon/contracts - T1.4 completeSale schemas & cost/fiscal boundary', 
       warnings: [],
     });
     expect(parsed.sale.receiptCode).toBe('0002-000001');
+    expect(parsed.sale.completedByUserId).toBe(UID(7));
 
-    // No fiscalStatus / fiscalReceiptNo on sales in T1.4
+    // No fiscalStatus / fiscalReceiptNo on sales in F1
     expect(() => SaleDtoSchema.parse({ ...baseSale, fiscalStatus: 'pending' })).toThrow();
     expect(() => SaleDtoSchema.parse({ ...baseSale, fiscalReceiptNo: null })).toThrow();
+
+    const parsedMove = CashMoveDtoSchema.parse({
+      id: UID(40),
+      organizationId: UID(2),
+      storeId: UID(3),
+      deviceId: UID(4),
+      shiftId: null,
+      type: 'sale_change_out',
+      amountDelta: '-25000',
+      sourceType: 'sale',
+      sourceId: UID(20),
+      paymentId: UID(30),
+      reason: null,
+      createdByUserId: UID(7),
+      createdAtMs: '1760000000000',
+    });
+    expect(parsedMove.amountDelta).toBe('-25000');
   });
 });

@@ -28,6 +28,7 @@ import {
   buildSaleMonotoneTriggersSql,
   buildSqliteImmutabilityTriggersSql,
   buildStockMonotoneTriggersSql,
+  cashMoves,
   categories,
   getDefaultLocalMigrationsFolder,
   inventoryCountLines,
@@ -123,6 +124,7 @@ describe('@mezon/db-local - Schema foundation, registry, pragmas, and bigint saf
       ['sales', 'MONOTONE'],
       ['sale_lines', 'FACT'],
       ['payments', 'FACT'],
+      ['cash_moves', 'FACT'],
     ]);
     expect(() =>
       validateSqliteSchemaRegistry(
@@ -152,6 +154,7 @@ describe('@mezon/db-local - Schema foundation, registry, pragmas, and bigint saf
           sales,
           saleLines,
           payments,
+          cashMoves,
         },
         localSchemaRegistry,
       ),
@@ -329,7 +332,7 @@ describe('@mezon/db-local - Schema foundation, registry, pragmas, and bigint saf
       const migCountRow = conn.sqlite
         .prepare('SELECT COUNT(*) as cnt FROM __drizzle_migrations')
         .get() as { cnt: bigint };
-      expect(migCountRow.cnt).toBe(7n);
+      expect(migCountRow.cnt).toBe(8n);
     } finally {
       conn.close();
     }
@@ -730,6 +733,15 @@ describe('@mezon/db-local - Schema foundation, registry, pragmas, and bigint saf
       validSaleTrig.replace(/CREATE TRIGGER "trg_sales_voided_monotone"[\s\S]*?END;/i, ''),
     );
     expect(() => assertSaleMigrationsComplete(missingVoidedTrigDir)).toThrowError(
+      /trg_sales_voided_monotone/,
+    );
+
+    const dropWithoutRecreateDir = makeMigDir();
+    fs.writeFileSync(
+      path.join(dropWithoutRecreateDir, '0006.sql'),
+      `${validSaleTrig}\nDROP TABLE "sales";`,
+    );
+    expect(() => assertSaleMigrationsComplete(dropWithoutRecreateDir)).toThrowError(
       /trg_sales_voided_monotone/,
     );
   });
