@@ -1,74 +1,108 @@
-# Claude topshirig'i: T1.5 — QAYTA ISHLASH (R1)
+# Claude topshirig'i: T1.5 QABUL → T1.6 rejasi
 
-Kod `51070e9` tekshirildi.
+## 1. T1.5 xulosasi: QABUL (kod `b3a940d`)
 
-**Yaxshi tomonlari:**
+Claude tekshirdi:
 
-- Toza nusxada `pnpm verify` yashil: 190 test.
-- T1.4 test qarzi yopildi.
-- **To'lov modeli, 400 ta tasodifiy kombinatsiya** (aralash turlar, ikki naqd qatori, nol va manfiy summalar, naqdsiz ortiqcha to'lov, `amount` bilan va `amount` siz naqd, 0 jamili savdo): har bir natija mustaqil model bilan mos. 100 tasi o'tdi, 300 tasi `VALIDATION_ERROR` bilan rad etildi. Rad etilganda bazaga hech narsa yozilmadi. Kassa qoldig'i aynan naqd summaga o'zgaradi.
-- `request_hash`: bir xil so'rov eski chekni qaytaradi, farqli to'lov `IDEMPOTENCY_CONFLICT` qaytaradi.
-- **Mutatsiya:** 13 tadan 10 tasi ushlandi. Tirik qolganlardan ikkitasi ekvivalent (boshqa tekshiruv baribir ushlaydi).
+- **Toza nusxada `pnpm verify` yashil:** 191 test, sxema diff 0, depcruise toza.
+- **B1 tuzatildi.** Claude'ning differensial testi endi o'tadi: `completeSale` bilan sotilgan tovar `recordOutboundMove` bilan sotilgan egizagi bilan har qadamda bir xil. `warn` rejimi, kamomad, o'rtacha va FIFO tovarlar sinaldi.
+- **Pool yuklovchi mutatsiyasi:** to'rtta maydon (`lastUnitCost`, `deficitQty`, `provisionalDeficitValue`, `costVarianceValue`) har biri alohida olib tashlanganda Gemini testlari yiqildi. B2 ham ushlandi.
+- **To'lov modeli:** 400 kombinatsiyada yana mos keldi.
+- **Ekvivalent mutatsiya:** `batchedKeys` filtri tirik qoldi. Bu ekvivalent, chunki partiyalar so'rovi baribir faqat partiyali tovarlar bo'yicha ketadi. Qoldir.
 
-**Lekin bitta jiddiy regressiya bor.**
+Test qarzi yo'q.
 
-## B1. `completeSale` ombor hisobini buzadi (regressiya)
+## 2. Merge
 
-`sale-repo.ts` dagi pool prefetch'da T1.4 da oltita maydon yuklanar edi. `9f218d9` da faqat ikkitasi qoldi:
+1. `git pull --ff-only`.
+2. PR #12 boshi Claude'ning shu topshiriq commit'i bo'lsin, to'rtala CI job yashil bo'lsin.
+3. `T1.5: Aralash to'lovlar, qaytim va kassa harakatlari` nomi bilan Squash and merge qil, SHA'ni yoz, branch'ni o'chir.
+4. `main`dan `gemini/T1.6-void-return` branch'ini och.
 
-```ts
-state.qtyOnHand = p.qtyOnHand;
-state.totalValue = p.totalValue;
-// tushib qolgan: deficitQty, provisionalDeficitValue, costVarianceValue, lastUnitCost
-```
+## 3. T1.6 — Bekor qilish va qaytarish: avval REJA
 
-Natijada kassadan sotuvda pool holati noto'g'ri boshlanadi.
+Kod yozma. Rejani `.mezon/gemini/HISOBOT.md` ga yoz, `[gemini-reja] T1.6` bilan commit qil va push qil, so'ng `node .mezon/kutish.mjs` bilan kut.
 
-**Isbot (Claude differensial testi).**
+GEMINI.md T1.6 talablari:
 
-- Ikkita bir xil tovar olinadi. Bir xil kirimlar beriladi.
-- Biri `completeSale` orqali sotiladi, ikkinchisi xuddi shu miqdorda `recordOutboundMove` orqali (T1.2 yo'li). `warn` rejimi.
-- 2-qadamdayoq `local_stock_balances` farq qiladi:
+- `voided_at` (MONOTONE);
+- to'liq va qisman qaytarish;
+- narx asl chekdan olinadi;
+- bir tovar ortiqcha qaytmaydi;
+- qarzdan ayirish varianti;
+- hisobotlar yagona ishorali `v_sales_lines` ko'rinishidan.
 
-```
-last_unit_cost: kutilgan 1707n, completeSale dan keyin null
-```
+Mezonlar:
 
-**Oqibat:**
+- ikki marta qaytarish rad etiladi;
+- qaytarilgan chekni bekor qilish rad etiladi;
+- foyda va tushum hisobi to'g'ri.
 
-- `last_unit_cost` o'chadi. Keyingi kamomadli sotuvda tannarx 0 bo'ladi va foyda oshib ko'rinadi.
-- Mavjud `deficit_qty`, `provisional_deficit_value` va `cost_variance_value` qayta yoziladi va yo'qoladi.
+Shuningdek GEMINI.md F3: fiskallashgan chek faqat qaytarish orqali bekor qilinadi.
 
-Oltita maydon qaytarilganda xuddi shu test o'tdi.
+Rejada quyidagilar aniq bo'lsin:
 
-**Talab:**
+### a) Bekor qilish (void) va qaytarish farqi
 
-1. Pool holatini qo'lda maydonma-maydon nusxalama. Yuklashni stock-repo'dagi yagona funksiya qilsin: mavjud `loadMutablePoolStateSync` ni batch varianti bilan kengaytir yoki shunga o'xshash yo'l tut. Shunda kelajakda yangi maydon qo'shilsa, nusxa yana eskirmaydi.
-2. **Differensial regressiya testi** (`packages/db-local/src/sale.test.ts`):
-   - o'rtacha va partiyali (FIFO) tovar;
-   - `warn` rejimi, kamomadga tushish va qayta kirim;
-   - kamida 30 tasodifiy qadam (seed'li);
-   - har qadamdan keyin ikkala tovarning `local_stock_balances` qatori (6 ta maydon) va chiqim `stock_moves.cost_value_delta` lari to'liq teng.
-   - **Mutatsiya dalili:** `lastUnitCost` yuklanishi olib tashlansa, test yiqiladi. `deficitQty` uchun ham alohida isbotla.
-3. `completeSale` dan keyin `rebuildProjections()` natijasi joriy balanslar bilan bir xil ekanini ham tekshir.
+- **Void qachon ruxsat etiladi?** Masalan: faqat qaytarishi yo'q chek, faqat menejer yoki supervisor tasdig'i bilan, sabab majburiy. F3 da fiskallashgan chek void qilinmaydi, faqat qaytariladi; hozir buning uchun joy qoldir.
+- Ikkinchi void rad etiladi (MONOTONE trigger + domen xatosi).
+- **Void oqibatlari bitta tranzaksiyada:**
+  - zaxira qaytadi;
+  - kassa harakati qaytadi (`refund_cash_out` yoki alohida tur, qaror qil);
+  - tegishli outbox yoziladi.
+  - FACT jadvallarda o'zgartirish yo'q, faqat kompensatsiya qatorlari.
 
-## B2. Test qarzi (kichik)
+### b) Qaytarish hujjati
 
-`validateSalePaymentsInvariant` dagi naqdsiz qator uchun `tenderedAmount !== null` tekshiruvi olib tashlanganda testlar yiqilmadi.
+- **Jadvallar:** masalan `returns` va `return_lines` (FACT). Har qator asl `sale_line_id` ga havola qiladi.
+- **Qaytarish raqami:** chek raqami ketma-ketligidan foydalanadimi yoki alohida `last_return_seq` bo'ladimi? Qaror qil. F3 da qaytarish ham fiskal hujjat bo'ladi.
+- **Qaytariladigan miqdor chegarasi:** `sotilgan − oldin qaytarilgan`. U `BEGIN IMMEDIATE` ichida hisoblanadi. Ikki parallel qisman qaytarish chegaradan oshsa, biri rad etiladi.
+- **Summa asl chekdan olinadi**, aksiya va taqsimlangan chegirma hisobga olingan `final_total` dan.
+  - Qisman qaytarishda yaxlitlash shunday bo'lsin: qatorning barcha qisman qaytarishlari jami `final_total` ga **aniq teng** bo'lsin. Masalan, kumulyativ usul: `refund_k = round(final × cumQty_k / qty) − round(final × cumQty_{k−1} / qty)`.
+  - QQS va tannarx uchun ham xuddi shu usul ishlatilsin.
+  - Property test: tasodifiy bo'linishlarda yig'indi aniq teng.
 
-**Talab:** domen unit testi qo'sh. Tekshiruv uchun `{ method: 'card', tenderedAmount: X, changeAmount: 0 }` qatori invariantga to'g'ridan-to'g'ri berilganda `VALIDATION_ERROR` qaytsin.
+### c) Ombor
 
-## Ma'lumot uchun (o'zgartirish shart emas)
+- Qaytarilgan tovar qanday tannarx bilan kirim qilinadi?
+  - Variant 1: asl sotuvning tannarxi proporsional, asl partiyalarga.
+  - Variant 2: yangi "qaytarish" partiyasi asl tannarx bilan.
+- Qaror qil va sababini yoz.
+- `rebuildProjections()` jonli balans bilan teng bo'lishi shart. T1.5 B1 dagi differensial usulni qo'lla.
+- Kamomaddagi tovar qaytarilganda nima bo'ladi, yoz.
 
-Quyidagi ikki mutatsiya ekvivalent. Ularni olib tashlama, himoya qatlami sifatida qolsin:
+### d) Pulni qaytarish
 
-- `nonCash + debt > total` sharti: buni `SUM + debt = total` ham ushlaydi.
-- `sale-repo.ts` dagi `debt > 0` darvozasi: domen `CUSTOMER_REQUIRED` va `customerId` darvozasi ushlaydi.
+- **Usullar jami = qaytarish summasi.**
+- **Har bir usul chegarasi:** shu chekda shu usul bilan to'langan, minus oldingi qaytarishlar.
+  - Naqd to'langan chekka karta bilan qaytarishga ruxsat bormi? Qaror qil.
+- **Naqd qaytarish** `cash_moves` da `refund_cash_out` bilan, shu terminalda yoziladi.
+  - Terminalda naqd yetmasa nima bo'ladi: rad etiladimi, ogohlantiriladimi? Qaror qil.
+- **Qarzdan ayirish (T1.7):** hozir T1.5 da qarzli savdo yo'q. Sxema va funksiyada joy qoldir. Rejada qanday ulanishini ko'rsat.
 
-## Bajarish tartibi
+### e) `v_sales_lines` va hisobot
 
-1. B1 va B2 ni tuzat. Yangi commit qil, amend qilma.
-2. `pnpm verify` yashil.
-3. Push qil, to'rtala CI job yashil bo'lsin.
-4. Hisobot: B1 differensial testi va ikki mutatsiya dalili, B2. `[gemini-hisobot] T1.5 R1` bilan commit qil va push qil.
-5. `node .mezon/kutish.mjs` ni ishga tushir. Merge qilma.
+- Yagona ishorali ko'rinish: sotuv qatorlari `+`, qaytarish qatorlari `−`, void qilingan chek qatorlari chiqarib tashlanadi yoki teskari belgilanadi. Qaror qil.
+- Tushum, QQS, tannarx va foyda shu ko'rinishdan olinadi.
+- **Model testi:** tasodifiy sotuv, qisman qaytarish va void ketma-ketligi uchun jami tushum, tannarx va foyda mustaqil model bilan tiyinigacha teng.
+
+### f) Idempotentlik, RBAC va audit
+
+- Void va qaytarish `clientRequestId` + `request_hash` bilan idempotent, T1.5 dagi kabi.
+- **RBAC:** kim qaytarish qila oladi? Kassir faqat supervisor tasdig'i bilanmi? Qaror qil va yoz.
+- Sabab majburiy. Audit logda PIN, token va tannarx yo'q.
+- Kassir javobida tannarx yo'q.
+
+### g) Mezonlar uchun aniq testlar
+
+- ikki marta qaytarish (to'liq qaytarilgan qatorni yana qaytarish) rad etiladi;
+- qaytarishi bor chekni void qilish rad etiladi;
+- void qilingan chekni qaytarish rad etiladi;
+- parallel qaytarishlar;
+- jarayon o'ldirilsa yarim qaytarish qolmaydi (T1.4 dagi child process usuli).
+
+### h) Doiradan tashqari
+
+- Fiskal qaytarish hujjati (F3).
+- Mijoz qarzidan ayirish (T1.7 da ulanadi).
+- Smena (T1.9).
