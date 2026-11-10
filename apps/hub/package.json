@@ -7,6 +7,19 @@
   "types": "./dist/index.d.ts",
   "scripts": {
     "build": "tsc -b",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit && tsc -p tsconfig.test.json --noEmit"
+  },
+  "dependencies": {
+    "@mezon/contracts": "workspace:*",
+    "@mezon/db-local": "workspace:*",
+    "@mezon/domain": "workspace:*",
+    "@mezon/drivers": "workspace:*",
+    "@node-rs/argon2": "2.2.2",
+    "fastify": "5.12.8",
+    "pino": "10.4.0",
+    "zod": "4.6.7"
+  },
+  "devDependencies": {
+    "@mezon/test-utils": "workspace:*"
   }
 }

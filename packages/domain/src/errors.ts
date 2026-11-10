@@ -20,14 +20,32 @@ export type DomainErrorCode =
   | 'UNIT_OF_WORK_REQUIRED'
   | 'UNIT_OF_WORK_SESSION_CLOSED'
   | 'UNIT_OF_WORK_CONCURRENT_NESTED'
-  | 'UNIT_OF_WORK_TENANT_MISMATCH';
+  | 'UNIT_OF_WORK_TENANT_MISMATCH'
+  | 'VALIDATION_ERROR'
+  | 'INVALID_PIN'
+  | 'AUTH_UNAUTHORIZED'
+  | 'AUTH_INVALID_CREDENTIALS'
+  | 'AUTH_FORBIDDEN'
+  | 'AUTH_RATE_LIMITED'
+  | 'SETUP_ALREADY_COMPLETED'
+  | 'USER_NOT_FOUND'
+  | 'USERNAME_ALREADY_EXISTS'
+  | 'LAST_OWNER_PROTECTED'
+  | 'INVALID_HOST'
+  | 'FORBIDDEN_ORIGIN';
+
+export interface DomainErrorOptions {
+  readonly retryAfterSeconds?: bigint;
+}
 
 export class DomainError extends Error {
   readonly code: DomainErrorCode;
+  readonly retryAfterSeconds?: bigint;
 
-  constructor(code: DomainErrorCode, detail?: string) {
+  constructor(code: DomainErrorCode, detail?: string, options?: DomainErrorOptions) {
     super(detail ? `${code}: ${detail}` : code);
     this.name = 'DomainError';
     this.code = code;
+    this.retryAfterSeconds = options?.retryAfterSeconds;
   }
 }

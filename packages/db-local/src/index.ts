@@ -59,6 +59,8 @@ export {
   SqliteUnitOfWorkSession,
   SqliteUnitOfWork,
   createSqliteUnitOfWork,
+  bootstrapSqliteHubUnitOfWork,
+  runConnectionReadOnly,
   getSessionSqlite,
 } from './uow.js';
 
@@ -75,4 +77,26 @@ export {
   tombstoneAttr,
 } from './writers.js';
 
-export { localSchemaRegistry, localDeviceState, localOutbox } from './schema/index.js';
+export {
+  localSchemaRegistry,
+  localDeviceState,
+  localOutbox,
+  users,
+  localHubConfig,
+  localPinCredentials,
+  localDeviceAuthState,
+  localSessions,
+} from './schema/index.js';
+
+export {
+  type HubConfigSnapshot,
+  type StoredUserRecord,
+  type LoginOptionRecord,
+  type LoginSelector,
+  type LoginCredentialSnapshot,
+  type CommitLoginOutcomeResult,
+  type AuthenticatedSessionSnapshot,
+  type CreateSqliteHubAuthStoreOptions,
+  SqliteHubAuthStore,
+  createSqliteHubAuthStore,
+} from './auth-repo.js';

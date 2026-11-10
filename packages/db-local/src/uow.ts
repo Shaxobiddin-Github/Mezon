@@ -67,6 +67,16 @@ class AsyncMutex {
 }
 
 const activeUowContext = new AsyncLocalStorage<ReadonlySet<SqliteUnitOfWork>>();
+const connectionMutexes = new WeakMap<Database.Database, AsyncMutex>();
+
+function getConnectionMutex(sqlite: Database.Database): AsyncMutex {
+  let mutex = connectionMutexes.get(sqlite);
+  if (!mutex) {
+    mutex = new AsyncMutex();
+    connectionMutexes.set(sqlite, mutex);
+  }
+  return mutex;
+}
 
 export interface CreateSqliteUnitOfWorkOptions {
   readonly connection: LocalSqliteConnection;
@@ -277,7 +287,7 @@ export class SqliteUnitOfWorkSession implements UnitOfWorkSession, SqliteSession
  * (`local_device_state.last_device_seq`) so SQLite transaction/savepoint rollback restores it automatically.
  */
 export class SqliteUnitOfWork implements UnitOfWork<SqliteUnitOfWorkSession> {
-  private readonly mutex = new AsyncMutex();
+  private readonly mutex: AsyncMutex;
   private readonly activeSessionStack: SqliteUnitOfWorkSession[] = [];
   private savepointSeq = 0;
 
@@ -304,6 +314,7 @@ export class SqliteUnitOfWork implements UnitOfWork<SqliteUnitOfWorkSession> {
     readonly hlcClock: HlcClock;
     readonly uuidGenerator: MonotonicUuidV7Generator;
   }) {
+    this.mutex = getConnectionMutex(params.connection.sqlite);
     this.internalConnection = params.connection;
     this.organizationId = params.organizationId;
     this.deviceId = params.deviceId;
@@ -314,7 +325,7 @@ export class SqliteUnitOfWork implements UnitOfWork<SqliteUnitOfWorkSession> {
     this.uuidGenerator = params.uuidGenerator;
   }
 
-  static create(options: CreateSqliteUnitOfWorkOptions): Promise<SqliteUnitOfWork> {
+  static async create(options: CreateSqliteUnitOfWorkOptions): Promise<SqliteUnitOfWork> {
     const validOrgId = parseUuidV7(options.organizationId);
     const validDeviceId = parseUuidV7(options.deviceId);
     const { sqlite, db } = options.connection;
@@ -323,73 +334,74 @@ export class SqliteUnitOfWork implements UnitOfWork<SqliteUnitOfWorkSession> {
       throw new Error('Cannot create SqliteUnitOfWork on a closed SQLite database connection');
     }
 
-    const existingTableCheck = sqlite
-      .prepare<[string], { readonly name: string }>(
-        "SELECT name FROM sqlite_master WHERE type = 'table' AND name = ?",
-      )
-      .get('local_device_state');
-    if (!existingTableCheck) {
-      throw new Error(
-        'Missing required "local_device_state" table; run migrateLocalDatabase() before creating SqliteUnitOfWork',
-      );
-    }
-
-    // Bootstrap persistent device state atomically inside BEGIN IMMEDIATE ... COMMIT
-    let persisted = readDeviceStateRowSync(db, validDeviceId);
-    if (persisted === null) {
-      sqlite.exec('BEGIN IMMEDIATE');
-      try {
-        persisted = readDeviceStateRowSync(db, validDeviceId);
-        if (persisted === null) {
-          const seedUuidGen = new MonotonicUuidV7Generator({
-            clock: options.clock,
-            random: options.random,
-          });
-          const rowId = seedUuidGen.nextId();
-          const nowMs = unixMsFromBigInt(options.clock.now());
-          const initialHlcStr = serializeHlc(createHlcTimestamp(nowMs, 0, validDeviceId));
-          const initialUuidMs = seedUuidGen.currentLastTimestampMs() ?? nowMs;
-          persisted = ensureDeviceStateRowSync(sqlite, db, {
-            rowId,
-            organizationId: validOrgId,
-            deviceId: validDeviceId,
-            initialHlcStr,
-            initialUuidMs,
-            nowMs,
-          });
-        }
-        sqlite.exec('COMMIT');
-      } catch (err) {
-        if (sqlite.open && sqlite.inTransaction) {
-          try {
-            sqlite.exec('ROLLBACK');
-          } catch {
-            // ignore rollback error
-          }
-        }
-        throw err;
+    const release = await getConnectionMutex(sqlite).acquire();
+    try {
+      const existingTableCheck = sqlite
+        .prepare<[string], { readonly name: string }>(
+          "SELECT name FROM sqlite_master WHERE type = 'table' AND name = ?",
+        )
+        .get('local_device_state');
+      if (!existingTableCheck) {
+        throw new Error(
+          'Missing required "local_device_state" table; run migrateLocalDatabase() before creating SqliteUnitOfWork',
+        );
       }
-    } else if (persisted.organizationId !== validOrgId) {
-      throw new Error(
-        `Device "${validDeviceId}" belongs to organization "${persisted.organizationId}", expected "${validOrgId}"`,
-      );
-    }
 
-    const hlcClock = new HlcClock({
-      clock: options.clock,
-      nodeId: validDeviceId,
-      maxSkewMs: options.maxSkewMs,
-      initial: parseHlc(persisted.lastHlc),
-    });
+      // Bootstrap persistent device state atomically inside BEGIN IMMEDIATE ... COMMIT
+      let persisted = readDeviceStateRowSync(db, validDeviceId);
+      if (persisted === null) {
+        sqlite.exec('BEGIN IMMEDIATE');
+        try {
+          persisted = readDeviceStateRowSync(db, validDeviceId);
+          if (persisted === null) {
+            const seedUuidGen = new MonotonicUuidV7Generator({
+              clock: options.clock,
+              random: options.random,
+            });
+            const rowId = seedUuidGen.nextId();
+            const nowMs = unixMsFromBigInt(options.clock.now());
+            const initialHlcStr = serializeHlc(createHlcTimestamp(nowMs, 0, validDeviceId));
+            const initialUuidMs = seedUuidGen.currentLastTimestampMs() ?? nowMs;
+            persisted = ensureDeviceStateRowSync(sqlite, db, {
+              rowId,
+              organizationId: validOrgId,
+              deviceId: validDeviceId,
+              initialHlcStr,
+              initialUuidMs,
+              nowMs,
+            });
+          }
+          sqlite.exec('COMMIT');
+        } catch (err) {
+          if (sqlite.open && sqlite.inTransaction) {
+            try {
+              sqlite.exec('ROLLBACK');
+            } catch {
+              // ignore rollback error
+            }
+          }
+          throw err;
+        }
+      } else if (persisted.organizationId !== validOrgId) {
+        throw new Error(
+          `Device "${validDeviceId}" belongs to organization "${persisted.organizationId}", expected "${validOrgId}"`,
+        );
+      }
 
-    const uuidGenerator = new MonotonicUuidV7Generator({
-      clock: options.clock,
-      random: options.random,
-      initialLastMs: persisted.lastUuidMs,
-    });
+      const hlcClock = new HlcClock({
+        clock: options.clock,
+        nodeId: validDeviceId,
+        maxSkewMs: options.maxSkewMs,
+        initial: parseHlc(persisted.lastHlc),
+      });
 
-    return Promise.resolve(
-      new SqliteUnitOfWork({
+      const uuidGenerator = new MonotonicUuidV7Generator({
+        clock: options.clock,
+        random: options.random,
+        initialLastMs: persisted.lastUuidMs,
+      });
+
+      return new SqliteUnitOfWork({
         connection: options.connection,
         organizationId: validOrgId,
         deviceId: validDeviceId,
@@ -397,8 +409,102 @@ export class SqliteUnitOfWork implements UnitOfWork<SqliteUnitOfWorkSession> {
         clock: options.clock,
         hlcClock,
         uuidGenerator,
-      }),
-    );
+      });
+    } finally {
+      release();
+    }
+  }
+
+  /**
+   * Atomically executes one-time bootstrap setup inside a single `BEGIN IMMEDIATE ... COMMIT`
+   * holding the connection FIFO mutex so concurrent `/setup` requests strictly serialize and
+   * only one can ever succeed (`T0.6`).
+   */
+  static async bootstrapSetup<T>(
+    options: CreateSqliteUnitOfWorkOptions & {
+      readonly assertPrecondition?: (db: BetterSQLite3Database) => void;
+      readonly fn: (session: SqliteUnitOfWorkSession, uow: SqliteUnitOfWork) => Promise<T>;
+    },
+  ): Promise<{ readonly uow: SqliteUnitOfWork; readonly result: T }> {
+    const validOrgId = parseUuidV7(options.organizationId);
+    const validDeviceId = parseUuidV7(options.deviceId);
+    const { sqlite, db } = options.connection;
+
+    if (!sqlite.open) {
+      throw new Error('Cannot run bootstrapSetup on a closed SQLite database connection');
+    }
+
+    const release = await getConnectionMutex(sqlite).acquire();
+    let txStarted = false;
+    let settled = false;
+
+    try {
+      sqlite.exec('BEGIN IMMEDIATE');
+      txStarted = true;
+
+      options.assertPrecondition?.(db);
+
+      const seedUuidGen = new MonotonicUuidV7Generator({
+        clock: options.clock,
+        random: options.random,
+      });
+      const rowId = seedUuidGen.nextId();
+      const nowMs = unixMsFromBigInt(options.clock.now());
+      const initialHlcStr = serializeHlc(createHlcTimestamp(nowMs, 0, validDeviceId));
+      const initialUuidMs = seedUuidGen.currentLastTimestampMs() ?? nowMs;
+      const persisted = ensureDeviceStateRowSync(sqlite, db, {
+        rowId,
+        organizationId: validOrgId,
+        deviceId: validDeviceId,
+        initialHlcStr,
+        initialUuidMs,
+        nowMs,
+      });
+
+      const uow = new SqliteUnitOfWork({
+        connection: options.connection,
+        organizationId: validOrgId,
+        deviceId: validDeviceId,
+        registry: options.registry,
+        clock: options.clock,
+        hlcClock: new HlcClock({
+          clock: options.clock,
+          nodeId: validDeviceId,
+          maxSkewMs: options.maxSkewMs,
+          initial: parseHlc(persisted.lastHlc),
+        }),
+        uuidGenerator: new MonotonicUuidV7Generator({
+          clock: options.clock,
+          random: options.random,
+          initialLastMs: persisted.lastUuidMs,
+        }),
+      });
+
+      const session = new SqliteUnitOfWorkSession(uow);
+      uow.pushActiveSession(session);
+      let result: T;
+      try {
+        result = await activeUowContext.run(new Set([uow]), () => options.fn(session, uow));
+      } finally {
+        session.close();
+        uow.activeSessionStack.length = 0;
+      }
+
+      sqlite.exec('COMMIT');
+      settled = true;
+      return { uow, result };
+    } catch (err) {
+      if (txStarted && !settled && sqlite.open && sqlite.inTransaction) {
+        try {
+          sqlite.exec('ROLLBACK');
+        } catch {
+          // ignore rollback error
+        }
+      }
+      throw err;
+    } finally {
+      release();
+    }
   }
 
   /**
@@ -520,6 +626,31 @@ export async function createSqliteUnitOfWork(
   options: CreateSqliteUnitOfWorkOptions,
 ): Promise<SqliteUnitOfWork> {
   return SqliteUnitOfWork.create(options);
+}
+
+export async function bootstrapSqliteHubUnitOfWork<T>(
+  options: CreateSqliteUnitOfWorkOptions & {
+    readonly assertPrecondition?: (db: BetterSQLite3Database) => void;
+    readonly fn: (session: SqliteUnitOfWorkSession, uow: SqliteUnitOfWork) => Promise<T>;
+  },
+): Promise<{ readonly uow: SqliteUnitOfWork; readonly result: T }> {
+  return SqliteUnitOfWork.bootstrapSetup(options);
+}
+
+/**
+ * Serializes a read-only database inspection across the connection FIFO mutex even before a
+ * `SqliteUnitOfWork` has been instantiated (e.g. pre-setup health checks and login-options).
+ */
+export async function runConnectionReadOnly<T>(
+  connection: LocalSqliteConnection,
+  fn: () => Promise<T>,
+): Promise<T> {
+  const release = await getConnectionMutex(connection.sqlite).acquire();
+  try {
+    return await fn();
+  } finally {
+    release();
+  }
 }
 
 /**

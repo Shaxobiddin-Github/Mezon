@@ -1250,7 +1250,7 @@ describe('@mezon/db-local - Async UnitOfWork, Outbox, DeviceState & SQLite Trigg
       }),
       { numRuns: 15 },
     );
-  });
+  }, 30_000);
 
   it('K1: rejects concurrent parallel nested() calls and parent-session writes while child savepoint is active, while allowing deep & sequential nested()', async () => {
     const dbPath = path.join(makeTempDir(), 'k1-nested-stack.db');

@@ -1,4 +1,21 @@
-export { DomainError, type DomainErrorCode } from './errors.js';
+export { DomainError, type DomainErrorCode, type DomainErrorOptions } from './errors.js';
+
+export {
+  USER_ROLES,
+  PIN_MIN_LENGTH,
+  PIN_MAX_LENGTH,
+  PIN_SECURITY_CONSTANTS,
+  type UserRole,
+  type HubPermission,
+  type PinHasher,
+  isUserRole,
+  roleHasPermission,
+  validatePinFormat,
+  normalizeUsername,
+  validateFullName,
+  computeDeviceCooldownDelayMs,
+  computeRetryAfterSeconds,
+} from './auth.js';
 
 export {
   type Money,
