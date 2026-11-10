@@ -426,7 +426,7 @@ describe('@mezon/domain - return, void window, cumulative allocation, and paymen
       }),
     ).toThrowError(/VALIDATION_ERROR/);
 
-    // T1.7 debt offset rejected until T1.7
+    // T1.7 debt offset caps: cannot offset > remainingSaleDebt (even on non-debt sale), and supports remainingSaleDebt + paidTowardDebtByMethod
     expect(() =>
       resolveReturnPayments({
         totalRefund: moneyFromTiyin(50_000n),
@@ -437,6 +437,26 @@ describe('@mezon/domain - return, void window, cumulative allocation, and paymen
         priorReturnedByMethod: prior,
         payments: [{ method: 'cash', amount: moneyFromTiyin(40_000n) }],
       }),
-    ).toThrowError(/CUSTOMER_REQUIRED/);
+    ).toThrowError(/RETURN_DEBT_OFFSET_EXCEEDED/);
+
+    const paidTowardDebt = createEmptyPaymentMethodMap();
+    paidTowardDebt.card = moneyFromTiyin(20_000n);
+    const debtRes = resolveReturnPayments({
+      totalRefund: moneyFromTiyin(100_000n),
+      debtOffsetAmount: moneyFromTiyin(30_000n),
+      saleTotalPaid: moneyFromTiyin(50_000n),
+      saleDebtAmount: moneyFromTiyin(50_000n),
+      remainingSaleDebt: moneyFromTiyin(30_000n),
+      paidTowardDebtByMethod: paidTowardDebt,
+      originalPaidByMethod: cashOnlyPaid,
+      priorReturnedByMethod: prior,
+      payments: [
+        { method: 'cash', amount: moneyFromTiyin(50_000n) },
+        { method: 'card', amount: moneyFromTiyin(20_000n), providerRef: 'CARD-DEBT-REF' },
+      ],
+    });
+    expect(moneyToTiyin(debtRes.debtOffsetAmount)).toBe(30_000n);
+    expect(moneyToTiyin(debtRes.cashRefundAmount)).toBe(50_000n);
+    expect(moneyToTiyin(debtRes.nonCashRefundAmount)).toBe(20_000n);
   });
 });

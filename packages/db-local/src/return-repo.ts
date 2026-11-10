@@ -34,7 +34,13 @@ import {
 import { and, asc, eq, lt } from 'drizzle-orm';
 import type { BetterSQLite3Database } from 'drizzle-orm/better-sqlite3';
 import { type LocalSqliteConnection } from './connection.js';
+import {
+  applyReturnDebtOffsetInTxSync,
+  prepareReturnSaleDebtContextInTxSync,
+  reverseSaleDebtOnVoidInTxSync,
+} from './customer-repo.js';
 import { advanceReturnSeqSync } from './device-state.js';
+import { resolveIntlDateKey } from './timezone.js';
 import {
   getCashDrawerBalanceSync,
   type StoredSaleRecord,
@@ -191,23 +197,6 @@ export interface SalesLinesReportSummaryRecord {
   readonly grossProfit: Money;
 }
 
-function resolveIntlDateKey(ms: UnixMs, tz: string): string {
-  const formatter = new Intl.DateTimeFormat('en-CA', {
-    timeZone: tz,
-    year: 'numeric',
-    month: '2-digit',
-    day: '2-digit',
-  });
-  const parts = formatter.formatToParts(new Date(Number(ms)));
-  const year = parts.find((p) => p.type === 'year')?.value ?? '';
-  const month = parts.find((p) => p.type === 'month')?.value ?? '';
-  const day = parts.find((p) => p.type === 'day')?.value ?? '';
-  if (!year || !month || !day) {
-    throw new DomainError('VALIDATION_ERROR', `Unable to format date in timezone "${tz}"`);
-  }
-  return `${year.padStart(4, '0')}-${month.padStart(2, '0')}-${day.padStart(2, '0')}`;
-}
-
 function sha256Hex(canonical: string): string {
   return createHash('sha256').update(canonical).digest('hex');
 }
@@ -344,28 +333,6 @@ function assertSaleNotFiscalizedForVoidSync(
   _saleRow: typeof sales.$inferSelect,
 ): void {
   // F1/T1.6 has no fiscal driver yet; F3 queries `fiscal_docs` here and throws `FISCALIZED_SALE_CANNOT_VOID`.
-}
-
-/**
- * T1.7 DEBT OFFSET HOOK:
- * Placeholder for reversing customer debt in `customer_ledger` during return/void.
- */
-function assertAndApplyDebtHookSync(_params: {
-  readonly saleDebtAmount: Money;
-  readonly debtOffsetAmount: Money;
-}): void {
-  if (moneyToTiyin(_params.debtOffsetAmount) > 0n) {
-    throw new DomainError(
-      'CUSTOMER_REQUIRED',
-      'Customer ledger debt offset is not enabled until T1.7',
-    );
-  }
-  if (moneyToTiyin(_params.saleDebtAmount) > 0n) {
-    throw new DomainError(
-      'CUSTOMER_REQUIRED',
-      'Sales with customer debt require T1.7 customer_ledger handling',
-    );
-  }
 }
 
 /**
@@ -646,11 +613,6 @@ export class SqliteReturnStore {
         resolveTimeZoneDateKey: resolveIntlDateKey,
       });
 
-      assertAndApplyDebtHookSync({
-        saleDebtAmount: saleRow.debtAmount,
-        debtOffsetAmount: ZERO_MONEY,
-      });
-
       const lineRows = session.db
         .select()
         .from(saleLines)
@@ -686,6 +648,18 @@ export class SqliteReturnStore {
           );
         }
       }
+
+      // 3b) T1.7: Validate and reverse sale debt in `customer_ledger` (rejects SALE_DEBT_HAS_PAYMENTS if already reduced)
+      reverseSaleDebtOnVoidInTxSync(session, {
+        organizationId: ctx.organizationId,
+        storeId: ctx.storeId,
+        customerId: saleRow.customerId,
+        saleId: saleRow.id,
+        saleDebtAmount: saleRow.debtAmount,
+        reason: `Void ${saleRow.receiptCode}: ${cleanReason}`,
+        actorUserId: validActorId,
+        nowMs,
+      });
 
       // 4) Load product tracking info and prefetch pool states before modifying anything
       const catalogProductIds = [
@@ -1109,9 +1083,12 @@ export class SqliteReturnStore {
         );
       }
 
-      assertAndApplyDebtHookSync({
+      const debtContext = prepareReturnSaleDebtContextInTxSync(session, {
+        organizationId: ctx.organizationId,
+        customerId: saleRow.customerId,
+        saleId: saleRow.id,
         saleDebtAmount: saleRow.debtAmount,
-        debtOffsetAmount: requestedDebtOffset,
+        nowMs,
       });
 
       const resolvedPayments = resolveReturnPayments({
@@ -1119,6 +1096,12 @@ export class SqliteReturnStore {
         debtOffsetAmount: requestedDebtOffset,
         saleTotalPaid: saleRow.totalPaid,
         saleDebtAmount: saleRow.debtAmount,
+        ...(debtContext !== null
+          ? {
+              remainingSaleDebt: debtContext.remainingSaleDebt,
+              paidTowardDebtByMethod: debtContext.paidTowardDebtByMethod,
+            }
+          : {}),
         originalPaidByMethod,
         priorReturnedByMethod,
         payments: input.payments,
@@ -1264,6 +1247,26 @@ export class SqliteReturnStore {
           },
           eventType: 'cash_move.created',
           schemaVersion: 1,
+        });
+      }
+
+      if (
+        debtContext !== null &&
+        moneyToTiyin(resolvedPayments.debtOffsetAmount) > 0n &&
+        saleRow.customerId !== null
+      ) {
+        applyReturnDebtOffsetInTxSync(session, {
+          organizationId: ctx.organizationId,
+          storeId: ctx.storeId,
+          customerId: saleRow.customerId,
+          saleId: saleRow.id,
+          returnId,
+          debtOffsetAmount: resolvedPayments.debtOffsetAmount,
+          currentBalance: debtContext.currentBalance,
+          remainingSaleDebt: debtContext.remainingSaleDebt,
+          reason: `Return ${returnCode}: ${cleanReason}`,
+          actorUserId: validActorId,
+          nowMs,
         });
       }
 

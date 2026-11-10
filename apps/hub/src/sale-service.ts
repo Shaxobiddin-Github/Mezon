@@ -20,6 +20,7 @@ import {
   moneyFromTiyin,
   quantityToMilli,
 } from '@mezon/domain';
+import type { HubAuthService } from './auth-service.js';
 
 /**
  * Maps a persisted `StoredSaleLineRecord` to the HTTP DTO using an explicit allow-list so internal
@@ -115,9 +116,11 @@ function toWarningDto(warning: StockMoveWarningRecord): SaleNegativeStockWarning
 
 export class HubSaleService {
   private readonly store: SqliteSaleStore;
+  private readonly authService: HubAuthService | undefined;
 
-  constructor(store: SqliteSaleStore) {
+  constructor(store: SqliteSaleStore, authService?: HubAuthService) {
     this.store = store;
+    this.authService = authService;
   }
 
   async completeSale(
@@ -125,6 +128,15 @@ export class HubSaleService {
     actorUserId: UuidV7,
     input: CompleteSaleRequestDto,
   ): Promise<CompleteSaleResponseDto> {
+    let creditOverrideApprovedByUserId: UuidV7 | null = null;
+    if (input.creditOverride !== undefined) {
+      if (!this.authService) {
+        throw new Error('Auth service is required to verify supervisor credit override');
+      }
+      const supervisor = await this.authService.verifySupervisorPin(input.creditOverride);
+      creditOverrideApprovedByUserId = supervisor.id;
+    }
+
     const mappedPayments: SalePaymentInput[] = input.payments.map((p) => {
       if (p.method === 'cash') {
         return {
@@ -148,6 +160,8 @@ export class HubSaleService {
       debtAmount:
         input.debtAmount !== undefined ? moneyFromTiyin(BigInt(input.debtAmount)) : ZERO_MONEY,
       customerId: input.customerId ?? null,
+      ...(input.dueDays !== undefined ? { dueDays: input.dueDays } : {}),
+      creditOverrideApprovedByUserId,
       payments: mappedPayments,
     });
 

@@ -1,6 +1,6 @@
 import { TASHKENT_TIMEZONE_ID, TASHKENT_UTC_OFFSET_MS } from './cart.js';
 import { type ProductUnit, isIntegerOnlyUnit, validateQuantityForUnit } from './catalog.js';
-import { type UnixMs, unixMsToBigInt } from './clock.js';
+import { type UnixMs, unixMsFromBigInt, unixMsToBigInt } from './clock.js';
 import { DomainError } from './errors.js';
 import { MAX_MONEY_TIYIN, type Money, ZERO_MONEY, moneyFromTiyin, moneyToTiyin } from './money.js';
 import { type Quantity, quantityFromMilli, quantityToMilli } from './quantity.js';
@@ -43,6 +43,78 @@ function civilDateFromEpochDays(epochDays: bigint): string {
   const yearStr =
     year < 0n ? `-${(-year).toString().padStart(4, '0')}` : year.toString().padStart(4, '0');
   return `${yearStr}-${month.toString().padStart(2, '0')}-${day.toString().padStart(2, '0')}`;
+}
+
+/**
+ * Exact BigInt inverse of `civilDateFromEpochDays` (`YYYY-MM-DD` -> Unix epoch days).
+ */
+export function epochDaysFromCivilDate(dateKey: string): bigint {
+  const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(dateKey);
+  if (!match || !match[1] || !match[2] || !match[3]) {
+    throw new DomainError('VALIDATION_ERROR', `Invalid YYYY-MM-DD date key: "${dateKey}"`);
+  }
+  const y = BigInt(match[1]);
+  const m = BigInt(match[2]);
+  const d = BigInt(match[3]);
+  if (m < 1n || m > 12n || d < 1n || d > 31n) {
+    throw new DomainError('VALIDATION_ERROR', `Invalid YYYY-MM-DD calendar date: "${dateKey}"`);
+  }
+  const yAdj = m <= 2n ? y - 1n : y;
+  const era = (yAdj >= 0n ? yAdj : yAdj - 399n) / 400n;
+  const yoe = yAdj - era * 400n;
+  const mAdj = m > 2n ? m - 3n : m + 9n;
+  const doy = (153n * mAdj + 2n) / 5n + d - 1n;
+  const doe = yoe * 365n + yoe / 4n - yoe / 100n + doy;
+  const days = era * 146097n + doe - 719468n;
+  if (civilDateFromEpochDays(days) !== dateKey) {
+    throw new DomainError('VALIDATION_ERROR', `Non-existent calendar date: "${dateKey}"`);
+  }
+  return days;
+}
+
+/**
+ * Shifts a `YYYY-MM-DD` business date key by `deltaDays` calendar days in pure BigInt arithmetic.
+ */
+export function addDaysToBusinessDateKey(dateKey: string, deltaDays: bigint): string {
+  return civilDateFromEpochDays(epochDaysFromCivilDate(dateKey) + deltaDays);
+}
+
+/**
+ * Computes the exact Unix millisecond timestamp of `00:00:00.000` on `dateKey` in `timeZone`.
+ */
+export function getStartOfBusinessDayMs(
+  dateKey: string,
+  timeZone: string = DEFAULT_STORE_TIMEZONE,
+  resolveTimeZoneDateKey?: (unixMs: UnixMs, tz: string) => string,
+): UnixMs {
+  const tz = assertValidStoreTimeZone(timeZone);
+  const epochDays = epochDaysFromCivilDate(dateKey);
+
+  if (tz === TASHKENT_TIMEZONE_ID) {
+    return unixMsFromBigInt(epochDays * MS_PER_DAY - TASHKENT_UTC_OFFSET_MS);
+  }
+  if (tz === 'UTC' || tz === 'Etc/UTC') {
+    return unixMsFromBigInt(epochDays * MS_PER_DAY);
+  }
+  if (!resolveTimeZoneDateKey) {
+    throw new DomainError(
+      'VALIDATION_ERROR',
+      `Timezone "${tz}" requires an external calendar resolver outside @mezon/domain`,
+    );
+  }
+
+  let lo = epochDays * MS_PER_DAY - MS_PER_DAY;
+  let hi = epochDays * MS_PER_DAY + MS_PER_DAY;
+  while (lo < hi) {
+    const mid = lo + (hi - lo) / 2n;
+    const key = resolveTimeZoneDateKey(unixMsFromBigInt(mid), tz);
+    if (key < dateKey) {
+      lo = mid + 1n;
+    } else {
+      hi = mid;
+    }
+  }
+  return unixMsFromBigInt(lo);
 }
 
 /**
@@ -446,17 +518,20 @@ export function createEmptyPaymentMethodMap(): Record<PaymentMethod, Money> {
 }
 
 /**
- * Validates refund payment method breakdown for a return:
+ * Validates refund payment method breakdown and debt offset for a return:
  * - Strictly forbids cross-method refunds (`cash` -> `card`, etc.).
  * - `originalPaid(sale, 'cash')` MUST be net applied `payments.amount`, NEVER `tenderedAmount` (V2).
+ * - In T1.7, `paidTowardDebtByMethod` adds payments collected toward this receipt's debt via FIFO.
+ * - `debtOffsetAmount` reduces remaining unpaid debt on this receipt (`<= remainingSaleDebt`).
  * - `SUM(payments.amount) + debtOffsetAmount === totalRefund`.
- * - Enforces T1.7 placeholder rejection if `debtOffsetAmount > 0` or `saleDebtAmount > 0`.
  */
 export function resolveReturnPayments(params: {
   readonly totalRefund: Money;
   readonly debtOffsetAmount?: Money;
   readonly saleTotalPaid: Money;
   readonly saleDebtAmount: Money;
+  readonly remainingSaleDebt?: Money;
+  readonly paidTowardDebtByMethod?: Readonly<Record<PaymentMethod, Money>>;
   readonly originalPaidByMethod: Readonly<Record<PaymentMethod, Money>>;
   readonly priorReturnedByMethod: Readonly<Record<PaymentMethod, Money>>;
   readonly payments: readonly ReturnPaymentInput[];
@@ -473,17 +548,38 @@ export function resolveReturnPayments(params: {
   if (debtOffsetTiyin < 0n || debtOffsetTiyin > MAX_MONEY_TIYIN) {
     throw new DomainError('VALIDATION_ERROR', 'debtOffsetAmount out of bounds');
   }
-  if (debtOffsetTiyin > 0n) {
+  if (saleDebtTiyin > 0n && params.remainingSaleDebt === undefined) {
     throw new DomainError(
       'CUSTOMER_REQUIRED',
-      'Customer debt offset during return requires T1.7 customer_ledger',
+      'Returns against debt sales require customer ledger remainingSaleDebt context',
     );
   }
-  if (saleDebtTiyin > 0n) {
+  const remainingDebtTiyin =
+    params.remainingSaleDebt !== undefined ? moneyToTiyin(params.remainingSaleDebt) : 0n;
+  if (remainingDebtTiyin < 0n || remainingDebtTiyin > saleDebtTiyin) {
+    throw new DomainError('VALIDATION_ERROR', 'remainingSaleDebt out of bounds for sale');
+  }
+  if (debtOffsetTiyin > remainingDebtTiyin) {
     throw new DomainError(
-      'CUSTOMER_REQUIRED',
-      'Returns against debt sales require T1.7 customer_ledger support',
+      'RETURN_DEBT_OFFSET_EXCEEDED',
+      `Requested debtOffsetAmount (${debtOffsetTiyin.toString()}) exceeds remaining sale debt (${remainingDebtTiyin.toString()})`,
+      {
+        details: {
+          requestedDebtOffset: debtOffsetTiyin.toString(),
+          remainingSaleDebt: remainingDebtTiyin.toString(),
+        },
+      },
     );
+  }
+
+  const paidTowardDebtByMethod = params.paidTowardDebtByMethod ?? createEmptyPaymentMethodMap();
+  let extraPaidFromDebtTiyin = 0n;
+  for (const method of PAYMENT_METHODS) {
+    const dp = moneyToTiyin(paidTowardDebtByMethod[method]);
+    if (dp < 0n || dp > MAX_MONEY_TIYIN) {
+      throw new DomainError('VALIDATION_ERROR', `paidTowardDebtByMethod.${method} out of bounds`);
+    }
+    extraPaidFromDebtTiyin += dp;
   }
 
   const resolvedItems: ResolvedReturnPaymentItem[] = [];
@@ -531,8 +627,9 @@ export function resolveReturnPayments(params: {
 
   for (const method of PAYMENT_METHODS) {
     const origTiyin = moneyToTiyin(params.originalPaidByMethod[method]);
+    const debtPaidTiyin = moneyToTiyin(paidTowardDebtByMethod[method]);
     const priorTiyin = moneyToTiyin(params.priorReturnedByMethod[method]);
-    const capTiyin = origTiyin - priorTiyin;
+    const capTiyin = origTiyin + debtPaidTiyin - priorTiyin;
     const reqTiyin = moneyToTiyin(requestedByMethod[method]);
     if (reqTiyin > capTiyin) {
       throw new DomainError(
@@ -544,6 +641,7 @@ export function resolveReturnPayments(params: {
             requestedAmount: reqTiyin.toString(),
             remainingCap: capTiyin.toString(),
             originalPaid: origTiyin.toString(),
+            paidTowardDebt: debtPaidTiyin.toString(),
             priorReturned: priorTiyin.toString(),
           },
         },
@@ -560,10 +658,10 @@ export function resolveReturnPayments(params: {
       `Refund payment invariant violated: sum(payments)=${sumPaymentsTiyin.toString()} + debtOffset=${debtOffsetTiyin.toString()} !== totalRefund=${totalRefundTiyin.toString()}`,
     );
   }
-  if (sumPaymentsTiyin > salePaidTiyin) {
+  if (sumPaymentsTiyin > salePaidTiyin + extraPaidFromDebtTiyin) {
     throw new DomainError(
       'RETURN_PAYMENT_LIMIT_EXCEEDED',
-      'Total refund payments cannot exceed original paid amount',
+      'Total refund payments cannot exceed total paid amount (checkout + debt payments)',
     );
   }
 

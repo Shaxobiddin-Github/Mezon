@@ -8,4 +8,5 @@ export { HubCatalogService } from './catalog-service.js';
 export { HubStockService } from './stock-service.js';
 export { HubCartService } from './cart-service.js';
 export { HubSaleService } from './sale-service.js';
+export { HubCustomerService } from './customer-service.js';
 export { createHubServer, type CreateHubServerOptions, type HubServer } from './server.js';

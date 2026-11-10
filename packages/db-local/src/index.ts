@@ -54,6 +54,8 @@ export {
 export {
   serializeOutboxJsonValue,
   serializeOutboxPayload,
+  redactOutboxPayloadForDebug,
+  formatOutboxRecordForDebug,
   listAllOutboxRecordsSync,
   SqliteOutboxRepository,
 } from './outbox.js';
@@ -115,12 +117,23 @@ export {
   returns,
   returnLines,
   returnPayments,
+  customers,
+  customerLedger,
+  localCustomerBalances,
 } from './schema/index.js';
 
 export {
+  type EntityFtsSearchConfig,
+  buildEntityFtsSearchSql,
+  assertEntityFtsMigrationsComplete,
   buildCatalogSearchFtsSql,
   assertCatalogSearchMigrationsComplete,
 } from './catalog-search-schema.js';
+
+export {
+  buildCustomerSearchFtsSql,
+  assertCustomerMigrationsComplete,
+} from './customer-migrations.js';
 
 export {
   buildStockMonotoneTriggersSql,
@@ -240,3 +253,26 @@ export {
   SqliteReturnStore,
   createSqliteReturnStore,
 } from './return-repo.js';
+
+export {
+  type CustomerRuntimeContext,
+  type CreateSqliteCustomerStoreOptions,
+  type CreateCustomerInput,
+  type UpdateCustomerInput,
+  type CustomerSummaryRecord,
+  type CustomerDetailRecord,
+  type CustomerListQueryInput,
+  type CustomerListOutcome,
+  type StoredCustomerLedgerEntryRecord,
+  type RecordOpeningBalanceInput,
+  type RecordDebtPaymentInput,
+  type RecordDebtAdjustmentInput,
+  type CustomerLedgerMutationOutcome,
+  type CustomerLedgerListQueryInput,
+  type CustomerLedgerListOutcome,
+  type RebuildCustomerBalancesOutcome,
+  type RebuildCustomerSearchIndexOutcome,
+  readCustomerLedgerFifoSync,
+  SqliteCustomerStore,
+  createSqliteCustomerStore,
+} from './customer-repo.js';

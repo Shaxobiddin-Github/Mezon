@@ -1754,7 +1754,7 @@ describe('@mezon/db-local - T1.4 completeSale atomic TX, receipts, stock policy,
       ).rejects.toMatchObject({ code: 'CUSTOMER_REQUIRED' });
       expect(snapshotState()).toEqual(baseSnap);
 
-      // M3: customerId !== null fails with exact VALIDATION_ERROR
+      // T1.7: unknown customerId rejects with exact CUSTOMER_NOT_FOUND (and 0 DB writes)
       await expect(
         env.saleStore.completeSale({
           cartId: openC.id,
@@ -1764,7 +1764,7 @@ describe('@mezon/db-local - T1.4 completeSale atomic TX, receipts, stock policy,
           customerId: parseUuidV7('01950000-0000-7000-8000-c00000000001'),
           payments: [{ method: 'cash', tenderedAmount: detC.totalFinal }],
         }),
-      ).rejects.toMatchObject({ code: 'VALIDATION_ERROR' });
+      ).rejects.toMatchObject({ code: 'CUSTOMER_NOT_FOUND' });
       expect(snapshotState()).toEqual(baseSnap);
 
       // M5 critical mutation traps: underpaid card, overpaid card, cash + full card

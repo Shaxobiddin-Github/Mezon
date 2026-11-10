@@ -154,6 +154,7 @@ export const localHubConfig = localSchemaRegistry.defineTable(
     quickSaleDefaultMxik: text('quick_sale_default_mxik'),
     quickSaleDefaultVatRateBp: sqliteInt('quick_sale_default_vat_rate_bp'),
     storeTimezone: text('store_timezone').notNull().default('Asia/Tashkent'),
+    defaultCustomerDueDays: sqliteInt('default_customer_due_days').default(14),
   }),
   (self) => [
     uniqueIndex('uidx_local_hub_config_singleton').on(self.singletonGuard),
@@ -171,6 +172,10 @@ export const localHubConfig = localSchemaRegistry.defineTable(
       sql`${self.quickSaleDefaultVatRateBp} IS NULL OR (${self.quickSaleDefaultVatRateBp} >= 0 AND ${self.quickSaleDefaultVatRateBp} <= 10000)`,
     ),
     check('chk_local_hub_config_timezone_nonempty', sql`length(trim(${self.storeTimezone})) >= 1`),
+    check(
+      'chk_local_hub_config_cust_due_days',
+      sql`${self.defaultCustomerDueDays} IS NULL OR (${self.defaultCustomerDueDays} >= 1 AND ${self.defaultCustomerDueDays} <= 3650)`,
+    ),
   ],
 );
 
@@ -1342,5 +1347,202 @@ export const returnPayments = localSchemaRegistry.defineTable(
       'chk_return_payments_cash_no_ref',
       sql`${self.method} <> 'cash' OR ${self.providerRef} IS NULL`,
     ),
+  ],
+);
+
+/**
+ * Organization-wide customer directory (`ATTR`, T1.7).
+ *
+ * Physical DELETE is forbidden; customers with non-zero ledger balance cannot be tombstoned
+ * (`CUSTOMER_HAS_OPEN_DEBT`), while `is_active = 0` disables new credit sales cleanly.
+ *
+ * F2 SYNC CONFLICT NOTE (D5):
+ * Credit limit (`credit_limit`), unique `opening_balance`, and `balance >= 0` overpayment prevention
+ * are strictly enforced on the local hub. When multiple offline stores sync in F2, concurrent
+ * offline writes can trip those constraints post-sync -> surfaced in `apps/admin` as owner-visible
+ * conflicts (`CREDIT_LIMIT_EXCEEDED_SYNC`, `DUPLICATE_OPENING_BALANCE`, `OVERPAYMENT_CONFLICT`).
+ */
+export const customers = localSchemaRegistry.defineTable(
+  {
+    name: 'customers',
+    tableClass: 'ATTR',
+    tenantScope: 'organization',
+  },
+  (common) => ({
+    ...common,
+    fullName: text('full_name').notNull(),
+    nameSearch: text('name_search').notNull(),
+    phoneNormalized: text('phone_normalized'),
+    phoneDigits: text('phone_digits'),
+    creditLimit: sqliteMoney('credit_limit'),
+    defaultDueDays: sqliteInt('default_due_days'),
+    note: text('note'),
+    isActive: sqliteBoolean('is_active').notNull().default(true),
+  }),
+  (self) => [
+    uniqueIndex('uidx_customers_org_phone_active')
+      .on(self.organizationId, self.phoneNormalized)
+      .where(sql`${self.deletedAtMs} IS NULL AND ${self.phoneNormalized} IS NOT NULL`),
+    index('idx_customers_org_active_name').on(
+      self.organizationId,
+      self.deletedAtMs,
+      self.isActive,
+      self.nameSearch,
+      self.id,
+    ),
+    index('idx_customers_org_phone_digits')
+      .on(self.organizationId, self.phoneDigits)
+      .where(sql`${self.deletedAtMs} IS NULL AND ${self.phoneDigits} IS NOT NULL`),
+    check('chk_customers_name_nonempty', sql`length(trim(${self.fullName})) >= 1`),
+    check(
+      'chk_customers_phone_e164',
+      sql`${self.phoneNormalized} IS NULL OR (${self.phoneNormalized} GLOB '+[1-9]*' AND length(${self.phoneNormalized}) BETWEEN 9 AND 16)`,
+    ),
+    check(
+      'chk_customers_phone_pair',
+      sql`(${self.phoneNormalized} IS NULL AND ${self.phoneDigits} IS NULL) OR (${self.phoneNormalized} IS NOT NULL AND ${self.phoneDigits} IS NOT NULL AND ${self.phoneNormalized} = ('+' || ${self.phoneDigits}))`,
+    ),
+    check(
+      'chk_customers_credit_nonneg',
+      sql`${self.creditLimit} IS NULL OR ${self.creditLimit} >= 0`,
+    ),
+    check(
+      'chk_customers_due_days',
+      sql`${self.defaultDueDays} IS NULL OR (${self.defaultDueDays} >= 1 AND ${self.defaultDueDays} <= 3650)`,
+    ),
+    check('chk_customers_is_active', sql`${self.isActive} IN (0, 1)`),
+  ],
+);
+
+/**
+ * Append-only customer debt ledger (`FACT`, store-scoped, T1.7).
+ * Single source of truth for all customer debt balances, FIFO open obligations, and overdue metrics.
+ *
+ * Sign convention:
+ * - `opening_balance` (`+`), `sale_debt` (`+`): increase customer debt
+ * - `debt_payment` (`-`), `return_offset` (`-`): reduce customer debt
+ * - `adjustment` (`+` or `-`): owner/manager manual correction with mandatory `reason`
+ *
+ * F2 SYNC CONFLICT NOTE (D5):
+ * Local hub rejects duplicate `opening_balance`, excess `credit_limit` without override, and
+ * negative `balance < 0` overpayments synchronously. Cross-store offline concurrency in F2 preserves
+ * immutable `FACT` rows and surfaces conflicts to the owner panel (`apps/admin`).
+ */
+export const customerLedger = localSchemaRegistry.defineTable(
+  {
+    name: 'customer_ledger',
+    tableClass: 'FACT',
+    tenantScope: 'store',
+  },
+  (common) => ({
+    ...common,
+    customerId: sqliteUuidV7('customer_id')
+      .notNull()
+      .references(() => customers.id),
+    entryType: text('entry_type').notNull(),
+    amountDelta: sqliteMoney('amount_delta').notNull(),
+    sourceType: text('source_type').notNull(),
+    sourceId: sqliteUuidV7('source_id').notNull(),
+    saleId: sqliteUuidV7('sale_id').references(() => sales.id),
+    paymentMethod: text('payment_method'),
+    providerRef: text('provider_ref'),
+    cashMoveId: sqliteUuidV7('cash_move_id').references(() => cashMoves.id),
+    dueAtMs: sqliteUnixMs('due_at_ms'),
+    reason: text('reason'),
+    createdByUserId: sqliteUuidV7('created_by_user_id')
+      .notNull()
+      .references(() => users.id),
+    overrideApprovedByUserId: sqliteUuidV7('override_approved_by_user_id').references(
+      () => users.id,
+    ),
+    clientRequestId: sqliteUuidV7('client_request_id'),
+    requestHash: text('request_hash'),
+  }),
+  (self) => [
+    uniqueIndex('uidx_customer_ledger_opening_balance')
+      .on(self.organizationId, self.customerId)
+      .where(sql`${self.entryType} = 'opening_balance'`),
+    uniqueIndex('uidx_customer_ledger_org_client_req')
+      .on(self.organizationId, self.clientRequestId)
+      .where(sql`${self.clientRequestId} IS NOT NULL`),
+    index('idx_customer_ledger_cust_hlc').on(
+      self.organizationId,
+      self.customerId,
+      self.hlc,
+      self.id,
+    ),
+    index('idx_customer_ledger_cust_created').on(
+      self.organizationId,
+      self.customerId,
+      self.createdAtMs,
+      self.id,
+    ),
+    index('idx_customer_ledger_sale')
+      .on(self.saleId)
+      .where(sql`${self.saleId} IS NOT NULL`),
+    check(
+      'chk_customer_ledger_entry_type',
+      sql`${self.entryType} IN ('opening_balance', 'sale_debt', 'debt_payment', 'return_offset', 'adjustment')`,
+    ),
+    check(
+      'chk_customer_ledger_source_type',
+      sql`${self.sourceType} IN ('opening_balance', 'sale', 'debt_payment', 'sale_void', 'return', 'adjustment')`,
+    ),
+    check(
+      'chk_customer_ledger_delta_sign',
+      sql`(${self.entryType} IN ('opening_balance', 'sale_debt') AND ${self.amountDelta} > 0) OR (${self.entryType} IN ('debt_payment', 'return_offset') AND ${self.amountDelta} < 0) OR (${self.entryType} = 'adjustment' AND ${self.amountDelta} <> 0)`,
+    ),
+    check(
+      'chk_customer_ledger_payment_fields',
+      sql`(${self.entryType} = 'debt_payment' AND ${self.paymentMethod} IN ('cash', 'card', 'uzqr', 'payme', 'click', 'uzum', 'social_card', 'other') AND ((${self.paymentMethod} = 'cash' AND ${self.cashMoveId} IS NOT NULL AND ${self.providerRef} IS NULL) OR (${self.paymentMethod} <> 'cash' AND ${self.cashMoveId} IS NULL))) OR (${self.entryType} <> 'debt_payment' AND ${self.paymentMethod} IS NULL AND ${self.providerRef} IS NULL AND ${self.cashMoveId} IS NULL)`,
+    ),
+    check(
+      'chk_customer_ledger_sale_ref',
+      sql`(${self.entryType} IN ('sale_debt', 'return_offset') AND ${self.saleId} IS NOT NULL) OR (${self.entryType} IN ('opening_balance', 'debt_payment', 'adjustment'))`,
+    ),
+    check(
+      'chk_customer_ledger_reason_req',
+      sql`${self.entryType} NOT IN ('opening_balance', 'adjustment') OR (${self.reason} IS NOT NULL AND length(trim(${self.reason})) >= 1)`,
+    ),
+    check(
+      'chk_customer_ledger_req_pair',
+      sql`(${self.clientRequestId} IS NULL AND ${self.requestHash} IS NULL) OR (${self.clientRequestId} IS NOT NULL AND ${self.requestHash} IS NOT NULL AND length(trim(${self.requestHash})) >= 6)`,
+    ),
+  ],
+);
+
+/**
+ * Reconstructible derived customer balance projection (`LOCAL`, never synced, T1.7).
+ * Stores fast-path lookup metrics (`balance`, `totalDebtAccrued`, `totalSettled`, `earliestOpenDueAtMs`)
+ * rebuilt deterministically from `customer_ledger` via `rebuildCustomerBalances()`.
+ */
+export const localCustomerBalances = localSchemaRegistry.defineTable(
+  {
+    name: 'local_customer_balances',
+    tableClass: 'LOCAL',
+    tenantScope: 'organization',
+  },
+  (common) => ({
+    ...common,
+    customerId: sqliteUuidV7('customer_id')
+      .notNull()
+      .references(() => customers.id),
+    balance: sqliteMoney('balance').notNull(),
+    totalDebtAccrued: sqliteMoney('total_debt_accrued').notNull(),
+    totalSettled: sqliteMoney('total_settled').notNull(),
+    earliestOpenDueAtMs: sqliteUnixMs('earliest_open_due_at_ms'),
+    lastActivityAtMs: sqliteUnixMs('last_activity_at_ms'),
+  }),
+  (self) => [
+    uniqueIndex('uidx_local_customer_balances_cust').on(self.customerId),
+    index('idx_local_customer_balances_org_due').on(
+      self.organizationId,
+      self.balance,
+      self.earliestOpenDueAtMs,
+      self.customerId,
+    ),
+    check('chk_local_customer_balances_nonneg', sql`${self.balance} >= 0`),
+    check('chk_local_customer_balances_accrued_nonneg', sql`${self.totalDebtAccrued} >= 0`),
+    check('chk_local_customer_balances_settled_nonneg', sql`${self.totalSettled} >= 0`),
   ],
 );

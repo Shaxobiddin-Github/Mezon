@@ -1,11 +1,12 @@
 import {
+  MAX_CUSTOMER_DUE_DAYS,
   CASH_MOVE_TYPES,
   MAX_MONEY_TIYIN,
   MAX_PROVIDER_REF_LENGTH,
   PAYMENT_METHODS,
 } from '@mezon/domain';
 import { z } from 'zod';
-import { BigIntStringSchema, UuidV7Schema } from './auth.js';
+import { BigIntStringSchema, LoginRequestSchema, UuidV7Schema } from './auth.js';
 import {
   CartLineKindSchema,
   ManualDiscountModeSchema,
@@ -81,6 +82,8 @@ export const CompleteSaleRequestSchema = z
     expectedTotal: BoundedMoneyStringSchema,
     debtAmount: BoundedMoneyStringSchema.optional(),
     customerId: UuidV7Schema.nullable().optional(),
+    dueDays: z.number().int().min(1).max(MAX_CUSTOMER_DUE_DAYS).nullable().optional(),
+    creditOverride: LoginRequestSchema.optional(),
     payments: z
       .array(SalePaymentInputSchema)
       .max(64, 'At most 64 payment lines may be attached to one sale'),

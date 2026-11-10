@@ -842,7 +842,7 @@ describe('@mezon/hub - T1.4 POST /carts/:id/complete, RBAC, 409 details, cost-hi
         },
       });
 
-      // M3: debt > 0 -> 400 CUSTOMER_REQUIRED; customerId != null -> 400 VALIDATION_ERROR; 0 DB writes
+      // M3: debt > 0 -> 400 CUSTOMER_REQUIRED; unknown customerId -> 404 CUSTOMER_NOT_FOUND; 0 DB writes
       const snapBeforeErrors = countRows();
       const debtRes = await hub.app.inject({
         method: 'POST',
@@ -870,8 +870,8 @@ describe('@mezon/hub - T1.4 POST /carts/:id/complete, RBAC, 409 details, cost-hi
           payments: [{ method: 'cash', tenderedAmount: '50000' }],
         },
       });
-      expect(custRes.statusCode).toBe(400);
-      expect(ApiErrorEnvelopeSchema.parse(custRes.json()).error.code).toBe('VALIDATION_ERROR');
+      expect(custRes.statusCode).toBe(404);
+      expect(ApiErrorEnvelopeSchema.parse(custRes.json()).error.code).toBe('CUSTOMER_NOT_FOUND');
       expect(countRows()).toEqual(snapBeforeErrors);
 
       // M5: Underpayment/overpayment/extra cash/0/negative MUST return EXACT HTTP 400 VALIDATION_ERROR (never 500) + 0 DB writes
