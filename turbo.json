@@ -8,6 +8,9 @@
     "typecheck": {
       "dependsOn": ["^build"]
     },
+    "db:check": {
+      "dependsOn": ["build"]
+    },
     "lint": {},
     "test": {}
   }

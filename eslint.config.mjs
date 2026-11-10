@@ -7,12 +7,13 @@ export default tseslint.config(
       '**/node_modules/**',
       '**/.turbo/**',
       '**/coverage/**',
-      '*.config.*',
+      '**/*.config.*',
       '.dependency-cruiser.cjs',
     ],
   },
   ...tseslint.configs.recommendedTypeChecked,
   {
+    files: ['**/*.{ts,tsx}'],
     languageOptions: {
       parserOptions: {
         project: [
@@ -32,6 +33,10 @@ export default tseslint.config(
         { argsIgnorePattern: '^_', varsIgnorePattern: '^_' },
       ],
     },
+  },
+  {
+    files: ['**/*.{mjs,cjs,mts,cts,d.mts,d.cts}'],
+    ...tseslint.configs.disableTypeChecked,
   },
   {
     files: ['packages/domain/**/*.{ts,tsx}', 'packages/rules/**/*.{ts,tsx}'],
