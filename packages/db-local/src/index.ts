@@ -34,4 +34,45 @@ export {
 
 export { getDefaultLocalMigrationsFolder, migrateLocalDatabase } from './migrate.js';
 
-export { localSchemaRegistry } from './schema/index.js';
+export {
+  buildSqliteImmutabilityTriggersSql,
+  buildAllSqliteTriggersSql,
+  applySqliteImmutabilityTriggers,
+  assertSqliteTriggersMigrationsComplete,
+} from './triggers.js';
+
+export {
+  type SqliteSessionDbAccess,
+  readDeviceStateRowSync,
+  SqliteDeviceStateRepository,
+} from './device-state.js';
+
+export {
+  serializeOutboxJsonValue,
+  serializeOutboxPayload,
+  listAllOutboxRecordsSync,
+  SqliteOutboxRepository,
+} from './outbox.js';
+
+export {
+  type CreateSqliteUnitOfWorkOptions,
+  SqliteUnitOfWorkSession,
+  SqliteUnitOfWork,
+  createSqliteUnitOfWork,
+  getSessionSqlite,
+} from './uow.js';
+
+export {
+  type BusinessInsertValues,
+  type BusinessUpdateValues,
+  type InsertEntityOptions,
+  type UpdateAttrOptions,
+  type TombstoneAttrOptions,
+  type SyncedWriteResult,
+  insertFact,
+  insertAttr,
+  updateAttr,
+  tombstoneAttr,
+} from './writers.js';
+
+export { localSchemaRegistry, localDeviceState, localOutbox } from './schema/index.js';

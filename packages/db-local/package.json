@@ -18,6 +18,7 @@
   "devDependencies": {
     "@mezon/test-utils": "workspace:*",
     "@types/better-sqlite3": "9.6.0",
-    "drizzle-kit": "0.31.11"
+    "drizzle-kit": "0.31.11",
+    "fast-check": "4.10.2"
   }
 }

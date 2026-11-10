@@ -1,0 +1,165 @@
+import {
+  type DeviceStateRepository,
+  type DeviceStateSnapshot,
+  type UnitOfWorkSession,
+  type UuidV7,
+  parseHlc,
+  parseUuidV7,
+  serializeHlc,
+  unixMsFromBigInt,
+} from '@mezon/domain';
+import type Database from 'better-sqlite3';
+import { eq } from 'drizzle-orm';
+import type { BetterSQLite3Database } from 'drizzle-orm/better-sqlite3';
+import { localDeviceState } from './schema/index.js';
+
+export interface SqliteSessionDbAccess extends UnitOfWorkSession {
+  readonly db: BetterSQLite3Database;
+  assertOpen(): void;
+}
+
+export interface EnsureDeviceStateParams {
+  readonly rowId: UuidV7;
+  readonly organizationId: UuidV7;
+  readonly deviceId: UuidV7;
+  readonly initialHlcStr: string;
+  readonly initialUuidMs: bigint;
+  readonly nowMs: bigint;
+}
+
+export interface AdvanceDeviceSeqParams {
+  readonly deviceId: UuidV7;
+  readonly hlc: string;
+  readonly uuidMs: bigint;
+  readonly updatedAtMs: bigint;
+}
+
+export function readDeviceStateRowSync(
+  db: BetterSQLite3Database,
+  deviceId: UuidV7,
+): DeviceStateSnapshot | null {
+  const validDeviceId = parseUuidV7(deviceId);
+  const rows = db
+    .select()
+    .from(localDeviceState)
+    .where(eq(localDeviceState.deviceId, validDeviceId))
+    .all();
+
+  if (rows.length === 0) {
+    return null;
+  }
+
+  const row = rows[0];
+  return {
+    id: row.id,
+    organizationId: row.organizationId,
+    deviceId: row.deviceId,
+    lastDeviceSeq: row.lastDeviceSeq,
+    lastHlc: row.lastHlc,
+    lastUuidMs: row.lastUuidMs,
+    createdAtMs: row.createdAtMs,
+    updatedAtMs: row.updatedAtMs,
+  };
+}
+
+/**
+ * Ensures the persistent `local_device_state` row exists inside the bootstrap transaction,
+ * verifying tenant consistency and returning the persisted snapshot for clock/UUID recovery.
+ */
+export function ensureDeviceStateRowSync(
+  sqlite: Database.Database,
+  db: BetterSQLite3Database,
+  params: EnsureDeviceStateParams,
+): DeviceStateSnapshot {
+  const validOrgId = parseUuidV7(params.organizationId);
+  const validDeviceId = parseUuidV7(params.deviceId);
+  const validRowId = parseUuidV7(params.rowId);
+  const canonicalHlc = serializeHlc(parseHlc(params.initialHlcStr));
+  const validUuidMs = unixMsFromBigInt(params.initialUuidMs);
+  const validNowMs = unixMsFromBigInt(params.nowMs);
+
+  const existing = readDeviceStateRowSync(db, validDeviceId);
+  if (existing !== null) {
+    if (existing.organizationId !== validOrgId) {
+      throw new Error(
+        `Device "${validDeviceId}" belongs to organization "${existing.organizationId}", expected "${validOrgId}"`,
+      );
+    }
+    return existing;
+  }
+
+  sqlite
+    .prepare(
+      `
+      INSERT INTO local_device_state (
+        id, organization_id, device_id, last_device_seq, last_hlc, last_uuid_ms, created_at_ms, updated_at_ms
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+      `,
+    )
+    .run(
+      validRowId,
+      validOrgId,
+      validDeviceId,
+      0n,
+      canonicalHlc,
+      validUuidMs,
+      validNowMs,
+      validNowMs,
+    );
+
+  const created = readDeviceStateRowSync(db, validDeviceId);
+  if (created === null) {
+    throw new Error(`Failed to initialize local_device_state for device "${validDeviceId}"`);
+  }
+  return created;
+}
+
+/**
+ * Atomically allocates the next gapless `device_seq` (`last_device_seq + 1`) and persists
+ * `last_hlc` and `last_uuid_ms` directly in SQLite `local_device_state`.
+ *
+ * Because this runs inside the caller's `BEGIN IMMEDIATE` / `SAVEPOINT` transaction,
+ * SQLite automatically rolls back `last_device_seq` on outer rollback or `ROLLBACK TO SAVEPOINT`.
+ */
+export function advanceDeviceSeqAndStateSync(
+  sqlite: Database.Database,
+  params: AdvanceDeviceSeqParams,
+): bigint {
+  const validDeviceId = parseUuidV7(params.deviceId);
+  const canonicalHlc = serializeHlc(parseHlc(params.hlc));
+  const validUuidMs = unixMsFromBigInt(params.uuidMs);
+  const validUpdatedAtMs = unixMsFromBigInt(params.updatedAtMs);
+
+  const result = sqlite
+    .prepare<[string, bigint, bigint, string], { readonly last_device_seq: unknown }>(
+      `
+      UPDATE local_device_state
+      SET
+        last_device_seq = last_device_seq + 1,
+        last_hlc = ?,
+        last_uuid_ms = ?,
+        updated_at_ms = ?
+      WHERE device_id = ?
+      RETURNING last_device_seq
+      `,
+    )
+    .get(canonicalHlc, validUuidMs, validUpdatedAtMs, validDeviceId);
+
+  if (!result || typeof result.last_device_seq !== 'bigint') {
+    throw new Error(
+      `Cannot allocate device_seq: local_device_state row missing or invalid for device "${validDeviceId}"`,
+    );
+  }
+
+  return result.last_device_seq;
+}
+
+export class SqliteDeviceStateRepository implements DeviceStateRepository<SqliteSessionDbAccess> {
+  getByDeviceId(
+    session: SqliteSessionDbAccess,
+    deviceId: UuidV7,
+  ): Promise<DeviceStateSnapshot | null> {
+    session.assertOpen();
+    return Promise.resolve(readDeviceStateRowSync(session.db, deviceId));
+  }
+}

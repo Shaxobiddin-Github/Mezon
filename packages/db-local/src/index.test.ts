@@ -11,7 +11,12 @@ import {
   DB_LOCAL_PACKAGE,
   SchemaValidationError,
   SqliteSchemaRegistry,
+  assertSqliteTriggersMigrationsComplete,
+  buildAllSqliteTriggersSql,
+  buildSqliteImmutabilityTriggersSql,
   getDefaultLocalMigrationsFolder,
+  localDeviceState,
+  localOutbox,
   localSchemaRegistry,
   migrateLocalDatabase,
   openLocalSqliteDatabase,
@@ -54,9 +59,15 @@ afterEach(() => {
 });
 
 describe('@mezon/db-local - Schema foundation, registry, pragmas, and bigint safety', () => {
-  it('exports package marker and keeps production schema empty in T0.4', () => {
+  it('exports package marker, registers only operational LOCAL foundation tables, and validates cleanly', () => {
     expect(DB_LOCAL_PACKAGE).toBe('@mezon/db-local');
-    expect(localSchemaRegistry.all()).toEqual([]);
+    expect(localSchemaRegistry.all().map((m) => [m.tableName, m.tableClass])).toEqual([
+      ['local_device_state', 'LOCAL'],
+      ['local_outbox', 'LOCAL'],
+    ]);
+    expect(() =>
+      validateSqliteSchemaRegistry({ localDeviceState, localOutbox }, localSchemaRegistry),
+    ).not.toThrow();
   });
 
   it('registers all four classes (FACT/ATTR/MONOTONE/LOCAL) and enforces exact common columns', () => {
@@ -230,7 +241,7 @@ describe('@mezon/db-local - Schema foundation, registry, pragmas, and bigint saf
       const migCountRow = conn.sqlite
         .prepare('SELECT COUNT(*) as cnt FROM __drizzle_migrations')
         .get() as { cnt: bigint };
-      expect(migCountRow.cnt).toBe(1n);
+      expect(migCountRow.cnt).toBe(2n);
     } finally {
       conn.close();
     }
@@ -439,5 +450,110 @@ describe('@mezon/db-local - Schema foundation, registry, pragmas, and bigint saf
     } finally {
       conn.close();
     }
+  });
+
+  it('generates class immutability triggers and assertSqliteTriggersMigrationsComplete catches missing/weak triggers', () => {
+    const reg = new SqliteSchemaRegistry();
+    reg.defineTable({ name: 'fact_sales', tableClass: 'FACT', tenantScope: 'store' }, (c) => ({
+      ...c,
+    }));
+    reg.defineTable(
+      { name: 'attr_customers', tableClass: 'ATTR', tenantScope: 'organization' },
+      (c) => ({ ...c }),
+    );
+    reg.defineTable(
+      {
+        name: 'mono_voids',
+        tableClass: 'MONOTONE',
+        tenantScope: 'store',
+        monotoneColumns: ['voided_at_ms'],
+      },
+      (c) => ({ ...c, voidedAtMs: sqliteUnixMs('voided_at_ms') }),
+    );
+    reg.defineTable({ name: 'local_cfg', tableClass: 'LOCAL', tenantScope: 'none' }, (c) => ({
+      ...c,
+    }));
+
+    expect(buildSqliteImmutabilityTriggersSql('local_cfg', 'LOCAL')).toEqual([]);
+    const allSql = buildAllSqliteTriggersSql(reg.all()).join('\n');
+    expect(allSql).toContain('CREATE TRIGGER "trg_fact_sales_no_update"');
+    expect(allSql).toContain('CREATE TRIGGER "trg_fact_sales_no_delete"');
+    expect(allSql).toContain('CREATE TRIGGER "trg_attr_customers_no_delete"');
+    expect(allSql).toContain('CREATE TRIGGER "trg_mono_voids_no_delete"');
+    expect(allSql).not.toContain('trg_attr_customers_no_update');
+    expect(allSql).not.toContain('trg_mono_voids_no_update');
+
+    const [factMeta, attrMeta, monoMeta] = reg.all();
+    const makeMigDir = () => {
+      const dir = path.join(os.tmpdir(), `mezon-trig-test-${Date.now()}-${Math.random()}`);
+      fs.mkdirSync(dir, { recursive: true });
+      tempDirs.push(dir);
+      return dir;
+    };
+
+    // Valid triggers pass for all classes
+    const okDir = makeMigDir();
+    fs.writeFileSync(path.join(okDir, '0001.sql'), allSql);
+    expect(() => assertSqliteTriggersMigrationsComplete(okDir, reg.all())).not.toThrow();
+
+    // Missing FACT BEFORE UPDATE trigger fails
+    const missingFactUpdateDir = makeMigDir();
+    fs.writeFileSync(
+      path.join(missingFactUpdateDir, '0001.sql'),
+      `
+      CREATE TRIGGER "trg_fact_sales_no_delete" BEFORE DELETE ON "fact_sales" FOR EACH ROW
+      BEGIN SELECT RAISE(ABORT, 'no delete'); END;
+      `,
+    );
+    expect(() =>
+      assertSqliteTriggersMigrationsComplete(missingFactUpdateDir, [factMeta]),
+    ).toThrowError(/missing required BEFORE UPDATE RAISE\(ABORT\)/);
+
+    // Wrong RAISE action (RAISE(IGNORE) instead of RAISE(ABORT)) fails
+    const raiseIgnoreDir = makeMigDir();
+    fs.writeFileSync(
+      path.join(raiseIgnoreDir, '0001.sql'),
+      `
+      CREATE TRIGGER "trg_attr_customers_no_delete" BEFORE DELETE ON "attr_customers" FOR EACH ROW
+      BEGIN SELECT RAISE(IGNORE); END;
+      `,
+    );
+    expect(() => assertSqliteTriggersMigrationsComplete(raiseIgnoreDir, [attrMeta])).toThrowError(
+      /missing required BEFORE DELETE RAISE\(ABORT\)/,
+    );
+
+    // Weakened WHEN trigger condition fails
+    const whenFilterDir = makeMigDir();
+    fs.writeFileSync(
+      path.join(whenFilterDir, '0001.sql'),
+      `
+      CREATE TRIGGER "trg_mono_voids_no_delete" BEFORE DELETE ON "mono_voids" FOR EACH ROW WHEN 1 = 0
+      BEGIN SELECT RAISE(ABORT, 'bypassed'); END;
+      `,
+    );
+    expect(() => assertSqliteTriggersMigrationsComplete(whenFilterDir, [monoMeta])).toThrowError(
+      /missing required BEFORE DELETE RAISE\(ABORT\)/,
+    );
+
+    // Subsequent DROP TRIGGER without recreate fails
+    const droppedDir = makeMigDir();
+    fs.writeFileSync(
+      path.join(droppedDir, '0001.sql'),
+      buildSqliteImmutabilityTriggersSql('attr_customers', 'ATTR').join('\n') +
+        '\nDROP TRIGGER "trg_attr_customers_no_delete";\n',
+    );
+    expect(() => assertSqliteTriggersMigrationsComplete(droppedDir, [attrMeta])).toThrowError(
+      /missing required BEFORE DELETE RAISE\(ABORT\)/,
+    );
+
+    // Unconditional BEFORE UPDATE abort mistakenly put on ATTR table fails
+    const attrUpdateBlockDir = makeMigDir();
+    fs.writeFileSync(
+      path.join(attrUpdateBlockDir, '0001.sql'),
+      buildSqliteImmutabilityTriggersSql('attr_customers', 'FACT').join('\n'),
+    );
+    expect(() =>
+      assertSqliteTriggersMigrationsComplete(attrUpdateBlockDir, [attrMeta]),
+    ).toThrowError(/must not define an unconditional BEFORE UPDATE RAISE\(ABORT\)/);
   });
 });

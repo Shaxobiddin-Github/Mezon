@@ -47,6 +47,10 @@ if (schemaPkg.localSchemaRegistry) {
   for (const meta of schemaPkg.localSchemaRegistry.all()) {
     schemaTables[meta.tableName] = meta.table;
   }
+  schemaPkg.assertSqliteTriggersMigrationsComplete(
+    migrationsDir,
+    schemaPkg.localSchemaRegistry.all(),
+  );
 }
 
 const currSnapshot = await generateSQLiteDrizzleJson(schemaTables);

@@ -1,0 +1,305 @@
+{
+  "version": "6",
+  "dialect": "sqlite",
+  "id": "96081d7f-2dd4-482f-bac0-ad20931d04af",
+  "prevId": "ca0e9cc6-7854-4f5f-b7e6-2826a4c4aa19",
+  "tables": {
+    "local_device_state": {
+      "name": "local_device_state",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "text",
+          "primaryKey": true,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "organization_id": {
+          "name": "organization_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "created_at_ms": {
+          "name": "created_at_ms",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "updated_at_ms": {
+          "name": "updated_at_ms",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "device_id": {
+          "name": "device_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "last_device_seq": {
+          "name": "last_device_seq",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "last_hlc": {
+          "name": "last_hlc",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "last_uuid_ms": {
+          "name": "last_uuid_ms",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        }
+      },
+      "indexes": {
+        "uidx_local_device_state_device_id": {
+          "name": "uidx_local_device_state_device_id",
+          "columns": ["device_id"],
+          "isUnique": true
+        }
+      },
+      "foreignKeys": {},
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "checkConstraints": {
+        "chk_local_device_state_created_at_ms_int": {
+          "name": "chk_local_device_state_created_at_ms_int",
+          "value": "typeof(\"local_device_state\".\"created_at_ms\") = 'integer'"
+        },
+        "chk_local_device_state_updated_at_ms_int": {
+          "name": "chk_local_device_state_updated_at_ms_int",
+          "value": "typeof(\"local_device_state\".\"updated_at_ms\") = 'integer'"
+        },
+        "chk_local_device_state_last_device_seq_int": {
+          "name": "chk_local_device_state_last_device_seq_int",
+          "value": "typeof(\"local_device_state\".\"last_device_seq\") = 'integer'"
+        },
+        "chk_local_device_state_last_hlc_len": {
+          "name": "chk_local_device_state_last_hlc_len",
+          "value": "length(\"local_device_state\".\"last_hlc\") = 58"
+        },
+        "chk_local_device_state_last_uuid_ms_int": {
+          "name": "chk_local_device_state_last_uuid_ms_int",
+          "value": "typeof(\"local_device_state\".\"last_uuid_ms\") = 'integer'"
+        },
+        "chk_local_device_state_seq_nonneg": {
+          "name": "chk_local_device_state_seq_nonneg",
+          "value": "\"local_device_state\".\"last_device_seq\" >= 0"
+        }
+      }
+    },
+    "local_outbox": {
+      "name": "local_outbox",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "text",
+          "primaryKey": true,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "organization_id": {
+          "name": "organization_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "created_at_ms": {
+          "name": "created_at_ms",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "updated_at_ms": {
+          "name": "updated_at_ms",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "store_id": {
+          "name": "store_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "device_id": {
+          "name": "device_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "device_seq": {
+          "name": "device_seq",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "hlc": {
+          "name": "hlc",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "type": {
+          "name": "type",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "entity": {
+          "name": "entity",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "entity_id": {
+          "name": "entity_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "class": {
+          "name": "class",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "schema_version": {
+          "name": "schema_version",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "payload": {
+          "name": "payload",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "status": {
+          "name": "status",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false,
+          "default": "'pending'"
+        },
+        "attempts": {
+          "name": "attempts",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false,
+          "default": 0
+        },
+        "last_error": {
+          "name": "last_error",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "pushed_at_ms": {
+          "name": "pushed_at_ms",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        }
+      },
+      "indexes": {
+        "uidx_local_outbox_device_seq": {
+          "name": "uidx_local_outbox_device_seq",
+          "columns": ["device_id", "device_seq"],
+          "isUnique": true
+        },
+        "idx_local_outbox_status_seq": {
+          "name": "idx_local_outbox_status_seq",
+          "columns": ["status", "device_seq"],
+          "isUnique": false
+        }
+      },
+      "foreignKeys": {},
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "checkConstraints": {
+        "chk_local_outbox_created_at_ms_int": {
+          "name": "chk_local_outbox_created_at_ms_int",
+          "value": "typeof(\"local_outbox\".\"created_at_ms\") = 'integer'"
+        },
+        "chk_local_outbox_updated_at_ms_int": {
+          "name": "chk_local_outbox_updated_at_ms_int",
+          "value": "typeof(\"local_outbox\".\"updated_at_ms\") = 'integer'"
+        },
+        "chk_local_outbox_device_seq_int": {
+          "name": "chk_local_outbox_device_seq_int",
+          "value": "typeof(\"local_outbox\".\"device_seq\") = 'integer'"
+        },
+        "chk_local_outbox_hlc_len": {
+          "name": "chk_local_outbox_hlc_len",
+          "value": "length(\"local_outbox\".\"hlc\") = 58"
+        },
+        "chk_local_outbox_pushed_at_ms_int": {
+          "name": "chk_local_outbox_pushed_at_ms_int",
+          "value": "\"local_outbox\".\"pushed_at_ms\" IS NULL OR typeof(\"local_outbox\".\"pushed_at_ms\") = 'integer'"
+        },
+        "chk_local_outbox_device_seq_pos": {
+          "name": "chk_local_outbox_device_seq_pos",
+          "value": "\"local_outbox\".\"device_seq\" >= 1"
+        },
+        "chk_local_outbox_class": {
+          "name": "chk_local_outbox_class",
+          "value": "\"local_outbox\".\"class\" IN ('FACT', 'ATTR', 'MONOTONE')"
+        },
+        "chk_local_outbox_schema_ver": {
+          "name": "chk_local_outbox_schema_ver",
+          "value": "\"local_outbox\".\"schema_version\" >= 1"
+        },
+        "chk_local_outbox_status": {
+          "name": "chk_local_outbox_status",
+          "value": "\"local_outbox\".\"status\" IN ('pending', 'acked', 'rejected')"
+        },
+        "chk_local_outbox_attempts": {
+          "name": "chk_local_outbox_attempts",
+          "value": "\"local_outbox\".\"attempts\" >= 0"
+        }
+      }
+    }
+  },
+  "views": {},
+  "enums": {},
+  "_meta": {
+    "schemas": {},
+    "tables": {},
+    "columns": {}
+  },
+  "internal": {
+    "indexes": {}
+  }
+}
