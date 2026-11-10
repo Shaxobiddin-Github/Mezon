@@ -1,118 +1,113 @@
-## Hisobot: T1.2
-Branch / PR: `gemini/T1.2-stock` / https://github.com/Shaxobiddin-Github/Mezon/pull/9
-Commit:
-- `27418448e612d27bb9c54f81aade20cd7d657ca4` — `T1.1 test qarzi: EAN-8 va FTS tartibi`
-- `cd0020426b89be5f829ee781fd0d7d2236aed4da` — `T1.2: Ombor, partiya, FIFO/o'rtacha tannarx va inventarizatsiya`
-- `43536f486bb81283f1d3e5bf533dfba1af8163d6` — `T1.2: FTS5 yagona o'tish va SQLite xotira pragmalari optimizatsiyasi`
-- `facc046db0511d6fc2b1ea12e7aa4ebe293e0486` — `T1.2: Windows CI uchun disk WAL property test timeoutlari`
+## Merge yakuni: T1.2 (`PR #9`)
 
-### Nima qilindi
+- **PR #9:** https://github.com/Shaxobiddin-Github/Mezon/pull/9 (`headSha`: `2d47a4138d15d7dea0fb61361e504ed1acbd8358`, 4 ta CI job'ining hammasi `success`: [Run #42836615237](https://github.com/Shaxobiddin-Github/Mezon/actions/runs/42836615237), [Run #42836609028](https://github.com/Shaxobiddin-Github/Mezon/actions/runs/42836609028))
+- **Squash and merge commit sarlavhasi:** `T1.2: Ombor, partiya va inventarizatsiya`
+- **Merge commit SHA (`main`):** `e9a9431d13cd16af3173e6b674a308b59c3663bb`
+- **Branch holati:** `gemini/T1.2-stock` lokal va masofadan o'chirildi; `main` dan `gemini/T1.3-cart-pricing` branch'i ochildi.
 
-1. **T1.1 test qarzi (`2741844`):**
-   - `@mezon/domain`: `EAN-8` noto'g'ri nazorat raqamini rad etish (`96385075`) va har bitta raqamni o'zgartiruvchi `fast-check` property testi qo'shildi. Mutatsiya bilan tekshirildi: `verifyGs1CheckDigit` da `ean8` tekshiruvi ataylab chetlab o'tilganda test to'plami yiqildi (keyin qayta tiklandi).
-   - `@mezon/db-local`: `products_fts` qidiruv tartibi `ORDER BY f.rank ASC, p."id" ASC` qilib deterministiklashtirildi hamda 30 ta bir xil nomli mahsulotda `limit=10, offset=0/10/20` bilan dublikatsiz va yo'qotishsiz sahifalash testi qo'shildi.
+---
 
-2. **Ombor va partiya domeni (`@mezon/domain/src/stock.ts`):**
-   - `STOCK_MOVE_REASONS` (`initial`, `purchase`, `sale`, `return`, `inventory`, `adjustment`, `damaged`, `broken`, `personal`, `lost`), `NEGATIVE_STOCK_POLICIES` (`warn` / `block`), `INVENTORY_COUNT_STATUSES` (`open` / `finalized` / `cancelled`) va `STOCK_CONFLICT_REASONS` (`BATCH_OVERCONSUMED`, `UNKNOWN_COST_SURPLUS`, `ORPHAN_BATCH_REFERENCE`).
-   - Qiymatga asoslangan (`remaining_qty` + `remaining_value` tiyinda) proporsional taqsimot (`computeProportionalCost`), FIFO (`planFifoOutboundLegs`) va o'rtacha tannarx (`planAverageOutboundCost`) rejalashtiruvchilari — oxirgi birlik qoldiq tiyinni to'liq yechib oladi, yaxlitlashda 1 tiyin ham yo'qolmaydi.
-   - Manfiy zaxira kamomadi (`deficitQty`, `provisionalDeficitValue`), keyingi kirimda kamomadni yopish va kechikkan/sinxron qayta o'ynashdagi qiymat farqi (`costVarianceValue`) — sof replay funksiyasi (`applyReplayStockMove`) hech qachon yiqilmaydi.
-   - `computeSurplusCostValue` (**S4**): ortiqcha chiqqan tovar tannarxini hisoblash.
+## Reja: T1.3 — Savat va narx
 
-3. **Kontraktlar (`@mezon/contracts`):**
-   - Mahsulot sxemalariga `trackBatches` (standart `false`, harakat yozilgandan keyin o'zgartirish `409 STOCK_COSTING_LOCKED`).
-   - Kassir javoblari uchun alohida `CashierStockBalanceSchema` (faqat miqdor/birlik/`isLowStock`; tannarx, partiya qiymati va `costVarianceValue` maydonlari umuman yo'q), egasi/menejer uchun `StockValuationItemSchema`, `BatchSummarySchema`, `StockMoveSummarySchema`, `StockConflictSummarySchema` va inventarizatsiya sxemalari.
+> **1-alohida commit (`T1.2 test qarzi: yaxlitlash va partiyani aniq tugatish`) — reja tasdiqlangach T1.3 kodidan oldin yoziladi:**
+> 1. `packages/domain/src/stock.test.ts` va `packages/db-local/src/stock.test.ts` ga `computeProportionalCost` uchun yuqoriga yaxlitlanadigan holat (`10_000` tiyin / `3 kg` dan `2 kg` chiqim → `6_667` tiyin) qo'shiladi; `divideRoundHalfAwayFromZero` ni `/` ga almashtirish mutatsiyasi testlarni yiqitishini isbotlash.
+> 2. `packages/db-local/src/stock.test.ts` ga `applyReplayStockMove` da partiya aynan `0` gacha tugaydigan (`remBatchMilli === needMilli`) holatdan keyin `rebuildStockProjections()` 0 ta `local_stock_conflicts` yozishini va qiymat o'zgarmasligini tekshiruvchi test qo'shiladi; `>=` → `>` mutatsiyasi testni yiqitishini isbotlash.
 
-4. **Lokal baza va repozitoriy (`@mezon/db-local`):**
-   - `0004_stock.sql`: `local_hub_config.negative_stock_policy` (`'warn'`), `products.track_batches` (`0`), hamda 7 ta yangi jadval: `batches` (`FACT`), `stock_moves` (`FACT`), `inventory_counts` (`MONOTONE`), `inventory_count_lines` (`MONOTONE`), `local_stock_balances` / `local_batch_balances` / `local_stock_conflicts` (`LOCAL`).
-   - `0003` -> `0004` migratsiyasida `drizzle-kit` yaratadigan xavfli `DROP TABLE` o'rniga toza `ALTER TABLE ... ADD COLUMN` yozildi (mavjud `products` va `products_fts` triggerlari saqlanadi).
-   - `SqliteStockStore` va `rebuildStockProjections()`: `(hlc ASC, id ASC)` tartibida qayta qurish, 0 ta outbox hodisasi chiqarish (`runConnectionProjectionMaintenance` orqali), **S1**–**S4** kafolatlari.
-   - `stock-migrations.ts` + `check-migrations.mjs`: `assertStockMigrationsComplete` barcha **S3** triggerlarini `db:check` da tekshiradi.
-   - `GEMINI.md` 4-bo'lim va `packages/db-local/src/schema/index.ts` izohida `stock_moves`/`batches` yagona do'kon hub'i yozuvchisi qoidasi (`F2` da bulutda majburlanadi) hujjatlashtirildi.
+### 1. Rejalashtirilgan fayllar
 
-5. **CI barqarorligi va FTS5 optimizatsiyasi (`43536f4`, `facc046`):**
-   - `catalog-repo.ts`: `ORDER BY f.rank ASC, f."product_id" ASC` qo'shilgandan keyin Windows CI runner'ida `searchP95` 50.997 ms ga chiqib qolgani aniqlandi. `products_fts` dan `COUNT(*) OVER()` bilan yagona o'tishda (kategoriyasiz qidiruvda ortiqcha `INNER JOIN products` siz) tayyorlangan so'rovlarni keshlash va `connection.ts` da `temp_store = MEMORY` / `cache_size = -16384` pragmalarini qo'llash orqali 50k WAL qidiruv `p95` lokalda 37.1 ms dan **22.8 ms** ga tushirildi va Windows CI o'tdi.
-   - Disk WAL'da 25 marta yangi baza ochib migratsiya qiluvchi property testlarga (`stock.test.ts:759`, `catalog.test.ts:533`) 30 000 ms timeout berildi (assertions va `numRuns` o'zgarmagan).
+- `packages/domain/src/errors.ts`, `auth.ts`, `auth.test.ts`, `index.ts` — yangi ruxsatlar (`cart:write`, `promotions:read`, `promotions:write`, `discounts:config`), xato kodlari (`CART_NOT_FOUND`, `CART_NOT_OPEN`, `CART_NOT_PARKED`, `CART_LINE_NOT_FOUND`, `PROMOTION_NOT_FOUND`, `INVALID_PROMOTION`, `DISCOUNT_OVERRIDE_REQUIRED`, `SUPERVISOR_PIN_REQUIRED`).
+- `packages/domain/src/cart.ts`, `packages/domain/src/cart.test.ts` — sof savat hisob-kitob dvigateli, aksiyalar nomzod tanlovi (`N+M`, foiz, summa, `Asia/Tashkent` UTC+5 vaqt siyosati), `allocate` asosida chegirma taqsimlash, `calculateVatIncluded`, tez savdo qatori, limit tekshiruvi va `fast-check` property testlar.
+- `packages/contracts/src/cart.ts`, `packages/contracts/src/cart.test.ts`, `packages/contracts/src/index.ts` — savat, qator (katalog / skan / tez savdo), aksiya CRUD, chegirma sozlamalari hamda kassir javoblaridan tannarxni istisno qiluvchi qat'iy Zod 4 sxemalar.
+- `packages/db-local/src/schema/index.ts`, `drizzle/0005_cart_pricing.sql`, `drizzle/meta/0005_snapshot.json`, `drizzle/meta/_journal.json` — `promotions` (`ATTR`), `local_carts` (`LOCAL`), `local_cart_lines` (`LOCAL`) hamda `local_hub_config` kengaytmalari (`cashier_max_discount_percent_bp`, `cashier_max_discount_amount`, `quick_sale_default_mxik`, `quick_sale_default_vat_rate_bp`); `0004 → 0005` mavjud bazani saqlab yangilash va `db:check` trigger himoyalari.
+- `packages/db-local/src/auth-repo.ts`, `apps/hub/src/auth-service.ts`, `apps/hub/src/hub.test.ts` — T0.6 dagi 3-fazali Argon2id + lock/backoff mexanizmini qayta ishlatuvchi `verifySupervisorPin()` (kassir rolini va noto'g'ri/bloklangan PIN ni rad etadi).
+- `packages/db-local/src/cart-repo.ts`, `packages/db-local/src/cart.test.ts`, `packages/db-local/src/index.ts`, `index.test.ts` — `SqliteCartStore`, park/resume, katalog narxi o'zgarishi ogohlantirishi, refresh, supervisor tasdiqli chegirma, `promotions` CRUD.
+- `apps/hub/src/error-handler.ts`, `routes.ts`, `server.ts`, `index.ts`, `cart-service.ts`, `cart-routes.ts`, `cart.test.ts` — `/carts/*`, `/promotions/*`, `/cart-settings` endpointlari va integratsion RBAC / PIN / narx o'zgarishi testlari.
 
-6. **Hub API (`apps/hub`):**
-   - `/stock/balances` (`stock:read` — kassir uchun ruxsat berilgan maydonlar ro'yxati orqali tannarxsiz), `/stock/valuation`, `/stock/batches`, `/stock/moves`, `/stock/moves/in`, `/stock/moves/out`, `/stock/conflicts`, `/stock/policy`, `/stock/projections/rebuild`, `/stock/inventory-counts/*` (`stock:write`, kassirga `403 AUTH_FORBIDDEN`).
+---
 
-### O'zgargan fayllar (fayl — sabab)
+### 2. Arxitektura qarorlari (`a`–`h`)
 
-- `.mezon/gemini/HISOBOT.md` — T1.2 yakuniy hisoboti
-- `GEMINI.md` — 4-bo'limga `stock_moves` / `batches` yagona yozuvchi qoidasi (`F2` da bulut tekshiruvi) eslatmasi
-- `packages/domain/src/errors.ts` — `STOCK_COSTING_LOCKED`, `UNLIMITED_PRODUCT_STOCK_NOT_TRACKED`, `INSUFFICIENT_STOCK`, `INVALID_STOCK_MOVE_REASON`, `BATCH_REQUIRED`, `BATCH_NOT_FOUND`, `INVENTORY_COUNT_NOT_FOUND`, `INVENTORY_COUNT_NOT_OPEN`
-- `packages/domain/src/auth.ts`, `auth.test.ts`, `index.ts` — `stock:read` (`owner`/`manager`/`cashier`) va `stock:write` (`owner`/`manager`) ruxsatlari + stock domen eksportlari
-- `packages/domain/src/stock.ts`, `stock.test.ts` — FIFO/o'rtacha tannarx, kamomad, S4 ortiqcha qiymat va 200-run property test
-- `packages/domain/src/catalog.test.ts` — T1.1 test qarzi (`EAN-8` bad check-digit va property test)
-- `packages/contracts/src/catalog.ts`, `catalog.test.ts`, `index.ts` — `trackBatches` maydoni va `stock` DTO eksportlari
-- `packages/contracts/src/stock.ts`, `stock.test.ts` — ombor, partiya, harakat, konflikt, inventarizatsiya va kassir uchun tannarxsiz DTO sxemalari
-- `packages/db-local/src/schema/index.ts` — 7 ta yangi jadval (`FACT`/`MONOTONE`/`LOCAL`), `trackBatches`, `negativeStockPolicy`, yagona yozuvchi izohi
-- `packages/db-local/drizzle/0004_stock.sql`, `drizzle/meta/0004_snapshot.json`, `drizzle/meta/_journal.json` — xavfsiz `ALTER TABLE`, yangi jadvallar va `FACT`/`MONOTONE` triggerlar migratsiyasi
-- `packages/db-local/src/writers.ts` — `insertMonotone`, `updateMonotone` va umumiy mutable yozuvchi helper
-- `packages/db-local/src/stock-migrations.ts`, `scripts/check-migrations.mjs` — `buildStockMonotoneTriggersSql` va `assertStockMigrationsComplete` (`db:check` himoyasi)
-- `packages/db-local/src/connection.ts` — `temp_store = MEMORY` va `cache_size = -16384` pragmalari
-- `packages/db-local/src/catalog-repo.ts`, `catalog.test.ts` — `trackBatches` + `STOCK_COSTING_LOCKED`, FTS5 `ORDER BY f.rank ASC, f."product_id" ASC` / `COUNT(*) OVER()` yagona o'tish va 30 bir xil mahsulot sahifalash testi
-- `packages/db-local/src/stock-repo.ts`, `stock.test.ts` — `SqliteStockStore`, `rebuildStockProjections()`, S1–S4 va 25-run stateful SQLite parity testi
-- `packages/db-local/src/index.ts`, `index.test.ts` — eksportlar, `0003 -> 0004` jonli baza yangilash testi va S3 salbiy trigger isbotlari
-- `apps/hub/src/error-handler.ts`, `catalog-service.ts`, `index.ts`, `routes.ts`, `server.ts` — stock xatolari mapping'i (`400`/`404`/`409`) va servis ulanishi
-- `apps/hub/src/stock-service.ts`, `stock-routes.ts`, `stock.test.ts` — HTTP endpointlar, RBAC va kassir DTO izolyatsiyasi testi
+#### a) Savat qayerda yashaydi
+- **Sof hisob-kitob (`packages/domain`):** savat holatini hisoblash (`evaluateCart` / `calculateCartTotals`) IO'siz sof funksiya bo'ladi: qatorlar, amaldagi aksiyalar ro'yxati, buyurtma darajasidagi qo'lda chegirma va `nowMs` beriladi, qatorlar kesimidagi barcha summalar, qo'llangan aksiya, taqsimlangan chegirma va QQS qaytadi.
+- **Lokal saqlash (`LOCAL` jadvallar):** `local_carts` va `local_cart_lines` (`tenantScope: 'store'`, `LOCAL`) SQLite'da saqlanadi, `local_outbox` ga umuman yozilmaydi va sinxronlanmaydi. Ilova o'chib yonsa ham kassirning ochiq va kechiktirilgan (`parked`) cheklari saqlanib qoladi.
+- **Park / Resume:** `POST /carts/:id/park` ochiq savatni `status = 'parked'` ga o'tkazadi (`park_label`, `parked_at_ms` saqlanadi). `POST /carts/:id/resume` esa kechiktirilgan chekni qayta `'open'` ga o'tkazadi; agar kassirda shu payt bo'sh `'open'` savat turgan bo'lsa (`0` ta qator) u tozalanadi, agar ichida qatori bo'lsa yo'qolmasligi uchun avtomatik `'parked'` qilinadi.
+- **Ombor va outbox daxlsizligi:** savat bosqichida `stock_moves`, `batches` va `local_outbox` ga **hech narsa yozilmaydi**. Zaxiradan chiqim va `sale` hodisasi faqat T1.4 `completeSale` ichida yoziladi.
 
-### Migratsiyalar
+#### b) Narx snapshot'i
+- Qator qo'shilganda joriy katalogdan (`product.salePrice` yoki `variant.salePrice ?? product.salePrice`), nom, birlik, kategoriya va fiskal maydonlar (`mxik`, `package_code`, `vat_rate_bp`) qatorda snapshot sifatida yozib olinadi.
+- **Katalog narxi savat ochiq/parked turganda o'zgarsa:** **kassirga ogohlantirish bilan ixtiyoriy qayta narxlash** tanlanadi (jim ustidan yozish YO'Q, savatni bloklash ham YO'Q):
+  - *Asos:* mijoz kassa oldida turganda menejer katalog narxini o'zgartirsa, chek summasi kassir xabarisiz o'zgarib ketishi kassa mojarosiga olib keladi; bloklash esa uzluksiz savdo qoidasini (`GEMINI.md` 3.2) buzadi.
+  - Savat o'qilganda (`GET /carts/:id`, `resume`, park/cart ro'yxati) har bir katalog qatori joriy `products`/`product_variants` narxi bilan solishtiriladi va farq bo'lsa javobda `priceChangeWarning: { snapshotUnitPrice, currentUnitPrice }` (yoki o'chirilgan bo'lsa `catalogDeleted: true`) qaytadi.
+  - Kassir `POST /carts/:id/refresh-prices` orqali bir harakat bilan joriy katalog narxlarini snapshot'ga yangilay oladi (yoki snapshot narxida davom etishi mumkin; yakuniy siyosat T1.4 da ham ulanadi).
 
-- `packages/db-local/drizzle/0004_stock.sql`:
-  - `local_hub_config` ga `negative_stock_policy TEXT NOT NULL DEFAULT 'warn'` qo'shadi (`ALTER TABLE`).
-  - `products` ga `track_batches INTEGER NOT NULL DEFAULT 0` qo'shadi (`ALTER TABLE`, mavjud qatorlar va FTS triggerlar buzilmaydi).
-  - `batches`, `stock_moves`, `inventory_counts`, `inventory_count_lines`, `local_stock_balances`, `local_batch_balances`, `local_stock_conflicts` jadvallari va `FACT`/`MONOTONE` triggerlarini yaratadi (`check-migrations.mjs` da 0 diff).
+#### c) Aksiyalar (`promotions`)
+- **`promotions` jadvali (`ATTR`, `tenantScope: 'organization'`):** ixtiyoriy `storeId` (null = butun tashkilot, UUID = bitta do'kon), `name`, `type` (`'percent' | 'fixed_amount' | 'buy_x_get_y'`), `scope` (`'product' | 'category' | 'all'`), `targetProductId`, `targetCategoryId`, `discountPercentBp` (`1..10000`), `discountAmount` (`> 0n` tiyin), `buyQty` (`>= 1`), `freeQty` (`>= 1`), `startsAtMs`, `endsAtMs` (nullable; mavjud bo'lsa `endsAtMs > startsAtMs`), `isActive`.
+- **Summa aksiyasi birligi (`fixed_amount`):** chegirma **birlik boshiga** (`multiply(discountAmount, qty)`, maksimal `lineGross`) hisoblanadi. *Asos:* aks holda kassir 3 ta bir xil tovarni 3 ta alohida qatorga skan qilib 3 marta chegirma olishi mumkin bo'lardi; birlik boshiga hisoblash qatorlarni birlashtirish/ajratishda doim bir xil natija beradi.
+- **Amal qilish oralig'i va vaqt mintaqasi:**
+  - Tekshiruv UTC Unix ms'da: `startsAtMs <= nowMs && (endsAtMs === null || nowMs < endsAtMs)` (boshlanishi kiradi, tugashi kirmaydi).
+  - Vaqt mintaqasi siyosati: O'zbekiston bo'yicha yagona `Asia/Tashkent` (`UTC+05:00`, doimiy siljish `18_000_000n` ms, DST yo'q). Kelajakda kunlik soat / hafta kuni qoidalari `nowMs + 18_000_000n` orqali OS sozlamasidan mustaqil hisoblanadi.
+- **Ustma-ust qo'llash va determinizm:**
+  - Bitta qatorga eng ko'pi **1 ta** aksiya — xaridorga eng katta tiyin chegirma (`promoDiscount`) beradigani tanlanadi.
+  - Tenglikda deterministik tanlov: `promotion.id` (UUIDv7) bo'yicha leksikografik eng kichigi yutadi.
+  - Qator aksiyalaridan keyin qolgan summaning ustiga buyurtma darajasidagi qo'lda chegirma qo'llanadi.
+- **N+M (`buy_x_get_y`):**
+  - Faqat butun birlikli (`unit IN ('dona', 'qadoq')`) tovarlar uchun; kasr birlikli (`kg`, `g`, `litr`, `metr`, `m2`) tovarlarda `product` qamrovli `N+M` yaratish rad etiladi (`INVALID_PROMOTION`), `category`/`all` qamrovli `N+M` esa hisoblashda kasr birlikli qatorlarga qo'llanmaydi.
+  - Tekin birliklar: `wholeQty = qtyMilli / 1000n`, `freeUnits = (wholeQty / BigInt(N + M)) * BigInt(M)`, `promoDiscount = moneyFromTiyin(freeUnits * moneyToTiyin(unitPrice))`.
+  - Misollar (`2+1`, narx `10_000` so'm): `qty=2 → 0` tekin (`20_000`); `qty=3 → 1` tekin (`20_000`); `qty=5 → 1` tekin (`40_000`); `qty=6 → 2` tekin (`40_000`).
+- **Qiymat chegarasi:** har qanday aksiya chegirmasi `lineGross` dan oshmaydi (`clamp`), qator summasi hech qachon manfiy bo'lmaydi.
 
-### Qabul mezonlari
+#### d) Qo'lda chegirma va ruxsat
+- **`local_hub_config` sozlamalari (faqat `owner` tahrirlaydi):**
+  - `cashierMaxDiscountPercentBp`: nullable int `0..10000` (migratsiya standarti: `0` — tasdiqsiz foiz chegirmasi ruxsat etilmagan).
+  - `cashierMaxDiscountAmount`: nullable `sqliteMoney` `>= 0n` (migratsiya standarti: `0n` — tasdiqsiz summa chegirmasi `0`).
+- **Limit tekshiruvi (backendda):**
+  - Buyurtma darajasidagi qo'lda chegirma `effectiveOrderDiscount = min(requestedDiscount, subtotalAfterPromo)` ga chegaralanadi (`subtotalAfterPromo` dan oshmaydi).
+  - Agar `effectiveOrderDiscount > 0n` bo'lsa:
+    - `cashierMaxDiscountPercentBp !== null` bo'lsa: `effectiveOrderDiscount * 10000n <= subtotalAfterPromo * BigInt(cashierMaxDiscountPercentBp)` bajarilishi shart (kassir summa kiritib foiz limitini aylanib o'ta olmaydi).
+    - `cashierMaxDiscountAmount !== null` bo'lsa: `effectiveOrderDiscount <= cashierMaxDiscountAmount` bajarilishi shart.
+    - Agar ikkala chegara ham `null` bo'lsa chegirma limitsiz ruxsat etiladi; bitta chegara non-null bo'lsa o'sha chegara tekshiriladi; ikkalasi ham non-null bo'lsa ikkalasi ham birga bajarilishi shart.
+  - Limitdan oshsa: so'rovda `override: { selector (userId | username), pin }` bo'lishi majburiy (aks holda `403 DISCOUNT_OVERRIDE_REQUIRED`).
+- **Supervisor PIN tasdig'i (`T0.6` bilan bir xil himoya):**
+  - `HubAuthService.verifySupervisorPin` T0.6 dagi 3-fazali jarayonni (SQLite lock'idan tashqarida Argon2id, TOCTOU hash tekshiruvi, 5 xato → 5 daqiqa foydalanuvchi bloki, qurilma 2..60s backoff) ishlatadi va faqat faol `owner` yoki `manager` ni qabul qiladi (`cashier` rad etiladi).
+  - Tasdiqlagan foydalanuvchi ID va vaqti (`overrideApprovedByUserId`, `overrideApprovedAtMs`) `local_carts` da saqlanadi. Qator qo'shilib/o'zgarib chegirma yangi limitdan chiqsa tasdiq tozalanadi va qayta tasdiq talab qilinadi.
 
-- [x] **T1.1 test qarzi (`EAN-8` + `FTS5` tartibi)** — `packages/domain/src/catalog.test.ts` (`F3 & GS1: verifies GS1 check digits...`) va `packages/db-local/src/catalog.test.ts` (`FTS5 pagination stays deterministic without drops or duplicates when 30 products share identical text & rank`).
-- [x] **Proyeksiya = ledger yig'indisi va qayta qurish natijasi teng (0 outbox)** — `packages/db-local/src/stock.test.ts`: harakatlar va qayta qurishdan keyin `qtyOnHand === SUM(qty_delta)`, `totalValue === SUM(batch.remainingValue)` va `rebuildProjections()` davomida outbox o'zgarmaydi (`(g) property test...`, `(d) out-of-order HLC replay...`).
-- [x] **Qo'lda hisoblangan misollar** — `packages/domain/src/stock.test.ts` hamda `packages/db-local/src/stock.test.ts` (`enforces unit rules, unlimited product blocks, STOCK_COSTING_LOCKED, FACT immutability, and worked manual FIFO & average examples`):
-  - `worked example #1: FIFO negative stock unbatched deficit and later closing receipt without losing 1 tiyin` (FIFO + manfiy qoldiqdan keyingi yopilish)
-  - `worked example #2: indivisible 10,000 / 3 weighted average cost drains 3,333 then exact remainder 6,667` (bo'linmas o'rtacha tannarxda 1 tiyin yo'qolmasligi)
-- [x] **S1 (kutilgan qoldiq har qator sanalgan paytda UoW ichida olinadi, qisman sanoq `NULL`)** — `packages/db-local/src/stock.test.ts`: `S1 & S3: snapshots expected_qty_at_count at line count time (cases a, b, c + partial) and blocks post-finalize line mutations` (a: 10→2 sotildi→8 sanaldi→yakun 8; b: 10→9 sanaldi→2 sotildi→yakun 7; c: bir qatorni ikki marta sanash; hamda `NULL` sanalmagan mahsulot nolga tushirilmasligi).
-- [x] **S2 (proyeksiya CHECK'siz, partiya oshsa kamomadga o'tadi + `local_stock_conflicts`)** — `packages/db-local/src/stock.test.ts`: `S2 & S4: rebuildStockProjections survives over-consumed batches & unknown surplus costs, logging owner conflicts accurately` (xom SQL bilan bitta partiyani ortiqcha ishlatuvchi `stock_moves` kiritilgandan keyin `rebuildStockProjections()` xatosiz tugaydi va `BATCH_OVERCONSUMED` konflikti yoziladi; `GEMINI.md` va `schema/index.ts` izohida F2 qoidasi qayd etilgan).
-- [x] **S3 (`inventory_counts` va `inventory_count_lines` triggerlari)** — `packages/db-local/src/stock.test.ts` (`S1 & S3...` ichida `finalized` va `cancelled` sanoq qatoriga xom SQL `INSERT`/`UPDATE` urinishi `SQLite` trigger tomonidan rad etilishi) va `packages/db-local/src/index.test.ts` (`F4 negative proof...` da `assertStockMigrationsComplete` salbiy isbotlari: `INSERT` va `UPDATE` triggeri olib tashlansa `db:check` yiqiladi).
-- [x] **S4 (ortiqcha sanoq tannarxi)** — `packages/domain/src/stock.test.ts` (`S4: computes surplus inventory cost by mode and flags unknown cost cleanly`) va `packages/db-local/src/stock.test.ts` (`S2 & S4...`): FIFO da `last_unit_cost` bilan yangi partiya, o'rtacha rejimda joriy o'rtacha narx, tannarx noma'lum bo'lsa `0` tiyin + `UNKNOWN_COST_SURPLUS` konflikti.
-- [x] **Property testlar tavsifi**:
-  1. `packages/domain/src/stock.test.ts` — `property test: inbound = outbound + remaining + variance - provisional holds to exact tiyin across random sequences` (`fast-check`, 200 ta tasodifiy ketma-ketlik): har xil `trackBatches` (FIFO/average), `policy` (`warn`/`block`), vaqt o'zgarishi va har xil kirim/chiqim/ortiqcha/kamomad qadamlaridan so'ng ikki yoqlama qiymat tengligi (`SUM(inboundCost) === SUM(outboundCost) + remainingValue - provisionalDeficitValue + costVarianceValue`) va `totalQty >= 0 => deficitQty === 0` invariantsiz tiyingacha tekshiriladi.
-  2. `packages/db-local/src/stock.test.ts` — `(g) property test: live SQLite state & rebuildStockProjections match independent naive ledger model exactly across random ops` (`fast-check`, 25 ta to'liq WAL disk bazasi ssenariysi): tasodifiy kirim, chiqim (`warn`/`block`) va inventarizatsiya amallaridan keyin jonli SQLite `local_stock_balances`/`local_batch_balances`, `stock_moves` ledger yig'indisi hamda mustaqil sodda model bir-biriga tengligi va `rebuildStockProjections()` 0 outbox bilan aynan shu natijani qayta qurishi tekshiriladi.
-- [x] **RBAC va kassirdan tannarx yashirish** — `apps/hub/src/stock.test.ts` (`enforces cashier cost-hiding on /stock/balances, blocks write/valuation endpoints with 403, and supports manager workflow`): kassir `/stock/balances` dan faqat miqdorlarni oladi (tannarx/qiymat/farq kalitlari umuman yo'q), `/stock/valuation`, `/stock/batches`, `/stock/moves`, `/stock/moves/*`, `/stock/inventory-counts/*` da `403 AUTH_FORBIDDEN`.
-- [x] **0003 → 0004 jonli baza yangilanishi** — `packages/db-local/src/index.test.ts` (`cleanly upgrades a pre-populated 0003 database to 0004 without losing products or FTS triggers`).
+#### e) Taqsimlash va yaxlitlash
+1. `lineGross = multiply(unitPriceSnapshot, qty)`.
+2. Eng yaxshi aksiya chegirmasi: `linePromoDiscount = min(bestPromoDiscount, lineGross)`, `lineSubtotalAfterPromo = lineGross - linePromoDiscount`.
+3. Buyurtma chegirmasi (`orderDiscount`): foiz bo'lsa `divideRoundHalfAwayFromZero(totalAfterPromo * BigInt(bp), 10000n)`, summa bo'lsa `min(amount, totalAfterPromo)`.
+4. `orderDiscount > 0n` bo'lsa T0.2 `allocate(orderDiscount, lineSubtotalAfterPromo[])` bilan qatorlarga taqsimlanadi (`lineAllocatedDiscount`); `totalAfterPromo === 0n` bo'lsa barcha taqsimot `0n`.
+5. `lineFinalTotal = lineSubtotalAfterPromo - lineAllocatedDiscount` (`>= 0n`).
+6. **QQS:** O'zbekiston chakana savdosida katalog narxi QQS bilan birga (`VAT-inclusive`) bo'lgani uchun har bir qator bo'yicha `calculateVatIncluded(lineFinalTotal, lineVatRate)` hisoblanadi (`lineNetExVat + lineVat === lineFinalTotal`).
+- **Property testlar (`fast-check`):**
+  - `Σ lineFinalTotal === cartTotal` (`Σ lineSubtotalAfterPromo - effectiveOrderDiscount`)
+  - `Σ lineAllocatedDiscount === effectiveOrderDiscount`
+  - `Σ linePromoDiscount === totalPromoDiscount`
+  - Har qator uchun `lineFinalTotal >= 0n`, `lineVat >= 0n`, `lineNetExVat + lineVat === lineFinalTotal`.
 
-### Test natijasi (buyruq va haqiqiy chiqish)
+#### f) Tez savdo qatori va F3 mosligi
+- Qator `kind: 'quick_sale'`: `productId = null`, `variantId = null`, erkin `name` (`1..200`), `unit`, `qty` (`dona`/`qadoq` da butun son), `unitPrice` (`>= 0n`), ixtiyoriy `mxik` / `vatRateBp`.
+- `local_hub_config` da `quick_sale_default_mxik` (nullable text) va `quick_sale_default_vat_rate_bp` (nullable int `0..10000`) saqlanadi (`owner` sozlaydi). Qatorda ko'rsatilmagan bo'lsa shu standart qiymatlar (`vatRateBp ?? 0`) snapshot qilinadi.
+- F1 da `quick_sale_default_mxik` `NULL` bo'lsa ham tez savdo bemalol ishlaydi; F3 (`T3.1`/`T3.2`) ulanganda esa egasi umumiy MXIK'ni sozlab qo'ysa barcha yangi tez savdo qatorlari tayyor MXIK snapshot'iga ega bo'ladi, `mxikSnapshot === null` qatorlarni esa `T3.2` qoidalar dvigateli fiskal rejim siyosatiga qarab aniqlaydi — sxema o'zgartirishsiz F3 ga tayyor.
 
-1. Lokal `pnpm verify` (`facc046` ustida):
-   - `prettier --check .` → `All matched files use Prettier code style!`
-   - `turbo run build` → `17 successful, 17 total`
-   - `eslint .` → 0 xato
-   - `turbo run typecheck` → `22 successful, 22 total`
-   - `turbo run db:check` → PostgreSQL va SQLite migratsiyalar bilan 0 diff (`19 successful, 19 total`)
-   - `vitest run` → `Test Files 29 passed | 1 skipped (30)`, `Tests 150 passed | 2 skipped (152)` (skip: `packages/db-cloud/src/pg-rls.test.ts` lokal Windows'da Docker yo'qligi uchun)
-   - `catalog.test.ts` 50k WAL natijasi: `[T1.1 Perf 50k products / 70k barcodes WAL] seedMs=5834.5 scan(n=250): p50=0.429ms p95=0.713ms | search(n=100): p50=19.485ms p95=22.701ms`
-   - `depcruise --config .dependency-cruiser.cjs apps/*/src packages/*/src` → `no dependency violations found (197 modules, 556 dependencies cruised)`
+#### g) Hub API va RBAC
+- `cart:write` (`owner`, `manager`, `cashier`):
+  - `POST /carts`, `GET /carts`, `GET /carts/:id`, `DELETE /carts/:id`
+  - `POST /carts/:id/lines` (productId / variantId / barcode skan / quick_sale), `PATCH /carts/:id/lines/:lineId`, `DELETE /carts/:id/lines/:lineId`
+  - `PUT /carts/:id/discount`, `POST /carts/:id/refresh-prices`, `POST /carts/:id/park`, `POST /carts/:id/resume`
+  - `GET /cart-settings`
+- `promotions:read` (`owner`, `manager`, `cashier`): `GET /promotions`
+- `promotions:write` (`owner`, `manager`): `POST /promotions`, `PATCH /promotions/:id`, `DELETE /promotions/:id` (kassirga `403 AUTH_FORBIDDEN`)
+- `discounts:config` (faqat `owner`): `PUT /cart-settings` (`cashier` va `manager` ga `403 AUTH_FORBIDDEN`)
+- Kassir javoblarida tannarx, partiya qiymati va foyda maydonlari mutlaqo bo'lmaydi.
 
-2. GitHub Actions CI (`facc046db0511d6fc2b1ea12e7aa4ebe293e0486`):
-   - Workflow runs: https://github.com/Shaxobiddin-Github/Mezon/actions/runs/42834263476 (PR) va https://github.com/Shaxobiddin-Github/Mezon/actions/runs/42834251233 (push)
-   - `Verify (ubuntu-latest)`: `success` — https://github.com/Shaxobiddin-Github/Mezon/actions/runs/42834263476/job/129892145753
-   - `Verify (windows-latest)`: `success` — https://github.com/Shaxobiddin-Github/Mezon/actions/runs/42834263476/job/129892145657
-   - `Verify PostgreSQL RLS (ubuntu-latest)`: `success` — https://github.com/Shaxobiddin-Github/Mezon/actions/runs/42834263476/job/129892145427
-   - `Build & E2E Desktop Installer (windows-latest)`: `success` — https://github.com/Shaxobiddin-Github/Mezon/actions/runs/42834263476/job/129892145132
+#### h) Doiradan tashqari
+`completeSale`, to'lovlar va ombordan chiqim (`T1.4`/`T1.5`), naqd pulni so'mga yaxlitlash (`T1.5`), kassa UI (`T1.11`).
 
-### Tekshirilmagan narsalar
+---
 
-- `packages/db-cloud/src/pg-rls.test.ts` (2 ta test) lokal Windows mashinasida Docker bo'lmagani uchun skip qilindi; lekin GitHub Actions CI dagi `Verify PostgreSQL RLS (ubuntu-latest)` job'ida to'liq bajarildi va muvaffaqiyatli o'tdi.
+### 3. Rejalashtirilgan testlar
 
-### Qilingan taxminlar
-
-- F1 bosqichida `warehouses` jadvali bo'lmagani sababli `batches` va `stock_moves` bevosita `store_id` bilan bog'landi (tasdiqlangan reja bo'yicha).
-- `products_fts` faol (`deleted_at_ms IS NULL`) mahsulotlar bilan `trg_products_fts_after_insert`/`update` va `rebuildCatalogSearchIndex` orqali sinxron ushlanadi; kategoriyasiz FTS5 qidiruvda `products_fts` ga to'g'ridan-to'g'ri murojaat qilish F4 invarianti bilan ta'minlanadi.
-
-### Takliflar
-
-- `T1.4` (`completeSale`) da savdo tranzaksiyasini yozishda ham `SqliteStockStore` ning ichki session helper'lari (`applyOutboundInsideSessionSync`) orqali to'g'ridan-to'g'ri bitta `uow.execute` ichida `sale`, `sale_line`, `stock_move` va `local_stock_balances` ni atomar bog'lash maqsadga muvofiq.
-
-### Egasi yoki Claude qarori kerak bo'lgan savollar
-
-- Yo'q. PR #9 merge qilish uchun Claude `QABUL` qarori kutilmoqda.
+- **Commit 1 (`T1.2 test qarzi`):** yuqoriga yaxlitlash (`10_000 / 3 * 2 → 6_667` tiyin) domen + ombor testlari va partiyani aynan `0` gacha tugatish (`remBatchMilli === needMilli`) bo'yicha soxta konflikt chiqmasligi testi (ikkala mutatsiya bilan isbotlanadi).
+- **Domen birlik & property testlari (`packages/domain/src/cart.test.ts`):** `N+M` (`2+1` uchun `2/3/5/6` va kasr birlik bloki), foiz/summa aksiya qamrovi va `[start, end)` chegarasi, tenglikda `id` bo'yicha determinizm, `allocate` 1-tiyin taqsimoti, `VAT` ichidan ajratish, tez savdo, va `fast-check` balans invariantlari.
+- **Kontrakt & DB testlari (`packages/contracts/src/cart.test.ts`, `packages/db-local/src/cart.test.ts`, `index.test.ts`):** `0004 → 0005` mavjud ma'lumotlar bilan migratsiya testi, `local_carts` crashdan keyin saqlanishi, park/resume, katalog narxi o'zgarganda ogohlantirish + refresh, `local_outbox` ga yozilmasligi.
+- **Hub API & Xavfsizlik (`apps/hub/src/cart.test.ts`):** kassir limitdan oshira olmasligi (`403 DISCOUNT_OVERRIDE_REQUIRED`), `manager`/`owner` to'g'ri PIN bilan tasdiqlashi, `cashier` PIN'i rad etilishi, 5 marta xato PIN → 5 daqiqa blok va qurilma backoff'i (`T0.6`), `promotions` va `/cart-settings` RBAC matritsasi, javoblarda tannarx/foyda yo'qligi.
