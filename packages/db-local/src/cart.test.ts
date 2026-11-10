@@ -6,6 +6,7 @@ import {
   type PinHasher,
   ZERO_MONEY,
   moneyFromTiyin,
+  parseUuidV7,
   quantityFromMilli,
   unixMsFromBigInt,
 } from '@mezon/domain';
@@ -367,6 +368,66 @@ describe('@mezon/db-local - T1.3 Cart persistence, P1 merging, price warnings, p
       await expect(env.cartStore.assertCartDiscountAuthorized(cart.id)).rejects.toMatchObject({
         code: 'DISCOUNT_OVERRIDE_REQUIRED',
       });
+    } finally {
+      env.connection.close();
+    }
+  });
+
+  it('T1.3 test debt: ignores store-specific promotions for another store while applying storeId=null promotions everywhere', async () => {
+    const dbPath = createTempDbPath('store-promo.db');
+    const env = await setupCartEnv(dbPath);
+    try {
+      const otherStoreId = parseUuidV7('01950000-0000-7000-8000-999999999999');
+      const product = await env.catalogStore.createProduct({
+        name: 'Shokolad',
+        unit: 'dona',
+        salePrice: '100000',
+        actorUserId: env.ownerId,
+      });
+
+      await env.cartStore.createPromotion({
+        storeId: otherStoreId,
+        name: 'Other Store Only 30%',
+        type: 'percent',
+        scope: 'product',
+        targetProductId: product.product.id,
+        targetCategoryId: null,
+        discountPercentBp: 3_000,
+        discountAmount: null,
+        buyQty: null,
+        freeQty: null,
+        startsAtMs: unixMsFromBigInt(1_759_000_000_000n),
+        endsAtMs: null,
+        isActive: true,
+      });
+
+      const networkPromo = await env.cartStore.createPromotion({
+        storeId: null,
+        name: 'Network Wide 5%',
+        type: 'percent',
+        scope: 'all',
+        targetProductId: null,
+        targetCategoryId: null,
+        discountPercentBp: 500,
+        discountAmount: null,
+        buyQty: null,
+        freeQty: null,
+        startsAtMs: unixMsFromBigInt(1_759_000_000_000n),
+        endsAtMs: null,
+        isActive: true,
+      });
+
+      const cart = await env.cartStore.openCart(env.cashierId);
+      const detail = await env.cartStore.addLine(cart.id, {
+        kind: 'catalog',
+        productId: product.product.id,
+        variantId: null,
+        qty: quantityFromMilli(1_000n),
+      });
+
+      expect(detail.totalPromoDiscount).toBe(moneyFromTiyin(5_000n));
+      expect(detail.lines[0]?.appliedPromotionId).toBe(networkPromo.id);
+      expect(detail.totalFinal).toBe(moneyFromTiyin(95_000n));
     } finally {
       env.connection.close();
     }

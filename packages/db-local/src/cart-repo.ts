@@ -34,6 +34,7 @@ import {
   vatRateFromBasisPoints,
 } from '@mezon/domain';
 import { and, asc, desc, eq, inArray, isNull } from 'drizzle-orm';
+import type { BetterSQLite3Database } from 'drizzle-orm/better-sqlite3';
 import type { LocalSqliteConnection } from './connection.js';
 import {
   categories,
@@ -303,6 +304,329 @@ function isSqliteCheckOrConstraintError(err: unknown): boolean {
   );
 }
 
+export function readHubConfigRowInDbSync(
+  db: BetterSQLite3Database,
+  organizationId: UuidV7,
+): typeof localHubConfig.$inferSelect {
+  const row = db
+    .select()
+    .from(localHubConfig)
+    .where(eq(localHubConfig.organizationId, organizationId))
+    .limit(1)
+    .all()[0];
+  if (!row) {
+    throw new DomainError('AUTH_UNAUTHORIZED', 'Hub setup configuration is missing');
+  }
+  return row;
+}
+
+export function readOrgPromotionsInDbSync(
+  db: BetterSQLite3Database,
+  organizationId: UuidV7,
+): readonly StoredPromotionRecord[] {
+  const rows = db
+    .select()
+    .from(promotions)
+    .where(and(eq(promotions.organizationId, organizationId), isNull(promotions.deletedAtMs)))
+    .orderBy(asc(promotions.startsAtMs), asc(promotions.id))
+    .all();
+  return rows.map(toStoredPromotion);
+}
+
+export function requireCartRowInDbSync(
+  db: BetterSQLite3Database,
+  organizationId: UuidV7,
+  storeId: UuidV7,
+  cartId: UuidV7,
+): typeof localCarts.$inferSelect {
+  const validId = parseUuidV7(cartId);
+  const row = db
+    .select()
+    .from(localCarts)
+    .where(
+      and(
+        eq(localCarts.id, validId),
+        eq(localCarts.organizationId, organizationId),
+        eq(localCarts.storeId, storeId),
+      ),
+    )
+    .limit(1)
+    .all()[0];
+  if (!row) {
+    throw new DomainError('CART_NOT_FOUND', `Cart "${cartId}" was not found`);
+  }
+  return row;
+}
+
+export function readCartLineRowsInDbSync(
+  db: BetterSQLite3Database,
+  cartId: UuidV7,
+): readonly (typeof localCartLines.$inferSelect)[] {
+  return db
+    .select()
+    .from(localCartLines)
+    .where(eq(localCartLines.cartId, cartId))
+    .orderBy(asc(localCartLines.sortOrder), asc(localCartLines.id))
+    .all();
+}
+
+export function buildCartPriceWarningsAndCatalogMapSync(
+  db: BetterSQLite3Database,
+  organizationId: UuidV7,
+  lineRows: readonly (typeof localCartLines.$inferSelect)[],
+): {
+  readonly warningsMap: Map<UuidV7, StoredPriceChangeWarning | null>;
+  readonly productsById: Map<UuidV7, typeof products.$inferSelect>;
+  readonly variantsById: Map<UuidV7, typeof productVariants.$inferSelect>;
+} {
+  const warningsMap = new Map<UuidV7, StoredPriceChangeWarning | null>();
+  const catalogLines = lineRows.filter((l) => l.lineKind === 'catalog' && l.productId !== null);
+  if (catalogLines.length === 0) {
+    return {
+      warningsMap,
+      productsById: new Map(),
+      variantsById: new Map(),
+    };
+  }
+
+  const productIds = [...new Set(catalogLines.map((l) => l.productId!))];
+  const prodRows = db
+    .select()
+    .from(products)
+    .where(
+      and(
+        eq(products.organizationId, organizationId),
+        isNull(products.deletedAtMs),
+        inArray(products.id, productIds),
+      ),
+    )
+    .all();
+  const productsById = new Map(prodRows.map((p) => [p.id, p]));
+
+  const variantIds = [
+    ...new Set(catalogLines.map((l) => l.variantId).filter((v): v is UuidV7 => v !== null)),
+  ];
+  const varRows =
+    variantIds.length > 0
+      ? db
+          .select()
+          .from(productVariants)
+          .where(
+            and(
+              eq(productVariants.organizationId, organizationId),
+              isNull(productVariants.deletedAtMs),
+              inArray(productVariants.id, variantIds),
+            ),
+          )
+          .all()
+      : [];
+  const variantsById = new Map(varRows.map((v) => [v.id, v]));
+
+  for (const line of catalogLines) {
+    const prod = line.productId ? productsById.get(line.productId) : undefined;
+    if (!prod) {
+      warningsMap.set(line.id, {
+        snapshotUnitPrice: moneyFromTiyin(line.unitPriceSnapshot),
+        currentUnitPrice: null,
+        catalogDeleted: true,
+      });
+      continue;
+    }
+    if (line.variantId !== null) {
+      const variant = variantsById.get(line.variantId);
+      if (!variant || variant.productId !== prod.id) {
+        warningsMap.set(line.id, {
+          snapshotUnitPrice: moneyFromTiyin(line.unitPriceSnapshot),
+          currentUnitPrice: null,
+          catalogDeleted: true,
+        });
+        continue;
+      }
+      const livePrice = variant.salePrice ?? prod.salePrice;
+      warningsMap.set(
+        line.id,
+        livePrice !== line.unitPriceSnapshot
+          ? {
+              snapshotUnitPrice: moneyFromTiyin(line.unitPriceSnapshot),
+              currentUnitPrice: moneyFromTiyin(livePrice),
+              catalogDeleted: false,
+            }
+          : null,
+      );
+    } else {
+      const livePrice = prod.salePrice;
+      warningsMap.set(
+        line.id,
+        livePrice !== line.unitPriceSnapshot
+          ? {
+              snapshotUnitPrice: moneyFromTiyin(line.unitPriceSnapshot),
+              currentUnitPrice: moneyFromTiyin(livePrice),
+              catalogDeleted: false,
+            }
+          : null,
+      );
+    }
+  }
+
+  return { warningsMap, productsById, variantsById };
+}
+
+/**
+ * Shared authoritative cart evaluation helper used identically by cart UI views and `completeSale`
+ * inside a single DB transaction (`db` is typically `session.db`).
+ */
+export function evaluateCartRowInDbSync(params: {
+  readonly db: BetterSQLite3Database;
+  readonly organizationId: UuidV7;
+  readonly storeId: UuidV7;
+  readonly cartRow: typeof localCarts.$inferSelect;
+  readonly nowMs: UnixMs;
+  readonly manualDiscountOverride?: {
+    readonly mode: ManualDiscountMode;
+    readonly percentBp: number;
+    readonly amount: Money;
+    readonly approvedByUserId: UuidV7 | null;
+    readonly approvedAmount: Money | null;
+  };
+}): {
+  readonly detail: StoredCartDetailRecord;
+  readonly hubConfig: typeof localHubConfig.$inferSelect;
+  readonly lineRows: readonly (typeof localCartLines.$inferSelect)[];
+  readonly productsById: Map<UuidV7, typeof products.$inferSelect>;
+  readonly variantsById: Map<UuidV7, typeof productVariants.$inferSelect>;
+} {
+  const { db, organizationId, storeId, cartRow, nowMs } = params;
+  const lineRows = readCartLineRowsInDbSync(db, cartRow.id);
+  const hubConfig = readHubConfigRowInDbSync(db, organizationId);
+  const settings = toDiscountSettings(hubConfig);
+  const promoRules = readOrgPromotionsInDbSync(db, organizationId).map(toPromotionRule);
+  const { warningsMap, productsById, variantsById } = buildCartPriceWarningsAndCatalogMapSync(
+    db,
+    organizationId,
+    lineRows,
+  );
+
+  const domainLines: CartLineInput[] = lineRows.map((l) => ({
+    id: l.id,
+    lineKind: l.lineKind as CartLineKind,
+    productId: l.productId,
+    variantId: l.variantId,
+    categoryId: l.categoryIdSnapshot,
+    name: l.itemName,
+    unit: parseProductUnit(l.unit),
+    qty: quantityFromMilli(l.qty),
+    unitPriceSnapshot: moneyFromTiyin(l.unitPriceSnapshot),
+    vatRate: vatRateFromBasisPoints(BigInt(l.vatRateBpSnapshot)),
+  }));
+
+  const discInput = params.manualDiscountOverride ?? {
+    ...toManualDiscountInput(cartRow),
+    approvedByUserId: cartRow.overrideApprovedByUserId,
+    approvedAmount:
+      cartRow.overrideApprovedAmount !== null
+        ? moneyFromTiyin(cartRow.overrideApprovedAmount)
+        : null,
+  };
+
+  const evaluation = evaluateCart({
+    storeId,
+    nowMs,
+    lines: domainLines,
+    promotions: promoRules,
+    manualDiscount: {
+      mode: discInput.mode,
+      percentBp: BigInt(discInput.percentBp),
+      amount: discInput.amount,
+    },
+    policy: settings.cashierDiscountLimit,
+    overrideApprovedByUserId: discInput.approvedByUserId,
+    overrideApprovedAmount: discInput.approvedAmount,
+  });
+
+  let priceWarningsCount = 0;
+  const storedLines: StoredCartLineRecord[] = evaluation.lines.map((ev, idx) => {
+    const srcRow = lineRows[idx];
+    if (!srcRow) {
+      throw new Error('Cart line alignment mismatch during evaluation');
+    }
+    const warning = warningsMap.get(ev.id) ?? null;
+    if (warning !== null) {
+      priceWarningsCount += 1;
+    }
+    return {
+      id: ev.id,
+      sortOrder: srcRow.sortOrder,
+      lineKind: ev.lineKind,
+      productId: ev.productId,
+      variantId: ev.variantId,
+      categoryIdSnapshot: ev.categoryId,
+      name: ev.name,
+      unit: ev.unit,
+      qty: ev.qty,
+      unitPriceSnapshot: ev.unitPriceSnapshot,
+      mxikSnapshot: srcRow.mxikSnapshot,
+      packageCodeSnapshot: srcRow.packageCodeSnapshot,
+      vatRateBpSnapshot: srcRow.vatRateBpSnapshot,
+      appliedPromotionId: ev.appliedPromotionId,
+      appliedPromotionName: ev.appliedPromotionName,
+      freeUnits: Number(ev.freeUnits),
+      grossTotal: ev.grossTotal,
+      promoDiscount: ev.promoDiscount,
+      subtotalAfterPromo: ev.subtotalAfterPromo,
+      allocatedOrderDiscount: ev.allocatedOrderDiscount,
+      finalTotal: ev.finalTotal,
+      netExVat: ev.netExVat,
+      vatTotal: ev.vatTotal,
+      priceChangeWarning: warning,
+    };
+  });
+
+  const detail: StoredCartDetailRecord = {
+    id: cartRow.id,
+    organizationId: cartRow.organizationId,
+    storeId: cartRow.storeId,
+    cashierUserId: cartRow.cashierUserId,
+    status: cartRow.status as CartStatus,
+    parkLabel: cartRow.parkLabel,
+    parkedAtMs: cartRow.parkedAtMs,
+    manualDiscountMode: discInput.mode,
+    manualDiscountValue:
+      discInput.mode === 'percent'
+        ? BigInt(discInput.percentBp)
+        : discInput.mode === 'amount'
+          ? moneyToTiyin(discInput.amount)
+          : 0n,
+    manualDiscountReason: cartRow.manualDiscountReason,
+    overrideApprovedByUserId: discInput.approvedByUserId,
+    overrideApprovedAmount: discInput.approvedAmount,
+    overrideApprovedAtMs: discInput.approvedByUserId !== null ? cartRow.overrideApprovedAtMs : null,
+    subtotalGross: evaluation.subtotalGross,
+    totalPromoDiscount: evaluation.totalPromoDiscount,
+    subtotalAfterPromo: evaluation.subtotalAfterPromo,
+    requestedOrderDiscount: evaluation.requestedOrderDiscount,
+    effectiveOrderDiscount: evaluation.effectiveOrderDiscount,
+    totalFinal: evaluation.totalFinal,
+    totalNetExVat: evaluation.totalNetExVat,
+    totalVat: evaluation.totalVat,
+    totalFreeUnits: Number(evaluation.totalFreeUnits),
+    exceedsCashierLimit: evaluation.exceedsCashierLimit,
+    discountAuthorized: evaluation.discountAuthorized,
+    discountOverrideRequired: evaluation.discountOverrideRequired,
+    priceWarningsCount,
+    lines: storedLines,
+    createdAtMs: cartRow.createdAtMs,
+    updatedAtMs: cartRow.updatedAtMs,
+  };
+
+  return {
+    detail,
+    hubConfig,
+    lineRows,
+    productsById,
+    variantsById,
+  };
+}
+
 export class SqliteCartStore {
   private readonly connection: LocalSqliteConnection;
   private readonly getRuntimeContext: () => CartRuntimeContext | null;
@@ -321,49 +645,18 @@ export class SqliteCartStore {
   }
 
   private readHubSettingsSync(organizationId: UuidV7): StoredCartDiscountSettings {
-    const row = this.connection.db
-      .select()
-      .from(localHubConfig)
-      .where(eq(localHubConfig.organizationId, organizationId))
-      .limit(1)
-      .all()[0];
-    if (!row) {
-      throw new DomainError('AUTH_UNAUTHORIZED', 'Hub setup configuration is missing');
-    }
-    return toDiscountSettings(row);
+    return toDiscountSettings(readHubConfigRowInDbSync(this.connection.db, organizationId));
   }
 
   private readOrgPromotionsSync(organizationId: UuidV7): readonly StoredPromotionRecord[] {
-    const rows = this.connection.db
-      .select()
-      .from(promotions)
-      .where(and(eq(promotions.organizationId, organizationId), isNull(promotions.deletedAtMs)))
-      .orderBy(asc(promotions.startsAtMs), asc(promotions.id))
-      .all();
-    return rows.map(toStoredPromotion);
+    return readOrgPromotionsInDbSync(this.connection.db, organizationId);
   }
 
   private requireCartRowSync(
     ctx: CartRuntimeContext,
     cartId: UuidV7,
   ): typeof localCarts.$inferSelect {
-    const validId = parseUuidV7(cartId);
-    const row = this.connection.db
-      .select()
-      .from(localCarts)
-      .where(
-        and(
-          eq(localCarts.id, validId),
-          eq(localCarts.organizationId, ctx.organizationId),
-          eq(localCarts.storeId, ctx.storeId),
-        ),
-      )
-      .limit(1)
-      .all()[0];
-    if (!row) {
-      throw new DomainError('CART_NOT_FOUND', `Cart "${cartId}" was not found`);
-    }
-    return row;
+    return requireCartRowInDbSync(this.connection.db, ctx.organizationId, ctx.storeId, cartId);
   }
 
   private requireOpenCartRowSync(
@@ -378,104 +671,7 @@ export class SqliteCartStore {
   }
 
   private readCartLineRowsSync(cartId: UuidV7): readonly (typeof localCartLines.$inferSelect)[] {
-    return this.connection.db
-      .select()
-      .from(localCartLines)
-      .where(eq(localCartLines.cartId, cartId))
-      .orderBy(asc(localCartLines.sortOrder), asc(localCartLines.id))
-      .all();
-  }
-
-  private buildPriceWarningsMapSync(
-    organizationId: UuidV7,
-    lineRows: readonly (typeof localCartLines.$inferSelect)[],
-  ): Map<UuidV7, StoredPriceChangeWarning | null> {
-    const result = new Map<UuidV7, StoredPriceChangeWarning | null>();
-    const catalogLines = lineRows.filter((l) => l.lineKind === 'catalog' && l.productId !== null);
-    if (catalogLines.length === 0) {
-      return result;
-    }
-
-    const productIds = [...new Set(catalogLines.map((l) => l.productId!))];
-    const prodRows = this.connection.db
-      .select()
-      .from(products)
-      .where(
-        and(
-          eq(products.organizationId, organizationId),
-          isNull(products.deletedAtMs),
-          inArray(products.id, productIds),
-        ),
-      )
-      .all();
-    const prodMap = new Map(prodRows.map((p) => [p.id, p]));
-
-    const variantIds = [
-      ...new Set(catalogLines.map((l) => l.variantId).filter((v): v is UuidV7 => v !== null)),
-    ];
-    const varRows =
-      variantIds.length > 0
-        ? this.connection.db
-            .select()
-            .from(productVariants)
-            .where(
-              and(
-                eq(productVariants.organizationId, organizationId),
-                isNull(productVariants.deletedAtMs),
-                inArray(productVariants.id, variantIds),
-              ),
-            )
-            .all()
-        : [];
-    const varMap = new Map(varRows.map((v) => [v.id, v]));
-
-    for (const line of catalogLines) {
-      const prod = line.productId ? prodMap.get(line.productId) : undefined;
-      if (!prod) {
-        result.set(line.id, {
-          snapshotUnitPrice: moneyFromTiyin(line.unitPriceSnapshot),
-          currentUnitPrice: null,
-          catalogDeleted: true,
-        });
-        continue;
-      }
-      if (line.variantId !== null) {
-        const variant = varMap.get(line.variantId);
-        if (!variant || variant.productId !== prod.id) {
-          result.set(line.id, {
-            snapshotUnitPrice: moneyFromTiyin(line.unitPriceSnapshot),
-            currentUnitPrice: null,
-            catalogDeleted: true,
-          });
-          continue;
-        }
-        const livePrice = variant.salePrice ?? prod.salePrice;
-        result.set(
-          line.id,
-          livePrice !== line.unitPriceSnapshot
-            ? {
-                snapshotUnitPrice: moneyFromTiyin(line.unitPriceSnapshot),
-                currentUnitPrice: moneyFromTiyin(livePrice),
-                catalogDeleted: false,
-              }
-            : null,
-        );
-      } else {
-        const livePrice = prod.salePrice;
-        result.set(
-          line.id,
-          livePrice !== line.unitPriceSnapshot
-            ? {
-                snapshotUnitPrice: moneyFromTiyin(line.unitPriceSnapshot),
-                currentUnitPrice: moneyFromTiyin(livePrice),
-                catalogDeleted: false,
-              }
-            : null,
-        );
-      }
-    }
-
-    return result;
+    return readCartLineRowsInDbSync(this.connection.db, cartId);
   }
 
   private evaluateCartRowSync(
@@ -490,123 +686,14 @@ export class SqliteCartStore {
       readonly approvedAmount: Money | null;
     },
   ): StoredCartDetailRecord {
-    const lineRows = this.readCartLineRowsSync(cartRow.id);
-    const settings = this.readHubSettingsSync(ctx.organizationId);
-    const promoRules = this.readOrgPromotionsSync(ctx.organizationId).map(toPromotionRule);
-    const warningsMap = this.buildPriceWarningsMapSync(ctx.organizationId, lineRows);
-
-    const domainLines: CartLineInput[] = lineRows.map((l) => ({
-      id: l.id,
-      lineKind: l.lineKind as CartLineKind,
-      productId: l.productId,
-      variantId: l.variantId,
-      categoryId: l.categoryIdSnapshot,
-      name: l.itemName,
-      unit: parseProductUnit(l.unit),
-      qty: quantityFromMilli(l.qty),
-      unitPriceSnapshot: moneyFromTiyin(l.unitPriceSnapshot),
-      vatRate: vatRateFromBasisPoints(BigInt(l.vatRateBpSnapshot)),
-    }));
-
-    const discInput = manualDiscountOverride ?? {
-      ...toManualDiscountInput(cartRow),
-      approvedByUserId: cartRow.overrideApprovedByUserId,
-      approvedAmount:
-        cartRow.overrideApprovedAmount !== null
-          ? moneyFromTiyin(cartRow.overrideApprovedAmount)
-          : null,
-    };
-
-    const evaluation = evaluateCart({
+    return evaluateCartRowInDbSync({
+      db: this.connection.db,
+      organizationId: ctx.organizationId,
       storeId: ctx.storeId,
+      cartRow,
       nowMs,
-      lines: domainLines,
-      promotions: promoRules,
-      manualDiscount: {
-        mode: discInput.mode,
-        percentBp: BigInt(discInput.percentBp),
-        amount: discInput.amount,
-      },
-      policy: settings.cashierDiscountLimit,
-      overrideApprovedByUserId: discInput.approvedByUserId,
-      overrideApprovedAmount: discInput.approvedAmount,
-    });
-
-    let priceWarningsCount = 0;
-    const storedLines: StoredCartLineRecord[] = evaluation.lines.map((ev, idx) => {
-      const srcRow = lineRows[idx];
-      if (!srcRow) {
-        throw new Error('Cart line alignment mismatch during evaluation');
-      }
-      const warning = warningsMap.get(ev.id) ?? null;
-      if (warning !== null) {
-        priceWarningsCount += 1;
-      }
-      return {
-        id: ev.id,
-        sortOrder: srcRow.sortOrder,
-        lineKind: ev.lineKind,
-        productId: ev.productId,
-        variantId: ev.variantId,
-        categoryIdSnapshot: ev.categoryId,
-        name: ev.name,
-        unit: ev.unit,
-        qty: ev.qty,
-        unitPriceSnapshot: ev.unitPriceSnapshot,
-        mxikSnapshot: srcRow.mxikSnapshot,
-        packageCodeSnapshot: srcRow.packageCodeSnapshot,
-        vatRateBpSnapshot: srcRow.vatRateBpSnapshot,
-        appliedPromotionId: ev.appliedPromotionId,
-        appliedPromotionName: ev.appliedPromotionName,
-        freeUnits: Number(ev.freeUnits),
-        grossTotal: ev.grossTotal,
-        promoDiscount: ev.promoDiscount,
-        subtotalAfterPromo: ev.subtotalAfterPromo,
-        allocatedOrderDiscount: ev.allocatedOrderDiscount,
-        finalTotal: ev.finalTotal,
-        netExVat: ev.netExVat,
-        vatTotal: ev.vatTotal,
-        priceChangeWarning: warning,
-      };
-    });
-
-    return {
-      id: cartRow.id,
-      organizationId: cartRow.organizationId,
-      storeId: cartRow.storeId,
-      cashierUserId: cartRow.cashierUserId,
-      status: cartRow.status as CartStatus,
-      parkLabel: cartRow.parkLabel,
-      parkedAtMs: cartRow.parkedAtMs,
-      manualDiscountMode: discInput.mode,
-      manualDiscountValue:
-        discInput.mode === 'percent'
-          ? BigInt(discInput.percentBp)
-          : discInput.mode === 'amount'
-            ? moneyToTiyin(discInput.amount)
-            : 0n,
-      manualDiscountReason: cartRow.manualDiscountReason,
-      overrideApprovedByUserId: discInput.approvedByUserId,
-      overrideApprovedAmount: discInput.approvedAmount,
-      overrideApprovedAtMs:
-        discInput.approvedByUserId !== null ? cartRow.overrideApprovedAtMs : null,
-      subtotalGross: evaluation.subtotalGross,
-      totalPromoDiscount: evaluation.totalPromoDiscount,
-      subtotalAfterPromo: evaluation.subtotalAfterPromo,
-      requestedOrderDiscount: evaluation.requestedOrderDiscount,
-      effectiveOrderDiscount: evaluation.effectiveOrderDiscount,
-      totalFinal: evaluation.totalFinal,
-      totalNetExVat: evaluation.totalNetExVat,
-      totalVat: evaluation.totalVat,
-      totalFreeUnits: Number(evaluation.totalFreeUnits),
-      exceedsCashierLimit: evaluation.exceedsCashierLimit,
-      discountAuthorized: evaluation.discountAuthorized,
-      discountOverrideRequired: evaluation.discountOverrideRequired,
-      priceWarningsCount,
-      lines: storedLines,
-      createdAtMs: cartRow.createdAtMs,
-      updatedAtMs: cartRow.updatedAtMs,
-    };
+      manualDiscountOverride,
+    }).detail;
   }
 
   private revokeOverrideIfNeededSync(
@@ -1019,6 +1106,7 @@ export class SqliteCartStore {
           and(
             eq(localCarts.organizationId, ctx.organizationId),
             eq(localCarts.storeId, ctx.storeId),
+            inArray(localCarts.status, ['open', 'parked']),
           ),
         )
         .orderBy(desc(localCarts.updatedAtMs), desc(localCarts.id))
@@ -1066,6 +1154,12 @@ export class SqliteCartStore {
     const ctx = this.requireContext();
     await ctx.uow.execute((session) => {
       const row = this.requireCartRowSync(ctx, cartId);
+      if (row.status === 'completed') {
+        throw new DomainError(
+          'CART_NOT_OPEN',
+          `Cart "${cartId}" has already been completed and cannot be deleted`,
+        );
+      }
       session.db.delete(localCarts).where(eq(localCarts.id, row.id)).run();
       return Promise.resolve();
     });

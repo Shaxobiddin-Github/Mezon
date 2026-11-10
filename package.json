@@ -9,8 +9,8 @@
   "scripts": {
     "build": "turbo run build",
     "typecheck": "turbo run typecheck",
-    "lint": "eslint .",
-    "lint:fix": "eslint . --fix",
+    "lint": "node scripts/lint-workspaces.mjs",
+    "lint:fix": "node scripts/lint-workspaces.mjs --fix",
     "test": "vitest run",
     "db:check": "turbo run db:check",
     "depcruise": "depcruise --config .dependency-cruiser.cjs apps/*/src packages/*/src",

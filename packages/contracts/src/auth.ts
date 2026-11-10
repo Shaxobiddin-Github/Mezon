@@ -72,6 +72,7 @@ export const ApiErrorEnvelopeSchema = z.strictObject({
   error: z.strictObject({
     code: z.string(),
     message: z.string(),
+    details: z.record(z.string(), z.unknown()).optional(),
   }),
 });
 export type ApiErrorEnvelope = z.infer<typeof ApiErrorEnvelopeSchema>;

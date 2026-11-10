@@ -44,6 +44,8 @@ export {
 export {
   type SqliteSessionDbAccess,
   readDeviceStateRowSync,
+  advanceReceiptSeqSync,
+  readReceiptSeqSync,
   SqliteDeviceStateRepository,
 } from './device-state.js';
 
@@ -104,6 +106,9 @@ export {
   promotions,
   localCarts,
   localCartLines,
+  sales,
+  saleLines,
+  payments,
 } from './schema/index.js';
 
 export {
@@ -115,6 +120,8 @@ export {
   buildStockMonotoneTriggersSql,
   assertStockMigrationsComplete,
 } from './stock-migrations.js';
+
+export { buildSaleMonotoneTriggersSql, assertSaleMigrationsComplete } from './sale-migrations.js';
 
 export {
   type HubConfigSnapshot,
@@ -157,12 +164,15 @@ export {
   type StoredStockMoveRecord,
   type StockMoveWarningRecord,
   type CreateStockMovesOutcome,
+  type OutboundStockMoveSessionParams,
+  type OutboundStockMoveSessionOutcome,
   type StoredStockConflictRecord,
   type StoredInventoryCountRecord,
   type StoredInventoryCountLineRecord,
   type StoredInventoryCountDetailRecord,
   type FinalizeInventoryCountOutcome,
   type RebuildStockProjectionsResult,
+  applyOutboundStockMoveSync,
   rebuildStockProjections,
   SqliteStockStore,
   createSqliteStockStore,
@@ -182,3 +192,16 @@ export {
   SqliteCartStore,
   createSqliteCartStore,
 } from './cart-repo.js';
+
+export {
+  type SaleRuntimeContext,
+  type SaleStoreTestHooks,
+  type CreateSqliteSaleStoreOptions,
+  type CompleteSaleInput,
+  type StoredSaleLineRecord,
+  type StoredSalePaymentRecord,
+  type StoredSaleRecord,
+  type CompleteSaleOutcome,
+  SqliteSaleStore,
+  createSqliteSaleStore,
+} from './sale-repo.js';

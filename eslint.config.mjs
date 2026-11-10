@@ -1,4 +1,37 @@
+import fs from 'node:fs';
+import path from 'node:path';
 import tseslint from 'typescript-eslint';
+
+function resolveLintTsProjects() {
+  const scopeRaw = process.env.MEZON_LINT_PROJECTS;
+  if (!scopeRaw || scopeRaw.trim().length === 0) {
+    return [
+      './tsconfig.json',
+      './packages/*/tsconfig.json',
+      './packages/*/tsconfig.test.json',
+      './apps/*/tsconfig.json',
+      './apps/*/tsconfig.test.json',
+    ];
+  }
+
+  const projects = [];
+  for (const entry of scopeRaw.split(',')) {
+    const clean = entry.trim();
+    if (!clean) {
+      continue;
+    }
+    if (clean === '.') {
+      projects.push('./tsconfig.json');
+      continue;
+    }
+    for (const candidate of [`./${clean}/tsconfig.json`, `./${clean}/tsconfig.test.json`]) {
+      if (fs.existsSync(path.resolve(import.meta.dirname, candidate))) {
+        projects.push(candidate);
+      }
+    }
+  }
+  return projects.length > 0 ? projects : ['./tsconfig.json'];
+}
 
 export default tseslint.config(
   {
@@ -22,13 +55,7 @@ export default tseslint.config(
     files: ['**/*.{ts,tsx}'],
     languageOptions: {
       parserOptions: {
-        project: [
-          './tsconfig.json',
-          './packages/*/tsconfig.json',
-          './packages/*/tsconfig.test.json',
-          './apps/*/tsconfig.json',
-          './apps/*/tsconfig.test.json',
-        ],
+        project: resolveLintTsProjects(),
         tsconfigRootDir: import.meta.dirname,
       },
     },

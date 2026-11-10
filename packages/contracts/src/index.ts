@@ -246,3 +246,21 @@ export {
   DeleteCartResponseSchema,
   type DeleteCartResponseDto,
 } from './cart.js';
+
+export {
+  PaymentMethodSchema,
+  CashSalePaymentInputSchema,
+  type CashSalePaymentInputDto,
+  CompleteSaleRequestSchema,
+  type CompleteSaleRequestDto,
+  SaleLineDtoSchema,
+  type SaleLineDto,
+  SalePaymentDtoSchema,
+  type SalePaymentDto,
+  SaleDtoSchema,
+  type SaleDto,
+  SaleNegativeStockWarningSchema,
+  type SaleNegativeStockWarningDto,
+  CompleteSaleResponseSchema,
+  type CompleteSaleResponseDto,
+} from './sale.js';

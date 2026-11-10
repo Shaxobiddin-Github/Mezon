@@ -37,12 +37,16 @@ export const localDeviceState = localSchemaRegistry.defineTable(
     ...common,
     deviceId: sqliteUuidV7('device_id').notNull(),
     lastDeviceSeq: sqliteBigint('last_device_seq').notNull(),
+    lastReceiptSeq: sqliteBigint('last_receipt_seq')
+      .notNull()
+      .default(sql`0`),
     lastHlc: sqliteHlc('last_hlc').notNull(),
     lastUuidMs: sqliteUnixMs('last_uuid_ms').notNull(),
   }),
   (self) => [
     uniqueIndex('uidx_local_device_state_device_id').on(self.deviceId),
     check('chk_local_device_state_seq_nonneg', sql`${self.lastDeviceSeq} >= 0`),
+    check('chk_local_device_state_receipt_nonneg', sql`${self.lastReceiptSeq} >= 0`),
   ],
 );
 
@@ -815,6 +819,9 @@ export const localCarts = localSchemaRegistry.defineTable(
     ),
     overrideApprovedAmount: sqliteMoney('override_approved_amount'),
     overrideApprovedAtMs: sqliteUnixMs('override_approved_at_ms'),
+    completedSaleId: sqliteUuidV7('completed_sale_id'),
+    completedAtMs: sqliteUnixMs('completed_at_ms'),
+    completionWarningsJson: text('completion_warnings_json'),
   }),
   (self) => [
     index('idx_local_carts_store_status').on(
@@ -823,10 +830,14 @@ export const localCarts = localSchemaRegistry.defineTable(
       self.status,
       self.updatedAtMs,
     ),
-    check('chk_local_carts_status', sql`${self.status} IN ('open', 'parked')`),
+    check('chk_local_carts_status', sql`${self.status} IN ('open', 'parked', 'completed')`),
     check(
       'chk_local_carts_park_meta',
-      sql`(${self.status} = 'open' AND ${self.parkedAtMs} IS NULL) OR (${self.status} = 'parked' AND ${self.parkedAtMs} IS NOT NULL)`,
+      sql`(${self.status} IN ('open', 'completed') AND ${self.parkedAtMs} IS NULL) OR (${self.status} = 'parked' AND ${self.parkedAtMs} IS NOT NULL)`,
+    ),
+    check(
+      'chk_local_carts_completed_meta',
+      sql`(${self.status} <> 'completed' AND ${self.completedSaleId} IS NULL AND ${self.completedAtMs} IS NULL) OR (${self.status} = 'completed' AND ${self.completedSaleId} IS NOT NULL AND ${self.completedAtMs} IS NOT NULL)`,
     ),
     check(
       'chk_local_carts_disc_mode',
@@ -892,6 +903,204 @@ export const localCartLines = localSchemaRegistry.defineTable(
     check(
       'chk_local_cart_lines_vat_bp',
       sql`${self.vatRateBpSnapshot} >= 0 AND ${self.vatRateBpSnapshot} <= 10000`,
+    ),
+  ],
+);
+
+/**
+ * Completed sales receipts (`MONOTONE`, T1.4).
+ * Immutable once created except one-way irreversible voiding (`voided_at_ms`, T1.6).
+ * Fiscal state lives separately in F3 `fiscal_docs` so mutable fiscal retries never weaken MONOTONE guarantees.
+ */
+export const sales = localSchemaRegistry.defineTable(
+  {
+    name: 'sales',
+    tableClass: 'MONOTONE',
+    tenantScope: 'store',
+    monotoneColumns: ['voided_at_ms'],
+  },
+  (common) => ({
+    ...common,
+    receiptNo: sqliteBigint('receipt_no').notNull(),
+    receiptCode: text('receipt_code').notNull(),
+    sourceCartId: sqliteUuidV7('source_cart_id'),
+    cashierUserId: sqliteUuidV7('cashier_user_id')
+      .notNull()
+      .references(() => users.id),
+    customerId: sqliteUuidV7('customer_id'),
+    shiftId: sqliteUuidV7('shift_id'),
+    clientRequestId: sqliteUuidV7('client_request_id').notNull(),
+    subtotalGross: sqliteMoney('subtotal_gross').notNull(),
+    totalPromoDiscount: sqliteMoney('total_promo_discount').notNull(),
+    subtotalAfterPromo: sqliteMoney('subtotal_after_promo').notNull(),
+    manualDiscountMode: text('manual_discount_mode').notNull(),
+    manualDiscountValue: sqliteBigint('manual_discount_value').notNull(),
+    manualDiscountReason: text('manual_discount_reason'),
+    orderDiscountAmount: sqliteMoney('order_discount_amount').notNull(),
+    totalFinal: sqliteMoney('total_final').notNull(),
+    totalNetExVat: sqliteMoney('total_net_ex_vat').notNull(),
+    totalVat: sqliteMoney('total_vat').notNull(),
+    totalPaid: sqliteMoney('total_paid').notNull(),
+    debtAmount: sqliteMoney('debt_amount')
+      .notNull()
+      .default(sql`0`),
+    changeAmount: sqliteMoney('change_amount').notNull(),
+    overrideApprovedByUserId: sqliteUuidV7('override_approved_by_user_id').references(
+      () => users.id,
+    ),
+    overrideApprovedAmount: sqliteMoney('override_approved_amount'),
+    overrideApprovedAtMs: sqliteUnixMs('override_approved_at_ms'),
+    voidedAtMs: sqliteUnixMs('voided_at_ms'),
+    voidedByUserId: sqliteUuidV7('voided_by_user_id').references(() => users.id),
+    voidReason: text('void_reason'),
+  }),
+  (self) => [
+    uniqueIndex('uidx_sales_org_device_receipt_no').on(
+      self.organizationId,
+      self.deviceId,
+      self.receiptNo,
+    ),
+    uniqueIndex('uidx_sales_org_client_request').on(self.organizationId, self.clientRequestId),
+    index('idx_sales_store_created').on(self.organizationId, self.storeId, self.createdAtMs),
+    index('idx_sales_store_cart').on(self.organizationId, self.storeId, self.sourceCartId),
+    check('chk_sales_receipt_no_pos', sql`${self.receiptNo} >= 1`),
+    check('chk_sales_receipt_code_nonempty', sql`length(trim(${self.receiptCode})) >= 1`),
+    check('chk_sales_disc_mode', sql`${self.manualDiscountMode} IN ('none', 'percent', 'amount')`),
+    check(
+      'chk_sales_disc_val',
+      sql`(${self.manualDiscountMode} = 'none' AND ${self.manualDiscountValue} = 0) OR (${self.manualDiscountMode} = 'percent' AND ${self.manualDiscountValue} BETWEEN 1 AND 10000) OR (${self.manualDiscountMode} = 'amount' AND ${self.manualDiscountValue} > 0)`,
+    ),
+    check(
+      'chk_sales_money_nonneg',
+      sql`${self.subtotalGross} >= 0 AND ${self.totalPromoDiscount} >= 0 AND ${self.subtotalAfterPromo} >= 0 AND ${self.orderDiscountAmount} >= 0 AND ${self.totalFinal} >= 0 AND ${self.totalNetExVat} >= 0 AND ${self.totalVat} >= 0 AND ${self.totalPaid} >= 0 AND ${self.debtAmount} >= 0 AND ${self.changeAmount} >= 0`,
+    ),
+    check(
+      'chk_sales_totals_balance',
+      sql`${self.totalPaid} + ${self.debtAmount} = ${self.totalFinal} AND ${self.totalNetExVat} + ${self.totalVat} = ${self.totalFinal}`,
+    ),
+    check(
+      'chk_sales_override_pair',
+      sql`(${self.overrideApprovedByUserId} IS NULL AND ${self.overrideApprovedAmount} IS NULL AND ${self.overrideApprovedAtMs} IS NULL) OR (${self.overrideApprovedByUserId} IS NOT NULL AND ${self.overrideApprovedAmount} >= 0 AND ${self.overrideApprovedAtMs} IS NOT NULL)`,
+    ),
+    check(
+      'chk_sales_void_pair',
+      sql`(${self.voidedAtMs} IS NULL AND ${self.voidedByUserId} IS NULL) OR (${self.voidedAtMs} IS NOT NULL AND ${self.voidedByUserId} IS NOT NULL)`,
+    ),
+  ],
+);
+
+/**
+ * Immutable completed sale line snapshots (`FACT`, T1.4).
+ * Carries full point-of-sale snapshot (`itemName`, `unitPrice`, `mxik`, `packageCode`, `vatRateBp`,
+ * discounts, and FIFO/average stock `costValue` excluded from cashier API responses).
+ */
+export const saleLines = localSchemaRegistry.defineTable(
+  {
+    name: 'sale_lines',
+    tableClass: 'FACT',
+    tenantScope: 'store',
+  },
+  (common) => ({
+    ...common,
+    saleId: sqliteUuidV7('sale_id')
+      .notNull()
+      .references(() => sales.id),
+    sortOrder: sqliteInt('sort_order').notNull(),
+    lineKind: text('line_kind').notNull(),
+    productId: sqliteUuidV7('product_id').references(() => products.id),
+    variantId: sqliteUuidV7('variant_id').references(() => productVariants.id),
+    categoryIdSnapshot: sqliteUuidV7('category_id_snapshot'),
+    itemName: text('item_name').notNull(),
+    unit: text('unit').notNull(),
+    qty: sqliteQuantity('qty').notNull(),
+    unitPriceSnapshot: sqliteMoney('unit_price_snapshot').notNull(),
+    appliedPromotionId: sqliteUuidV7('applied_promotion_id'),
+    appliedPromotionName: text('applied_promotion_name'),
+    freeUnits: sqliteBigint('free_units')
+      .notNull()
+      .default(sql`0`),
+    grossTotal: sqliteMoney('gross_total').notNull(),
+    promoDiscount: sqliteMoney('promo_discount').notNull(),
+    subtotalAfterPromo: sqliteMoney('subtotal_after_promo').notNull(),
+    allocatedOrderDiscount: sqliteMoney('allocated_order_discount').notNull(),
+    finalTotal: sqliteMoney('final_total').notNull(),
+    vatRateBpSnapshot: sqliteInt('vat_rate_bp_snapshot').notNull(),
+    netExVat: sqliteMoney('net_ex_vat').notNull(),
+    vatTotal: sqliteMoney('vat_total').notNull(),
+    mxikSnapshot: text('mxik_snapshot'),
+    packageCodeSnapshot: text('package_code_snapshot'),
+    costValue: sqliteMoney('cost_value')
+      .notNull()
+      .default(sql`0`),
+  }),
+  (self) => [
+    uniqueIndex('uidx_sale_lines_sale_sort').on(self.saleId, self.sortOrder),
+    index('idx_sale_lines_store_sale').on(self.organizationId, self.storeId, self.saleId),
+    check('chk_sale_lines_sort_nonneg', sql`${self.sortOrder} >= 0`),
+    check('chk_sale_lines_kind', sql`${self.lineKind} IN ('catalog', 'quick_sale')`),
+    check(
+      'chk_sale_lines_kind_product',
+      sql`(${self.lineKind} = 'catalog' AND ${self.productId} IS NOT NULL) OR (${self.lineKind} = 'quick_sale' AND ${self.productId} IS NULL AND ${self.variantId} IS NULL)`,
+    ),
+    check('chk_sale_lines_name_nonempty', sql`length(trim(${self.itemName})) >= 1`),
+    check(
+      'chk_sale_lines_unit',
+      sql`${self.unit} IN ('dona', 'kg', 'g', 'litr', 'metr', 'm2', 'qadoq')`,
+    ),
+    check('chk_sale_lines_qty_pos', sql`${self.qty} > 0`),
+    check(
+      'chk_sale_lines_unit_int',
+      sql`${self.unit} NOT IN ('dona', 'qadoq') OR (${self.qty} % 1000) = 0`,
+    ),
+    check(
+      'chk_sale_lines_money_nonneg',
+      sql`${self.unitPriceSnapshot} >= 0 AND ${self.freeUnits} >= 0 AND ${self.grossTotal} >= 0 AND ${self.promoDiscount} >= 0 AND ${self.subtotalAfterPromo} >= 0 AND ${self.allocatedOrderDiscount} >= 0 AND ${self.finalTotal} >= 0 AND ${self.netExVat} >= 0 AND ${self.vatTotal} >= 0 AND ${self.costValue} >= 0`,
+    ),
+    check(
+      'chk_sale_lines_vat_bp',
+      sql`${self.vatRateBpSnapshot} >= 0 AND ${self.vatRateBpSnapshot} <= 10000`,
+    ),
+    check(
+      'chk_sale_lines_arithmetic',
+      sql`${self.subtotalAfterPromo} = ${self.grossTotal} - ${self.promoDiscount} AND ${self.finalTotal} = ${self.subtotalAfterPromo} - ${self.allocatedOrderDiscount} AND ${self.netExVat} + ${self.vatTotal} = ${self.finalTotal}`,
+    ),
+  ],
+);
+
+/**
+ * Immutable sale payment rows (`FACT`, T1.4 cash + T1.5/F3 extensible methods & provider refs).
+ */
+export const payments = localSchemaRegistry.defineTable(
+  {
+    name: 'payments',
+    tableClass: 'FACT',
+    tenantScope: 'store',
+  },
+  (common) => ({
+    ...common,
+    saleId: sqliteUuidV7('sale_id')
+      .notNull()
+      .references(() => sales.id),
+    method: text('method').notNull(),
+    amount: sqliteMoney('amount').notNull(),
+    tenderedAmount: sqliteMoney('tendered_amount'),
+    changeAmount: sqliteMoney('change_amount')
+      .notNull()
+      .default(sql`0`),
+    providerRef: text('provider_ref'),
+    providerMetaJson: text('provider_meta_json'),
+  }),
+  (self) => [
+    index('idx_payments_sale').on(self.saleId),
+    index('idx_payments_store_created').on(self.organizationId, self.storeId, self.createdAtMs),
+    check(
+      'chk_payments_method',
+      sql`${self.method} IN ('cash', 'card', 'uzqr', 'payme', 'click', 'uzum', 'social_card', 'other')`,
+    ),
+    check('chk_payments_nonneg', sql`${self.amount} >= 0 AND ${self.changeAmount} >= 0`),
+    check(
+      'chk_payments_cash_balance',
+      sql`(${self.method} = 'cash' AND ${self.tenderedAmount} IS NOT NULL AND ${self.tenderedAmount} >= ${self.amount} AND ${self.tenderedAmount} - ${self.changeAmount} = ${self.amount}) OR (${self.method} <> 'cash' AND ${self.changeAmount} = 0)`,
     ),
   ],
 );

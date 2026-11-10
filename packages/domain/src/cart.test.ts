@@ -9,7 +9,10 @@ import {
   ZERO_VAT_RATE,
   assertCartDiscountAuthorized,
   computeBuyXGetYFreeUnits,
+  doesDiscountExceedCashierLimit,
   evaluateCart,
+  isCartManualDiscountAuthorized,
+  isPromotionActiveAt,
   moneyFromTiyin,
   moneyToTiyin,
   parseUuidV7,
@@ -653,5 +656,174 @@ describe('@mezon/domain - cart calculation, promotions (N+M), P1/P2/P3 & propert
       ),
       { numRuns: 200 },
     );
+  });
+
+  it('T1.3 test debt (1): store-scoped promotion applies only to its store, whereas storeId=null applies everywhere', () => {
+    const storeA = mkId(101);
+    const storeB = mkId(102);
+
+    const storeAPromo: PromotionRule = {
+      id: mkId(701),
+      storeId: storeA,
+      name: 'Only Store A 10%',
+      type: 'percent',
+      scope: 'all',
+      targetProductId: null,
+      targetCategoryId: null,
+      discountPercentBp: 1_000n,
+      discountAmount: null,
+      buyQty: null,
+      freeQty: null,
+      startsAtMs: T0,
+      endsAtMs: null,
+      isActive: true,
+    };
+    const networkPromo: PromotionRule = {
+      id: mkId(702),
+      storeId: null,
+      name: 'Network Wide 5%',
+      type: 'percent',
+      scope: 'all',
+      targetProductId: null,
+      targetCategoryId: null,
+      discountPercentBp: 500n,
+      discountAmount: null,
+      buyQty: null,
+      freeQty: null,
+      startsAtMs: T0,
+      endsAtMs: null,
+      isActive: true,
+    };
+
+    expect(isPromotionActiveAt(storeAPromo, T0, storeA)).toBe(true);
+    expect(isPromotionActiveAt(storeAPromo, T0, storeB)).toBe(false);
+    expect(isPromotionActiveAt(networkPromo, T0, storeA)).toBe(true);
+    expect(isPromotionActiveAt(networkPromo, T0, storeB)).toBe(true);
+
+    const line: CartLineInput = {
+      id: mkId(703),
+      lineKind: 'catalog',
+      productId: PROD_A,
+      variantId: null,
+      categoryId: CAT_DRINKS,
+      name: 'Tea',
+      unit: 'dona',
+      qty: quantityFromMilli(1_000n),
+      unitPriceSnapshot: moneyFromTiyin(100_000n),
+      vatRate: ZERO_VAT_RATE,
+    };
+
+    const evalStoreB = evaluateCart({
+      storeId: storeB,
+      nowMs: T0,
+      lines: [line],
+      promotions: [storeAPromo, networkPromo],
+      manualDiscount: { mode: 'none', percentBp: 0n, amount: ZERO_MONEY },
+      policy: ZERO_CASHIER_LIMIT,
+      overrideApprovedByUserId: null,
+      overrideApprovedAmount: null,
+    });
+    expect(evalStoreB.lines[0]?.appliedPromotionId).toBe(networkPromo.id);
+    expect(evalStoreB.totalPromoDiscount).toBe(moneyFromTiyin(5_000n));
+
+    const evalStoreA = evaluateCart({
+      storeId: storeA,
+      nowMs: T0,
+      lines: [line],
+      promotions: [storeAPromo, networkPromo],
+      manualDiscount: { mode: 'none', percentBp: 0n, amount: ZERO_MONEY },
+      policy: ZERO_CASHIER_LIMIT,
+      overrideApprovedByUserId: null,
+      overrideApprovedAmount: null,
+    });
+    expect(evalStoreA.lines[0]?.appliedPromotionId).toBe(storeAPromo.id);
+    expect(evalStoreA.totalPromoDiscount).toBe(moneyFromTiyin(10_000n));
+  });
+
+  it('T1.3 test debt (2): doesDiscountExceedCashierLimit enforces exact maxAmount (+1 tiyin) and maxPercentBp (+1 tiyin) boundaries', () => {
+    const amountPolicy: CashierDiscountPolicy = {
+      percentUnlimited: true,
+      maxPercentBp: 0n,
+      amountUnlimited: false,
+      maxAmount: moneyFromTiyin(5_000n),
+    };
+    const subtotal = moneyFromTiyin(100_000n);
+
+    expect(doesDiscountExceedCashierLimit(moneyFromTiyin(5_000n), subtotal, amountPolicy)).toBe(
+      false,
+    );
+    expect(doesDiscountExceedCashierLimit(moneyFromTiyin(5_001n), subtotal, amountPolicy)).toBe(
+      true,
+    );
+
+    const percentPolicy: CashierDiscountPolicy = {
+      percentUnlimited: false,
+      maxPercentBp: 1_000n, // 10.00%
+      amountUnlimited: true,
+      maxAmount: ZERO_MONEY,
+    };
+
+    // Exact 10.00% of 100,000 = 10,000 -> allowed; 10,001 -> exceeds
+    expect(doesDiscountExceedCashierLimit(moneyFromTiyin(10_000n), subtotal, percentPolicy)).toBe(
+      false,
+    );
+    expect(doesDiscountExceedCashierLimit(moneyFromTiyin(10_001n), subtotal, percentPolicy)).toBe(
+      true,
+    );
+
+    const bothPolicy: CashierDiscountPolicy = {
+      percentUnlimited: false,
+      maxPercentBp: 1_000n,
+      amountUnlimited: false,
+      maxAmount: moneyFromTiyin(5_000n),
+    };
+    expect(doesDiscountExceedCashierLimit(moneyFromTiyin(5_000n), subtotal, bothPolicy)).toBe(
+      false,
+    );
+    expect(doesDiscountExceedCashierLimit(moneyFromTiyin(5_001n), subtotal, bothPolicy)).toBe(true);
+  });
+
+  it('T1.3 test debt (3): isCartManualDiscountAuthorized rejects when either overrideApprovedByUserId or overrideApprovedAmount is null', () => {
+    const subtotal = moneyFromTiyin(100_000n);
+    const exceededDiscount = moneyFromTiyin(20_000n);
+    const strictPolicy: CashierDiscountPolicy = {
+      percentUnlimited: false,
+      maxPercentBp: 1_000n, // 10,000 allowed
+      amountUnlimited: false,
+      maxAmount: moneyFromTiyin(10_000n),
+    };
+
+    // Approver present, approved ceiling null -> must reject
+    expect(
+      isCartManualDiscountAuthorized({
+        effectiveOrderDiscount: exceededDiscount,
+        subtotalAfterPromo: subtotal,
+        policy: strictPolicy,
+        overrideApprovedByUserId: USER_MGR,
+        overrideApprovedAmount: null,
+      }),
+    ).toBe(false);
+
+    // Approved ceiling sufficient, approver ID null -> must reject
+    expect(
+      isCartManualDiscountAuthorized({
+        effectiveOrderDiscount: exceededDiscount,
+        subtotalAfterPromo: subtotal,
+        policy: strictPolicy,
+        overrideApprovedByUserId: null,
+        overrideApprovedAmount: moneyFromTiyin(25_000n),
+      }),
+    ).toBe(false);
+
+    // Both present and ceiling >= effective discount -> allowed
+    expect(
+      isCartManualDiscountAuthorized({
+        effectiveOrderDiscount: exceededDiscount,
+        subtotalAfterPromo: subtotal,
+        policy: strictPolicy,
+        overrideApprovedByUserId: USER_MGR,
+        overrideApprovedAmount: moneyFromTiyin(20_000n),
+      }),
+    ).toBe(true);
   });
 });

@@ -22,6 +22,19 @@ export const DEFAULT_LOG_REDACT_PATHS: readonly string[] = [
   '*.password',
   'secret',
   '*.secret',
+  'cost',
+  '*.cost',
+  '*.*.cost',
+  'costValue',
+  '*.costValue',
+  '*.*.costValue',
+  'costPrice',
+  '*.costPrice',
+  'profit',
+  '*.profit',
+  '*.*.profit',
+  'margin',
+  '*.margin',
 ];
 
 export interface CreateRotatingFileLogStreamOptions {
