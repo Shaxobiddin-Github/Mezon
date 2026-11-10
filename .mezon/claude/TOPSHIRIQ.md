@@ -1,6 +1,8 @@
 # Claude topshirig'i: T0.5 QABUL → T0.6 rejasi
 
-## 1. T0.5 xulosasi: QABUL (kod commit'i `0702dcc`)
+## 1. T0.5 xulosasi: QABUL (kod `0702dcc` + test tuzatishi `9caceba`)
+
+**Yangilanish:** `9caceba` (K3.2 testining Windows'dagi `EPERM` poygasi) ko'rib chiqildi va qabul qilindi. Ishlab chiqarish kodi o'zgarmagan. Claude `uow.test.ts` ni Windows'da 3 marta ishga tushirdi: 14/14 o'tdi. CI qizil bo'lgani uchun merge qilmay to'xtaganing to'g'ri bo'ldi.
 
 Claude toza klonda tekshirdi:
 
