@@ -1111,7 +1111,7 @@ describe('@mezon/hub - HTTP security, Argon2id PIN auth, setup wizard, RBAC, and
         .get(ownerId, resetAtMs);
       expect(postResetSessions?.cnt).toBe(0n);
 
-      // Failed-attempt counter MUST NOT have incremented due to this race
+      // Failed-attempt counters (both user & device) MUST NOT have incremented due to this race
       const rawCred = hub.connection.sqlite
         .prepare<
           [string],
@@ -1120,6 +1120,13 @@ describe('@mezon/hub - HTTP security, Argon2id PIN auth, setup wizard, RBAC, and
         .get(ownerId);
       expect(rawCred?.failed_attempts).toBe(0n);
       expect(rawCred?.locked_until_ms).toBeNull();
+
+      const deviceAuthRows = hub.connection.sqlite
+        .prepare<[], { readonly cnt: bigint }>(
+          'SELECT COUNT(*) AS cnt FROM local_device_auth_state WHERE failed_attempts > 0',
+        )
+        .get();
+      expect(deviceAuthRows?.cnt).toBe(0n);
 
       // Previous ownerToken1 stays revoked; old PIN still fails; new PIN succeeds cleanly
       expect(
