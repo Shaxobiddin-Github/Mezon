@@ -1,9 +1,23 @@
-## Hisobot: T0.6 — Hub skeleti va autentifikatsiya
+## Hisobot: T0.6 — Qayta ishlash (`R1` va `R2`)
 
 Branch / PR: `gemini/T0.6-hub-auth` / [PR #6](https://github.com/Shaxobiddin-Github/Mezon/pull/6)  
-Commit: `07afc281f2bbddd016d46b16e9f4c2a3083e117a`
+Commit: `9b7a75b6b4089986be0bbcd3b92ff6d2767f1fea` (`R1`–`R2` tuzatishlari; boshlang'ich T0.6: `07afc281f2bbddd016d46b16e9f4c2a3083e117a`)
 
-### Nima qilindi
+### Qayta ishlash (`R1` va `R2`)
+
+1. **R1 (YUQORI — PIN reset bilan login TOCTOU poygasi):**
+   - [`packages/db-local/src/auth-repo.ts`](packages/db-local/src/auth-repo.ts) ichidagi `commitLoginOutcome()` endi `verifiedPinHash: string | null` ni majburiy parametr sifatida qabul qiladi (`auth-service.ts` Phase 1 snapshotdagi `snap.pinHash` ni uzatadi).
+   - `BEGIN IMMEDIATE` tranzaksiyasi ichida bazadagi `cred.pinHash !== input.verifiedPinHash` bo'lsa (PIN tekshiruv paytida `POST /users/:id/pin` orqali almashtirilgan bo'lsa), sessiya ochilmaydi hamda `failed_attempts` (user va device) oshirilmasdan `{ kind: 'invalid_credentials' }` qaytadi -> mijoz **`401 AUTH_INVALID_CREDENTIALS`** oladi.
+   - Test ([`hub.test.ts`](apps/hub/src/hub.test.ts)): `rejects in-flight login when PIN is reset mid-verification (TOCTOU R1) without creating a session or incrementing failed_attempts` (300 ms kechikadigan maxsus `pinHasher`, 60 ms o'tgach `POST /users/:id/pin` = `200`, kechikkan login = `401`, resetdan keyingi `local_sessions` soni = `0n`, `failed_attempts` = `0n`, `locked_until_ms` = `null`).
+
+2. **R2 (O'RTA — paralel yuklamada 5000 ms timeout barqarorligi):**
+   - Og'ir tsikl, `fast-check` property va ko'p jarayonli testlarga aniq `30_000` ms timeout berildi (`hech bir assertion zaiflashtirilmadi`):
+     - `packages/domain/src/hlc.test.ts`: `survives 70,000 now() calls ...` (284-qator) va HLC `fast-check` property testi (651-qator) -> `30_000` ms.
+     - `packages/domain/src/uuidv7.test.ts`: UUIDv7 `fast-check` property testi (392-qator) -> `30_000` ms.
+     - `packages/db-local/src/uow.test.ts`: child-process crash recovery (`process.exit(42)`), `fast-check` property test va `K3.2` 2-process `BEGIN IMMEDIATE` testi -> `30_000` ms.
+     - `apps/hub/src/hub.test.ts`: haqiqiy `@node-rs/argon2` testi va `R1` sekin hasher testi -> `30_000` ms.
+
+### Nima qilindi (T0.6 umumiy)
 
 Rejadagi barcha talablar (`a`–`h`) va Claude belgilagan `T1`–`T6` tuzatishlar to'liq amalga oshirildi:
 
@@ -62,22 +76,23 @@ Rejadagi barcha talablar (`a`–`h`) va Claude belgilagan `T1`–`T6` tuzatishla
 
 ### Test natijasi (oxirgi tahrirdan keyin)
 
-**Lokal (`Windows`, commit `07afc28`):**
+**Lokal (`Windows`, commit `9b7a75b`, `pnpm verify` ketma-ket 3 marta):**
 
-- `pnpm verify`:
-  - `prettier --check .`, `turbo run build` (`17/17`), `eslint .` (`0` xato), `turbo run typecheck` (`22/22`), `turbo run db:check` (SQLite `0 diff`, PostgreSQL `0 diff`).
-  - `vitest run`: `Test Files 14 passed | 1 skipped (15)`, `Tests 98 passed | 2 skipped (100)` (`pg-rls.test.ts` Docker yo'qligi sabab skip; `domain` 48, `contracts` 3, `drivers` 4, `rules` 2, `test-utils` 6, `db-local` 24, `db-cloud` 6, `apps/hub` 5).
-  - `depcruise`: `no dependency violations found (138 modules, 344 dependencies cruised)`.
-- **Salbiy tekshiruvlar (vaqtinchalik, keyin qayta tiklangan):**
+1. **1-run:** `Test Files 14 passed | 1 skipped (15)`, `Tests 99 passed | 2 skipped (101)`, Vitest `10.50s` (`70,000 now()` `4447ms`, `TOCTOU R1` `1335ms`), `db:check` `0 diff`, `depcruise` `0` xato (`138 modules, 344 deps`).
+2. **2-run:** `Test Files 14 passed | 1 skipped (15)`, `Tests 99 passed | 2 skipped (101)`, Vitest `10.66s` (`70,000 now()` `4598ms`, `TOCTOU R1` `1335ms`), `0` xato.
+3. **3-run:** `Test Files 14 passed | 1 skipped (15)`, `Tests 99 passed | 2 skipped (101)`, Vitest `11.04s` (`70,000 now()` `4761ms`, `TOCTOU R1` `1327ms`), `0` xato.
+   *(Lokal Windows muhitida Docker bo'lmagani uchun `pg-rls.test.ts` skip qilingan.)*
+- **Salbiy tekshiruvlar (`07afc28` da tasdiqlangan, qayta tiklangan):**
   - `apps/hub/src/index.ts` -> `@mezon/db-cloud` => `depcruise` Exit code 1 (`hub-src-imports`).
   - `packages/contracts/src/index.ts` -> `@mezon/db-local` => `depcruise` Exit code 1 (`contracts-src-imports`).
   - `0002_hub_auth.sql` da `trg_users_no_delete` olib tashlansa => `db:check` Exit code 1.
 
-**GitHub Actions CI (commit `07afc28`, Run [#42802089620](https://github.com/Shaxobiddin-Github/Mezon/actions/runs/42802089620)):**
+**GitHub Actions CI (commit `9b7a75b`, PR Run [#42804480413](https://github.com/Shaxobiddin-Github/Mezon/actions/runs/42804480413) va push Run [#42804472884](https://github.com/Shaxobiddin-Github/Mezon/actions/runs/42804472884)):**
 
-- [`Verify (ubuntu-latest)`](https://github.com/Shaxobiddin-Github/Mezon/actions/runs/42802089620/job/129781915119) — **success** (`0 diff`, `Test Files 15 passed (15)`, `Tests 100 passed (100)`, `21.80s`, `depcruise` 0 violations / 138 modules / 344 deps).
-- [`Verify (windows-latest)`](https://github.com/Shaxobiddin-Github/Mezon/actions/runs/42802089620/job/129781915252) — **success** (`0 diff`, `Test Files 14 passed | 1 skipped (15)`, `Tests 98 passed | 2 skipped (100)` [Docker yo'q PG RLS skip], `22.13s`, `depcruise` 0 violations).
-- [`Verify PostgreSQL RLS (ubuntu-latest)`](https://github.com/Shaxobiddin-Github/Mezon/actions/runs/42802089620/job/129781914722) — **success** (`Test Files 2 passed (2)`, `Tests 8 passed (8)`, `13.26s`).
+- [`Verify (ubuntu-latest)`](https://github.com/Shaxobiddin-Github/Mezon/actions/runs/42804480413/job/129790023611) — **success** (`0 diff`, `Test Files 14 passed | 1 skipped (15)`, `Tests 99 passed | 2 skipped (101)` [`pg-rls`], `13.71s`, `depcruise` 0 violations / 138 modules / 344 deps).
+- [`Verify (windows-latest)`](https://github.com/Shaxobiddin-Github/Mezon/actions/runs/42804480413/job/129790023547) — **success** (`0 diff`, `Test Files 14 passed | 1 skipped (15)`, `Tests 99 passed | 2 skipped (101)`, `24.66s`, `depcruise` 0 violations).
+- [`Verify PostgreSQL RLS (ubuntu-latest)`](https://github.com/Shaxobiddin-Github/Mezon/actions/runs/42804480413/job/129790023313) — **success** (`Test Files 2 passed (2)`, `Tests 8 passed (8)`, `14.00s`).
+- (`push` Run [#42804472884](https://github.com/Shaxobiddin-Github/Mezon/actions/runs/42804472884) ham uchala job'da **success**.)
 
 ### Tekshirilmagan narsalar
 
@@ -93,4 +108,4 @@ Rejadagi barcha talablar (`a`–`h`) va Claude belgilagan `T1`–`T6` tuzatishla
 
 ### Egasi yoki Claude qarori kerak bo'lgan savollar
 
-- Savol yo'q; PR #6 (`07afc28`) Claude tekshiruvi uchun tayyor.
+- Savol yo'q; PR #6 (`9b7a75b`) Claude tekshiruvi uchun tayyor.
