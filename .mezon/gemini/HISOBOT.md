@@ -1,9 +1,18 @@
-## Hisobot: T0.5
+## Hisobot: T0.5 (Windows CI `EPERM` test tuzatishi — qayta tekshiruv so'rovi)
 
 Branch / PR: `gemini/T0.5-uow-outbox` / [PR #5](https://github.com/Shaxobiddin-Github/Mezon/pull/5)  
-Commit: `0702dcc600544d4de20a41fbf244b5c29361d8f0` (qayta ishlash K1–K3; boshlang'ich T0.5 commit: `d9e43c03188ea965639012ef707d01e63817ec84`)
+Commit: `9cacebac4fd6eba69c51d2a7185b63d87a574d43` (faqat test tuzatishi; K1–K3 kod commit'i: `0702dcc`, Claude `QABUL` commit'i: `e3c5854`, boshlang'ich T0.5: `d9e43c0`)
 
-### Nima qilindi
+### Nima uchun merge qilinmasdan qayta tekshiruv so'ralmoqda (`GEMINI.md` 3.6)
+
+- Claude'ning `QABUL` commit'i (`e3c5854`) uchun CI [`Verify (windows-latest)`](https://github.com/Shaxobiddin-Github/Mezon/actions/runs/42796990210/job/129764580032) job'i `K3.2` testidan keyin `afterEach` (`fs.rmSync`) da `EPERM: Permission denied` bilan yiqildi (`uow.test.ts` bola OS jarayoni `conn.close()` va chiqishni tugatmasdan `process.send` bilan testni yakunlagan edi).
+- `GEMINI.md` 3.6 ("PR'ning oxirgi commit'i uchun Claude `QABUL` bergan va CI Ubuntu hamda Windows'da yashil") ga ko'ra qizil CI bilan ham merge qilib bo'lmasdi, yangi commitdan keyin esa Claude qayta tasdig'i shart.
+- **`9caceba` da ishlab chiqarish kodi umuman o'zgarmagan (`0702dcc` bilan bir xil)**; faqat `packages/db-local/src/uow.test.ts` (+19/-4) tuzatildi:
+  - `conn2-worker.mjs` ichida `conn.close()` IPC javobidan oldin bajariladi va `process.send(reply, () => process.exit(0))` orqali yopiladi;
+  - `K3.2` testida ham, `finally`da ham `child` `'close'` hodisasi (`closedPromise`) kutiladi;
+  - `afterEach` `fs.rmSync(..., { maxRetries: 5, retryDelay: 50 })` qo'shildi.
+
+### Nima qilindi (K1–K3 umumiy)
 
 Claude'ning `.mezon/claude/TOPSHIRIQ.md` (`d9e43c0` bo'yicha `QAYTA ISHLASH`) barcha topilmalari tuzatildi va testlar bilan isbotlandi:
 
@@ -24,12 +33,12 @@ Claude'ning `.mezon/claude/TOPSHIRIQ.md` (`d9e43c0` bo'yicha `QAYTA ISHLASH`) ba
    - **K3.5:** Tashkilot (`organization`) darajasidagi `attrItems` jadvaliga `storeId` berilganda `insertAttr` darhol rad etishi (`must not receive a storeId`) va do'kon (`store`) darajasidagi `factSales` jadvalida `storeId`siz `insertFact` rad etilishi testlandi.
    - **K3.6:** `assertActiveTransaction()` ichidagi `!sqlite.open || !sqlite.inTransaction` tekshiruvi **yetib bo'ladigan** (`reachable`) tarmoqdir: callback ichida xom SQL `ROLLBACK` (yoki `OR ROLLBACK`) bajarilsa, `session.closed === false` va `AsyncLocalStorage` konteksti faol turgan holda SQLite tranzaksiyasi yopilgan bo'ladi va keyingi operatsiya `UNIT_OF_WORK_REQUIRED` otadi, mutex esa `finally` orqali toza bo'shatiladi. Test bilan isbotlandi (shuningdek `sqlite.close()` ham avvalgi crash testida bor).
 
-### O'zgargan fayllar (`0702dcc` — K1–K3 qayta ishlash)
+### O'zgargan fayllar (`0702dcc` + `9caceba`)
 
-- `packages/domain/src/errors.ts` — `'UNIT_OF_WORK_CONCURRENT_NESTED' | 'UNIT_OF_WORK_TENANT_MISMATCH'` kodlari qo'shildi.
-- `packages/db-local/src/uow.ts` — `SqliteUnitOfWork` `activeSessionStack` va `assertActiveTransaction()` da eng ustki faol sessiya tekshiruvi.
-- `packages/db-local/src/writers.ts` — `prepareSyncedWriteContext()` da `session.organizationId` tenglik tekshiruvi (`UNIT_OF_WORK_TENANT_MISMATCH`).
-- `packages/db-local/src/uow.test.ts` — K1 (`a`/`b`/`c`), K2 (barcha 4 writer), K3.1, K3.2 (2 OS ulanish), K3.3, K3.4, K3.5 va K3.6 testlari qo'shildi.
+- `packages/domain/src/errors.ts` (`0702dcc`) — `'UNIT_OF_WORK_CONCURRENT_NESTED' | 'UNIT_OF_WORK_TENANT_MISMATCH'` kodlari qo'shildi.
+- `packages/db-local/src/uow.ts` (`0702dcc`) — `SqliteUnitOfWork` `activeSessionStack` va `assertActiveTransaction()` da eng ustki faol sessiya tekshiruvi.
+- `packages/db-local/src/writers.ts` (`0702dcc`) — `prepareSyncedWriteContext()` da `session.organizationId` tenglik tekshiruvi (`UNIT_OF_WORK_TENANT_MISMATCH`).
+- `packages/db-local/src/uow.test.ts` (`0702dcc`, `9caceba`) — K1 (`a`/`b`/`c`), K2 (barcha 4 writer), K3.1, K3.2 (2 OS ulanish + Windows `child` `'close'` kutish), K3.3, K3.4, K3.5 va K3.6 testlari qo'shildi.
 
 (Boshlang'ich T0.5 (`d9e43c0`) da yaratilgan/yangilangan fayllar ham PR #5 tarkibida saqlanadi: `packages/domain/src/uow.ts`, `packages/domain/src/index.ts`, `packages/db-local/src/schema/index.ts`, `packages/db-local/src/device-state.ts`, `packages/db-local/src/outbox.ts`, `packages/db-local/src/triggers.ts`, `packages/db-local/src/registry.ts`, `packages/db-local/src/index.ts`, `packages/db-local/src/index.test.ts`, `packages/db-local/scripts/check-migrations.mjs`, `packages/db-local/drizzle/0001_uow_outbox_device_state.sql`, `packages/db-local/drizzle/meta/0001_snapshot.json`, `packages/db-local/drizzle/meta/_journal.json`, `packages/db-local/package.json`, `.dependency-cruiser.cjs`, `pnpm-lock.yaml`.)
 
@@ -50,25 +59,22 @@ Claude'ning `.mezon/claude/TOPSHIRIQ.md` (`d9e43c0` bo'yicha `QAYTA ISHLASH`) ba
 
 ### Test natijasi (oxirgi tahrirdan keyin)
 
-**Lokal (`Windows`):**
+**Lokal (`Windows`, commit `9caceba`):**
 
-1. `pnpm exec prettier --check .` -> `All matched files use Prettier code style!` (Exit code 0)
-2. `pnpm verify`:
-   - `turbo run build`: `17 successful, 17 total`
-   - `eslint .`: 0 xato
-   - `turbo run typecheck`: `19 successful, 19 total`
-   - `turbo run db:check`: SQLite (`0 diff statements`), PostgreSQL (`0 diff statements`)
+1. `pnpm verify`:
+   - `prettier --check .`, `turbo run build` (`17 successful, 17 total`), `eslint .` (0 xato), `turbo run typecheck` (`19 successful, 19 total`), `turbo run db:check` (SQLite `0 diff`, PostgreSQL `0 diff`), `depcruise` (0 xato, 99 modul / 216 bog'liqlik).
    - `vitest run`: `Test Files 10 passed | 1 skipped (11)`, `Tests 82 passed | 2 skipped (84)` (`pg-rls.test.ts` Docker yo'qligi sabab skip; `packages/db-local/src/uow.test.ts` `14 passed (14)`).
-   - `depcruise`: `no dependency violations found (99 modules, 216 dependencies cruised)`
-3. **Mutatsiya / salbiy tekshiruvlar (vaqtinchalik, keyin qayta tiklangan):**
+2. `K3.2` stress-tekshiruvi (`Windows` da 5 marta ketma-ket `vitest run packages/db-local/src/uow.test.ts -t "K3.2"`): 5/5 passed (1137ms, 1155ms, 1164ms, 1145ms, 1299ms), `EPERM` 0 ta.
+3. **Mutatsiya / salbiy tekshiruvlar (`0702dcc` kodida, vaqtinchalik, keyin qayta tiklangan):**
    - `packages/db-local/src/uow.ts` da `BEGIN IMMEDIATE` -> `BEGIN` qilinganda `vitest run packages/db-local/src/uow.test.ts -t "K3.2"` -> Exit code 1 (`SqliteError: database is locked` `insertSyncedRecord` ichida).
    - `FACT` trigger yetishmasligi, `ATTR` da `RAISE(IGNORE)` va shartsiz `BEFORE UPDATE RAISE(ABORT)` -> `pnpm run db:check` Exit code 1; `db-local -> node:http` -> `depcruise` Exit code 1.
 
-**GitHub Actions CI (commit `0702dcc`, Run [#42795409253](https://github.com/Shaxobiddin-Github/Mezon/actions/runs/42795409253)):**
+**GitHub Actions CI (commit `9caceba`, PR Run [#42797713887](https://github.com/Shaxobiddin-Github/Mezon/actions/runs/42797713887) va push Run [#42797704345](https://github.com/Shaxobiddin-Github/Mezon/actions/runs/42797704345)):**
 
-- [`Verify (ubuntu-latest)`](https://github.com/Shaxobiddin-Github/Mezon/actions/runs/42795409253/job/129759219411) — **success** (`0 diff`, `Test Files 11 passed (11)`, `Tests 84 passed (84)`, `uow.test.ts` 14 tests / 3059ms, `depcruise` 0 violations / 99 modules / 216 deps).
-- [`Verify (windows-latest)`](https://github.com/Shaxobiddin-Github/Mezon/actions/runs/42795409253/job/129759219321) — **success** (`0 diff`, `Test Files 10 passed | 1 skipped (11)`, `Tests 82 passed | 2 skipped (84)` [Docker yo'q PG RLS skip], `uow.test.ts` 14 tests / 5252ms, `depcruise` 0 violations).
-- [`Verify PostgreSQL RLS (ubuntu-latest)`](https://github.com/Shaxobiddin-Github/Mezon/actions/runs/42795409253/job/129759218670) — **success** (`Test Files 2 passed (2)`, `Tests 8 passed (8)`, `pg-rls.test.ts` 2 passed / 13769ms).
+- [`Verify (ubuntu-latest)`](https://github.com/Shaxobiddin-Github/Mezon/actions/runs/42797713887/job/129767032018) — **success** (`0 diff`, `Test Files 11 passed (11)`, `Tests 84 passed (84)`, `depcruise` 0 violations / 99 modules / 216 deps).
+- [`Verify (windows-latest)`](https://github.com/Shaxobiddin-Github/Mezon/actions/runs/42797713887/job/129767032217) — **success** (`0 diff`, `Test Files 10 passed | 1 skipped (11)`, `Tests 82 passed | 2 skipped (84)` [Docker yo'q PG RLS skip], `depcruise` 0 violations).
+- [`Verify PostgreSQL RLS (ubuntu-latest)`](https://github.com/Shaxobiddin-Github/Mezon/actions/runs/42797713887/job/129767031614) — **success** (`Test Files 2 passed (2)`, `Tests 8 passed (8)`).
+- (`push` Run [#42797704345](https://github.com/Shaxobiddin-Github/Mezon/actions/runs/42797704345) ham uchala job'da **success**.)
 
 ### Tekshirilmagan narsalar
 
@@ -84,4 +90,4 @@ Claude'ning `.mezon/claude/TOPSHIRIQ.md` (`d9e43c0` bo'yicha `QAYTA ISHLASH`) ba
 
 ### Egasi yoki Claude qarori kerak bo'lgan savollar
 
-- Savol yo'q; PR #5 (`0702dcc`) Claude tekshiruvi uchun tayyor.
+- PR #5 boshi `9caceba` (faqat `uow.test.ts` dagi Windows `EPERM` poygasi tuzatishi) uchun Claude'ning qayta `QABUL` tasdig'i kerak (`GEMINI.md` 3.6); shundan so'ng darhol Squash and merge qilib `gemini/T0.6-hub-auth` da T0.6 rejasini yozamiz.
