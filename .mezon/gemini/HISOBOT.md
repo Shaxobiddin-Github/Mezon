@@ -1,111 +1,131 @@
-## Hisobot: T0.6 — Qayta ishlash (`R1` va `R2`)
+## T0.6 Merge xulosasi
 
-Branch / PR: `gemini/T0.6-hub-auth` / [PR #6](https://github.com/Shaxobiddin-Github/Mezon/pull/6)  
-Commit: `9b7a75b6b4089986be0bbcd3b92ff6d2767f1fea` (`R1`–`R2` tuzatishlari; boshlang'ich T0.6: `07afc281f2bbddd016d46b16e9f4c2a3083e117a`)
+- **PR #6** (`gemini/T0.6-hub-auth`, bosh SHA `2430c48b4a56e6282093cbe57cdd687e688af871`, barcha 6 CI check run `success` — Run [#42806545966](https://github.com/Shaxobiddin-Github/Mezon/actions/runs/42806545966) va [#42806539992](https://github.com/Shaxobiddin-Github/Mezon/actions/runs/42806539992)) `T0.6: Hub skeleti va autentifikatsiya` nomi bilan Squash and merge qilindi.
+- **Merge commit SHA (`main`):** `759f3ee073da8a75fbd32808c67243b50a802b4b`
+- **`gemini/T0.6-hub-auth` branch:** masofadan va lokaldan o'chirildi.
+- **Yangi branch (`main` @ `759f3ee` dan):** `gemini/T0.7-electron-shell`
 
-### Qayta ishlash (`R1` va `R2`)
+---
 
-1. **R1 (YUQORI — PIN reset bilan login TOCTOU poygasi):**
-   - [`packages/db-local/src/auth-repo.ts`](packages/db-local/src/auth-repo.ts) ichidagi `commitLoginOutcome()` endi `verifiedPinHash: string | null` ni majburiy parametr sifatida qabul qiladi (`auth-service.ts` Phase 1 snapshotdagi `snap.pinHash` ni uzatadi).
-   - `BEGIN IMMEDIATE` tranzaksiyasi ichida bazadagi `cred.pinHash !== input.verifiedPinHash` bo'lsa (PIN tekshiruv paytida `POST /users/:id/pin` orqali almashtirilgan bo'lsa), sessiya ochilmaydi hamda `failed_attempts` (user va device) oshirilmasdan `{ kind: 'invalid_credentials' }` qaytadi -> mijoz **`401 AUTH_INVALID_CREDENTIALS`** oladi.
-   - Test ([`hub.test.ts`](apps/hub/src/hub.test.ts)): `rejects in-flight login when PIN is reset mid-verification (TOCTOU R1) without creating a session or incrementing failed_attempts` (300 ms kechikadigan maxsus `pinHasher`, 60 ms o'tgach `POST /users/:id/pin` = `200`, kechikkan login = `401`, resetdan keyingi `local_sessions` soni = `0n`, `failed_attempts` = `0n`, `locked_until_ms` = `null`).
+## Reja: T0.7 — Electron qobig'i (hamda T0.6 test qarzi)
 
-2. **R2 (O'RTA — paralel yuklamada 5000 ms timeout barqarorligi):**
-   - Og'ir tsikl, `fast-check` property va ko'p jarayonli testlarga aniq `30_000` ms timeout berildi (`hech bir assertion zaiflashtirilmadi`):
-     - `packages/domain/src/hlc.test.ts`: `survives 70,000 now() calls ...` (284-qator) va HLC `fast-check` property testi (651-qator) -> `30_000` ms.
-     - `packages/domain/src/uuidv7.test.ts`: UUIDv7 `fast-check` property testi (392-qator) -> `30_000` ms.
-     - `packages/db-local/src/uow.test.ts`: child-process crash recovery (`process.exit(42)`), `fast-check` property test va `K3.2` 2-process `BEGIN IMMEDIATE` testi -> `30_000` ms.
-     - `apps/hub/src/hub.test.ts`: haqiqiy `@node-rs/argon2` testi va `R1` sekin hasher testi -> `30_000` ms.
+> **Eslatma:** Bu bosqichda faqat reja berilmoqda; Claude tasdig'isiz kod yozilmaydi.
 
-### Nima qilindi (T0.6 umumiy)
+### 0. T0.6 test qarzi (PR #7 ichida birinchi alohida commit)
 
-Rejadagi barcha talablar (`a`–`h`) va Claude belgilagan `T1`–`T6` tuzatishlar to'liq amalga oshirildi:
+- **Commit:** `T0.6 test qarzi: R1 failed_attempts tekshiruvi`
+- **Muammo:** `auth-repo.ts` dagi TOCTOU himoyasi o'chirilganda `failed_attempts = 0n` assertion'i ham uni ushlay olishi shart (mutatsiya bilan tasdiqlangan holatda: erta `if` guard olib tashlansa `R1` testi haqiqatan yiqilishi kerak). T0.7 kodidan oldin alohida commitda test tuzatiladi va `auth-repo.ts` mutatsiyasi orqali test haqiqatan `failed_attempts` o'sishini ham, sessiya ochilishini ham ushlashi isbotlanadi.
 
-1. **Domen qoidalari va RBAC (`packages/domain`):**
-   - [`packages/domain/src/auth.ts`](packages/domain/src/auth.ts): `USER_ROLES` (`owner`, `manager`, `cashier`), `ROLE_PERMISSION_TABLE` va `roleHasPermission()` (`auth:self`, `users:read`, `users:write`, `users:unlock`), `PinHasher` porti, `PIN_SECURITY_CONSTANTS`, `validatePinFormat()` (6–12 raqam, takroriy `000000`/`111111` va ketma-ket `123456`/`654321` PINlarni rad etadi, xatoda PINni oshkor qilmaydi), `normalizeUsername()`, `validateFullName()`, `computeDeviceCooldownDelayMs()` (`15`-xatodan boshlab 2s, 4s, 8s, 16s, 32s, 60s max), `computeRetryAfterSeconds()`.
-   - [`packages/domain/src/errors.ts`](packages/domain/src/errors.ts): T0.6 kodlari (`VALIDATION_ERROR`, `INVALID_PIN`, `AUTH_UNAUTHORIZED`, `AUTH_INVALID_CREDENTIALS`, `AUTH_FORBIDDEN`, `AUTH_RATE_LIMITED`, `SETUP_ALREADY_COMPLETED`, `USER_NOT_FOUND`, `USERNAME_ALREADY_EXISTS`, `LAST_OWNER_PROTECTED`, `INVALID_HOST`, `FORBIDDEN_ORIGIN`) hamda ixtiyoriy `retryAfterSeconds`.
+---
 
-2. **Zod kontraktlar (`packages/contracts`):**
-   - `zod@4.6.7` qo'shildi.
-   - [`packages/contracts/src/auth.ts`](packages/contracts/src/auth.ts): `ApiErrorEnvelopeSchema` (`{ error: { code, message } }`), `SetupRequestSchema`/`SetupResponseSchema`, `LoginOptionsResponseSchema`, `LoginRequestSchema` (`username` yoki `userId` + PIN), `LoginResponseSchema`, `LogoutResponseSchema`, `AuthMeResponseSchema`, `CreateUserRequestSchema`, `UpdateUserRequestSchema`, `ResetUserPinRequestSchema`, `UnlockUserResponseSchema`, `DeleteUserResponseSchema`, `UserSummarySchema` (`pinHash`, lockout va `tokenHash`siz).
+### 1. Versiyalar va doira (`GEMINI.md` 2.1 va `g` bandi)
 
-3. **SQLite sxema, migratsiya va auth store (`packages/db-local`):**
-   - [`packages/db-local/src/schema/index.ts`](packages/db-local/src/schema/index.ts):
-     - `users` (`ATTR`, `tenantScope: 'organization'`) — T5 bo'yicha partial unique index `uidx_users_org_username` (`WHERE "users"."deleted_at_ms" IS NULL`).
-     - `local_hub_config` (`LOCAL`, `singleton_guard = 1` + `UNIQUE`).
-     - `local_pin_credentials` (`LOCAL` — Argon2id hash va 5-xatoli user blok holati, bulut/outboxga chiqmaydi).
-     - `local_device_auth_state` (`LOCAL` — T1 bo'yicha 5-daqiqalik oyna + 15-xatodan keyingi 2..60s progressiv kechikish).
-     - `local_sessions` (`LOCAL` — 64-belgi SHA-256 `token_hash`, `expires_at_ms`, `revoked_at_ms`, `last_seen_at_ms`).
-   - [`packages/db-local/src/uow.ts`](packages/db-local/src/uow.ts): ulanish darajasidagi umumiy FIFO mutex (`connectionMutexes` WeakMap), `runConnectionReadOnly()`, `bootstrapSqliteHubUnitOfWork()`.
-   - [`packages/db-local/src/auth-repo.ts`](packages/db-local/src/auth-repo.ts): barcha yozuvlar `uow.execute` / `bootstrapSqliteHubUnitOfWork` orqali, barcha o'qishlar `uow.runReadOnly` / `runConnectionReadOnly` orqali (`T4`); `local_sessions.last_seen_at_ms` daqiqada eng ko'pi 1 marta (`>= 60_000n` ms) yangilanadi (`T4`); `users` `ATTR` `insertAttr`/`updateAttr`/`tombstoneAttr` orqali outboxga atomik yoziladi; oxirgi aktiv `owner` himoyasi (`LAST_OWNER_PROTECTED`).
+- **Paket versiyalari (npm'da tasdiqlangan, `pnpm-lock.yaml` bilan mahkamlanadi):**
+  - `electron`: `45.2.3` (`GEMINI.md`: Electron 45)
+  - `electron-builder`: `26.18.0` (`GEMINI.md`: electron-builder 26)
+  - `@electron/fuses`: `2.1.3`
+  - `@electron/rebuild`: `4.2.1`
+  - `playwright` & `@playwright/test`: `1.65.0` (`GEMINI.md`: Playwright 1.65)
+  - `react` & `react-dom`: `19.3.1` (`@types/react`: `19.3.0`, `@types/react-dom`: `19.3.0`; `GEMINI.md`: React 19)
+  - `vite`: `8.3.7`, `@vitejs/plugin-react`: `6.3.0` (`GEMINI.md`: Vite 8)
+  - `koffi`: `3.3.7` (Electron 45 ABI/yuklash tekshiruvi uchun; printer drayveri o'zi `T1.12`da)
+- **GEMINI.md 2.1 "Muhim tekshiruvlar":** Electron 45 ichidagi Node major/ABI versiyasi hamda `better-sqlite3`, `@node-rs/argon2` va `koffi` Electron 45 bilan yig'ilishi/yuklanishi amalga oshirishda o'lchanib hisobotga yoziladi.
+- **Doiradan tashqari (`g`):**
+  - **Code signing:** Egasi qarori (keyinroq); hozir imzosiz yig'iladi va qo'lda o'rnatishda Windows SmartScreen ogohlantirishi kutiladi.
+  - **Avtomatik yangilanish (`electron-updater`):** `T4.8` da.
+  - **Kassa UI:** `T1.11` da.
 
-4. **Hub HTTP server va himoya (`apps/hub`):**
-   - Fastify `5.12.8`, Pino `10.4.0`, `@node-rs/argon2` `2.2.2`, Zod `4.6.7`.
-   - [`apps/hub/src/config.ts`](apps/hub/src/config.ts) & [`apps/hub/src/security.ts`](apps/hub/src/security.ts): faqat `127.0.0.1`; `Host` (`127.0.0.1:<port>`/`localhost:<port>` bo'lmasa `421 INVALID_HOST`); `Origin` allowlist & `Sec-Fetch-Site: cross-site` (`403 FORBIDDEN_ORIGIN`); `OPTIONS` preflight va `Access-Control-*` sarlavhalari qat'iy yopiq; cookie ishlatilmaydi, faqat `Authorization: Bearer`.
-   - [`apps/hub/src/argon2-pin-hasher.ts`](apps/hub/src/argon2-pin-hasher.ts): OWASP minimal profili `Argon2id`, `m=19456` KiB (19 MiB), `t=2`, `p=1`, `outputLen=32`; mavjud bo'lmagan/nofaol foydalanuvchi uchun ham doimiy `dummyPinHash` orqali Argon2id tekshiruvi.
-   - [`apps/hub/src/auth-service.ts`](apps/hub/src/auth-service.ts): `login()` 4 fazali (read snapshot -> tranzaksiya tashqarisida async Argon2id -> `uow.execute` ichida muvaffaqiyatsiz urinish yoki sessiyani commit qilish -> commitdan keyin HTTP xatosi otish, `T2`).
-   - [`apps/hub/src/logger.ts`](apps/hub/src/logger.ts) & [`apps/hub/src/error-handler.ts`](apps/hub/src/error-handler.ts): Pino `redact` (`authorization`, `cookie`, `pin`, `pinHash`, `token`, `tokenHash`, `password`, `secret`), `{ error: { code, message } }` konverti va stack trace'ni yashirish.
-   - [`apps/hub/src/routes.ts`](apps/hub/src/routes.ts): `GET /health`, `POST /setup`, `GET /auth/login-options` (`T6`), `POST /auth/login` (`username` yoki `userId`), `POST /auth/logout`, `GET /auth/me`, `GET /users`, `POST /users`, `PATCH /users/:id`, `POST /users/:id/pin`, `POST /users/:id/unlock` (`T3`), `DELETE /users/:id`.
+---
 
-5. **Import chegaralari va TypeScript/ESLint:**
-   - [`.dependency-cruiser.cjs`](.dependency-cruiser.cjs): `contracts-src-imports` va `hub-src-imports` (`apps/hub` `db-cloud`ni import qila olmaydi).
-   - [`eslint.config.mjs`](eslint.config.mjs): `./apps/*/tsconfig.test.json` qo'shildi.
+### 2. Rejalashtirilgan arxitektura va fayllar (`a`–`e`)
 
-### O'zgargan fayllar (`07afc28`)
+#### a) Jarayonlar arxitekturasi (`utilityProcess` vs `main`)
 
-- `.dependency-cruiser.cjs`, `eslint.config.mjs`, `pnpm-lock.yaml` — depcruise chegaralari, ESLint test tsconfigni ulash va exact paket versiyalarini mahkamlash.
-- `packages/domain/src/{errors.ts,auth.ts,index.ts,auth.test.ts}` — RBAC, PIN qoidalari, progressiv backoff, auth `DomainError` kodlari.
-- `packages/contracts/{package.json,tsconfig.json,tsconfig.test.json,src/{auth.ts,index.ts,auth.test.ts}}` — Zod 4.6.7 kontraktlar va testlar.
-- `packages/db-local/{src/{schema/index.ts,uow.ts,auth-repo.ts,index.ts,index.test.ts,uow.test.ts,auth.test.ts},drizzle/{0002_hub_auth.sql,meta/{_journal.json,0002_snapshot.json}}}` — T0.6 jadvallari, migratsiya + `users` `BEFORE DELETE` triggeri, connection FIFO mutex, `SqliteHubAuthStore` va testlar (`uow.test.ts` property test timeout `30_000` ms).
-- `apps/hub/{package.json,tsconfig.json,tsconfig.test.json,src/{config.ts,logger.ts,argon2-pin-hasher.ts,security.ts,error-handler.ts,auth-service.ts,routes.ts,server.ts,index.ts,hub.test.ts}}` — Hub HTTP server va to'liq integratsiya testlari.
+- **Tanlov:** Hub alohida **`Electron.utilityProcess`** (`apps/desktop/src/hub-worker.ts`) ichida ishlaydi (`main` jarayoni ichida emas).
+- **Asos:**
+  1. Hub (Fastify, SQLite, Argon2id) ichida kutilmagan xato yoki crash bo'lsa **UI va `main` jarayoni qulamaydi**; `main` `exit` hodisasini tutib fayl logga yozadi va cheklangan backoff (`500 ms -> 1 s -> 2 s -> max 5 s`) bilan Hub'ni avtomatik qayta ko'taradi.
+  2. SQLite WAL/Argon2id CPU ishi Electron `main` GUI/IPC siklini to'smaydi (4 GB RAM monoblokda silliq UI).
+- **Port va `hubBaseUrl`:**
+  - Hub `utilityProcess` ichida `{ host: '127.0.0.1', port: 0, allowedOrigins: ['app://mezon'] }` bilan tinglaydi (OS bo'sh tasodifiy port beradi).
+  - Hub tayyor bo'lgach parent port orqali `main`ga `{ type: 'ready', baseUrl: 'http://127.0.0.1:<port>' }` uzatadi.
+  - Renderer `hubBaseUrl` ni faqat preload'dagi tor IPC (`mezonBridge.getHubBaseUrl()`) orqali oladi va Hub `/health` ga `fetch` yuboradi.
+  - `before-quit` da `main` Hub worker'ga `shutdown` yuborib DB toza yopilishini kutadi (va timeoutdan keyin `.kill()`).
 
-### Migratsiyalar
+#### b) Electron xavfsizligi (`app://mezon`, Fuses, CSP, Preload)
 
-- `packages/db-local/drizzle/0002_hub_auth.sql`: `local_device_auth_state`, `local_hub_config`, `local_pin_credentials`, `local_sessions`, `users` (`ATTR`) hamda `uidx_users_org_username` (`WHERE "users"."deleted_at_ms" IS NULL`) va `trg_users_no_delete` (`BEFORE DELETE RAISE(ABORT)`).
+- **`app://mezon` maxsus protokoli (`file://` va `null` taqiq):**
+  - `app.whenReady()` dan oldin `protocol.registerSchemesAsPrivileged([{ scheme: 'app', privileges: { standard: true, secure: true, supportFetchAPI: true, corsEnabled: true, bypassCSP: false } }])`.
+  - `protocol.handle('app', ...)`: faqat `host === 'mezon'` qabul qilinadi, path traversal (`..`) rad etiladi va **faqat `app.asar` ichidagi** `@mezon/pos` UI dist fayllari beriladi.
+  - Hub `allowedOrigins: ['app://mezon']` qilib sozlanadi.
+- **`BrowserWindow` `webPreferences`:** `contextIsolation: true`, `sandbox: true`, `nodeIntegration: false`, `nodeIntegrationInWorker: false`, `nodeIntegrationInSubFrames: false`, `webSecurity: true`, `allowRunningInsecureContent: false`, `webviewTag: false`.
+- **Preload (`apps/desktop/src/preload.ts`):** `contextBridge.exposeInMainWorld('mezonBridge', { getHubBaseUrl, getHubRestartCount })` — umumiy `ipcRenderer`, Node API va `fs` umuman ochilmaydi.
+- **Qat'iy CSP (`session.defaultSession.webRequest.onHeadersReceived`):**
+  `default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self' data:; font-src 'self'; connect-src app://mezon http://127.0.0.1:<port>; object-src 'none'; base-uri 'none'; frame-ancestors 'none'; form-action 'none'` (faqat aniq hub portiga ruxsat, wildcard yo'q).
+- **Navigatsiya va popup blokirovkasi:** `will-navigate` (`app://mezon/` dan tashqari hammasini `preventDefault()`), `setWindowOpenHandler(() => ({ action: 'deny' }))`.
+- **Electron Fuses (`@electron/fuses@2.1.3`, `electron-builder` `afterPack` hook orqali):**
+  - `RunAsNode: false`
+  - `EnableCookieEncryption: true`
+  - `EnableNodeOptionsEnvironmentVariable: false`
+  - `EnableNodeCliInspectArguments: false`
+  - `EnableEmbeddedAsarIntegrityValidation: true`
+  - `OnlyLoadAppFromAsar: true`
+  - Testda yig'ilgan binary'dan `getCurrentFuseWire` o'qilib ham, `ELECTRON_RUN_AS_NODE=1` sinovi bilan ham tekshiriladi.
 
-### Qabul mezonlari
+#### c) Ma'lumot `%LOCALAPPDATA%\Mezon\`, NSIS, Bir nusxa rejimi va Fayl loglari
 
-- [x] **a) Mahalliy himoya** — `hub.test.ts`: `0.0.0.0` rad etilishi, real `127.0.0.1:0` tinglash, 7 ta soxta/noto'g'ri `Host` -> `421`, noto'g'ri `Origin`/`null`/`Sec-Fetch-Site: cross-site` -> `403`, `OPTIONS` preflight -> `403` (`Access-Control-*`siz), `Cookie` ignor qilinishi va `Set-Cookie` yo'qligi.
-- [x] **b) PIN, Argon2id, brute force va log redaction** — `hub.test.ts`: haqiqiy `@node-rs/argon2` (`$argon2id$v=19$m=19456,t=2,p=1$...`), mavjud bo'lmagan foydalanuvchi uchun `verify(dummyHash, pin)` chaqirilishi va bir xil 401 javobi, 5 xatodan keyin baza + restartdan keyin ham `429` blok, T1 bo'yicha 15+ xatodan keyin `2, 4, 8, 16, 32, 60, 60` s `Retry-After` va kutishdan keyin egasi kira olishi, Pino stream loglarida PIN/hash/token/tokenHash `0` ta va `[Redacted]` borligi.
-- [x] **c) Ma'lumot & T4 & T5** — `auth.test.ts` va `hub.test.ts`: `users` outboxda `ATTR` (`deleted_at_ms IS NULL` partial unique bilan tombstone nomni qayta ishlatish `T5`), `local_pin_credentials`/`local_sessions` outboxga yozilmasligi, `last_seen_at_ms` < 60s da yozilmay `>= 60s` da yangilanishi (`T4`), logout/expiry/`isActive=false`/PIN reset sessiyani darhol yopishi.
-- [x] **d) Sehrgar (`POST /setup`)** — `hub.test.ts` va `auth.test.ts`: parallel `Promise.all` da aniq 1 ta `201` va 1 ta `409 SETUP_ALREADY_COMPLETED`, kuchsiz PIN va `admin/admin` rad etilishi.
-- [x] **e) & T3 Rollar** — `hub.test.ts`: (`unauthenticated`, `cashier`, `manager`, `owner`) × (`/auth/me`, `/auth/logout`, `GET /users`, `POST /users`, `PATCH /users/:id`, `POST /users/:id/unlock`, `POST /users/:id/pin`, `DELETE /users/:id`) to'liq matritsasi, oxirgi `owner` himoyasi.
-- [x] **T2 (Commit before reject)** — `hub.test.ts`: 5 xatodan keyin to'g'ridan-to'g'ri SQLite `SELECT failed_attempts, locked_until_ms FROM local_pin_credentials` da `failed_attempts = 5n` va `locked_until_ms` saqlangan.
-- [x] **T6 (`login-options` va `userId` login)** — `hub.test.ts`: ochiq `GET /auth/login-options` faqat aktiv `{ id, fullName, role }` qaytaradi; `{ userId, pin }` login ishlaydi.
-- [x] **f) & g) Xatolar, versiyalar va chegara** — `{ error: { code, message } }` (stack siz), salbiy `depcruise` (`apps/hub -> @mezon/db-cloud` Exit code 1; `packages/contracts -> @mezon/db-local` Exit code 1) va salbiy `db:check` (`trg_users_no_delete` olib tashlansa Exit code 1).
+- **Katalog yo'li:** Ishga tushishning eng boshida (`requestSingleInstanceLock()`dan oldin) Windows'da `%LOCALAPPDATA%\Mezon\` (Linux/CI da XDG fallback; test izolyatsiyasi uchun `MEZON_DATA_DIR` faqat test muhitida) aniqlanadi va **`app.setPath('userData', dataDir)`** hamda `app.setPath('logs', path.join(dataDir, 'logs'))` ga yo'naltiriladi (standart Roaming emas!).
+  - SQLite DB: `<dataDir>\data\mezon.db` (WAL).
+  - Loglar: `<dataDir>\logs\mezon-hub.log` (Pino `10.4.0` + `HUB_LOGGER_REDACT_PATHS` redaction) va `mezon-desktop.log`.
+- **NSIS (`apps/desktop/electron-builder.yml` / config):**
+  - `win.target: ['nsis']`, `nsis: { oneClick: false, perMachine: false, allowElevation: false, allowToChangeInstallationDirectory: true, deleteAppDataOnUninstall: false }` — foydalanuvchi darajasida o'rnatish, admin paroli/UAC so'ramaydi, uninstall paytida `%LOCALAPPDATA%\Mezon\` saqlanadi.
+- **Bir nusxa rejimi:** `app.requestSingleInstanceLock()` — `false` bo'lsa darhol `app.quit()` (ikkinchi Hub ochilmaydi); `second-instance` hodisasida asosiy oyna `restore()` + `show()` + `focus()`.
 
-### Test natijasi (oxirgi tahrirdan keyin)
+#### d) Native modullar va Node vs Electron ABI izolyatsiyasi
 
-**Lokal (`Windows`, commit `9b7a75b`, `pnpm verify` ketma-ket 3 marta):**
+- **Muammo:** `better-sqlite3` V8/NAN ABI ga bog'langan; root `.pnpm` da Electron ABIga qayta yig'ilsa host Node 24 Vitest testlari `ERR_DLOPEN_FAILED` beradi.
+- **Yechim (izolyatsiyalangan staging katalogi `apps/desktop/dist-app/`):**
+  1. Root `node_modules` hech qachon Electron ABI ga o'zgartirilmaydi -> `pnpm verify` doimo Node 24 ABI da ishlaydi.
+  2. `apps/desktop/scripts/prepare-electron-app.mjs` alohida `apps/desktop/dist-app/` (`.gitignore`) ichiga kompilyatsiya qilingan workspace paketlarni (`dist/`, `db-local/drizzle` migratsiya SQLlari, `@mezon/pos/dist`) va kerakli production modullarini (`better-sqlite3`, `@node-rs/argon2`, `koffi`, `fastify`, `pino`, `zod`...) symlinksiz ko'chiradi hamda faqat `dist-app/` ichida **`@electron/rebuild@4.2.1`** bilan Electron `45.2.3` ABI uchun yig'adi.
+  3. `electron-builder` `directories.app: 'dist-app'`, `asar: true`, `asarUnpack: ['**/*.node']` bilan `app.asar` va `.node` fayllarini paketlaydi (`afterPack` fuse'larni o'rnatadi).
+  4. `db-local/src/migrate.ts` dagi `import.meta.dirname/../drizzle` yondashuvi staging `dist-app` va `app.asar` ichida ham bir xil ishlashi real paketlangan app'da tekshiriladi.
 
-1. **1-run:** `Test Files 14 passed | 1 skipped (15)`, `Tests 99 passed | 2 skipped (101)`, Vitest `10.50s` (`70,000 now()` `4447ms`, `TOCTOU R1` `1335ms`), `db:check` `0 diff`, `depcruise` `0` xato (`138 modules, 344 deps`).
-2. **2-run:** `Test Files 14 passed | 1 skipped (15)`, `Tests 99 passed | 2 skipped (101)`, Vitest `10.66s` (`70,000 now()` `4598ms`, `TOCTOU R1` `1335ms`), `0` xato.
-3. **3-run:** `Test Files 14 passed | 1 skipped (15)`, `Tests 99 passed | 2 skipped (101)`, Vitest `11.04s` (`70,000 now()` `4761ms`, `TOCTOU R1` `1327ms`), `0` xato.
-   *(Lokal Windows muhitida Docker bo'lmagani uchun `pg-rls.test.ts` skip qilingan.)*
-- **Salbiy tekshiruvlar (`07afc28` da tasdiqlangan, qayta tiklangan):**
-  - `apps/hub/src/index.ts` -> `@mezon/db-cloud` => `depcruise` Exit code 1 (`hub-src-imports`).
-  - `packages/contracts/src/index.ts` -> `@mezon/db-local` => `depcruise` Exit code 1 (`contracts-src-imports`).
-  - `0002_hub_auth.sql` da `trg_users_no_delete` olib tashlansa => `db:check` Exit code 1.
+#### e) Minimal UI (`apps/pos`)
 
-**GitHub Actions CI (commit `9b7a75b`, PR Run [#42804480413](https://github.com/Shaxobiddin-Github/Mezon/actions/runs/42804480413) va push Run [#42804472884](https://github.com/Shaxobiddin-Github/Mezon/actions/runs/42804472884)):**
+- `apps/pos`: React 19 + Vite 8 minimal sahifa (`index.html`, `src/main.tsx`, `src/App.tsx`).
+- Preload `window.mezonBridge.getHubBaseUrl()` dan manzilni olib `fetch(`${baseUrl}/health`)` chaqiradi (`Origin: app://mezon`) va ekranda Hub holati (`ok`), `needsSetup`, va xato bo'lsa qayta urinish holatini ko'rsatadi.
 
-- [`Verify (ubuntu-latest)`](https://github.com/Shaxobiddin-Github/Mezon/actions/runs/42804480413/job/129790023611) — **success** (`0 diff`, `Test Files 14 passed | 1 skipped (15)`, `Tests 99 passed | 2 skipped (101)` [`pg-rls`], `13.71s`, `depcruise` 0 violations / 138 modules / 344 deps).
-- [`Verify (windows-latest)`](https://github.com/Shaxobiddin-Github/Mezon/actions/runs/42804480413/job/129790023547) — **success** (`0 diff`, `Test Files 14 passed | 1 skipped (15)`, `Tests 99 passed | 2 skipped (101)`, `24.66s`, `depcruise` 0 violations).
-- [`Verify PostgreSQL RLS (ubuntu-latest)`](https://github.com/Shaxobiddin-Github/Mezon/actions/runs/42804480413/job/129790023313) — **success** (`Test Files 2 passed (2)`, `Tests 8 passed (8)`, `14.00s`).
-- (`push` Run [#42804472884](https://github.com/Shaxobiddin-Github/Mezon/actions/runs/42804472884) ham uchala job'da **success**.)
+#### Depcruise chegaralari (`.dependency-cruiser.cjs`)
 
-### Tekshirilmagan narsalar
+- `apps/desktop/src`: faqat `apps/desktop/src`, `packages/(domain|contracts|drivers)`, `electron` va `node:*` (`db-cloud`, `db-local` to'g'ridan-to'g'ri, `apps/pos` importi taqiqlanadi — Hub alohida `utilityProcess` sifatida `dist-app`dan yuklanadi!).
+- `apps/pos/src`: faqat `apps/pos/src`, `packages/(contracts|i18n|ui)`, `react`, `react-dom` (Node builtinlar, `electron`, `db-local`, `db-cloud` taqiqlanadi).
+- Har ikki qoidaga salbiy `depcruise` dalili keltiriladi.
 
-- Lokal Windows muhitida Docker bo'lmagani sabab `pg-rls.test.ts` lokalda o'tkazib yuborildi (Ubuntu CI job'larida to'liq o'tdi).
+---
 
-### Qilingan taxminlar
+### 3. Testlar va CI (`f` bandi)
 
-- Yangi taxmin kiritilmadi; barcha yondashuvlar tasdiqlangan T0.6 rejasi va `T1`–`T6` tuzatishlariga mos.
+1. **Birlik / xavfsizlik testlari:**
+   - `T0.6 R1` test qarzi tuzatilib mutatsiya bilan tasdiqlangan test (`auth-repo.ts` + `hub.test.ts`).
+   - `apps/desktop`: `resolveDesktopDataDir()` (Windows `LOCALAPPDATA\Mezon`, Roaming emasligi), fuse konfiguratsiyasi va navigatsiya/origin helper testlari.
+2. **Playwright (`1.65.0`) `_electron` E2E smoke test (yig'ilgan `app.asar` + fused Electron binary ustida):**
+   - Ilova ochiladi, `BrowserWindow` URL `app://mezon/` (hech qanday `file://` yo'q), sahifada Hub `/health` `200` + `needsSetup: true` ko'rinadi.
+   - Hub tomoni so'rov `Origin` sarlavhasi aynan `app://mezon` bo'lganini tasdiqlaydi; `<dataDir>/data/mezon.db` va redact qilingan fayl loglari yaratilgan.
+   - `ELECTRON_RUN_AS_NODE=1` bilan executable Node sifatida ishga tushmaydi; `window.open` va tashqi `navigate` rad etiladi.
+   - Bir nusxa: bir xil `dataDir` bilan 2-nusxa yopiladi, 2-Hub ochilmaydi.
+   - Hub crash recovery: `utilityProcess` yiqilganda UI ochiq qoladi va Hub qayta ko'tarilib `/health` yana `200` qaytaradi.
+3. **GitHub Actions CI (`.github/workflows/ci.yml`):**
+   - `Verify (ubuntu-latest)` va `Verify (windows-latest)`: `pnpm verify` (`T0.7` unit testlar + `depcruise`).
+   - Yangi **`desktop` (`Build & E2E Desktop Installer (windows-latest)`)** job: `pnpm --filter @mezon/desktop run pack:win` (staging + `@electron/rebuild` + `electron-builder` NSIS `.exe` + `@electron/fuses`), fuse wire tekshiruvi, Playwright `_electron` smoke testi yig'ilgan `win-unpacked` ustida, hamda `Mezon Setup *.exe` GitHub Actions artifact sifatida yuklanadi.
+4. **Egasi uchun toza Windows'da qo'lda tekshiruv ro'yxati (`GEMINI.md` T0.7):**
+   1. CI `desktop` artifact'idan NSIS `.exe` o'rnatuvchini yuklab olish.
+   2. Oddiy (admin huquqsiz) Windows 10 22H2+ / Windows 11 hisobida o'rnatish (SmartScreen chiqsa `More info -> Run anyway`; UAC admin paroli so'ramasligi shart).
+   3. Ilovani ochib, oyna va Hub `/health` ko'ringanini **skrinshot** qilish hamda `%LOCALAPPDATA%\Mezon\data\mezon.db` yaratilganini ko'rish.
+   4. Ilovani ikkinchi marta bosganda birinchi oyna oldinga chiqishini tekshirish.
+   5. Windows Apps & Features orqali Uninstall qilish va `%LOCALAPPDATA%\Mezon\data\mezon.db` saqlanib qolganini tekshirish.
+   6. Qayta o'rnatib ochish va oldingi baza saqlanganini **skrinshot** bilan tasdiqlash.
 
-### Takliflar
-
-- Yangi taklif yo'q.
+---
 
 ### Egasi yoki Claude qarori kerak bo'lgan savollar
 
-- Savol yo'q; PR #6 (`9b7a75b`) Claude tekshiruvi uchun tayyor.
+- **Electron 45 + `apps/desktop` utilityProcess bilan Hub ulanishi:** `utilityProcess` kompilyatsiya qilingan `hub-worker.js` orqali `@mezon/hub` ni ishga tushirganda `better-sqlite3`, `@node-rs/argon2` va `koffi` staging `dist-app/node_modules` ichidan yuklanadi — bu `GEMINI.md` 2.1 dagi "Muhim tekshiruvlar"ni ham bir yo'la amalda tasdiqlaydi. Tasdiqlasangiz amalga oshirishni boshlaymiz (`T0.6 test qarzi` commitidan boshlab).
