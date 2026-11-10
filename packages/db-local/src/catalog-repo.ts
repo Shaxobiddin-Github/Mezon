@@ -368,13 +368,83 @@ export async function rebuildCatalogSearchIndex(
   });
 }
 
+type SqliteStatement = ReturnType<LocalSqliteConnection['sqlite']['prepare']>;
+
+interface CatalogFtsStatements {
+  readonly searchAll: SqliteStatement;
+  readonly countAll: SqliteStatement;
+  readonly searchCategory: SqliteStatement;
+  readonly countCategory: SqliteStatement;
+}
+
+interface FtsSearchHitRow {
+  readonly product_id: string;
+  readonly total: number;
+}
+
 export class SqliteCatalogStore {
   private readonly connection: LocalSqliteConnection;
   private readonly getRuntimeContext: () => CatalogRuntimeContext | null;
+  private cachedFtsStatements: CatalogFtsStatements | null = null;
 
   constructor(options: CreateSqliteCatalogStoreOptions) {
     this.connection = options.connection;
     this.getRuntimeContext = options.getRuntimeContext;
+  }
+
+  private getFtsStatements(): CatalogFtsStatements {
+    if (this.cachedFtsStatements !== null) {
+      return this.cachedFtsStatements;
+    }
+    const sqlite = this.connection.sqlite;
+    // Active rows in products_fts mirror products WHERE deleted_at_ms IS NULL via FTS triggers.
+    // Querying products_fts directly when no category filter is active avoids 10k+ product lookups
+    // while computing exact COUNT(*) OVER() in a single inverted-index pass.
+    this.cachedFtsStatements = {
+      searchAll: sqlite
+        .prepare(
+          `SELECT f."product_id" AS product_id, COUNT(*) OVER() AS total
+           FROM "products_fts" f
+           WHERE f."products_fts" MATCH ?
+             AND f."organization_id" = ?
+           ORDER BY f.rank ASC, f."product_id" ASC
+           LIMIT ? OFFSET ?`,
+        )
+        .safeIntegers(false),
+      countAll: sqlite
+        .prepare(
+          `SELECT COUNT(*) AS total
+           FROM "products_fts" f
+           WHERE f."products_fts" MATCH ?
+             AND f."organization_id" = ?`,
+        )
+        .safeIntegers(false),
+      searchCategory: sqlite
+        .prepare(
+          `SELECT f."product_id" AS product_id, COUNT(*) OVER() AS total
+           FROM "products_fts" f
+           INNER JOIN "products" p ON p."id" = f."product_id"
+           WHERE f."products_fts" MATCH ?
+             AND p."organization_id" = ?
+             AND p."deleted_at_ms" IS NULL
+             AND p."category_id" = ?
+           ORDER BY f.rank ASC, p."id" ASC
+           LIMIT ? OFFSET ?`,
+        )
+        .safeIntegers(false),
+      countCategory: sqlite
+        .prepare(
+          `SELECT COUNT(*) AS total
+           FROM "products_fts" f
+           INNER JOIN "products" p ON p."id" = f."product_id"
+           WHERE f."products_fts" MATCH ?
+             AND p."organization_id" = ?
+             AND p."deleted_at_ms" IS NULL
+             AND p."category_id" = ?`,
+        )
+        .safeIntegers(false),
+    };
+    return this.cachedFtsStatements;
   }
 
   private requireContext(): CatalogRuntimeContext {
@@ -656,41 +726,26 @@ export class SqliteCatalogStore {
         return Promise.resolve({ products: [], total: 0, limit, offset });
       }
 
-      const sqlite = this.connection.sqlite;
-      const categoryClause = categoryId !== undefined ? ' AND p."category_id" = ?' : '';
+      const stmts = this.getFtsStatements();
       const baseParams: unknown[] =
         categoryId !== undefined
           ? [ftsExpr, organizationId, categoryId]
           : [ftsExpr, organizationId];
-
-      const hitsStmt = sqlite.prepare(
-        `SELECT f."product_id" AS product_id
-         FROM "products_fts" f
-         INNER JOIN "products" p ON p."id" = f."product_id"
-         WHERE f."products_fts" MATCH ?
-           AND p."organization_id" = ?
-           AND p."deleted_at_ms" IS NULL${categoryClause}
-         ORDER BY f.rank ASC, p."id" ASC
-         LIMIT ? OFFSET ?`,
-      );
-      const hitRows = hitsStmt.all(...baseParams, limit, offset) as ReadonlyArray<{
-        readonly product_id: string;
-      }>;
+      const searchStmt = categoryId !== undefined ? stmts.searchCategory : stmts.searchAll;
+      const hitRows = searchStmt.all(
+        ...baseParams,
+        limit,
+        offset,
+      ) as ReadonlyArray<FtsSearchHitRow>;
 
       let total: number;
-      if (offset === 0 && hitRows.length < limit) {
-        total = hitRows.length;
+      const firstHit = hitRows[0];
+      if (firstHit !== undefined) {
+        total = firstHit.total;
+      } else if (offset === 0) {
+        total = 0;
       } else {
-        const countStmt = sqlite
-          .prepare(
-            `SELECT COUNT(*) AS total
-             FROM "products_fts" f
-             INNER JOIN "products" p ON p."id" = f."product_id"
-             WHERE f."products_fts" MATCH ?
-               AND p."organization_id" = ?
-               AND p."deleted_at_ms" IS NULL${categoryClause}`,
-          )
-          .safeIntegers(false);
+        const countStmt = categoryId !== undefined ? stmts.countCategory : stmts.countAll;
         const countRow = countStmt.get(...baseParams) as { readonly total: number } | undefined;
         total = countRow?.total ?? 0;
       }
