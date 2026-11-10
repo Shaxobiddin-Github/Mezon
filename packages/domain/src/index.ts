@@ -46,3 +46,51 @@ export {
   formatQuantityDecimal,
   parseQuantityDecimal,
 } from './serialize.js';
+
+export {
+  type UnixMs,
+  MIN_UNIX_MS,
+  MAX_UNIX_MS,
+  type Clock,
+  type RandomSource,
+  unixMsFromBigInt,
+  unixMsToBigInt,
+  addUnixMs,
+  diffUnixMs,
+  serializeUnixMs,
+  parseUnixMs,
+} from './clock.js';
+
+export {
+  type UuidV7,
+  type IdGenerator,
+  type MonotonicUuidV7State,
+  type MonotonicUuidV7StepResult,
+  type MonotonicUuidV7GeneratorOptions,
+  UUID_V7_RANDOM_BYTES_LENGTH,
+  MAX_UUID_V7_COUNTER,
+  encodeUuidV7,
+  parseUuidV7,
+  isValidUuidV7,
+  extractUuidV7Timestamp,
+  uuidV7ToBytes,
+  uuidV7FromBytes,
+  stepMonotonicUuidV7,
+  MonotonicUuidV7Generator,
+} from './uuidv7.js';
+
+export {
+  DEFAULT_HLC_MAX_SKEW_MS,
+  MAX_HLC_COUNTER,
+  HLC_STRING_LENGTH,
+  type HlcTimestamp,
+  type HlcState,
+  type HlcNowResult,
+  type HlcReceiveResult,
+  type HlcClockOptions,
+  createHlcTimestamp,
+  serializeHlc,
+  parseHlc,
+  compareHlc,
+  HlcClock,
+} from './hlc.js';

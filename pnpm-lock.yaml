@@ -217,7 +217,11 @@ importers:
         specifier: 4.10.2
         version: 4.10.2
 
-  packages/drivers: {}
+  packages/drivers:
+    dependencies:
+      '@mezon/domain':
+        specifier: workspace:*
+        version: link:../domain
 
   packages/i18n: {}
 
@@ -229,7 +233,11 @@ importers:
 
   packages/sync: {}
 
-  packages/test-utils: {}
+  packages/test-utils:
+    dependencies:
+      '@mezon/domain':
+        specifier: workspace:*
+        version: link:../domain
 
   packages/ui: {}
 
