@@ -331,12 +331,13 @@ describe('@mezon/db-local - T1.4 completeSale atomic TX, receipts, stock policy,
           .run(completed.sale.id),
       ).toThrow(/forbids physical DELETE/);
 
-      // Allowed 1-way void transition succeeds once, then second UPDATE (even to void_reason) is blocked permanently
+      // Allowed 1-way void transition succeeds once (with required V3 void_client_request_id & void_request_hash),
+      // then any subsequent UPDATE (even to void_reason) is blocked permanently
       env.connection.sqlite
         .prepare(
-          'UPDATE "sales" SET "voided_at_ms" = 1760000099000, "voided_by_user_id" = ?, "void_reason" = \'Test void\', "updated_at_ms" = 1760000099000 WHERE "id" = ?',
+          'UPDATE "sales" SET "voided_at_ms" = 1760000099000, "voided_by_user_id" = ?, "void_reason" = \'Test void\', "void_client_request_id" = ?, "void_request_hash" = \'deadbeef1234\', "updated_at_ms" = 1760000099000 WHERE "id" = ?',
         )
-        .run(env.ownerId, completed.sale.id);
+        .run(env.ownerId, parseUuidV7('01950000-0000-7000-8000-000000009901'), completed.sale.id);
       expect(() =>
         env.connection.sqlite
           .prepare('UPDATE "sales" SET "void_reason" = \'Modified after void\' WHERE "id" = ?')
@@ -348,7 +349,7 @@ describe('@mezon/db-local - T1.4 completeSale atomic TX, receipts, stock policy,
             'UPDATE "sales" SET "voided_at_ms" = NULL, "voided_by_user_id" = NULL WHERE "id" = ?',
           )
           .run(completed.sale.id),
-      ).toThrow(/forbids updating immutable receipt fields/);
+      ).toThrow(/cannot be modified once voided/);
     } finally {
       env.connection.close();
     }

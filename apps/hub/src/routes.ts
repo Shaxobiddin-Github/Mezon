@@ -14,6 +14,8 @@ import type { HubCatalogService } from './catalog-service.js';
 import { registerCartRoutes } from './cart-routes.js';
 import type { HubCartService } from './cart-service.js';
 import type { HubSaleService } from './sale-service.js';
+import { registerReturnRoutes } from './return-routes.js';
+import type { HubReturnService } from './return-service.js';
 import { registerStockRoutes } from './stock-routes.js';
 import type { HubStockService } from './stock-service.js';
 
@@ -34,6 +36,7 @@ export function registerHubRoutes(
   stockService?: HubStockService,
   cartService?: HubCartService,
   saleService?: HubSaleService,
+  returnService?: HubReturnService,
 ): void {
   app.get('/health', async () => {
     return authService.getHealth();
@@ -110,5 +113,8 @@ export function registerHubRoutes(
   }
   if (cartService) {
     registerCartRoutes(app, authService, cartService, saleService);
+  }
+  if (returnService) {
+    registerReturnRoutes(app, authService, returnService);
   }
 }

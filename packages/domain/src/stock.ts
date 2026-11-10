@@ -453,7 +453,10 @@ export function applyReplayStockMove(
         conflictQty: inQty,
         reason: 'UNKNOWN_COST_SURPLUS',
       });
-    } else if (valTiyin > 0n || move.reason === 'initial' || move.reason === 'purchase') {
+    } else if (
+      move.reason !== 'return' &&
+      (valTiyin > 0n || move.reason === 'initial' || move.reason === 'purchase')
+    ) {
       state.lastUnitCost = computeUnitCostFromTotals(inVal, inQty);
     }
 

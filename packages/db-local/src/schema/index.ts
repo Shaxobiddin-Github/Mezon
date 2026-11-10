@@ -40,6 +40,9 @@ export const localDeviceState = localSchemaRegistry.defineTable(
     lastReceiptSeq: sqliteBigint('last_receipt_seq')
       .notNull()
       .default(sql`0`),
+    lastReturnSeq: sqliteBigint('last_return_seq')
+      .notNull()
+      .default(sql`0`),
     lastHlc: sqliteHlc('last_hlc').notNull(),
     lastUuidMs: sqliteUnixMs('last_uuid_ms').notNull(),
   }),
@@ -47,6 +50,7 @@ export const localDeviceState = localSchemaRegistry.defineTable(
     uniqueIndex('uidx_local_device_state_device_id').on(self.deviceId),
     check('chk_local_device_state_seq_nonneg', sql`${self.lastDeviceSeq} >= 0`),
     check('chk_local_device_state_receipt_nonneg', sql`${self.lastReceiptSeq} >= 0`),
+    check('chk_local_device_state_return_nonneg', sql`${self.lastReturnSeq} >= 0`),
   ],
 );
 
@@ -149,6 +153,7 @@ export const localHubConfig = localSchemaRegistry.defineTable(
       .default(sql`0`),
     quickSaleDefaultMxik: text('quick_sale_default_mxik'),
     quickSaleDefaultVatRateBp: sqliteInt('quick_sale_default_vat_rate_bp'),
+    storeTimezone: text('store_timezone').notNull().default('Asia/Tashkent'),
   }),
   (self) => [
     uniqueIndex('uidx_local_hub_config_singleton').on(self.singletonGuard),
@@ -165,6 +170,7 @@ export const localHubConfig = localSchemaRegistry.defineTable(
       'chk_local_hub_config_qs_vat',
       sql`${self.quickSaleDefaultVatRateBp} IS NULL OR (${self.quickSaleDefaultVatRateBp} >= 0 AND ${self.quickSaleDefaultVatRateBp} <= 10000)`,
     ),
+    check('chk_local_hub_config_timezone_nonempty', sql`length(trim(${self.storeTimezone})) >= 1`),
   ],
 );
 
@@ -957,6 +963,8 @@ export const sales = localSchemaRegistry.defineTable(
     voidedAtMs: sqliteUnixMs('voided_at_ms'),
     voidedByUserId: sqliteUuidV7('voided_by_user_id').references(() => users.id),
     voidReason: text('void_reason'),
+    voidClientRequestId: sqliteUuidV7('void_client_request_id'),
+    voidRequestHash: text('void_request_hash'),
   }),
   (self) => [
     uniqueIndex('uidx_sales_org_device_receipt_no').on(
@@ -965,6 +973,9 @@ export const sales = localSchemaRegistry.defineTable(
       self.receiptNo,
     ),
     uniqueIndex('uidx_sales_org_client_request').on(self.organizationId, self.clientRequestId),
+    uniqueIndex('uidx_sales_org_void_client_req')
+      .on(self.organizationId, self.voidClientRequestId)
+      .where(sql`${self.voidClientRequestId} IS NOT NULL`),
     index('idx_sales_store_created').on(self.organizationId, self.storeId, self.createdAtMs),
     index('idx_sales_store_cart').on(self.organizationId, self.storeId, self.sourceCartId),
     check('chk_sales_receipt_no_pos', sql`${self.receiptNo} >= 1`),
@@ -989,7 +1000,7 @@ export const sales = localSchemaRegistry.defineTable(
     ),
     check(
       'chk_sales_void_pair',
-      sql`(${self.voidedAtMs} IS NULL AND ${self.voidedByUserId} IS NULL) OR (${self.voidedAtMs} IS NOT NULL AND ${self.voidedByUserId} IS NOT NULL)`,
+      sql`(${self.voidedAtMs} IS NULL AND ${self.voidedByUserId} IS NULL AND ${self.voidReason} IS NULL AND ${self.voidClientRequestId} IS NULL AND ${self.voidRequestHash} IS NULL) OR (${self.voidedAtMs} IS NOT NULL AND ${self.voidedByUserId} IS NOT NULL AND ${self.voidReason} IS NOT NULL AND length(trim(${self.voidReason})) >= 1 AND ${self.voidClientRequestId} IS NOT NULL AND ${self.voidRequestHash} IS NOT NULL AND length(trim(${self.voidRequestHash})) >= 6)`,
     ),
   ],
 );
@@ -1158,5 +1169,178 @@ export const cashMoves = localSchemaRegistry.defineTable(
       sql`(${self.type} IN ('sale_cash_in', 'debt_payment_in', 'cash_in') AND ${self.amountDelta} > 0) OR (${self.type} IN ('sale_change_out', 'refund_cash_out', 'cash_out', 'encashment') AND ${self.amountDelta} < 0)`,
     ),
     check('chk_cash_moves_source_type', sql`length(trim(${self.sourceType})) >= 1`),
+  ],
+);
+
+/**
+ * Immutable sale return documents (`FACT`, store-scoped, T1.6).
+ */
+export const returns = localSchemaRegistry.defineTable(
+  {
+    name: 'returns',
+    tableClass: 'FACT',
+    tenantScope: 'store',
+  },
+  (common) => ({
+    ...common,
+    saleId: sqliteUuidV7('sale_id')
+      .notNull()
+      .references(() => sales.id),
+    returnNo: sqliteBigint('return_no').notNull(),
+    returnCode: text('return_code').notNull(),
+    processedByUserId: sqliteUuidV7('processed_by_user_id')
+      .notNull()
+      .references(() => users.id),
+    overrideApprovedByUserId: sqliteUuidV7('override_approved_by_user_id').references(
+      () => users.id,
+    ),
+    overrideApprovedAtMs: sqliteUnixMs('override_approved_at_ms'),
+    reason: text('reason').notNull(),
+    clientRequestId: sqliteUuidV7('client_request_id').notNull(),
+    requestHash: text('request_hash').notNull(),
+    totalRefund: sqliteMoney('total_refund').notNull(),
+    totalNetExVat: sqliteMoney('total_net_ex_vat').notNull(),
+    totalVat: sqliteMoney('total_vat').notNull(),
+    cashRefundAmount: sqliteMoney('cash_refund_amount').notNull(),
+    nonCashRefundAmount: sqliteMoney('non_cash_refund_amount').notNull(),
+    debtOffsetAmount: sqliteMoney('debt_offset_amount')
+      .notNull()
+      .default(sql`0`),
+  }),
+  (self) => [
+    uniqueIndex('uidx_returns_org_device_return_no').on(
+      self.organizationId,
+      self.deviceId,
+      self.returnNo,
+    ),
+    uniqueIndex('uidx_returns_org_client_request').on(self.organizationId, self.clientRequestId),
+    index('idx_returns_store_sale').on(self.organizationId, self.storeId, self.saleId),
+    index('idx_returns_store_created').on(self.organizationId, self.storeId, self.createdAtMs),
+    check('chk_returns_return_no_pos', sql`${self.returnNo} >= 1`),
+    check('chk_returns_code_nonempty', sql`length(trim(${self.returnCode})) >= 1`),
+    check('chk_returns_reason_nonempty', sql`length(trim(${self.reason})) >= 1`),
+    check('chk_returns_request_hash_nonempty', sql`length(trim(${self.requestHash})) >= 6`),
+    check(
+      'chk_returns_money_nonneg',
+      sql`${self.totalRefund} >= 0 AND ${self.totalNetExVat} >= 0 AND ${self.totalVat} >= 0 AND ${self.cashRefundAmount} >= 0 AND ${self.nonCashRefundAmount} >= 0 AND ${self.debtOffsetAmount} >= 0`,
+    ),
+    check(
+      'chk_returns_totals_balance',
+      sql`${self.cashRefundAmount} + ${self.nonCashRefundAmount} + ${self.debtOffsetAmount} = ${self.totalRefund} AND ${self.totalNetExVat} + ${self.totalVat} = ${self.totalRefund}`,
+    ),
+    check(
+      'chk_returns_override_pair',
+      sql`(${self.overrideApprovedByUserId} IS NULL AND ${self.overrideApprovedAtMs} IS NULL) OR (${self.overrideApprovedByUserId} IS NOT NULL AND ${self.overrideApprovedAtMs} IS NOT NULL)`,
+    ),
+  ],
+);
+
+/**
+ * Immutable returned line items referencing original `sale_lines` (`FACT`, store-scoped, T1.6).
+ */
+export const returnLines = localSchemaRegistry.defineTable(
+  {
+    name: 'return_lines',
+    tableClass: 'FACT',
+    tenantScope: 'store',
+  },
+  (common) => ({
+    ...common,
+    returnId: sqliteUuidV7('return_id')
+      .notNull()
+      .references(() => returns.id),
+    saleId: sqliteUuidV7('sale_id')
+      .notNull()
+      .references(() => sales.id),
+    saleLineId: sqliteUuidV7('sale_line_id')
+      .notNull()
+      .references(() => saleLines.id),
+    sortOrder: sqliteInt('sort_order').notNull(),
+    lineKind: text('line_kind').notNull(),
+    productId: sqliteUuidV7('product_id').references(() => products.id),
+    variantId: sqliteUuidV7('variant_id').references(() => productVariants.id),
+    itemName: text('item_name').notNull(),
+    unit: text('unit').notNull(),
+    qty: sqliteQuantity('qty').notNull(),
+    unitPriceSnapshot: sqliteMoney('unit_price_snapshot').notNull(),
+    vatRateBpSnapshot: sqliteInt('vat_rate_bp_snapshot').notNull(),
+    mxikSnapshot: text('mxik_snapshot'),
+    packageCodeSnapshot: text('package_code_snapshot'),
+    refundAmount: sqliteMoney('refund_amount').notNull(),
+    netExVat: sqliteMoney('net_ex_vat').notNull(),
+    vatTotal: sqliteMoney('vat_total').notNull(),
+    costValue: sqliteMoney('cost_value')
+      .notNull()
+      .default(sql`0`),
+  }),
+  (self) => [
+    uniqueIndex('uidx_return_lines_return_sale_line').on(self.returnId, self.saleLineId),
+    uniqueIndex('uidx_return_lines_return_sort').on(self.returnId, self.sortOrder),
+    index('idx_return_lines_sale_line').on(self.saleLineId),
+    index('idx_return_lines_store_sale').on(self.organizationId, self.storeId, self.saleId),
+    check('chk_return_lines_sort_nonneg', sql`${self.sortOrder} >= 0`),
+    check('chk_return_lines_kind', sql`${self.lineKind} IN ('catalog', 'quick_sale')`),
+    check(
+      'chk_return_lines_kind_product',
+      sql`(${self.lineKind} = 'catalog' AND ${self.productId} IS NOT NULL) OR (${self.lineKind} = 'quick_sale' AND ${self.productId} IS NULL AND ${self.variantId} IS NULL)`,
+    ),
+    check('chk_return_lines_name_nonempty', sql`length(trim(${self.itemName})) >= 1`),
+    check(
+      'chk_return_lines_unit',
+      sql`${self.unit} IN ('dona', 'kg', 'g', 'litr', 'metr', 'm2', 'qadoq')`,
+    ),
+    check('chk_return_lines_qty_pos', sql`${self.qty} > 0`),
+    check(
+      'chk_return_lines_unit_int',
+      sql`${self.unit} NOT IN ('dona', 'qadoq') OR (${self.qty} % 1000) = 0`,
+    ),
+    check(
+      'chk_return_lines_money_nonneg',
+      sql`${self.unitPriceSnapshot} >= 0 AND ${self.refundAmount} >= 0 AND ${self.netExVat} >= 0 AND ${self.vatTotal} >= 0 AND ${self.costValue} >= 0`,
+    ),
+    check(
+      'chk_return_lines_vat_bp',
+      sql`${self.vatRateBpSnapshot} >= 0 AND ${self.vatRateBpSnapshot} <= 10000`,
+    ),
+    check(
+      'chk_return_lines_arithmetic',
+      sql`${self.netExVat} + ${self.vatTotal} = ${self.refundAmount}`,
+    ),
+  ],
+);
+
+/**
+ * Immutable refund payment rows for a return document (`FACT`, store-scoped, T1.6).
+ */
+export const returnPayments = localSchemaRegistry.defineTable(
+  {
+    name: 'return_payments',
+    tableClass: 'FACT',
+    tenantScope: 'store',
+  },
+  (common) => ({
+    ...common,
+    returnId: sqliteUuidV7('return_id')
+      .notNull()
+      .references(() => returns.id),
+    saleId: sqliteUuidV7('sale_id')
+      .notNull()
+      .references(() => sales.id),
+    method: text('method').notNull(),
+    amount: sqliteMoney('amount').notNull(),
+    providerRef: text('provider_ref'),
+  }),
+  (self) => [
+    index('idx_return_payments_return').on(self.returnId),
+    index('idx_return_payments_sale').on(self.saleId),
+    check(
+      'chk_return_payments_method',
+      sql`${self.method} IN ('cash', 'card', 'uzqr', 'payme', 'click', 'uzum', 'social_card', 'other')`,
+    ),
+    check('chk_return_payments_pos', sql`${self.amount} > 0`),
+    check(
+      'chk_return_payments_cash_no_ref',
+      sql`${self.method} <> 'cash' OR ${self.providerRef} IS NULL`,
+    ),
   ],
 );

@@ -61,6 +61,9 @@ if (schemaPkg.assertStockMigrationsComplete) {
 if (schemaPkg.assertSaleMigrationsComplete) {
   schemaPkg.assertSaleMigrationsComplete(migrationsDir);
 }
+if (schemaPkg.assertReturnAndViewMigrationsComplete) {
+  schemaPkg.assertReturnAndViewMigrationsComplete(migrationsDir);
+}
 
 const currSnapshot = await generateSQLiteDrizzleJson(schemaTables);
 const diffStatements = await generateSQLiteMigration(prevSnapshot, currSnapshot);
