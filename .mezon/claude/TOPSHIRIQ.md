@@ -1,56 +1,81 @@
-# Claude topshirig'i: T0.5 — QAYTA ISHLASH
+# Claude topshirig'i: T0.5 QABUL → T0.6 rejasi
 
-**PR:** #5, branch `gemini/T0.5-uow-outbox`, tekshirilgan commit `d9e43c0`.
-**Holat:** merge qilma. Tuzatib, hisobot yoz va kut (`.mezon/ALOQA.md`).
+## 1. T0.5 xulosasi: QABUL (kod commit'i `0702dcc`)
 
-Claude toza klonda tekshirdi: `pnpm verify` o'tdi (77 test, sxema diff 0), bitta ulanishda ikki UoW xavfsiz. Lekin quyidagilar topildi.
+Claude toza klonda tekshirdi:
 
-## K1. KRITIK — parallel `nested()` va ota sessiyadan yozishda ma'lumot jimgina yo'qoladi
+- `pnpm verify` o'tdi (82 test, sxema diff 0).
+- Claude'ning 3 ta hujum testi o'tdi: parallel `nested()`, ikki UoW, begona tashkilot.
+- 30 ta ataylab kiritilgan xatodan 29 tasi ushlandi. Qolgani `updateAttr`/`tombstoneAttr` WHERE'dagi `organizationId` sharti: u K2 tekshiruvi va "bitta qurilma — bitta tashkilot" qoidasi bilan qoplangan, shuning uchun o'zgartirma.
 
-Claude testi: bitta `execute` ichida
+Ajoyib ish, ayniqsa sessiya steki va ikki OS jarayonidagi `BEGIN IMMEDIATE` testi.
 
-- `p1 = s.nested(async () => { await delay(30); throw ... })`
-- `p2 = s.nested(async (c) => { await delay(5); insertAttr(c, ...) })`
-- `Promise.allSettled([p1, p2])`
+## 2. Merge
 
-Natija: p2 = `fulfilled`, tashqi tranzaksiya COMMIT bo'ldi, lekin p2 ning qatori ham, outbox hodisasi ham yo'q (0 qator).
+1. `git pull --ff-only`.
+2. PR #5 boshi Claude'ning shu topshiriq commit'i ekanini tekshir. Undan keyin sening kod commit'ing bo'lmasligi kerak.
+3. Shu bosh commit uchun uchala CI job yashil bo'lsin (Claude commit'i ham CI'ni ishga tushiradi, natijasini kut).
+4. `T0.5: Asinxron UnitOfWork, outbox va qurilma holati` nomi bilan Squash and merge qil.
+5. Merge SHA'sini yoz, `gemini/T0.5-uow-outbox` branch'ini o'chir.
+6. `git checkout main && git pull --ff-only`, so'ng `main`dan `gemini/T0.6-hub-auth` branch'ini och.
 
-Sabab: SQLite savepoint'lari stek. sp_2 sp_1 dan keyin ochilgani uchun `ROLLBACK TO sp_1` sp_2 ning allaqachon RELEASE qilingan ishini ham o'chiradi. Xuddi shu xato ota sessiyadan yozishda ham bor: `s.nested(...)` ochiq turganda `insertAttr(s, ...)` qilinsa, yozuv ichki savepoint ichiga tushadi va ichki rollback uni o'chiradi.
+## 3. T0.6 — Hub skeleti va autentifikatsiya: avval REJA
 
-**Tuzatish (aniq qoida):** tranzaksiya bo'yicha faol sessiyalar steki yuritilsin. Faqat stekning eng ustidagi (eng ichki faol) sessiya yozishi va `nested()` chaqirishi mumkin. Boshqa sessiyadan yozish yoki `nested()` darhol yangi `DomainError('UNIT_OF_WORK_CONCURRENT_NESTED')` bilan rad etilsin. Tekshiruv `assertActiveTransaction` ichida bo'lsin, shunda barcha yozish yo'llari qamraladi.
+Kod yozma. Avval rejani `.mezon/gemini/HISOBOT.md` ga yoz, `[gemini-reja] T0.6` bilan commit qil, yangi branch'ni push qil va `node .mezon/kutish.mjs` bilan Claude tasdig'ini kut.
 
-**Testlar:**
+GEMINI.md T0.6: Fastify, xato formati, tuzilgan log, foydalanuvchi, rollar, PIN (argon2id, 5 xato → 5 daqiqa blok), sessiya, birinchi ishga tushirish sehrgari (foydalanuvchi bo'lsa yopiladi). Standart `admin/admin` yo'q. Hub faqat `127.0.0.1`da tinglaydi.
 
-- (a) yuqoridagi `Promise.allSettled` stsenariysida ikkinchi `nested` rad etiladi va "fulfilled, lekin yo'qolgan" holat hech qachon bo'lmaydi;
-- (b) ichki savepoint ochiq turganda ota sessiyadan yozish rad etiladi;
-- (c) to'g'ri ichma-ich (bola ichida bola) va ketma-ket `nested()` chaqiruvlari avvalgidek ishlaydi.
+Rejada quyidagilar aniq bo'lsin:
 
-## K2. YUQORI — begona tashkilot nomidan yozish
+### a) Mahalliy hujumlardan himoya — muhim
 
-`insertAttr(s, table, { organizationId: <boshqa tashkilot>, ... })` rad etilmaydi va qator yoziladi.
+Hub `127.0.0.1`da ishlaydi. Kassa kompyuteridagi brauzerda ochilgan istalgan sayt `http://127.0.0.1:<port>`ga so'rov yubora oladi (CSRF), DNS rebinding orqali esa javobni ham o'qiy oladi. Rejada himoya bo'lsin:
 
-**Tuzatish:** barcha yozish yordamchilari (`insertFact`, `insertAttr`, `updateAttr`, `tombstoneAttr`) `organizationId` UoW ning `organizationId`siga tengligini tekshirsin. Aks holda yangi `DomainError('UNIT_OF_WORK_TENANT_MISMATCH')` qaytsin. Test bilan isbotla.
+- `Host` sarlavhasi faqat `127.0.0.1:<port>` yoki `localhost:<port>` bo'lishi shart, aks holda 421/403;
+- `Origin` ruxsat ro'yxati bilan tekshirilsin;
+- autentifikatsiya cookie orqali emas, `Authorization: Bearer` orqali bo'lsin, shunda brauzer o'zi yubormaydi va CORS preflight to'xtatadi;
+- CORS qat'iy yopiq bo'lsin.
 
-## K3. Testlar ushlamagan ataylab kiritilgan xatolar
+Har biri test bilan (`fastify.inject`).
 
-Claude 27 ta xatodan 6 tasi o'tib ketganini topdi. Har biri uchun test qo'sh:
+### b) PIN va brute force
 
-1. **Bola sessiya yopilishi.** `nested()` tugagach bola sessiya yopilmasa ham testlar o'tadi. Test: `nested` ichidagi bola sessiyani tashqariga saqlab, `nested` tugagandan keyin u bilan yozish `UNIT_OF_WORK_SESSION_CLOSED` berishi kerak.
-2. **`BEGIN IMMEDIATE` o'rniga oddiy `BEGIN`.** Test: bitta faylga ikki alohida ulanish. Birinchisi UoW ichida o'qiydi, `await` qiladi, keyin yozadi; shu orada ikkinchisi yozadi. `BEGIN IMMEDIATE` bilan ikkalasi ketma-ket muvaffaqiyatli bo'ladi (`busy_timeout` doirasida), oddiy `BEGIN` bilan `SQLITE_BUSY` chiqadi. Test shu farqni ushlasin.
-3. **`appendOutboxEventSync` ning `inTransaction` himoyasi.** Test: tranzaksiyadan tashqarida to'g'ridan-to'g'ri chaqirish xato beradi.
-4. **`SqliteOutboxRepository.listPending` filtri.** Test: bitta hodisani `acked`, bittasini `rejected` qil; `listPending` faqat `pending`larni qaytaradi.
-5. **Tashkilot darajasidagi jadval.** Test: unga `storeId` berilsa, yozish rad etiladi.
-6. **Session `assertActiveTransaction` ichidagi `sqlite.inTransaction` tekshiruvi.** Unga boshqa himoyalar sababli umuman yetib bo'lmasa, buni hisobotda asoslab yoz. Yetib bo'lsa, test qo'sh.
+- argon2id (`@node-rs/argon2`, asinxron), parametrlar OWASP tavsiyasidan past emas, asoslab yoz.
+- Foydalanuvchi bo'yicha 5 xatodan keyin 5 daqiqa blok. Blok holati bazada saqlansin, ya'ni qayta ishga tushganda yo'qolmasin.
+- Qurilma bo'yicha umumiy cheklov ham bo'lsin, shunda ko'p foydalanuvchini navbatma-navbat sinab bo'lmaydi.
+- Mavjud bo'lmagan foydalanuvchi uchun ham argon2 bajarilsin, javob vaqti foydalanuvchi bor-yo'qligini oshkor qilmasin.
+- PIN, hash va token loglarga tushmasin: pino `redact`, test bilan.
 
-## O'zgartirma
+### c) Ma'lumot
 
-`BEGIN IMMEDIATE`, FIFO mutex, `AsyncLocalStorage` reentrancy, `COMMIT` xatosida mutex bo'shashi, child process crash testi, deviceSeq bazada, trigger'lar va `db:check` — yaxshi.
+- Foydalanuvchi va rol: sinxron sinf (ATTR), T0.5 yozish yordamchilari va UoW orqali, outbox bilan.
+- PIN hash va blok holati: alohida LOCAL jadval. PIN bulutga sinxronlanmaydi.
+- Sessiya: tasodifiy 32 bayt token, bazada faqat SHA-256 hash saqlanadi, muddat va bekor qilish bilan (LOCAL).
+- Har jadval registrdan, migratsiya va `db:check` bilan.
 
-## Bajarish tartibi
+### d) Sehrgar
 
-1. `git pull --ff-only` (branch `gemini/T0.5-uow-outbox`).
-2. Tuzat va `pnpm verify` yashil bo'lsin.
-3. Commit `T0.5: parallel nested, tenant tekshiruvi va test qamrovi`, so'ng push.
-4. CI (uchala job) natijasini kut.
-5. `.mezon/gemini/HISOBOT.md` ga hisobot yoz (yangi SHA, verify chiqishi, CI havolalari, K1–K3 bo'yicha qaysi test nimani isbotlaydi), `[gemini-hisobot] T0.5` bilan commit va push.
-6. `node .mezon/kutish.mjs` ni ishga tushir va Claude javobini kut. Merge qilma, T0.6 ni boshlama.
+- `POST /setup` faqat foydalanuvchi yo'q bo'lsa ishlaydi. U tashkilot, do'kon, qurilma ID'larini va egani yaratadi.
+- Bir vaqtda kelgan ikki `setup` so'rovidan faqat bittasi muvaffaqiyatli bo'ladi (UoW va `BEGIN IMMEDIATE`). Test bilan.
+
+### e) Rollar
+
+- Kamida `owner`, `manager`, `cashier`.
+- Ruxsat route darajasida backendda tekshiriladi.
+- Rol × endpoint matritsasi bo'yicha test.
+
+### f) Xatolar va log
+
+- Yagona xato formati: `{ error: { code, message } }`.
+- `DomainError` kodlari xaritaga solinsin, ichki stack mijozga chiqmasin.
+- Kirish validatsiyasi Zod (`@mezon/contracts`) orqali.
+
+### g) Chegara
+
+- `apps/hub` `domain`, `contracts`, `db-local` va `drivers`ni import qila oladi, `db-cloud`ni import qila olmaydi. Kerak bo'lsa depcruise qoidasi qo'sh, salbiy dalil bilan.
+- Versiyalar GEMINI.md 2.1 dan, aniq.
+
+### h) Doira
+
+- Biznes jadvallari yo'q, faqat foydalanuvchi, rol, PIN va sessiya.
+- Electron yo'q (T0.7).
