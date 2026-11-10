@@ -72,3 +72,45 @@ jobs:
 
       - name: Run PostgreSQL RLS and bigint integration tests
         run: pnpm exec vitest run packages/db-cloud
+
+  desktop:
+    name: Build & E2E Desktop Installer (windows-latest)
+    runs-on: windows-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Install pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 12.18.0
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version-file: '.nvmrc'
+          cache: 'pnpm'
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Stage & build Windows NSIS installer
+        run: pnpm --filter @mezon/desktop run pack:win
+
+      - name: Verify Electron 45 native ABI (better-sqlite3, argon2, koffi)
+        run: pnpm --filter @mezon/desktop run verify:abi
+
+      - name: Verify fused packaged binary (fuses, RunAsNode/--inspect block, smoke launch, T5)
+        run: pnpm --filter @mezon/desktop run verify:fuses
+
+      - name: Run Playwright _electron E2E on identical app.asar
+        run: pnpm --filter @mezon/desktop run test:e2e
+
+      - name: Upload Windows NSIS installer artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: mezon-desktop-win-x64-nsis
+          path: apps/desktop/dist-electron/Mezon-Setup-*.exe
+          if-no-files-found: error
+          retention-days: 14

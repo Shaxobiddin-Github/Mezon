@@ -1,30 +1,7 @@
+import { DEFAULT_LOG_REDACT_PATHS, createRotatingFileLogStream } from '@mezon/drivers/node';
 import pino, { type DestinationStream, type LevelWithSilent, type Logger } from 'pino';
 
-export const HUB_LOGGER_REDACT_PATHS: readonly string[] = [
-  'req.headers.authorization',
-  'req.headers["x-pin"]',
-  'req.headers.cookie',
-  'req.headers["set-cookie"]',
-  'res.headers["set-cookie"]',
-  'pin',
-  '*.pin',
-  '*.*.pin',
-  'newPin',
-  '*.newPin',
-  'pinHash',
-  '*.pinHash',
-  'token',
-  '*.token',
-  '*.*.token',
-  'accessToken',
-  '*.accessToken',
-  'tokenHash',
-  '*.tokenHash',
-  'password',
-  '*.password',
-  'secret',
-  '*.secret',
-];
+export const HUB_LOGGER_REDACT_PATHS: readonly string[] = DEFAULT_LOG_REDACT_PATHS;
 
 export interface CreateHubLoggerOptions {
   readonly level?: LevelWithSilent;
@@ -42,4 +19,20 @@ export function createHubLogger(options?: CreateHubLoggerOptions): Logger {
   };
 
   return options?.stream ? pino(pinoOptions, options.stream) : pino(pinoOptions);
+}
+
+export interface CreateRotatingHubLogStreamOptions {
+  readonly logDir: string;
+  readonly filename?: string;
+  readonly maxBytes?: number;
+  readonly maxFiles?: number;
+}
+
+export function createRotatingHubLogStream(options: CreateRotatingHubLogStreamOptions) {
+  return createRotatingFileLogStream({
+    directory: options.logDir,
+    filename: options.filename ?? 'mezon-hub.log',
+    maxBytes: options.maxBytes,
+    maxFiles: options.maxFiles,
+  });
 }

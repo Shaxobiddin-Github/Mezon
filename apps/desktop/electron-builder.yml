@@ -1,0 +1,40 @@
+appId: uz.mezon.kassa
+productName: Mezon
+copyright: Copyright © 2026 Mezon
+directories:
+  app: dist-app
+  output: dist-electron
+asar: true
+asarUnpack:
+  - '**/*.node'
+nodeGypRebuild: false
+buildDependenciesFromSource: false
+files:
+  - package.json
+  - desktop/**/*
+  - pos/**/*
+  - from: node_modules
+    to: node_modules
+    filter:
+      - '**/*'
+beforeBuild: ./scripts/before-build.mjs
+afterPack: ./scripts/after-pack-fuses.mjs
+win:
+  target:
+    - target: nsis
+      arch:
+        - x64
+  artifactName: Mezon-Setup-${version}-${arch}.${ext}
+  signAndEditExecutable: false
+nsis:
+  oneClick: false
+  perMachine: false
+  allowElevation: false
+  allowToChangeInstallationDirectory: true
+  deleteAppDataOnUninstall: false
+  createDesktopShortcut: true
+  createStartMenuShortcut: true
+  shortcutName: Mezon Kassa
+electronLanguages:
+  - en-US
+  - ru

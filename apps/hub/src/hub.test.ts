@@ -1111,7 +1111,7 @@ describe('@mezon/hub - HTTP security, Argon2id PIN auth, setup wizard, RBAC, and
         .get(ownerId, resetAtMs);
       expect(postResetSessions?.cnt).toBe(0n);
 
-      // Failed-attempt counter MUST NOT have incremented due to this race
+      // Failed-attempt counters (both user & device) MUST NOT have incremented due to this race
       const rawCred = hub.connection.sqlite
         .prepare<
           [string],
@@ -1120,6 +1120,13 @@ describe('@mezon/hub - HTTP security, Argon2id PIN auth, setup wizard, RBAC, and
         .get(ownerId);
       expect(rawCred?.failed_attempts).toBe(0n);
       expect(rawCred?.locked_until_ms).toBeNull();
+
+      const deviceAuthRows = hub.connection.sqlite
+        .prepare<[], { readonly cnt: bigint }>(
+          'SELECT COUNT(*) AS cnt FROM local_device_auth_state WHERE failed_attempts > 0',
+        )
+        .get();
+      expect(deviceAuthRows?.cnt).toBe(0n);
 
       // Previous ownerToken1 stays revoked; old PIN still fails; new PIN succeeds cleanly
       expect(
@@ -1155,4 +1162,189 @@ describe('@mezon/hub - HTTP security, Argon2id PIN auth, setup wizard, RBAC, and
       await hub.close();
     }
   }, 30_000);
+
+  it('allows allowlisted app://mezon Electron custom scheme with strict non-credentialed CORS while keeping other origins locked down', async () => {
+    await expect(
+      createHubServer({
+        dbPath: makeDbPath('bad-app-origin.db'),
+        allowedOrigins: ['app://mezon/subpath'],
+        logLevel: 'silent',
+        pinHasher: makeFastTestHasher(),
+      }),
+    ).rejects.toThrow(/without path/);
+
+    await expect(
+      createHubServer({
+        dbPath: makeDbPath('bad-file-origin.db'),
+        allowedOrigins: ['file://'],
+        logLevel: 'silent',
+        pinHasher: makeFastTestHasher(),
+      }),
+    ).rejects.toThrow();
+
+    const hub = await createHubServer({
+      dbPath: makeDbPath('electron-origin.db'),
+      port: TEST_PORT,
+      allowedOrigins: ['app://mezon'],
+      logLevel: 'silent',
+      pinHasher: makeFastTestHasher(),
+      registerExtraTestRoutes: (app) => {
+        app.get('/__test-boom', () => {
+          throw new Error('simulated hub internal error');
+        });
+      },
+    });
+
+    try {
+      const allowedGet = await hub.app.inject({
+        method: 'GET',
+        url: '/health',
+        headers: loopHeaders({
+          origin: 'app://mezon',
+          'sec-fetch-site': 'cross-site',
+        }),
+      });
+      expect(allowedGet.statusCode).toBe(200);
+      expect(allowedGet.headers['access-control-allow-origin']).toBe('app://mezon');
+      expect(allowedGet.headers['access-control-expose-headers']).toBe('Retry-After');
+      expect(allowedGet.headers['access-control-allow-credentials']).toBeUndefined();
+      expect(allowedGet.headers['vary']).toBe('Origin');
+
+      const allowedPreflight = await hub.app.inject({
+        method: 'OPTIONS',
+        url: '/auth/login',
+        headers: loopHeaders({
+          origin: 'app://mezon',
+          'sec-fetch-site': 'cross-site',
+          'access-control-request-method': 'POST',
+          'access-control-request-headers': 'authorization, content-type',
+        }),
+      });
+      expect(allowedPreflight.statusCode).toBe(204);
+      expect(allowedPreflight.headers['access-control-allow-origin']).toBe('app://mezon');
+      expect(allowedPreflight.headers['access-control-expose-headers']).toBe('Retry-After');
+      expect(allowedPreflight.headers['access-control-allow-credentials']).toBeUndefined();
+
+      // Setup owner + cashier to verify 401, 403, 429 (with Retry-After), and 500 preserve CORS for app://mezon
+      const setupRes = await hub.app.inject({
+        method: 'POST',
+        url: '/setup',
+        headers: loopHeaders({ origin: 'app://mezon', 'sec-fetch-site': 'cross-site' }),
+        payload: {
+          owner: { fullName: 'Owner Test', username: 'owner', pin: '135790' },
+        },
+      });
+      expect(setupRes.statusCode).toBe(201);
+
+      const ownerLogin = await hub.app.inject({
+        method: 'POST',
+        url: '/auth/login',
+        headers: loopHeaders({ origin: 'app://mezon', 'sec-fetch-site': 'cross-site' }),
+        payload: { username: 'owner', pin: '135790' },
+      });
+      expect(ownerLogin.statusCode).toBe(200);
+      const ownerToken = ownerLogin.json<{ readonly token: string }>().token;
+
+      const cashierCreate = await hub.app.inject({
+        method: 'POST',
+        url: '/users',
+        headers: authHeaders(ownerToken, {
+          origin: 'app://mezon',
+          'sec-fetch-site': 'cross-site',
+        }),
+        payload: { fullName: 'Cashier Test', username: 'kassir', role: 'cashier', pin: '246813' },
+      });
+      expect(cashierCreate.statusCode).toBe(201);
+
+      const cashierLogin = await hub.app.inject({
+        method: 'POST',
+        url: '/auth/login',
+        headers: loopHeaders({ origin: 'app://mezon', 'sec-fetch-site': 'cross-site' }),
+        payload: { username: 'kassir', pin: '246813' },
+      });
+      expect(cashierLogin.statusCode).toBe(200);
+      const cashierToken = cashierLogin.json<{ readonly token: string }>().token;
+
+      // 401 (/auth/me unauthenticated + /auth/login wrong PIN)
+      const res401 = await hub.app.inject({
+        method: 'GET',
+        url: '/auth/me',
+        headers: loopHeaders({ origin: 'app://mezon', 'sec-fetch-site': 'cross-site' }),
+      });
+      expect(res401.statusCode).toBe(401);
+      expect(res401.headers['access-control-allow-origin']).toBe('app://mezon');
+      expect(res401.headers['access-control-expose-headers']).toBe('Retry-After');
+      expect(res401.headers['vary']).toBe('Origin');
+
+      // 403 (cashier accessing owner-only /users)
+      const res403 = await hub.app.inject({
+        method: 'GET',
+        url: '/users',
+        headers: authHeaders(cashierToken, {
+          origin: 'app://mezon',
+          'sec-fetch-site': 'cross-site',
+        }),
+      });
+      expect(res403.statusCode).toBe(403);
+      expect(res403.headers['access-control-allow-origin']).toBe('app://mezon');
+      expect(res403.headers['access-control-expose-headers']).toBe('Retry-After');
+      expect(res403.headers['vary']).toBe('Origin');
+
+      // Trigger real 429 AUTH_RATE_LIMITED with Retry-After header after 5 failed PIN attempts
+      for (let attempt = 0; attempt < 5; attempt += 1) {
+        const badPinRes = await hub.app.inject({
+          method: 'POST',
+          url: '/auth/login',
+          headers: loopHeaders({ origin: 'app://mezon', 'sec-fetch-site': 'cross-site' }),
+          payload: { username: 'kassir', pin: '999999' },
+        });
+        expect(badPinRes.statusCode).toBe(401);
+        expect(badPinRes.headers['access-control-allow-origin']).toBe('app://mezon');
+      }
+      const res429 = await hub.app.inject({
+        method: 'POST',
+        url: '/auth/login',
+        headers: loopHeaders({ origin: 'app://mezon', 'sec-fetch-site': 'cross-site' }),
+        payload: { username: 'kassir', pin: '999999' },
+      });
+      expect(res429.statusCode).toBe(429);
+      expect(Number(res429.headers['retry-after'])).toBeGreaterThanOrEqual(1);
+      expect(res429.headers['access-control-allow-origin']).toBe('app://mezon');
+      expect(res429.headers['access-control-expose-headers']).toBe('Retry-After');
+      expect(res429.headers['vary']).toBe('Origin');
+
+      // 500 internal error
+      const res500 = await hub.app.inject({
+        method: 'GET',
+        url: '/__test-boom',
+        headers: loopHeaders({ origin: 'app://mezon', 'sec-fetch-site': 'cross-site' }),
+      });
+      expect(res500.statusCode).toBe(500);
+      expect(res500.headers['access-control-allow-origin']).toBe('app://mezon');
+      expect(res500.headers['access-control-expose-headers']).toBe('Retry-After');
+      expect(res500.headers['vary']).toBe('Origin');
+
+      for (const badOrigin of ['app://evil', 'file://', 'https://evil.uz']) {
+        const deniedGet = await hub.app.inject({
+          method: 'GET',
+          url: '/health',
+          headers: loopHeaders({ origin: badOrigin, 'sec-fetch-site': 'cross-site' }),
+        });
+        expect(deniedGet.statusCode).toBe(403);
+        expect(deniedGet.headers['access-control-allow-origin']).toBeUndefined();
+        expect(deniedGet.headers['access-control-expose-headers']).toBeUndefined();
+
+        const deniedErr = await hub.app.inject({
+          method: 'GET',
+          url: '/__test-boom',
+          headers: loopHeaders({ origin: badOrigin, 'sec-fetch-site': 'cross-site' }),
+        });
+        expect(deniedErr.statusCode).toBe(403);
+        expect(deniedErr.headers['access-control-allow-origin']).toBeUndefined();
+        expect(deniedErr.headers['access-control-expose-headers']).toBeUndefined();
+      }
+    } finally {
+      await hub.close();
+    }
+  });
 });

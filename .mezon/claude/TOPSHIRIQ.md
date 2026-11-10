@@ -1,72 +1,72 @@
-# Claude topshirig'i: T0.6 QABUL → T0.7 rejasi
+# Claude topshirig'i: T0.7 QABUL → F0 yakuni → T1.1 rejasi
 
-## 1. T0.6 xulosasi: QABUL (kod commit'i `9b7a75b`)
+## 1. T0.7 xulosasi: QABUL (kod `1d61486`)
 
-Claude toza klonda tekshirdi:
+Claude tekshirdi:
 
-- `pnpm verify` ketma-ket 2 marta yashil (99 test), ya'ni beqaror test tuzaldi.
-- Claude'ning H1–H3 hujumlari to'xtatildi: Host/Origin variantlari, 60 ta parallel PIN, PIN reset paytidagi TOCTOU.
-- Ataylab kiritilgan 12 xatodan 10 tasi ushlandi. Qolgan ikkitasi xavfsizlikka ta'sir qilmaydi:
-  - `normalizedOrigin === 'null'` tekshiruvi ortiqcha, chunki `null` baribir ruxsat ro'yxatida yo'q.
-  - R1 dagi alohida TOCTOU himoyasi o'chirilsa ham sessiya ochilmaydi. Lekin `failed_attempts` 1 ga oshadi va testlar buni ushlamadi.
-
-**Diqqat:** hisobotda R1 testi `failed_attempts = 0n` ni tekshiradi deb yozilgan, amalda bu tekshiruv hech narsani ushlamaydi. Hisobotdagi dalil kod bilan mos bo'lishi shart. T0.7 PR'ida alohida commit sifatida (`T0.6 test qarzi: R1 failed_attempts tekshiruvi`) shu testni tuzat: TOCTOU himoyasi o'chirilganda test yiqilishi kerak. Mutatsiya bilan isbotla.
+- `pnpm verify` o'tdi.
+- `app://mezon` uchun 401 javoblarida ham CORS sarlavhasi bor.
+- `win-unpacked` qayta yig'ildi, `verify:fuses` va Playwright E2E o'tdi (ruxsatlar rad etilishi va xato javoblarini o'qish bilan).
 
 ## 2. Merge
 
 1. `git pull --ff-only`.
-2. PR #6 boshi Claude'ning shu topshiriq commit'i bo'lsin va uchala CI job yashil bo'lsin.
-3. `T0.6: Hub skeleti va autentifikatsiya` nomi bilan Squash and merge qil, SHA'ni yoz va branch'ni o'chir.
-4. `main`dan `gemini/T0.7-electron-shell` branch'ini och.
+2. PR #7 boshi Claude'ning shu topshiriq commit'i bo'lsin. To'rtala CI job yashil bo'lsin.
+3. `T0.7: Electron qobig'i va Windows o'rnatuvchi` nomi bilan Squash and merge qil, SHA'ni yoz va branch'ni o'chir.
+4. `main`dan `gemini/T1.1-catalog` branch'ini och.
 
-## 3. T0.7 — Electron qobig'i: avval REJA
+**F0 bosqichi shu bilan yakunlanadi.** Claude `main` ustida F0 bo'yicha alohida yakuniy tekshiruv o'tkazadi. Unda topilgan narsalar keyingi topshiriqlarda alohida beriladi. Sen T1.1 rejasini davom ettir.
 
-Kod yozma. Rejani `.mezon/gemini/HISOBOT.md` ga yoz, `[gemini-reja] T0.7` bilan commit qil va push qil, so'ng `node .mezon/kutish.mjs` bilan kut.
+## 3. T1.1 — Katalog: avval REJA
 
-GEMINI.md T0.7: Electron hub'ni ishga tushiradi va UI'ni ochadi. Ma'lumot `%LOCALAPPDATA%` da saqlanadi va ilova o'chirilganda qoladi. O'rnatish admin parolisiz bo'ladi. Bir nusxa rejimi va `contextIsolation` yoqilgan.
+Kod yozma. Rejani `.mezon/gemini/HISOBOT.md` ga yoz, `[gemini-reja] T1.1` bilan commit qil va push qil, so'ng `node .mezon/kutish.mjs` bilan kut.
+
+GEMINI.md T1.1: mahsulot, kategoriya, variant (JSON atributlar), bir nechta shtrix-kod, birliklar (dona, kg, g, litr, metr, m², qadoq), `unlimited` (xizmat/cheksiz), `min_stock`, narx tarixi, qidiruv va skan indekslari. Mezonlar:
+
+- 50 000 mahsulotda skan ≤ 20 ms (domen va baza qismi);
+- bitta shtrix-kod faqat bitta yozuvga bog'langan.
 
 Rejada quyidagilar aniq bo'lsin:
 
-### a) Jarayonlar arxitekturasi
+### a) Jadvallar va sinflar
 
-Hub qayerda ishlaydi: `main` jarayonidami yoki `utilityProcess`dami? Tavsiya: `utilityProcess`. Shunda hub yiqilsa, UI yiqilmaydi. Hub yiqilganda kechikish bilan qayta ishga tushirish va logga yozish bo'lsin. Tanlovingni asosla.
+- `categories`, `products`, `product_variants`, `product_barcodes`: ATTR, T0.5 yozish yordamchilari va outbox orqali.
+- Narx tarixi `price_changes`: FACT, har narx o'zgarishida o'sha UoW ichida yoziladi.
+- Katalog tashkilot darajasida bo'ladi. Do'kon bo'yicha alohida narx F5'da. Agar boshqacha taklif qilsang, asosla.
+- Fiskal uchun kerakli maydonlar hozirdan bo'lsin (GEMINI.md 8-bo'lim): `mxik` va `package_code` (nullable), `vat_rate_bp` (VatRate).
+- Pul uchun `sqliteMoney`, miqdor uchun `sqliteQuantity` ishlatilsin. `real` ishlatilmasin.
 
-Port: ishga tushishda bo'sh tasodifiy port. Renderer unga faqat preload orqali kelgan `hubBaseUrl` bilan ulanadi.
+### b) Birlik va miqdor qoidasi (domen)
 
-### b) Electron xavfsizligi
+- `dona` va `qadoq` uchun miqdor faqat butun son bo'lsin (`Quantity` 1000 ga karrali). `kg`/`litr`/`metr`/`m²` uchun 0.001 aniqlik.
+- Qoida `packages/domain`da sof funksiya bo'lsin va property test bilan tekshirilsin.
 
-Hub'dagi Host/Origin himoyasi shunga tayanadi:
+### c) Shtrix-kod
 
-- `contextIsolation: true`, `sandbox: true`, `nodeIntegration: false`, `webSecurity: true`.
-- Preload `contextBridge` orqali faqat minimal API beradi: Node, `ipcRenderer` umumiy obyekti va fayl tizimi yo'q.
-- UI `file://` orqali emas, maxsus `app://mezon` protokolidan (privileged, standard, secure) asar ichidan yuklanadi. Hub `allowedOrigins` = aynan `['app://mezon']`. Renderer haqiqatan shu `Origin` bilan so'rov yuborishini test bilan isbotla.
-- Qat'iy CSP: faqat `app://mezon` va hub manzili.
-- `will-navigate` va `setWindowOpenHandler` hammasini rad etadi, tashqi havolalar ochilmaydi.
-- Electron fuses: `RunAsNode` o'chiq, `EnableNodeOptionsEnvironmentVariable` o'chiq, `EnableNodeCliInspectArguments` o'chiq, `EnableEmbeddedAsarIntegrityValidation` va `OnlyLoadAppFromAsar` yoqilgan. Paket versiyasini npm'da tekshirib aniq mahkamla.
+- Normalizatsiya: bo'shliqlarni olib tashlash va faqat ruxsat etilgan belgilar.
+- EAN-13/EAN-8/UPC-A uchun nazorat raqami tekshiruvi. Noto'g'ri nazorat raqami ogohlantirish beradimi yoki rad etiladimi: tanlovni asosla. Ichki do'kon kodlari ham qo'llab-quvvatlanadi.
+- Noyoblik: faol shtrix-kodlar orasida tashkilot bo'yicha noyob (partial unique index, `deleted_at_ms IS NULL`).
+- Tarozi yorlig'i (EAN-13 ichida og'irlik yoki narx, `2x` prefiks) T5.8'da bo'ladi. Lekin skan qidiruv funksiyasi hozirdan `{ product, variant?, quantity? }` qaytaradigan qilib loyihalansin, keyin kengaytirish oson bo'lsin.
 
-### c) Ma'lumot va o'rnatish
+### d) Nom bo'yicha qidiruv
 
-- Baza, log va konfiguratsiya `%LOCALAPPDATA%\Mezon\` da bo'lsin. `app.getPath('userData')` standart holatda Roaming'ga qaraydi, uni aniq qayta yo'naltir.
-- NSIS: foydalanuvchi uchun, admin parolisiz, o'chirishda ma'lumot saqlanadi.
-- Bir nusxa rejimi: ikkinchi ishga tushirishda mavjud oyna oldinga chiqadi va ikkinchi hub ishga tushmaydi.
-- Loglar faylga, hub'dagi `redact` bilan.
+- O'zbek tilining real holati: lotin va kirill aralash, `o'`/`g'` apostrof variantlari (`'`, `ʻ`, `ʼ`, `‘`).
+- Qidiruv uchun normalizatsiya funksiyasi `packages/domain`da bo'lsin: kirill → lotin, apostroflarni birxillashtirish, katta-kichik harf. Testlar bilan.
+- SQLite FTS5 yoki boshqa yondashuv: tanlovni asosla. Maqsad: 50 000 mahsulotda nom qidiruvi p95 ≤ 50 ms.
 
-### d) Native modullar
+### e) Hub API va RBAC
 
-better-sqlite3 va koffi Electron 45 ABI uchun qayta yig'ilsin (`@electron/rebuild` yoki electron-builder `install-app-deps`). Oddiy Node testlari ham buzilmasin: Node va Electron ABI'lari to'qnashmasligi uchun yechimni yoz.
+- Mahsulot va kategoriya CRUD: `owner`, `manager`.
+- O'qish va skan qidiruvi: `cashier` ham.
+- Zod kontraktlari `@mezon/contracts`da.
+- Javoblarda kassirga tannarx ko'rsatilmaydi (GEMINI.md 3.4). Tannarx T1.2 partiyada bo'ladi, lekin DTO hozirdan shunga tayyor tursin.
 
-### e) UI
+### f) Unumdorlik testi
 
-Faqat minimal sahifa. U hub `/health` holatini va `needsSetup`ni ko'rsatadi. Haqiqiy kassa UI T1.11 da bo'ladi.
-
-### f) Testlar va CI
-
-- `windows-latest` da alohida `desktop` job. U o'rnatuvchini yig'adi va artifact sifatida saqlaydi.
-- Playwright (`_electron`) smoke testi: ilova ochiladi, oyna `app://mezon` ni yuklaydi, hub `/health` 200 qaytaradi, `Origin` = `app://mezon`, ikkinchi nusxa ochilmaydi, hub yiqilganda qayta ko'tariladi.
-- Toza Windows'ga qo'lda o'rnatish va o'chirib qayta o'rnatganda ma'lumot saqlanishi: egasi qiladigan qo'lda tekshiruv ro'yxatini yoz.
+- 50 000 mahsulot va 70 000 shtrix-kod bilan seed.
+- Skan va nom qidiruvining p50/p95 qiymatlari o'lchansin va hisobotga yozilsin.
+- CI'da sekin kompyuter uchun chegara oqilona bo'lsin, lekin regressiyani ushlasin.
 
 ### g) Doiradan tashqari
 
-- Code signing: egasi qarori, keyinroq. SmartScreen ogohlantirishini yoz.
-- Avtomatik yangilanish: T4.8.
-- Kassa UI: T1.11.
+Ombor qoldig'i va partiya (T1.2), narx aksiyalari (T1.3), UI (T1.11).

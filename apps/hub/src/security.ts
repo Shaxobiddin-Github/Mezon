@@ -67,23 +67,43 @@ function assertValidHostHeader(
   }
 }
 
+function isAllowlistedDesktopAppOrigin(
+  rawOrigin: string | string[] | undefined,
+  allowedOrigins: ReadonlySet<string>,
+): string | null {
+  if (typeof rawOrigin !== 'string') {
+    return null;
+  }
+  const normalized = rawOrigin.trim();
+  if (!normalized.startsWith('app://') || !allowedOrigins.has(normalized)) {
+    return null;
+  }
+  return normalized;
+}
+
 function assertAllowedBrowserOrigin(
   request: FastifyRequest,
   allowedOrigins: ReadonlySet<string>,
-): void {
+): string | null {
+  const desktopAppOrigin = isAllowlistedDesktopAppOrigin(request.headers.origin, allowedOrigins);
+
   const secFetchSite = request.headers['sec-fetch-site'];
-  if (typeof secFetchSite === 'string' && secFetchSite.trim().toLowerCase() === 'cross-site') {
+  if (
+    desktopAppOrigin === null &&
+    typeof secFetchSite === 'string' &&
+    secFetchSite.trim().toLowerCase() === 'cross-site'
+  ) {
     throw new DomainError('FORBIDDEN_ORIGIN', 'Cross-site requests are forbidden');
   }
 
-  // Strictly close all CORS preflight requests regardless of origin
-  if (request.method.toUpperCase() === 'OPTIONS') {
+  // Strictly close browser CORS preflight unless the request comes from an allowlisted Electron app:// origin
+  if (request.method.toUpperCase() === 'OPTIONS' && desktopAppOrigin === null) {
     throw new DomainError('FORBIDDEN_ORIGIN', 'CORS preflight requests are not allowed');
   }
 
   const rawOrigin = request.headers.origin;
   if (rawOrigin === undefined) {
-    return;
+    return null;
   }
   if (typeof rawOrigin !== 'string') {
     throw new DomainError('FORBIDDEN_ORIGIN', 'Origin header is invalid');
@@ -97,6 +117,8 @@ function assertAllowedBrowserOrigin(
   ) {
     throw new DomainError('FORBIDDEN_ORIGIN', 'Origin is not allowed');
   }
+
+  return desktopAppOrigin;
 }
 
 export function registerHubSecurityHooks(
@@ -114,22 +136,48 @@ export function registerHubSecurityHooks(
       throw err;
     }
 
+    let desktopAppOrigin: string | null = null;
     try {
-      assertAllowedBrowserOrigin(request, config.allowedOrigins);
+      desktopAppOrigin = assertAllowedBrowserOrigin(request, config.allowedOrigins);
     } catch (err) {
       if (err instanceof DomainError) {
         return sendSecurityError(reply, 403, err);
       }
       throw err;
     }
+
+    if (desktopAppOrigin !== null && request.method.toUpperCase() === 'OPTIONS') {
+      return reply
+        .code(204)
+        .header('access-control-allow-origin', desktopAppOrigin)
+        .header('access-control-expose-headers', 'Retry-After')
+        .header('vary', 'Origin')
+        .header('access-control-allow-methods', 'GET, POST, PUT, PATCH, DELETE')
+        .header('access-control-allow-headers', 'authorization, content-type, x-pin')
+        .header('access-control-max-age', '600')
+        .send();
+    }
   });
 
-  app.addHook('onSend', async (_request, reply, payload) => {
+  app.addHook('onSend', async (request, reply, payload) => {
+    const desktopAppOrigin = isAllowlistedDesktopAppOrigin(
+      request.headers.origin,
+      config.allowedOrigins,
+    );
     reply.removeHeader('set-cookie');
-    reply.removeHeader('access-control-allow-origin');
     reply.removeHeader('access-control-allow-credentials');
-    reply.removeHeader('access-control-allow-methods');
-    reply.removeHeader('access-control-allow-headers');
+
+    if (desktopAppOrigin !== null) {
+      reply.header('access-control-allow-origin', desktopAppOrigin);
+      reply.header('access-control-expose-headers', 'Retry-After');
+      reply.header('vary', 'Origin');
+    } else {
+      reply.removeHeader('access-control-allow-origin');
+      reply.removeHeader('access-control-expose-headers');
+      reply.removeHeader('access-control-allow-methods');
+      reply.removeHeader('access-control-allow-headers');
+    }
+
     reply.header('cache-control', 'no-store');
     reply.header('x-content-type-options', 'nosniff');
     return payload;

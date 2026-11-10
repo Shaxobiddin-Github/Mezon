@@ -3,7 +3,21 @@
   "compilerOptions": {
     "outDir": "./dist",
     "rootDir": "./src",
-    "composite": true
+    "composite": true,
+    "lib": ["ES2024", "DOM"],
+    "types": ["node"]
   },
-  "include": ["src/**/*"]
+  "references": [
+    {
+      "path": "../../packages/domain"
+    },
+    {
+      "path": "../../packages/contracts"
+    },
+    {
+      "path": "../../packages/drivers"
+    }
+  ],
+  "include": ["src/**/*"],
+  "exclude": ["src/**/*.test.ts"]
 }

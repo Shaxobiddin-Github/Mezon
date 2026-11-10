@@ -274,4 +274,53 @@ describe('@mezon/db-local - SqliteHubAuthStore, partial username uniqueness, per
       conn.close();
     }
   });
+
+  it('rejects commitLoginOutcome cleanly when PIN rotated mid-flight without opening session or incrementing user/device failed_attempts (T0.6 R1 debt)', async () => {
+    const dbPath = makeDbPath('r1-debt-pin-rotation.db');
+    const conn = openLocalSqliteDatabase(dbPath);
+    const clock = new FixedClock(1_700_000_400_000n);
+
+    try {
+      migrateLocalDatabase(conn.db);
+      const store = await createSqliteHubAuthStore({
+        connection: conn,
+        clock,
+        random: new SeededRandomSource(106),
+      });
+      const { owner } = await store.completeSetup({
+        fullName: 'Race Debt Owner',
+        username: 'owner_r1',
+        pinHash: 'hash-old-pin',
+      });
+
+      const snap = await store.prepareLoginSnapshot({ kind: 'userId', userId: owner.id });
+      expect(snap.pinHash).toBe('hash-old-pin');
+
+      // Rotate PIN mid-flight after snapshot was taken
+      clock.advance(50n);
+      await store.resetUserPin({ userId: owner.id, pinHash: 'hash-new-pin' });
+
+      // Late commit using stale verified hash MUST reject without opening session OR incrementing counters
+      clock.advance(250n);
+      const lateCommit = await store.commitLoginOutcome({
+        selector: { kind: 'userId', userId: owner.id },
+        verifiedPinForUserId: owner.id,
+        verifiedPinHash: 'hash-old-pin',
+        tokenHashToMint: 'b'.repeat(64),
+      });
+      expect(lateCommit).toEqual({ kind: 'invalid_credentials' });
+
+      expect(conn.db.select().from(localSessions).all()).toHaveLength(0);
+      expect(conn.db.select().from(localDeviceAuthState).all()).toHaveLength(0);
+      const credAfter = conn.db
+        .select()
+        .from(localPinCredentials)
+        .where(eq(localPinCredentials.userId, owner.id))
+        .all()[0];
+      expect(credAfter.failedAttempts).toBe(0);
+      expect(credAfter.lockedUntilMs).toBeNull();
+    } finally {
+      conn.close();
+    }
+  });
 });

@@ -67,4 +67,22 @@ packages/
   - `packages/rules` faqat `packages/domain`ni import qila oladi.
   - `apps/*` ilovalari bir-birini import qila olmaydi.
   - `packages/*` paketlari `apps/*` ilovalarini import qila olmaydi.
+  - `apps/desktop/src` `db-local`, `db-cloud`, `@mezon/hub` va `@mezon/pos` ni import qila olmaydi; Hub `utilityProcess` orqali alohida ishga tushadi.
+  - `apps/pos/src` brauzer muhitida qoladi (`node:*`, `electron`, `db-*`, `drivers` taqiqlangan).
   - `domain` va `rules` ichida `Date.now()`, `new Date()`, `Math.random()`, `crypto` va `process` global ob'ektlari ESLint orqali taqiqlangan.
+
+---
+
+## 5. Desktop (Electron 45) yig'ish va tekshirish (Windows)
+
+> **Windows eslatma:** NSIS (`makensis`) 260 belgilik yo'l (`MAX_PATH`) chegarasiga ega bo'lgani uchun Windows'da repozitoriyani qisqa yo'lda saqlash tavsiya etiladi (masalan `D:\mezon`).
+
+```bash
+pnpm --filter @mezon/desktop run pack:win
+pnpm --filter @mezon/desktop run verify:abi
+pnpm --filter @mezon/desktop run verify:fuses
+pnpm --filter @mezon/desktop run test:e2e
+```
+
+- Ma'lumot va loglar Windows'da `%LOCALAPPDATA%\Mezon\` ostida saqlanadi (`deleteAppDataOnUninstall: false`).
+- `apps/desktop/dist-app` izolyatsiya qilingan staging katalogi orqali Electron `45.2.3` nativ bog'liqliklari root `node_modules` ga ta'sir qilmaydi.
