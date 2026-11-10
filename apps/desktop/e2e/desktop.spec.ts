@@ -145,6 +145,50 @@ test('Playwright unfused Electron against identical app.asar: app://mezon, CSP, 
     });
     expect(rejectedHealth.status).toBe(403);
 
+    // 1b. R1: Renderer fetch receives 401 JSON error envelope on wrong PIN.
+    const loginErrorResult = await page.evaluate(async (hubUrl) => {
+      const res = await fetch(`${hubUrl}/auth/login`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ username: 'unknown-cashier', pin: '1234' }),
+      });
+      const json = (await res.json()) as {
+        readonly error?: { readonly code?: string };
+      };
+      return {
+        status: res.status,
+        errorCode: json.error?.code ?? null,
+      };
+    }, initialHubUrl);
+    expect(loginErrorResult).toEqual({
+      status: 401,
+      errorCode: 'AUTH_INVALID_CREDENTIALS',
+    });
+
+    // 1c. R2: Renderer permission requests (Notification, camera) are denied by Electron session handlers.
+    const permissionResult = await page.evaluate(async () => {
+      const notificationPermission = await Notification.requestPermission();
+      let mediaGranted = false;
+      let mediaErrorName: string | null = null;
+      try {
+        const stream = await navigator.mediaDevices.getUserMedia({ video: true });
+        mediaGranted = true;
+        for (const track of stream.getTracks()) {
+          track.stop();
+        }
+      } catch (err) {
+        mediaErrorName = err instanceof Error ? err.name : String(err);
+      }
+      return {
+        notificationPermission,
+        mediaGranted,
+        mediaErrorName,
+      };
+    });
+    expect(permissionResult.notificationPermission).toBe('denied');
+    expect(permissionResult.mediaGranted).toBe(false);
+    expect(permissionResult.mediaErrorName).toBe('NotAllowedError');
+
     // 2. Renderer sandbox, CSP inline-script block, & preload boundary checks.
     const sandboxDiagnostics = await page.evaluate(() => {
       const win = window as unknown as {
@@ -231,6 +275,42 @@ test('Playwright unfused Electron against identical app.asar: app://mezon, CSP, 
       const recoveredHubUrl = (await page.getByTestId('hub-url').innerText()).trim();
       expect(recoveredHubUrl).toMatch(/^http:\/\/127\.0\.0\.1:\d+$/);
       expect(recoveredHubUrl).not.toBe(initialHubUrl);
+
+      // 4c. R1 (post-recovery): After setup, 5 wrong PIN attempts trigger 429 and renderer reads Retry-After header.
+      const rateLimitCheck = await page.evaluate(async (hubUrl) => {
+        const setupRes = await fetch(`${hubUrl}/setup`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            owner: { fullName: 'E2E Owner', username: 'e2eowner', pin: '135790' },
+          }),
+        });
+        for (let i = 0; i < 5; i += 1) {
+          await fetch(`${hubUrl}/auth/login`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ username: 'e2eowner', pin: '999999' }),
+          });
+        }
+        const res429 = await fetch(`${hubUrl}/auth/login`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ username: 'e2eowner', pin: '999999' }),
+        });
+        const json429 = (await res429.json()) as {
+          readonly error?: { readonly code?: string };
+        };
+        return {
+          setupStatus: setupRes.status,
+          status: res429.status,
+          errorCode: json429.error?.code ?? null,
+          retryAfter: res429.headers.get('retry-after'),
+        };
+      }, recoveredHubUrl);
+      expect(rateLimitCheck.setupStatus).toBe(201);
+      expect(rateLimitCheck.status).toBe(429);
+      expect(rateLimitCheck.errorCode).toBe('AUTH_RATE_LIMITED');
+      expect(Number(rateLimitCheck.retryAfter)).toBeGreaterThanOrEqual(1);
     } finally {
       await new Promise<void>((resolve) => {
         portOccupier.close(() => resolve());

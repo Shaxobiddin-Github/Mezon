@@ -141,6 +141,15 @@ function registerSessionCspHeaders(): void {
   });
 }
 
+function registerSessionPermissionHandlers(): void {
+  session.defaultSession.setPermissionRequestHandler((_webContents, permission, callback) => {
+    desktopLog.logger.warn({ permission }, 'desktop_blocked_permission_request');
+    callback(false);
+  });
+  session.defaultSession.setPermissionCheckHandler(() => false);
+  session.defaultSession.setDevicePermissionHandler(() => false);
+}
+
 function registerAppProtocolHandler(uiDir: string): void {
   protocol.handle(APP_SCHEME, async (request) => {
     const resolvedFile = resolveAppProtocolFilePath(request.url, uiDir);
@@ -226,6 +235,7 @@ if (singleInstanceLockAcquired) {
       );
 
       registerSessionCspHeaders();
+      registerSessionPermissionHandlers();
       registerAppProtocolHandler(assets.uiDir);
 
       powerMonitor.on('shutdown', () => {

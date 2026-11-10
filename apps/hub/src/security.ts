@@ -150,6 +150,7 @@ export function registerHubSecurityHooks(
       return reply
         .code(204)
         .header('access-control-allow-origin', desktopAppOrigin)
+        .header('access-control-expose-headers', 'Retry-After')
         .header('vary', 'Origin')
         .header('access-control-allow-methods', 'GET, POST, PUT, PATCH, DELETE')
         .header('access-control-allow-headers', 'authorization, content-type, x-pin')
@@ -166,11 +167,13 @@ export function registerHubSecurityHooks(
     reply.removeHeader('set-cookie');
     reply.removeHeader('access-control-allow-credentials');
 
-    if (desktopAppOrigin !== null && reply.statusCode < 400) {
+    if (desktopAppOrigin !== null) {
       reply.header('access-control-allow-origin', desktopAppOrigin);
+      reply.header('access-control-expose-headers', 'Retry-After');
       reply.header('vary', 'Origin');
     } else {
       reply.removeHeader('access-control-allow-origin');
+      reply.removeHeader('access-control-expose-headers');
       reply.removeHeader('access-control-allow-methods');
       reply.removeHeader('access-control-allow-headers');
     }
