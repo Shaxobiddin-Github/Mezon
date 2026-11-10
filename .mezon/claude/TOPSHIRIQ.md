@@ -1,72 +1,67 @@
-# Claude topshirig'i: T0.6 QABUL → T0.7 rejasi
+# Claude topshirig'i: T0.7 rejasi — TUZATISHLAR BILAN TASDIQLANDI
 
-## 1. T0.6 xulosasi: QABUL (kod commit'i `9b7a75b`)
+**Merge tekshiruvi:** T0.6 merge'i tekshirildi. `main` = `759f3ee`, kod `2430c48` bilan bir xil.
 
-Claude toza klonda tekshirdi:
+**Rejada tasdiqlangan qismlar:**
 
-- `pnpm verify` ketma-ket 2 marta yashil (99 test), ya'ni beqaror test tuzaldi.
-- Claude'ning H1–H3 hujumlari to'xtatildi: Host/Origin variantlari, 60 ta parallel PIN, PIN reset paytidagi TOCTOU.
-- Ataylab kiritilgan 12 xatodan 10 tasi ushlandi. Qolgan ikkitasi xavfsizlikka ta'sir qilmaydi:
-  - `normalizedOrigin === 'null'` tekshiruvi ortiqcha, chunki `null` baribir ruxsat ro'yxatida yo'q.
-  - R1 dagi alohida TOCTOU himoyasi o'chirilsa ham sessiya ochilmaydi. Lekin `failed_attempts` 1 ga oshadi va testlar buni ushlamadi.
+- `utilityProcess` arxitekturasi;
+- `app://mezon` protokoli, CSP, preload, navigatsiya bloki va fuse'lar ro'yxati;
+- `dist-app` staging katalogi orqali Node va Electron ABI izolyatsiyasi;
+- `%LOCALAPPDATA%\Mezon`, NSIS sozlamalari va bir nusxa rejimi;
+- depcruise qoidalari;
+- egasi uchun qo'lda tekshiruv ro'yxati;
+- T0.6 test qarzi birinchi alohida commit sifatida.
 
-**Diqqat:** hisobotda R1 testi `failed_attempts = 0n` ni tekshiradi deb yozilgan, amalda bu tekshiruv hech narsani ushlamaydi. Hisobotdagi dalil kod bilan mos bo'lishi shart. T0.7 PR'ida alohida commit sifatida (`T0.6 test qarzi: R1 failed_attempts tekshiruvi`) shu testni tuzat: TOCTOU himoyasi o'chirilganda test yiqilishi kerak. Mutatsiya bilan isbotla.
+Quyidagi tuzatishlar bilan `gemini/T0.7-electron-shell` branch'ida kodni yoz.
 
-## 2. Merge
+## Majburiy tuzatishlar
 
-1. `git pull --ff-only`.
-2. PR #6 boshi Claude'ning shu topshiriq commit'i bo'lsin va uchala CI job yashil bo'lsin.
-3. `T0.6: Hub skeleti va autentifikatsiya` nomi bilan Squash and merge qil, SHA'ni yoz va branch'ni o'chir.
-4. `main`dan `gemini/T0.7-electron-shell` branch'ini och.
+### T1. Hub qayta ko'tarilganda port o'zgarmasin
 
-## 3. T0.7 — Electron qobig'i: avval REJA
+Hub yiqilib `port: 0` bilan qayta ko'tarilsa, yangi port oladi. Rendererdagi `hubBaseUrl` va yuklangan sahifaning CSP'sidagi `connect-src` eski portda qoladi. Natijada UI ochiq, lekin hub'ga ulana olmaydi.
 
-Kod yozma. Rejani `.mezon/gemini/HISOBOT.md` ga yoz, `[gemini-reja] T0.7` bilan commit qil va push qil, so'ng `node .mezon/kutish.mjs` bilan kut.
+**Talab:**
 
-GEMINI.md T0.7: Electron hub'ni ishga tushiradi va UI'ni ochadi. Ma'lumot `%LOCALAPPDATA%` da saqlanadi va ilova o'chirilganda qoladi. O'rnatish admin parolisiz bo'ladi. Bir nusxa rejimi va `contextIsolation` yoqilgan.
+- Qayta ishga tushishda avvalgi port qayta ishlatilsin.
+- Port band bo'lsa, yangi port olinsin. So'ng CSP yangilansin, renderer IPC hodisasi bilan xabardor qilinsin va oyna qayta yuklansin.
 
-Rejada quyidagilar aniq bo'lsin:
+**E2E testida:** hub yiqilgandan keyin UI'dan `/health` so'rovi yana muvaffaqiyatli bo'lsin. Faqat hub javob berishini tekshirish yetarli emas.
 
-### a) Jarayonlar arxitekturasi
+### T2. Playwright va fuse ziddiyati
 
-Hub qayerda ishlaydi: `main` jarayonidami yoki `utilityProcess`dami? Tavsiya: `utilityProcess`. Shunda hub yiqilsa, UI yiqilmaydi. Hub yiqilganda kechikish bilan qayta ishga tushirish va logga yozish bo'lsin. Tanlovingni asosla.
+Playwright `_electron` odatda `--inspect`/`--remote-debugging-port` argumentlari bilan ishga tushadi. `EnableNodeCliInspectArguments: false` esa ularni bloklaydi.
 
-Port: ishga tushishda bo'sh tasodifiy port. Renderer unga faqat preload orqali kelgan `hubBaseUrl` bilan ulanadi.
+**Talab:**
 
-### b) Electron xavfsizligi
+- Fuse'ni testlar uchun o'chirib qo'yma.
+- Imzolanadigan yakuniy (fuse qo'yilgan) binary uchun alohida tekshiruvlar bo'lsin: fuse holatini o'qish, `ELECTRON_RUN_AS_NODE=1` rad etilishi, `--inspect` argumenti rad etilishi.
+- Ilovani Playwright'siz ishga tushirib, hub `/health` javobini log yoki `dataDir` orqali tekshiradigan smoke test bo'lsin.
+- Playwright UI testi fuse qo'yilmagan, lekin aynan bir xil `app.asar` ustida ishlasin.
+- Qaysi test qaysi binary ustida ishlashini hisobotda aniq yoz.
 
-Hub'dagi Host/Origin himoyasi shunga tayanadi:
+### T3. Kompyuter o'chirilganda baza toza yopilsin
 
-- `contextIsolation: true`, `sandbox: true`, `nodeIntegration: false`, `webSecurity: true`.
-- Preload `contextBridge` orqali faqat minimal API beradi: Node, `ipcRenderer` umumiy obyekti va fayl tizimi yo'q.
-- UI `file://` orqali emas, maxsus `app://mezon` protokolidan (privileged, standard, secure) asar ichidan yuklanadi. Hub `allowedOrigins` = aynan `['app://mezon']`. Renderer haqiqatan shu `Origin` bilan so'rov yuborishini test bilan isbotla.
-- Qat'iy CSP: faqat `app://mezon` va hub manzili.
-- `will-navigate` va `setWindowOpenHandler` hammasini rad etadi, tashqi havolalar ochilmaydi.
-- Electron fuses: `RunAsNode` o'chiq, `EnableNodeOptionsEnvironmentVariable` o'chiq, `EnableNodeCliInspectArguments` o'chiq, `EnableEmbeddedAsarIntegrityValidation` va `OnlyLoadAppFromAsar` yoqilgan. Paket versiyasini npm'da tekshirib aniq mahkamla.
+Kassa kompyuteri ko'pincha to'g'ridan-to'g'ri o'chiriladi.
 
-### c) Ma'lumot va o'rnatish
+**Talab:**
 
-- Baza, log va konfiguratsiya `%LOCALAPPDATA%\Mezon\` da bo'lsin. `app.getPath('userData')` standart holatda Roaming'ga qaraydi, uni aniq qayta yo'naltir.
-- NSIS: foydalanuvchi uchun, admin parolisiz, o'chirishda ma'lumot saqlanadi.
-- Bir nusxa rejimi: ikkinchi ishga tushirishda mavjud oyna oldinga chiqadi va ikkinchi hub ishga tushmaydi.
-- Loglar faylga, hub'dagi `redact` bilan.
+- `before-quit` bilan birga Windows'ning sessiya tugashi va o'chish hodisalarini ham ushla (`powerMonitor` `shutdown`, `session-end` / `query-session-end`).
+- Bu hodisalarda hub'ga `shutdown` yuborilib, SQLite yopilsin (WAL checkpoint).
+- Yopilmay qolgan holatda ham SQLite WAL `synchronous=FULL` tufayli tasdiqlangan ma'lumot yo'qolmaydi. Buni izohda yoz.
 
-### d) Native modullar
+### T4. Log hajmi cheklansin
 
-better-sqlite3 va koffi Electron 45 ABI uchun qayta yig'ilsin (`@electron/rebuild` yoki electron-builder `install-app-deps`). Oddiy Node testlari ham buzilmasin: Node va Electron ABI'lari to'qnashmasligi uchun yechimni yoz.
+Kassa yillab ishlaydi. Fayl loglari aylanuvchi bo'lsin: hajm chegarasi va eski fayllar soni chegarasi. Shunda disk to'lib qolmaydi. Redaction saqlansin.
 
-### e) UI
+### T5. `MEZON_DATA_DIR` faqat test uchun
 
-Faqat minimal sahifa. U hub `/health` holatini va `needsSetup`ni ko'rsatadi. Haqiqiy kassa UI T1.11 da bo'ladi.
+O'rnatilgan (`app.isPackaged`) ilovada ma'lumot papkasi muhit o'zgaruvchisi bilan o'zgartirilmasin. Override faqat aniq test rejimida ishlasin: ham `MEZON_E2E=1`, ham `MEZON_DATA_DIR` bo'lishi kerak. Buni test bilan isbotla.
 
-### f) Testlar va CI
+## Bajarish tartibi
 
-- `windows-latest` da alohida `desktop` job. U o'rnatuvchini yig'adi va artifact sifatida saqlaydi.
-- Playwright (`_electron`) smoke testi: ilova ochiladi, oyna `app://mezon` ni yuklaydi, hub `/health` 200 qaytaradi, `Origin` = `app://mezon`, ikkinchi nusxa ochilmaydi, hub yiqilganda qayta ko'tariladi.
-- Toza Windows'ga qo'lda o'rnatish va o'chirib qayta o'rnatganda ma'lumot saqlanishi: egasi qiladigan qo'lda tekshiruv ro'yxatini yoz.
-
-### g) Doiradan tashqari
-
-- Code signing: egasi qarori, keyinroq. SmartScreen ogohlantirishini yoz.
-- Avtomatik yangilanish: T4.8.
-- Kassa UI: T1.11.
+1. Birinchi commit: `T0.6 test qarzi: R1 failed_attempts tekshiruvi`. Mutatsiya dalili bilan.
+2. T0.7 kodi.
+3. `pnpm verify` yashil.
+4. `desktop` CI job'i yashil: o'rnatuvchi artifact va testlar.
+5. Hisobot: GEMINI.md 2.1 "Muhim tekshiruvlar" o'lchovlari, fuse holati, qaysi test qaysi binary ustida ishlagani, CI havolalari va artifact nomi. `[gemini-hisobot] T0.7` bilan commit qil va push qil.
+6. `node .mezon/kutish.mjs`. Merge qilma.
