@@ -667,7 +667,7 @@ export class SqliteCatalogStore {
          WHERE f."products_fts" MATCH ?
            AND p."organization_id" = ?
            AND p."deleted_at_ms" IS NULL${categoryClause}
-         ORDER BY f.rank ASC
+         ORDER BY f.rank ASC, p."id" ASC
          LIMIT ? OFFSET ?`,
       );
       const hitRows = hitsStmt.all(...baseParams, limit, offset) as ReadonlyArray<{

@@ -532,6 +532,39 @@ describe('@mezon/db-local - T1.1 Catalog persistence, F1-F5 guarantees, and 50k 
     );
   });
 
+  it('FTS5 pagination stays deterministic without drops or duplicates when 30 products share identical text & rank', async () => {
+    const env = await setupCatalogEnv();
+    try {
+      const createdIds: string[] = [];
+      for (let i = 0; i < 30; i++) {
+        const res = await env.catalogStore.createProduct({
+          name: 'Identical Kola 1L',
+          unit: 'dona',
+          salePrice: '1000000',
+          actorUserId: env.ownerId,
+        });
+        createdIds.push(res.product.id);
+      }
+
+      const p1 = await env.catalogStore.listProducts({ q: 'identical', limit: 10, offset: 0 });
+      const p2 = await env.catalogStore.listProducts({ q: 'identical', limit: 10, offset: 10 });
+      const p3 = await env.catalogStore.listProducts({ q: 'identical', limit: 10, offset: 20 });
+
+      expect(p1.total).toBe(30);
+      expect(p1.products).toHaveLength(10);
+      expect(p2.products).toHaveLength(10);
+      expect(p3.products).toHaveLength(10);
+
+      const combined = [...p1.products, ...p2.products, ...p3.products].map((p) => p.id);
+      expect(new Set(combined).size).toBe(30);
+      expect([...combined].sort()).toEqual([...createdIds].sort());
+      // Tie-breaker p."id" ASC ensures stable order across consecutive pages
+      expect(combined).toEqual([...createdIds].sort());
+    } finally {
+      env.connection.close();
+    }
+  });
+
   it('meets <= 20ms barcode scan & fast FTS search on 50,000 products + 70,000 barcodes (real WAL disk DB)', async () => {
     const env = await setupCatalogEnv();
     try {
