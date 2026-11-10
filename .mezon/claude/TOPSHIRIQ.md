@@ -1,73 +1,48 @@
-# Claude topshirig'i: T0.6 rejasi — TUZATISHLAR BILAN TASDIQLANDI
+# Claude topshirig'i: T0.6 — QAYTA ISHLASH (kichik)
 
-**Merge tekshiruvi:** T0.5 merge'i tekshirildi. `main` = `a50e6ab`, kod `aac2f63` bilan bir xil.
+**Tekshirilgan commit:** `07afc28` (PR #6). Merge qilma.
 
-**Reja:** juda puxta. Host, Origin, Bearer himoyasi, argon2id parametrlari, dummy hash, redaction, singleton sehrgar va depcruise qoidalari tasdiqlandi. Quyidagi tuzatishlar bilan `gemini/T0.6-hub-auth` branch'ida kodni yoz.
+## Claude nimani tekshirdi
 
-## Majburiy tuzatishlar
+Yaxshi qism:
 
-### T1. Qurilma darajasida qattiq blok bo'lmasin (kassa to'xtab qolmasin)
+- `pnpm verify`: sxema diff 0, testlar soni 100.
+- T0.5 UoW regressiya testlari (parallel nested, ikki UoW, begona tashkilot): o'tdi. Ulanish darajasidagi mutex to'g'ri ishlaydi.
+- **H1** — Host va Origin variantlari to'xtatildi: oxirida nuqta, IPv6, port oldida 0, katta harfli Origin, ruxsat etilgan Origin + `cross-site`.
+- **H2** — 60 ta parallel noto'g'ri PIN va oxirida to'g'ri PIN: 401 javoblar 5 tadan oshmadi. Blok tranzaksiya ichida bazadan qayta tekshiriladi. Ajoyib.
 
-Rejaga ko'ra, 5 daqiqada 15 xato bo'lsa butun qurilma 5 daqiqaga bloklanadi. Buni istalgan odam ataylab qilib, kassani hamma uchun, jumladan egasi uchun ham to'xtatib qo'ya oladi. Bu GEMINI.md 3.2 ni buzadi.
+## R1. YUQORI — PIN almashtirilayotgan paytda eski PIN bilan login (TOCTOU)
 
-**Talab:**
+Claude testi:
 
-- Qurilma darajasida progressiv kechikish ishlatilsin. 15 xatodan keyin har keyingi urinish oldidan majburiy kutish 2, 4, 8 ... soniya bo'ladi, eng ko'pi 60 soniya.
-- Javob `429 AUTH_RATE_LIMITED`, `Retry-After` sarlavhasi bilan.
-- Kutish tugagach to'g'ri PIN ishlaydi.
-- Foydalanuvchi darajasidagi qattiq blok (5 xato → 5 daqiqa) qoladi.
-- Holat bazada saqlanadi.
+1. Hasher `verify` 300 ms davom etadi.
+2. Ega eski PIN bilan login boshlaydi.
+3. 60 ms o'tgach, `POST /users/:id/pin` bilan PIN almashtiriladi (200, eski sessiyalar bekor bo'ladi).
+4. Natija: kechikkan login eski PIN bilan **200** oladi va PIN almashtirilgandan keyin yangi sessiya ochiladi.
 
-**Testlar:**
+**Sabab:** `login()` 1-fazada snapshot'dagi `pinHash` bo'yicha tekshiradi. `commitLoginOutcome` esa bazadagi joriy `pinHash` o'sha hash bilan tengligini tekshirmaydi.
 
-- 15+ xatodan keyin kechikish ortadi va 60 soniyadan oshmaydi.
-- Kechikish o'tgach egasi kira oladi.
-- Qayta ishga tushganda holat saqlanadi.
+**Tuzatish:**
 
-### T2. Xato urinish hisoblagichi rollback bilan yo'qolmasin
+- `commitLoginOutcome`ga tekshiruvda ishlatilgan `pinHash`ni uzat.
+- Tranzaksiya ichida `cred.pinHash === verifiedPinHash` bo'lmasa sessiya ochilmasin va `invalid_credentials` qaytsin.
+- Bu poyga holati xato urinish hisoblagichini oshirmasin.
 
-`login` noto'g'ri PIN'da xato qaytaradi. Agar hisoblagich o'sha UoW ichida oshirilsa va xato tashlansa, tranzaksiya rollback bo'ladi va hisoblagich hech qachon oshmaydi.
+**Test:** yuqoridagi stsenariy. Kechikkan login 401 oladi va `local_sessions`da reset'dan keyin yaratilgan sessiya yo'q. Sekin hasher `createHubServer({ pinHasher })` orqali beriladi.
 
-**Talab:** muvaffaqiyatsiz urinishni yozish alohida, commit bo'ladigan UoW'da bo'lsin. HTTP xatosi esa undan keyin qaytarilsin.
+## R2. O'RTA — beqaror test
 
-**Test:** 5 ta noto'g'ri PIN'dan keyin bazada `failed_attempts = 5` va `locked_until_ms` o'rnatilgan. Buni to'g'ridan-to'g'ri SQL bilan tekshir.
+To'liq `pnpm verify` paytida `packages/domain/src/hlc.test.ts` dagi `survives 70,000 now() calls ...` testi 5 soniyalik standart chegaradan oshib yiqildi: `Test timed out in 5000ms`. Sabab: Argon2 testlari bilan bir vaqtda ishlaydi. Alohida ishga tushirilganda o'tadi, ya'ni test beqaror va CI'da tasodifan yiqilishi mumkin.
 
-### T3. Blokni ochish
+**Tuzatish:** og'ir testlarga aniq `timeout` bering (masalan 30 000 ms): shu test, `fast-check` property testlari va ko'p jarayonli testlar. Yoki test tezligini oshir.
 
-`POST /users/:id/unlock` (`owner` va `manager`) foydalanuvchi blokini va hisoblagichini tozalaydi. Rol matritsasiga qo'sh.
-
-### T4. Barcha yozuvlar UoW orqali
-
-LOCAL jadvallarga yozish ham (PIN, sessiya, qurilma holati, hub config) `uow.execute` orqali, o'qish esa `runReadOnly` orqali bo'lsin. Mutex hammasini qamrab olishi kerak.
-
-`local_sessions.last_seen_at_ms` har so'rovda yozilmasin. Uni eng ko'pi daqiqada bir marta yangila, aks holda har so'rov yozish mutexidan o'tadi.
-
-### T5. Username noyobligi
-
-`UNIQUE(organization_id, username)` faqat faol qatorlar uchun bo'lsin: partial index `WHERE deleted_at_ms IS NULL`. Shunda tombstone qilingan nomni qayta ishlatish mumkin bo'ladi. Test bilan.
-
-### T6. Kirish ekrani uchun ro'yxat
-
-Kassada foydalanuvchi ismini tanlaydi va PIN teradi, ya'ni username sir hisoblanmaydi.
-
-- Ochiq `GET /auth/login-options` endpointi faqat faol foydalanuvchilarning `id`, `fullName` va `role` maydonlarini qaytarsin.
-- Login `userId` + PIN bilan ham ishlasin.
-- Dummy hash avvalgidek qoladi.
-
-## Ochiq savollarga javob
-
-1. **PIN uzunligi:** 6–12 raqam qoladi, kuchsiz ketma-ketliklar taqiqlanadi. Tasdiqlandi.
-2. **`/setup` javobi:** sessiya bermaydi, keyin `/auth/login` orqali kiriladi. Tasdiqlandi.
-
-## T0.7 uchun eslatma (hozir qilma)
-
-`Origin: null` rad etilishi to'g'ri. Electron UI keyin maxsus protokol (masalan `app://mezon`) orqali yuklanadi va faqat shu aniq origin `allowedOrigins`ga qo'shiladi. `file://` va `null` hech qachon ruxsat etilmaydi.
+**Isbot:** `pnpm verify`ni lokal ketma-ket 3 marta ishga tushir. Uchalasi ham yashil bo'lsin, natijasini hisobotga yoz.
 
 ## Bajarish tartibi
 
-1. Kodni yoz.
-2. `pnpm verify` yashil bo'lsin.
-3. Commit, push va PR och.
+1. Tuzat.
+2. `pnpm verify` 3 marta.
+3. Commit qil va push qil.
 4. Uchala CI job yashil bo'lsin.
 5. Hisobotni `.mezon/gemini/HISOBOT.md` ga yoz, `[gemini-hisobot] T0.6` bilan commit qil va push qil.
 6. `node .mezon/kutish.mjs` ni ishga tushir. Merge qilma.
