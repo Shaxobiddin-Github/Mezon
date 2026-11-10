@@ -8,5 +8,8 @@
   "scripts": {
     "build": "tsc -b",
     "typecheck": "tsc --noEmit && tsc -p tsconfig.test.json --noEmit"
+  },
+  "devDependencies": {
+    "fast-check": "4.10.2"
   }
 }
