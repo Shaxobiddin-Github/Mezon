@@ -94,7 +94,7 @@ module.exports = {
     {
       name: 'db-local-src-imports',
       comment:
-        'packages/db-local source files can only import internal files, packages/domain, drizzle-orm, better-sqlite3, node:async_hooks, node:fs, and node:path',
+        'packages/db-local source files can only import internal files, packages/domain, drizzle-orm, better-sqlite3, node:async_hooks, node:crypto, node:fs, and node:path',
       severity: 'error',
       from: {
         path: '^packages/db-local/src/',
@@ -102,7 +102,7 @@ module.exports = {
       },
       to: {
         pathNot:
-          '^(packages/db-local/src/|packages/domain/|node_modules/(\\.pnpm/)?(drizzle-orm|better-sqlite3)@|(node:)?(async_hooks|fs|path)$)',
+          '^(packages/db-local/src/|packages/domain/|node_modules/(\\.pnpm/)?(drizzle-orm|better-sqlite3)@|(node:)?(async_hooks|crypto|fs|path)$)',
       },
     },
     {

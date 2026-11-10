@@ -1,29 +1,34 @@
+import { createHash } from 'node:crypto';
 import {
   type CartLineKind,
+  type CashMoveType,
   DomainError,
+  MAX_MONEY_TIYIN,
   type ManualDiscountMode,
   type Money,
   type PaymentMethod,
   type ProductUnit,
   type Quantity,
-  type ReplayStockPoolState,
+  type SalePaymentInput,
   type UnixMs,
   type UuidV7,
   ZERO_MONEY,
   assertCartDiscountAuthorized,
-  createEmptyStockPoolState,
+  canonicalizeCompleteSaleRequest,
   formatReceiptCode,
   moneyFromTiyin,
   moneyToTiyin,
+  negateMoney,
   parseNegativeStockPolicy,
   parseProductUnit,
   parseUuidV7,
   quantityFromMilli,
   quantityToMilli,
-  validateCashSalePayment,
+  resolveSalePayments,
   validateSalePaymentsInvariant,
 } from '@mezon/domain';
-import { and, asc, eq, inArray } from 'drizzle-orm';
+import { and, asc, eq } from 'drizzle-orm';
+import type { BetterSQLite3Database } from 'drizzle-orm/better-sqlite3';
 import {
   evaluateCartRowInDbSync,
   readCartLineRowsInDbSync,
@@ -31,16 +36,15 @@ import {
 } from './cart-repo.js';
 import type { LocalSqliteConnection } from './connection.js';
 import { advanceReceiptSeqSync } from './device-state.js';
+import { cashMoves, localCarts, payments, saleLines, sales } from './schema/index.js';
 import {
-  localBatchBalances,
-  localCarts,
-  localStockBalances,
-  payments,
-  saleLines,
-  sales,
-} from './schema/index.js';
-import { type StockMoveWarningRecord, applyOutboundStockMoveSync } from './stock-repo.js';
-import type { SqliteUnitOfWork } from './uow.js';
+  type StockMoveWarningRecord,
+  type StockPoolPrefetchTarget,
+  applyOutboundStockMoveSync,
+  prefetchMutablePoolStatesSync,
+  stockPoolKey,
+} from './stock-repo.js';
+import { type SqliteUnitOfWork, runConnectionReadOnly } from './uow.js';
 import { insertFact, insertMonotone } from './writers.js';
 
 export interface SaleRuntimeContext {
@@ -72,10 +76,9 @@ export interface CompleteSaleInput {
   readonly actorUserId: UuidV7;
   readonly clientRequestId: UuidV7;
   readonly expectedTotal: Money;
-  readonly payments: readonly {
-    readonly method: 'cash';
-    readonly tenderedAmount: Money;
-  }[];
+  readonly debtAmount?: Money;
+  readonly customerId?: UuidV7 | null;
+  readonly payments: readonly SalePaymentInput[];
 }
 
 export interface StoredSaleLineRecord {
@@ -116,6 +119,22 @@ export interface StoredSalePaymentRecord {
   readonly createdAtMs: UnixMs;
 }
 
+export interface StoredCashMoveRecord {
+  readonly id: UuidV7;
+  readonly organizationId: UuidV7;
+  readonly storeId: UuidV7;
+  readonly deviceId: UuidV7;
+  readonly shiftId: UuidV7 | null;
+  readonly type: CashMoveType;
+  readonly amountDelta: Money;
+  readonly sourceType: string;
+  readonly sourceId: UuidV7;
+  readonly paymentId: UuidV7 | null;
+  readonly reason: string | null;
+  readonly createdByUserId: UuidV7;
+  readonly createdAtMs: UnixMs;
+}
+
 export interface StoredSaleRecord {
   readonly id: UuidV7;
   readonly receiptNo: bigint;
@@ -125,6 +144,7 @@ export interface StoredSaleRecord {
   readonly deviceId: UuidV7;
   readonly sourceCartId: UuidV7 | null;
   readonly cashierUserId: UuidV7;
+  readonly completedByUserId: UuidV7;
   readonly customerId: UuidV7 | null;
   readonly shiftId: UuidV7 | null;
   readonly clientRequestId: UuidV7;
@@ -156,8 +176,15 @@ export interface CompleteSaleOutcome {
   readonly idempotentReplay: boolean;
 }
 
-function poolKey(productId: UuidV7, variantId: UuidV7 | null): string {
-  return `${productId}:${variantId ?? ''}`;
+function computeCompleteSaleRequestHash(params: {
+  readonly cartId: UuidV7;
+  readonly expectedTotal: Money;
+  readonly debtAmount: Money;
+  readonly customerId: UuidV7 | null;
+  readonly payments: readonly SalePaymentInput[];
+}): string {
+  const canonical = canonicalizeCompleteSaleRequest(params);
+  return createHash('sha256').update(canonical).digest('hex');
 }
 
 interface SerializedWarningJson {
@@ -248,6 +275,7 @@ function toStoredSale(
     deviceId: row.deviceId,
     sourceCartId: row.sourceCartId,
     cashierUserId: row.cashierUserId,
+    completedByUserId: row.completedByUserId,
     customerId: row.customerId,
     shiftId: row.shiftId,
     clientRequestId: row.clientRequestId,
@@ -274,11 +302,72 @@ function toStoredSale(
   };
 }
 
+/**
+ * Computes exact cash drawer balance for a specific terminal (`deviceId`) strictly from the
+ * append-only `cash_moves` ledger (`SUM(amount_delta)`).
+ */
+export function getCashDrawerBalanceSync(
+  db: BetterSQLite3Database,
+  params: {
+    readonly organizationId: UuidV7;
+    readonly storeId: UuidV7;
+    readonly deviceId: UuidV7;
+  },
+): Money {
+  const rows = db
+    .select({ amountDelta: cashMoves.amountDelta })
+    .from(cashMoves)
+    .where(
+      and(
+        eq(cashMoves.organizationId, parseUuidV7(params.organizationId)),
+        eq(cashMoves.storeId, parseUuidV7(params.storeId)),
+        eq(cashMoves.deviceId, parseUuidV7(params.deviceId)),
+      ),
+    )
+    .all();
+
+  let totalTiyin = 0n;
+  for (const row of rows) {
+    totalTiyin += moneyToTiyin(row.amountDelta);
+  }
+  return moneyFromTiyin(totalTiyin);
+}
+
+/**
+ * Computes total cash ledger balance across all terminals in a store (`SUM(amount_delta)`).
+ */
+export function getStoreCashBalanceSync(
+  db: BetterSQLite3Database,
+  params: {
+    readonly organizationId: UuidV7;
+    readonly storeId: UuidV7;
+  },
+): Money {
+  const rows = db
+    .select({ amountDelta: cashMoves.amountDelta })
+    .from(cashMoves)
+    .where(
+      and(
+        eq(cashMoves.organizationId, parseUuidV7(params.organizationId)),
+        eq(cashMoves.storeId, parseUuidV7(params.storeId)),
+      ),
+    )
+    .all();
+
+  let totalTiyin = 0n;
+  for (const row of rows) {
+    totalTiyin += moneyToTiyin(row.amountDelta);
+  }
+  return moneyFromTiyin(totalTiyin);
+}
+
 export class SqliteSaleStore {
+  private readonly connection: LocalSqliteConnection;
   private readonly getRuntimeContext: () => SaleRuntimeContext | null;
   private readonly testHooks?: SaleStoreTestHooks;
 
   constructor(options: CreateSqliteSaleStoreOptions) {
+    this.connection = options.connection;
     this.getRuntimeContext = options.getRuntimeContext;
     this.testHooks = options.__testHooks;
   }
@@ -291,29 +380,66 @@ export class SqliteSaleStore {
     return ctx;
   }
 
+  async getTerminalCashBalance(deviceId?: UuidV7): Promise<Money> {
+    const ctx = this.requireContext();
+    const targetDeviceId = deviceId !== undefined ? parseUuidV7(deviceId) : ctx.uow.deviceId;
+    return runConnectionReadOnly(this.connection, () =>
+      Promise.resolve(
+        getCashDrawerBalanceSync(this.connection.db, {
+          organizationId: ctx.organizationId,
+          storeId: ctx.storeId,
+          deviceId: targetDeviceId,
+        }),
+      ),
+    );
+  }
+
+  async getStoreCashBalance(): Promise<Money> {
+    const ctx = this.requireContext();
+    return runConnectionReadOnly(this.connection, () =>
+      Promise.resolve(
+        getStoreCashBalanceSync(this.connection.db, {
+          organizationId: ctx.organizationId,
+          storeId: ctx.storeId,
+        }),
+      ),
+    );
+  }
+
   /**
    * Executes the sole authoritative `completeSale` transaction (`GEMINI.md` 3.1.9–3.1.10):
-   * - Idempotency check by `(organization_id, client_request_id)` inside `BEGIN IMMEDIATE`.
+   * - Idempotency check by `(organization_id, client_request_id)` + `storeId` + `cartId` + `requestHash`.
    * - Re-evaluates cart totals at commit timestamp (`evaluateCartRowInDbSync`) and checks `expectedTotal`.
-   * - Enforces cashier/supervisor discount approval (`DISCOUNT_OVERRIDE_REQUIRED`) and payment balance.
+   * - Enforces cashier/supervisor discount approval (`DISCOUNT_OVERRIDE_REQUIRED`).
+   * - Enforces T1.5 debt/customer gates (`CUSTOMER_REQUIRED` on `debt > 0`, `VALIDATION_ERROR` on `customerId !== null`),
+   *   resolves mixed payment rows, and runs `validateSalePaymentsInvariant` against server `totalFinal`.
    * - Deducts stock via shared `applyOutboundStockMoveSync` without nested `uow.execute`.
    * - Allocates gapless per-device `receipt_no` atomically (`last_receipt_seq`).
-   * - Inserts `sales` (`MONOTONE`), `sale_lines` (`FACT`), `payments` (`FACT`), `stock_moves`,
-   *   updates `local_carts.status = 'completed'`, and emits all `local_outbox` rows in 1 tx.
+   * - Inserts `sales` (`MONOTONE`), `sale_lines` (`FACT`), `payments` (`FACT`), `cash_moves` (`FACT`),
+   *   `stock_moves` (`FACT`), updates `local_carts.status = 'completed'`, and emits all `local_outbox` rows in 1 tx.
    */
   async completeSale(input: CompleteSaleInput): Promise<CompleteSaleOutcome> {
     const ctx = this.requireContext();
     const cartId = parseUuidV7(input.cartId);
     const actorUserId = parseUuidV7(input.actorUserId);
     const clientRequestId = parseUuidV7(input.clientRequestId);
+    const debtAmount = input.debtAmount ?? ZERO_MONEY;
+    const customerId =
+      input.customerId !== undefined && input.customerId !== null
+        ? parseUuidV7(input.customerId)
+        : null;
 
-    if (input.payments.length !== 1 || input.payments[0]?.method !== 'cash') {
-      throw new DomainError('VALIDATION_ERROR', 'T1.4 supports exactly one cash payment');
-    }
-    const tenderedAmount = input.payments[0].tenderedAmount;
+    const incomingRequestHash = computeCompleteSaleRequestHash({
+      cartId,
+      expectedTotal: input.expectedTotal,
+      debtAmount,
+      customerId,
+      payments: input.payments,
+    });
 
     return ctx.uow.execute<CompleteSaleOutcome>((session) => {
-      // 1) Idempotent replay lookup inside BEGIN IMMEDIATE (prevents double-click/parallel duplicate)
+      // 1) Idempotent replay lookup inside BEGIN IMMEDIATE (prevents double-click/parallel duplicates
+      //    and rejects reusing the same clientRequestId with another store, cart, or differing payload)
       const existingSale = session.db
         .select()
         .from(sales)
@@ -327,10 +453,14 @@ export class SqliteSaleStore {
         .all()[0];
 
       if (existingSale) {
-        if (existingSale.storeId !== ctx.storeId || existingSale.sourceCartId !== cartId) {
+        if (
+          existingSale.storeId !== ctx.storeId ||
+          existingSale.sourceCartId !== cartId ||
+          existingSale.requestHash !== incomingRequestHash
+        ) {
           throw new DomainError(
             'IDEMPOTENCY_CONFLICT',
-            `clientRequestId "${clientRequestId}" was already used for another cart or store`,
+            `clientRequestId "${clientRequestId}" conflicts with another store, cart, or request payload`,
           );
         }
         const existingLines = session.db
@@ -373,7 +503,7 @@ export class SqliteSaleStore {
         throw new DomainError('CART_EMPTY', 'Cannot complete sale for an empty cart');
       }
 
-      // 3) Server-side recomputation at current clock time + price/promo/override/payment checks
+      // 3) Server-side recomputation at current clock time + price/promo/override checks
       const nowMs = session.nowUnixMs();
       const { detail, hubConfig, productsById, variantsById } = evaluateCartRowInDbSync({
         db: session.db,
@@ -384,6 +514,12 @@ export class SqliteSaleStore {
       });
 
       const expectedTiyin = moneyToTiyin(input.expectedTotal);
+      if (expectedTiyin < 0n || expectedTiyin > MAX_MONEY_TIYIN) {
+        throw new DomainError(
+          'VALIDATION_ERROR',
+          `expectedTotal must be between 0 and ${MAX_MONEY_TIYIN.toString()} tiyin`,
+        );
+      }
       const actualTiyin = moneyToTiyin(detail.totalFinal);
       if (actualTiyin !== expectedTiyin) {
         throw new DomainError(
@@ -417,21 +553,49 @@ export class SqliteSaleStore {
         discountOverrideRequired: detail.discountOverrideRequired,
       });
 
-      const validatedPayment = validateCashSalePayment({
+      // 4) T1.5 debt & customer gates + mixed payment resolution + strict invariant check against server totalFinal.
+      //    T1.7 replaces these gates with real customer registry lookup and `customer_ledger` insert in this tx.
+      const debtTiyin = moneyToTiyin(debtAmount);
+      if (debtTiyin < 0n || debtTiyin > MAX_MONEY_TIYIN) {
+        throw new DomainError(
+          'VALIDATION_ERROR',
+          `debtAmount must be between 0 and ${MAX_MONEY_TIYIN.toString()} tiyin`,
+        );
+      }
+      if (debtTiyin > 0n) {
+        throw new DomainError(
+          'CUSTOMER_REQUIRED',
+          'Partial or full debt requires a customer ledger (available in T1.7)',
+        );
+      }
+      if (customerId !== null) {
+        throw new DomainError(
+          'VALIDATION_ERROR',
+          'customerId is not supported in T1.5 until T1.7 adds customer registry',
+        );
+      }
+
+      const resolvedPayments = resolveSalePayments({
         totalFinal: detail.totalFinal,
-        tenderedAmount,
+        debtAmount,
+        customerId,
+        payments: input.payments,
       });
       validateSalePaymentsInvariant({
         totalFinal: detail.totalFinal,
-        debtAmount: ZERO_MONEY,
-        payments: [validatedPayment],
+        debtAmount,
+        customerId,
+        payments: resolvedPayments.payments,
       });
 
-      // 4) Validate catalog integrity & batch-prefetch stock pools for all tracked lines
+      // F3 HOOK POINT (`packages/rules`, PF-246 compliance):
+      // Evaluate signed legal rule bundle here (banned MXIK cash block, mixed receipt cash ban,
+      // 25M UZS limit, prescription/expiry checks) AFTER server totals & payment invariants pass and
+      // BEFORE allocating `receipt_no` or modifying inventory/sales/payments/cash_moves.
+
+      // 5) Validate catalog integrity & batch-prefetch full mutable pool states via stock-repo's single loader
       const negativeStockPolicy = parseNegativeStockPolicy(hubConfig.negativeStockPolicy);
-      const trackedProdIds: UuidV7[] = [];
-      const batchedProdIds: UuidV7[] = [];
-      const trackedKeys = new Set<string>();
+      const trackedTargets: StockPoolPrefetchTarget[] = [];
 
       for (const line of detail.lines) {
         if (line.lineKind !== 'catalog' || line.productId === null) {
@@ -454,79 +618,22 @@ export class SqliteSaleStore {
           }
         }
         if (!prod.unlimited) {
-          trackedProdIds.push(prod.id);
-          trackedKeys.add(poolKey(prod.id, line.variantId));
-          if (Boolean(prod.trackBatches)) {
-            batchedProdIds.push(prod.id);
-          }
+          trackedTargets.push({
+            productId: prod.id,
+            variantId: line.variantId,
+            trackBatches: Boolean(prod.trackBatches),
+          });
         }
       }
 
-      const uniqueTrackedProdIds = [...new Set(trackedProdIds)];
-      const uniqueBatchedProdIds = [...new Set(batchedProdIds)];
-      const sessionPoolCache = new Map<string, ReplayStockPoolState>();
-
-      if (uniqueTrackedProdIds.length > 0) {
-        for (const key of trackedKeys) {
-          sessionPoolCache.set(key, createEmptyStockPoolState());
-        }
-
-        const poolRows = session.db
-          .select()
-          .from(localStockBalances)
-          .where(
-            and(
-              eq(localStockBalances.organizationId, ctx.organizationId),
-              eq(localStockBalances.storeId, ctx.storeId),
-              inArray(localStockBalances.productId, uniqueTrackedProdIds),
-            ),
-          )
-          .all();
-
-        for (const row of poolRows) {
-          const key = poolKey(row.productId, row.variantId);
-          const state = sessionPoolCache.get(key);
-          if (state) {
-            state.qtyOnHand = row.qtyOnHand;
-            state.totalValue = row.totalValue;
-            state.deficitQty = row.deficitQty;
-            state.provisionalDeficitValue = row.provisionalDeficitValue;
-            state.costVarianceValue = row.costVarianceValue;
-            state.lastUnitCost = row.lastUnitCost;
-          }
-        }
-
-        if (uniqueBatchedProdIds.length > 0) {
-          const batchRows = session.db
-            .select()
-            .from(localBatchBalances)
-            .where(
-              and(
-                eq(localBatchBalances.organizationId, ctx.organizationId),
-                eq(localBatchBalances.storeId, ctx.storeId),
-                inArray(localBatchBalances.productId, uniqueBatchedProdIds),
-              ),
-            )
-            .orderBy(asc(localBatchBalances.hlc), asc(localBatchBalances.batchId))
-            .all();
-
-          for (const b of batchRows) {
-            const key = poolKey(b.productId, b.variantId);
-            const state = sessionPoolCache.get(key);
-            if (state) {
-              state.batches.set(b.batchId, {
-                batchId: b.batchId,
-                hlc: b.hlc,
-                remainingQty: b.remainingQty,
-                remainingValue: b.remainingValue,
-              });
-            }
-          }
-        }
-      }
+      const sessionPoolCache = prefetchMutablePoolStatesSync(session, {
+        organizationId: ctx.organizationId,
+        storeId: ctx.storeId,
+        targets: trackedTargets,
+      });
 
       // Cumulative check in 'block' mode so ALL short lines (including duplicate-product lines) fail clearly
-      if (negativeStockPolicy === 'block' && trackedKeys.size > 0) {
+      if (negativeStockPolicy === 'block' && sessionPoolCache.size > 0) {
         const remainingAvailableMilli = new Map<string, bigint>();
         for (const [key, state] of sessionPoolCache.entries()) {
           const onHand = quantityToMilli(state.qtyOnHand);
@@ -551,7 +658,7 @@ export class SqliteSaleStore {
           if (!prod || prod.unlimited) {
             continue;
           }
-          const key = poolKey(prod.id, line.variantId);
+          const key = stockPoolKey(prod.id, line.variantId);
           const avail = remainingAvailableMilli.get(key) ?? 0n;
           const need = quantityToMilli(line.qty);
           if (avail < need) {
@@ -579,14 +686,14 @@ export class SqliteSaleStore {
         }
       }
 
-      // 5) Allocate gapless device receipt_no inside same transaction (auto-rolled back on abort)
+      // 6) Allocate gapless device receipt_no inside same transaction (auto-rolled back on abort)
       const receiptNo = advanceReceiptSeqSync(session.internalGetSqlite(), {
         deviceId: ctx.uow.deviceId,
         updatedAtMs: nowMs,
       });
       const receiptCode = formatReceiptCode(ctx.uow.deviceId, receiptNo);
 
-      // 6) Insert `sales` (MONOTONE) first so `sale_lines`, `payments`, and `stock_moves` reference valid saleId
+      // 7) Insert `sales` (MONOTONE) first so `sale_lines`, `payments`, and `cash_moves` reference valid saleId
       const saleWrite = insertMonotone(session, sales, {
         organizationId: ctx.organizationId,
         storeId: ctx.storeId,
@@ -595,9 +702,11 @@ export class SqliteSaleStore {
           receiptCode,
           sourceCartId: cartId,
           cashierUserId: cartRow.cashierUserId,
+          completedByUserId: actorUserId,
           customerId: null,
           shiftId: null,
           clientRequestId,
+          requestHash: incomingRequestHash,
           subtotalGross: detail.subtotalGross,
           totalPromoDiscount: detail.totalPromoDiscount,
           subtotalAfterPromo: detail.subtotalAfterPromo,
@@ -608,9 +717,9 @@ export class SqliteSaleStore {
           totalFinal: detail.totalFinal,
           totalNetExVat: detail.totalNetExVat,
           totalVat: detail.totalVat,
-          totalPaid: validatedPayment.amount,
-          debtAmount: ZERO_MONEY,
-          changeAmount: validatedPayment.changeAmount,
+          totalPaid: resolvedPayments.totalPaid,
+          debtAmount: resolvedPayments.debtAmount,
+          changeAmount: resolvedPayments.changeAmount,
           overrideApprovedByUserId: detail.overrideApprovedByUserId,
           overrideApprovedAmount: detail.overrideApprovedAmount,
           overrideApprovedAtMs: detail.overrideApprovedAtMs,
@@ -623,7 +732,7 @@ export class SqliteSaleStore {
       });
       const saleId = saleWrite.entityId;
 
-      // 7) Deduct stock (for tracked catalog lines) and insert immutable `sale_lines` (`FACT`)
+      // 8) Deduct stock (for tracked catalog lines) and insert immutable `sale_lines` (`FACT`)
       const allWarnings: StockMoveWarningRecord[] = [];
       const insertedLines: (typeof saleLines.$inferSelect)[] = [];
 
@@ -690,24 +799,66 @@ export class SqliteSaleStore {
         insertedLines.push(lineWrite.row);
       }
 
-      // 8) Insert immutable cash `payments` row (`FACT`)
-      const paymentWrite = insertFact(session, payments, {
-        organizationId: ctx.organizationId,
-        storeId: ctx.storeId,
-        values: {
-          saleId,
-          method: validatedPayment.method,
-          amount: validatedPayment.amount,
-          tenderedAmount: validatedPayment.tenderedAmount,
-          changeAmount: validatedPayment.changeAmount,
-          providerRef: null,
-          providerMetaJson: null,
-        },
-        eventType: 'payment.created',
-        schemaVersion: 1,
-      });
+      // 9) Insert immutable `payments` (`FACT`) & atomic `cash_moves` (`FACT`) in the same transaction
+      const insertedPayments: (typeof payments.$inferSelect)[] = [];
+      for (const item of resolvedPayments.payments) {
+        const paymentWrite = insertFact(session, payments, {
+          organizationId: ctx.organizationId,
+          storeId: ctx.storeId,
+          values: {
+            saleId,
+            method: item.method,
+            amount: item.amount,
+            tenderedAmount: item.tenderedAmount,
+            changeAmount: item.changeAmount,
+            providerRef: item.providerRef,
+            providerMetaJson: null,
+          },
+          eventType: 'payment.created',
+          schemaVersion: 1,
+        });
+        insertedPayments.push(paymentWrite.row);
 
-      // 9) Mark cart `'completed'` inside the same transaction so subsequent conflicting requests get CART_NOT_OPEN
+        if (item.method === 'cash' && item.tenderedAmount !== null) {
+          insertFact(session, cashMoves, {
+            organizationId: ctx.organizationId,
+            storeId: ctx.storeId,
+            values: {
+              shiftId: null,
+              type: 'sale_cash_in',
+              amountDelta: item.tenderedAmount,
+              sourceType: 'sale',
+              sourceId: saleId,
+              paymentId: paymentWrite.entityId,
+              reason: `Sale receipt ${receiptCode} cash in`,
+              createdByUserId: actorUserId,
+            },
+            eventType: 'cash_move.created',
+            schemaVersion: 1,
+          });
+
+          if (moneyToTiyin(item.changeAmount) > 0n) {
+            insertFact(session, cashMoves, {
+              organizationId: ctx.organizationId,
+              storeId: ctx.storeId,
+              values: {
+                shiftId: null,
+                type: 'sale_change_out',
+                amountDelta: negateMoney(item.changeAmount),
+                sourceType: 'sale',
+                sourceId: saleId,
+                paymentId: paymentWrite.entityId,
+                reason: `Sale receipt ${receiptCode} change out`,
+                createdByUserId: actorUserId,
+              },
+              eventType: 'cash_move.created',
+              schemaVersion: 1,
+            });
+          }
+        }
+      }
+
+      // 10) Mark cart `'completed'` inside the same transaction so subsequent conflicting requests get CART_NOT_OPEN
       session.db
         .update(localCarts)
         .set({
@@ -725,7 +876,7 @@ export class SqliteSaleStore {
       this.testHooks?.onBeforeCommit?.();
 
       return Promise.resolve({
-        sale: toStoredSale(saleWrite.row, insertedLines, [paymentWrite.row]),
+        sale: toStoredSale(saleWrite.row, insertedLines, insertedPayments),
         warnings: allWarnings,
         idempotentReplay: false,
       });

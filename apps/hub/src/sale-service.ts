@@ -13,7 +13,13 @@ import type {
   StoredSalePaymentRecord,
   StoredSaleRecord,
 } from '@mezon/db-local';
-import { type UuidV7, moneyFromTiyin, quantityToMilli } from '@mezon/domain';
+import {
+  type SalePaymentInput,
+  type UuidV7,
+  ZERO_MONEY,
+  moneyFromTiyin,
+  quantityToMilli,
+} from '@mezon/domain';
 
 /**
  * Maps a persisted `StoredSaleLineRecord` to the HTTP DTO using an explicit allow-list so internal
@@ -69,6 +75,7 @@ function toSaleDto(sale: StoredSaleRecord): SaleDto {
     deviceId: sale.deviceId,
     sourceCartId: sale.sourceCartId,
     cashierUserId: sale.cashierUserId,
+    completedByUserId: sale.completedByUserId,
     customerId: sale.customerId,
     shiftId: sale.shiftId,
     clientRequestId: sale.clientRequestId,
@@ -118,15 +125,30 @@ export class HubSaleService {
     actorUserId: UuidV7,
     input: CompleteSaleRequestDto,
   ): Promise<CompleteSaleResponseDto> {
+    const mappedPayments: SalePaymentInput[] = input.payments.map((p) => {
+      if (p.method === 'cash') {
+        return {
+          method: 'cash',
+          tenderedAmount: moneyFromTiyin(BigInt(p.tenderedAmount)),
+          ...(p.amount !== undefined ? { amount: moneyFromTiyin(BigInt(p.amount)) } : {}),
+        };
+      }
+      return {
+        method: p.method,
+        amount: moneyFromTiyin(BigInt(p.amount)),
+        ...(p.providerRef !== undefined ? { providerRef: p.providerRef } : {}),
+      };
+    });
+
     const outcome = await this.store.completeSale({
       cartId,
       actorUserId,
       clientRequestId: input.clientRequestId,
       expectedTotal: moneyFromTiyin(BigInt(input.expectedTotal)),
-      payments: input.payments.map((p) => ({
-        method: p.method,
-        tenderedAmount: moneyFromTiyin(BigInt(p.tenderedAmount)),
-      })),
+      debtAmount:
+        input.debtAmount !== undefined ? moneyFromTiyin(BigInt(input.debtAmount)) : ZERO_MONEY,
+      customerId: input.customerId ?? null,
+      payments: mappedPayments,
     });
 
     return {

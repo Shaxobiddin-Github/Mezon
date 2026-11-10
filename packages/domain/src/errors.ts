@@ -64,7 +64,8 @@ export type DomainErrorCode =
   | 'INVALID_PROMOTION'
   | 'DISCOUNT_OVERRIDE_REQUIRED'
   | 'SALE_TOTAL_CHANGED'
-  | 'IDEMPOTENCY_CONFLICT';
+  | 'IDEMPOTENCY_CONFLICT'
+  | 'CUSTOMER_REQUIRED';
 
 export type DomainErrorDetails = Readonly<Record<string, unknown>>;
 

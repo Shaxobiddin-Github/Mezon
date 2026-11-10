@@ -33,9 +33,11 @@ export function buildSaleMonotoneTriggersSql(): string[] {
       '  NEW."receipt_code" IS NOT OLD."receipt_code" OR',
       '  NEW."source_cart_id" IS NOT OLD."source_cart_id" OR',
       '  NEW."cashier_user_id" IS NOT OLD."cashier_user_id" OR',
+      '  NEW."completed_by_user_id" IS NOT OLD."completed_by_user_id" OR',
       '  NEW."customer_id" IS NOT OLD."customer_id" OR',
       '  NEW."shift_id" IS NOT OLD."shift_id" OR',
       '  NEW."client_request_id" IS NOT OLD."client_request_id" OR',
+      '  NEW."request_hash" IS NOT OLD."request_hash" OR',
       '  NEW."subtotal_gross" IS NOT OLD."subtotal_gross" OR',
       '  NEW."total_promo_discount" IS NOT OLD."total_promo_discount" OR',
       '  NEW."subtotal_after_promo" IS NOT OLD."subtotal_after_promo" OR',
@@ -95,7 +97,13 @@ function hasActiveWhenTrigger(
   let latestDrop = -1;
   for (const d of sqlContent.matchAll(dropPattern)) {
     if (typeof d.index === 'number') {
-      latestDrop = d.index;
+      latestDrop = Math.max(latestDrop, d.index);
+    }
+  }
+  const dropTablePattern = new RegExp(`\\bDROP\\s+TABLE\\s+(?:IF\\s+EXISTS\\s+)?${tableRef}`, 'gi');
+  for (const dt of sqlContent.matchAll(dropTablePattern)) {
+    if (typeof dt.index === 'number') {
+      latestDrop = Math.max(latestDrop, dt.index);
     }
   }
   if (latest.index <= latestDrop) {
@@ -106,7 +114,8 @@ function hasActiveWhenTrigger(
 }
 
 /**
- * Verifies committed SQLite migrations enforce MONOTONE immutability on `sales` (`db:check`).
+ * Verifies committed SQLite migrations enforce MONOTONE immutability on `sales`
+ * and recreate immutability triggers after any table rebuild (`db:check`).
  */
 export function assertSaleMigrationsComplete(migrationsDir: string): void {
   if (!fs.existsSync(migrationsDir)) {
@@ -140,10 +149,62 @@ export function assertSaleMigrationsComplete(migrationsDir: string): void {
       'trg_sales_immutable_core',
       'sales',
       /NEW\."?total_final"?\s+IS\s+NOT\s+OLD\."?total_final"?/i,
+    ) ||
+    !hasActiveWhenTrigger(
+      sqlContent,
+      'trg_sales_immutable_core',
+      'sales',
+      /NEW\."?completed_by_user_id"?\s+IS\s+NOT\s+OLD\."?completed_by_user_id"?/i,
+    ) ||
+    !hasActiveWhenTrigger(
+      sqlContent,
+      'trg_sales_immutable_core',
+      'sales',
+      /NEW\."?request_hash"?\s+IS\s+NOT\s+OLD\."?request_hash"?/i,
     )
   ) {
     throw new Error(
-      'Missing active BEFORE UPDATE MONOTONE trigger "trg_sales_immutable_core" on "sales"',
+      'Missing or incomplete active BEFORE UPDATE MONOTONE trigger "trg_sales_immutable_core" on "sales"',
     );
+  }
+
+  // Ensure rebuilt tables also re-apply unconditional FACT / DELETE triggers after DROP TABLE
+  for (const [tableName, triggerName] of [
+    ['sales', 'trg_sales_no_delete'],
+    ['sale_lines', 'trg_sale_lines_no_update'],
+    ['sale_lines', 'trg_sale_lines_no_delete'],
+    ['payments', 'trg_payments_no_update'],
+    ['payments', 'trg_payments_no_delete'],
+    ['cash_moves', 'trg_cash_moves_no_update'],
+    ['cash_moves', 'trg_cash_moves_no_delete'],
+  ] as const) {
+    const dropTbl = new RegExp(
+      `\\bDROP\\s+TABLE\\s+(?:IF\\s+EXISTS\\s+)?"?${tableName}"?\\b`,
+      'gi',
+    );
+    const createTrig = new RegExp(
+      `\\bCREATE\\s+TRIGGER\\s+(?:IF\\s+NOT\\s+EXISTS\\s+)?"?${triggerName}"?\\b`,
+      'gi',
+    );
+    let lastDropIdx = -1;
+    for (const m of sqlContent.matchAll(dropTbl)) {
+      if (typeof m.index === 'number') {
+        lastDropIdx = Math.max(lastDropIdx, m.index);
+      }
+    }
+    if (lastDropIdx === -1) {
+      continue;
+    }
+    let lastCreateIdx = -1;
+    for (const m of sqlContent.matchAll(createTrig)) {
+      if (typeof m.index === 'number') {
+        lastCreateIdx = Math.max(lastCreateIdx, m.index);
+      }
+    }
+    if (lastCreateIdx === -1 || lastCreateIdx <= lastDropIdx) {
+      throw new Error(
+        `Trigger "${triggerName}" on "${tableName}" must exist cleanly after any table rebuild`,
+      );
+    }
   }
 }

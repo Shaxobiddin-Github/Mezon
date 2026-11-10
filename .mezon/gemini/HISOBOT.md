@@ -1,117 +1,99 @@
-## Hisobot: T1.4
+## Hisobot: T1.5 (R1 — B1 va B2 tuzatildi)
 
-Branch / PR: `gemini/T1.4-complete-sale` / https://github.com/Shaxobiddin-Github/Mezon/pull/11
+Branch / PR: `gemini/T1.5-payments` / https://github.com/Shaxobiddin-Github/Mezon/pull/12
 Commitlar:
-- `64ff1a4c03b518269aa0da947bff894e8a2045e0` — `T1.3 test qarzi: do'kon aksiyasi, limit chegarasi, tasdiq maydonlari`
-- `e420122c1fcd61ddf10f49e5839cef836f4f249d` — `T1.4: completeSale komandasi, chek/to'lov sxemasi va idempotentlik`
-- `a8c863474cf978fd2e11c81fb029046ec5902ad1` — `T1.4: ESLint workspace bo'laklash (CI 2 GB OOM bartaraf)`
+- `adf9e670d08028a134021394a4a244eb6357cefc` — `T1.4 test qarzi: zaxira chegarasi, idempotentlik do'koni`
+- `9f218d94b0e92a8f7af5b2bff10a8eb720dc02ab` — `T1.5: Aralash to'lovlar, qaytim, cash_moves va M1-M5 himoyalar`
+- `51070e900f85b0e29bc9919c04ef5f4d5d99481e` — `T1.5: 20 qatorli 3-to'lovli perf testini 5 namunali medianga o'tkazish`
+- `b3a940ddb2a6080abec62c2a51661a19bdd49139` — `T1.5 R1: B1 stock pool batch prefetch (6 maydon) va B2 test qarzi`
 
-*(T1.3 PR #10 `main` ga `462cac770332667a4bdfad48b876e3e2da5cf682` bilan Squash & Merge qilindi va `gemini/T1.3-cart-pricing` o'chirildi.)*
+*(Oldingi T1.4 PR #11 `main` ga `740ab2a895a85f83a8c8695baee363f05e45f269` SHA bilan Squash & Merge qilindi va `gemini/T1.4-complete-sale` lokal/remote branch'lari o'chirildi.)*
 
 ---
 
-### Nima qilindi
+### R1 tuzatishlari (`b3a940d`)
 
-1. **T1.3 test qarzi (`64ff1a4`, mutatsiya dalillari bilan):**
-   - `packages/domain/src/cart.test.ts` va `packages/db-local/src/cart.test.ts`:
-     - **1-mutatsiya (`isPromotionActiveAt` do'kon filtri):** `promo.storeId !== null && storeId !== null && promo.storeId !== storeId` tekshiruvi olib tashlanganda `@mezon/domain` (`false` o'rniga `true`) va `@mezon/db-local` (`30_000n !== 5_000n`) testlari yiqildi.
-     - **2-mutatsiya (`doesDiscountExceedCashierLimit` chegaralari):** `> maxAmount + 1n` hamda `%` shartida `+ 10_000n` (1 tiyin bo'shatish) kiritilganda `10_000 / 10_001` va `maxAmount / maxAmount + 1` chegara testlari yiqildi.
-     - **3-mutatsiya (`isCartManualDiscountAuthorized` tasdiq juftligi):** `||` → `&&` ga o'zgartirilganda `overrideApprovedByUserId: null` + musbat `overrideApprovedAmount` holati `false` o'rniga `true` qaytarib testni yiqitdi.
+1. **B1. `completeSale` ombor pool prefetch'ini yagona yuklovchiga birlashtirish:**
+   - `packages/db-local/src/stock-repo.ts`: yagona `applyPoolBalanceRowToState` (barcha 6 maydonni ko'chiradi: `qtyOnHand`, `totalValue`, `deficitQty`, `provisionalDeficitValue`, `costVarianceValue`, `lastUnitCost`) hamda eksport qilingan batch yuklovchi `prefetchMutablePoolStatesSync` (`stockPoolKey`, `StockPoolPrefetchTarget`) qo'shildi. Endi `loadMutablePoolStateSync` va `prefetchMutablePoolStatesSync` aynan bir xil `applyPoolBalanceRowToState` dan foydalanadi — qo'lda maydon nusxalash yo'q.
+   - `packages/db-local/src/sale-repo.ts`: qo'lda `localStockBalances` / `localBatchBalances` nusxalash butunlay olib tashlandi; `completeSale` to'g'ridan-to'g'ri `prefetchMutablePoolStatesSync(...)` va `stockPoolKey(...)` ni chaqiradi.
+   - **Differensial regressiya testi (`packages/db-local/src/sale.test.ts` — `B1 regression`):**
+     - Ikkita o'rtacha tannarxli (`avgSale` vs `avgDirect`, dastlabki `3.000` kg / `5121` tiyin = `1707n` tiyin/kg) va ikkita FIFO partiyali (`fifoSale` vs `fifoDirect`) tovar bilan `'warn'` rejimida **36 ta seed'li qadam** (normal sotuv, kamomadga tushish, kamomad ichida ketma-ket sotuvlar, har xil narxda qisman/to'liq qayta kirim).
+     - Har bir qadamda `local_stock_balances` ning barcha 6 maydoni (`qtyOnHand`, `totalValue`, `deficitQty`, `provisionalDeficitValue`, `costVarianceValue`, `lastUnitCost`), har qadamdagi `sale_lines.costValue === -SUM(stock_moves.costValueDelta)`, jami chiqim `costValueDelta`, hamda FIFO `local_batch_balances` (`remainingQty`, `remainingValue`) ikkala yo'lda ham to'liq teng.
+     - Oxirida `env.stockStore.rebuildProjections()` chaqirilib, qayta qurilgan barcha 4 tovar balansi va partiyalar jonli jadvallar bilan aynan teng ekani tasdiqlandi.
+   - **B1 ikki mutatsiya dalili:**
+     - **1-mutatsiya (`lastUnitCost`):** `applyPoolBalanceRowToState` dan `state.lastUnitCost = row.lastUnitCost` olib tashlanganda `B1 regression` darhol yiqildi (`avgDirect`/`avgSale` da `lastUnitCost`: kutilgan `null` o'rniga `1805n`; `fifoDirect`/`fifoSale` da `null` o'rniga `3776n`).
+     - **2-mutatsiya (`deficitQty`):** `applyPoolBalanceRowToState` dan `state.deficitQty = row.deficitQty` olib tashlanganda `B1 regression` darhol yiqildi (`avg` da `costVarianceValue`: `0n` vs `-30335n`, `provisionalDeficitValue`: `30540n` vs `0n`; `fifo` da `deficitQty`: `0n` vs `7662n`, `totalValue`: `46523n` vs `37816n`, partiyalar farqli).
 
-2. **Domen (`@mezon/domain` — sof `bigint`, nol `Number`):**
-   - `packages/domain/src/sale.ts`: `PAYMENT_METHODS`, `formatReceiptCode` (`<deviceId oxirgi 4 katta hex>-<6+ xonali receipt_no>`, izohda faqat ko'rinish uchun ekani, noyoblik DB `UNIQUE(organization_id, device_id, receipt_no)` bilan kafolatlanishi va F4 da terminal qisqa kodiga o'tishi yozildi), `validateCashSalePayment`, `validateSalePaymentsInvariant` (`SUM(payments.amount) + debtAmount === totalFinal`, qaytim faqat naqdda).
-   - `packages/domain/src/errors.ts` va `cart.ts`: `CART_EMPTY`, `SALE_TOTAL_CHANGED`, `IDEMPOTENCY_CONFLICT`, ixtiyoriy `DomainError.details`, hamda `CART_STATUSES` da `'completed'`.
+2. **B2. Test qarzi (`packages/domain/src/sale.test.ts`):**
+   - `validateSalePaymentsInvariant` ga to'g'ridan-to'g'ri `{ method: 'card', amount: 100_000n, tenderedAmount: 100_000n, changeAmount: 0n }` berilganda `VALIDATION_ERROR` tashlashini tekshiruvchi unit test qo'shildi.
+   - **Mutatsiya dalili:** `validateSalePaymentsInvariant` dan `if (p.tenderedAmount !== null)` tekshiruvi olib tashlanganda aynan shu test (`sale.test.ts:295`) yiqildi.
 
-3. **Kontraktlar (`@mezon/contracts`) va log redaksiyasi (`@mezon/drivers`):**
-   - `packages/contracts/src/sale.ts`: `CompleteSaleRequestSchema` (`payments[]` `length(1)`, T1.4 da faqat `'cash'`, T1.5 da o'zgarishsiz kengayadi) va `CompleteSaleResponseSchema` (`strictObject` — tannarx/foyda va fiskal holat ustunlarisiz).
-   - `packages/contracts/src/auth.ts`: `ApiErrorEnvelopeSchema` da ixtiyoriy tuzilgan `error.details`.
-   - `packages/drivers/src/node/redact.ts` (**C2**): `DEFAULT_LOG_REDACT_PATHS` ga `cost`, `costValue`, `costPrice`, `profit`, `margin` (va ularning `*.` / `*.*.` shakllari) qo'shildi.
+---
 
-4. **Lokal baza va `completeSale` tranzaksiyasi (`@mezon/db-local`):**
-   - `packages/db-local/src/schema/index.ts` va `drizzle/0006_complete_sale.sql`:
-     - **`sales` (`MONOTONE`, `store`):** `receipt_no`, `receipt_code`, `source_cart_id`, `cashier_user_id`, `customer_id`, `shift_id`, `client_request_id` (`UNIQUE`), jami summalar snapshot'i, `total_paid`, `debt_amount`, `change_amount`, supervisor tasdig'i va `voided_*` (fiskal ustunlar **olib tashlandi**, F3 `fiscal_docs` da bo'ladi). Ikki tomonlama `MONOTONE` triggerlar (`trg_sales_voided_monotone`, `trg_sales_immutable_core`) va `assertSaleMigrationsComplete` (`db:check`).
-     - **`sale_lines` (`FACT`, `store`):** to'liq snapshot (`item_name`, `unit`, `qty`, `unit_price_snapshot`, aksiya/chegirma/QQS, `mxik_snapshot`, `package_code_snapshot`) va `cost_value` (`stock_moves` dagi `-cost_value_delta` yig'indisi).
-     - **`payments` (`FACT`, `store`):** naqd (`tendered_amount`, `change_amount`) + T1.5/F3 (`method`, `provider_ref`, `provider_meta_json`).
-     - `local_device_state.last_receipt_seq` (`ALTER TABLE ADD`) va `advanceReceiptSeqSync` (`UPDATE ... RETURNING` tranzaksiya ichida).
-     - `local_carts` ga `'completed'` holati, `completed_sale_id`, `completed_at_ms`, `completion_warnings_json` qo'shildi (`PRAGMA foreign_keys = ON` tranzaksiyasi ichida `local_cart_lines` ni xavfsiz saqlab yangilanadi); `listCarts()` tugallangan savatlarni chiqarmaydi.
-   - `packages/db-local/src/stock-repo.ts` va `cart-repo.ts`: `applyOutboundStockMoveSync` va `evaluateCartRowInDbSync` ajratildi; `completeSale` ichma-ich `uow.execute` siz aynan shu funksiyalarni chaqiradi.
-   - `packages/db-local/src/sale-repo.ts`: idempotentlik (`client_request_id`), server qayta hisobi (`409 SALE_TOTAL_CHANGED` + `details`), override qayta tekshiruvi (`403 DISCOUNT_OVERRIDE_REQUIRED`), `inArray` batch prefetch va `'block'` rejimida bir nechta/dubl-tovar qatorlar bo'yicha jamlangan yetishmovchilik tekshiruvi (`409 INSUFFICIENT_STOCK`), `'warn'` ogohlantirishlari va test-only `__testHooks` (**C1**).
+### Nima qilindi (T1.5 jami)
 
-5. **Hub API (`apps/hub`):**
-   - `apps/hub/src/sale-service.ts`, `cart-routes.ts`, `routes.ts`, `server.ts`, `error-handler.ts`:
-     - `POST /carts/:id/complete` (`200 OK`, `cart:write` RBAC), allow-list mapper (`costValue`/foyda yo'q), `409` `details`, `sale.completed` strukturali Pino audit logi (**C2**), va `__testHooks` ni hech qachon uzatmaslik (**C1**).
+1. **T1.4 test qarzi (`adf9e67`, mutatsiya dalillari bilan):** `block` rejimida aniq `5.000` / `5.001` (`3.000 + 2.001`) chegara va boshqa `store_id` bilan `IDEMPOTENCY_CONFLICT`.
+2. **Domen (`@mezon/domain`):** `CUSTOMER_REQUIRED`, `MAX_MONEY_TIYIN = 9_223_372_036_854_775_807n`, `CASH_MOVE_TYPES`, `resolveSalePayments`, `validateSalePaymentsInvariant`, `canonicalizeCompleteSaleRequest`, 500 ta `fast-check` property test va B2 unit testi.
+3. **Kontraktlar (`@mezon/contracts`):** T1.4 bilan mos kengaytirilgan aralash to'lovlar, M4 `MAX_MONEY_TIYIN` chegarasi, `completedByUserId`, `CashMoveDtoSchema`.
+4. **Lokal baza (`@mezon/db-local`) va `0007_payments_cash_moves.sql`:**
+   - `sales` (`completed_by_user_id`, `request_hash`, triggerlar tiklangan), `payments` (`amount > 0` va non-cash CHECK), `cash_moves` (`FACT`, terminal indeksi `idx_cash_moves_terminal`), `getCashDrawerBalanceSync` (terminal `device_id`) va `getStoreCashBalanceSync`.
+   - `prefetchMutablePoolStatesSync` orqali yagona 6 maydonli pool yuklash (`stock-repo.ts`), B1 36 qadamli differensial test + `rebuildProjections()`, M1 (`0006 -> 0007` haqiqiy cheklar upgrade), M2–M5 va 50 ta DB fuzz testi.
+5. **Hub API (`apps/hub`):** `POST /carts/:id/complete` aralash to'lovlar, `CUSTOMER_REQUIRED: 400`, M3/M4/M5 E2E testlar, `completedByUserId` audit logi (nol tannarx/foyda).
 
-6. **CI 2 GB OOM tuzatishi (`a8c8634`):**
-   - T1.4 dagi qo'shimcha Drizzle jadvallari (`25` jadval, `~28` tsconfig) bir vaqtda bitta `eslint .` jarayonida V8 heap'ni `2.50 GB` ga chiqarib CI runnerlarning default `2048 MB` limitida OOM (`exit 134`) chaqirdi.
-   - `eslint.config.mjs` ga ixtiyoriy `MEZON_LINT_PROJECTS` filtri va `scripts/lint-workspaces.mjs` (3 tadan workspace bo'laklarida barcha ildiz fayllar + `packages/*` + `apps/*` ni aynan o'sha qoidalar bilan tekshirish) qo'shildi (`--max-old-space-size=1024` ostida ham xatosiz o'tadi).
-
-### O'zgargan fayllar (fayl — sabab)
-
-- `eslint.config.mjs`, `package.json`, `scripts/lint-workspaces.mjs` — `MEZON_LINT_PROJECTS` va bo'laklangan `pnpm run lint` (CI 2 GB OOM tuzatishi)
-- `packages/domain/src/cart.test.ts`, `packages/db-local/src/cart.test.ts` — T1.3 test qarzi (1-commit)
-- `packages/domain/src/errors.ts`, `cart.ts`, `sale.ts`, `sale.test.ts`, `index.ts` — `Sale` domenni hisoblash, formatlash va to'lov invarianti
-- `packages/drivers/src/node/redact.ts` — **C2** `cost`/`costValue`/`profit`/`margin` redaksiya qoidalari
-- `packages/contracts/src/auth.ts`, `sale.ts`, `sale.test.ts`, `index.ts` — `CompleteSale` Zod 4 DTO va xato `details`
-- `packages/db-local/src/schema/index.ts`, `drizzle/0006_complete_sale.sql`, `drizzle/meta/*`, `sale-migrations.ts`, `scripts/check-migrations.mjs` — `sales`/`sale_lines`/`payments`, `last_receipt_seq`, FK-xavfsiz `local_carts` va `MONOTONE` triggerlar
-- `packages/db-local/src/device-state.ts`, `stock-repo.ts`, `cart-repo.ts`, `sale-repo.ts`, `sale.test.ts`, `index.test.ts`, `index.ts` — `applyOutboundStockMoveSync`, `evaluateCartRowInDbSync`, `SqliteSaleStore` va testlar
-- `apps/hub/src/error-handler.ts`, `sale-service.ts`, `cart-routes.ts`, `routes.ts`, `server.ts`, `index.ts`, `sale.test.ts` — `POST /carts/:id/complete`, RBAC, `C1`/`C2` va HTTP E2E testlar
+### O'zgargan fayllar (R1 da yangilanganlar bilan)
+- `.dependency-cruiser.cjs`
+- `packages/domain/src/errors.ts`, `money.ts`, `sale.ts`, `index.ts`, `sale.test.ts`
+- `packages/contracts/src/sale.ts`, `index.ts`, `sale.test.ts`
+- `packages/db-local/src/schema/index.ts`, `drizzle/0007_payments_cash_moves.sql`, `drizzle/meta/_journal.json`, `drizzle/meta/0007_snapshot.json`, `src/sale-migrations.ts`, `src/stock-repo.ts`, `src/sale-repo.ts`, `src/index.ts`, `src/index.test.ts`, `src/sale.test.ts`
+- `apps/hub/src/error-handler.ts`, `sale-service.ts`, `cart-routes.ts`, `sale.test.ts`
 
 ### Migratsiyalar
+- `packages/db-local/drizzle/0007_payments_cash_moves.sql` (`meta/0007_snapshot.json`): `sales`, `payments`, `cash_moves` (`FACT`) va barcha `FACT`/`MONOTONE` triggerlari (`db:check` `0 diff`).
 
-- `packages/db-local/drizzle/0006_complete_sale.sql`:
-  - `sales` (`MONOTONE`, `trg_sales_no_delete`, `trg_sales_voided_monotone`, `trg_sales_immutable_core`), `sale_lines` (`FACT`, `trg_sale_lines_no_update/delete`), `payments` (`FACT`, `trg_payments_no_update/delete`).
-  - `local_device_state` ga `ALTER TABLE ADD last_receipt_seq`.
-  - `local_carts` ni `'completed'` holati va `completed_*` ustunlari bilan `PRAGMA foreign_keys = ON` ostida `local_cart_lines` ni saqlab yangilash (`check-migrations.mjs`: 0 diff).
+---
 
-### Qabul mezonlari
+### Qabul mezonlari va M1–M5 / B1–B2 dalillari
 
-- [x] **T1.3 test qarzi va mutatsiya isbotlari (`64ff1a4`)** — `packages/domain/src/cart.test.ts` (`T1.3 test debt (1)..(3)`) va `packages/db-local/src/cart.test.ts` (`storeId` A/B/`null`), uchala mutatsiya testni yiqitishi tasdiqlandi.
-- [x] **Atomik yagona tranzaksiya (`b`)** — `applyOutboundStockMoveSync` va `evaluateCartRowInDbSync` ajratildi; `sales`, `sale_lines`, `payments`, `stock_moves`, `local_stock_balances`/`local_batch_balances`, `last_receipt_seq`, `local_carts` va `local_outbox` bitta `uow.execute` da yoziladi.
-- [x] **Server qayta hisobi, `SALE_TOTAL_CHANGED` va override (`c`)** — `packages/db-local/src/sale.test.ts` va `apps/hub/src/sale.test.ts` (`409 SALE_TOTAL_CHANGED` va `403 DISCOUNT_OVERRIDE_REQUIRED`).
-- [x] **Zaxira siyosati (`block` + `warn` + `unlimited`/`quick_sale`) (`d`)** — `block` rejimida dubl-mahsulot jamlanma yetishmovchiligi ham to'liq rollback + `409 INSUFFICIENT_STOCK` (`insufficientLines` `details`) + `'open'` savat; `warn` rejimida ogohlantirishlar saqlanadi; `unlimited` va `quick_sale` omborga tegmaydi (`costValue = 0`).
-- [x] **Chek raqami va fiskal ustunlar yo'qligi (`e`, qaror #1 va #3)** — `last_receipt_seq` rollback va crash'da sarflanmaydi; ko'rinadigan `receipt_code` (`<4hex>-000001`), noyoblik `(organization_id, device_id, receipt_no)`; `sales` da fiskal status ustunlari yo'q.
-- [x] **Chidamlilik testlari (`f`):**
-  - *Ikki marta bosish (`db-local` va `hub`):* bir xil `(cartId, clientRequestId)` → aynan bitta `sales`, bir xil `receiptNo` va `warnings`, 0 qo'shimcha outbox/stock; boshqa `cartId` bilan qayta ishlatish → `409 IDEMPOTENCY_CONFLICT`.
-  - *Parallellik (`db-local` 5 parallel, `hub` 3 parallel):* `Promise.all` natijasida bazada qat'iy 1 ta `sales`; bir xil `clientRequestId` idempotent javob, boshqa ID esa `409 CART_NOT_OPEN` oladi.
-  - *Rollback → qayta urinish:* `409 INSUFFICIENT_STOCK` dan keyin `sales = 0`, `last_receipt_seq = 0`, savat `'open'`; kirim qilinib **xuddi shu `clientRequestId`** bilan qayta so'rovda `receiptNo = 1` bilan muvaffaqiyatli yopiladi.
-  - *Child process crash testi (`crash-worker.mjs`):* SQLite `WAL` fayl bazada `onBeforeCommit` ichida `process.exit(42)` bilan (`COMMIT` dan oldin) jarayon o'ladi → qayta ochilganda `sales = 0`, `sale_lines = 0`, `payments = 0`, outbox va zaxira o'zgarmagan, `last_receipt_seq = 0`, savat `'open'`, keyingi urinish esa `receiptNo = 1` bilan to'liq o'tadi.
-- [x] **C1 dalillari (`__testHooks` izolyatsiyasi):** `__testHooks?: SaleStoreTestHooks` faqat test in'ektsiyasi orqali ishlaydi; `process.env` yoki global bayroq o'qilmaydi (`MEZON_TEST_CRASH_BEFORE_COMMIT=1` bilan ikkala `db-local/src/sale.test.ts` va `hub/src/sale.test.ts` da salbiy tekshiruv o'tdi); `apps/hub/src/server.ts` (`createSqliteSaleStore`) va `apps/desktop` da `__testHooks` uzatilmaydi va mavjud emas.
-- [x] **C2 dalillari (`sale.completed` Pino audit logi):** `apps/hub/src/sale.test.ts` da `sale.completed` log qatorlarida PIN, token, `cost`/`costValue`/`costPrice`/`profit`/`margin` kalitlari ham, xom qiymatlari ham yo'qligi tekshirildi; hamda `createHubLogger` + `HUB_LOGGER_REDACT_PATHS` (`DEFAULT_LOG_REDACT_PATHS`) `pin`, `token`, `cost`, `costValue`, `profit` maydonlarini (tashqi va ichki) `[Redacted]` ga aylantirishi isbotlandi.
-- [x] **20 qatorli savdo unumdorligi (`<= 300 ms`, `g`):**
-  - `@mezon/db-local` (`packages/db-local/src/sale.test.ts`, disk WAL SQLite, 10 FIFO partiyali + 10 o'rtacha): `pnpm run verify` parallel yuklamasida **`115.48 ms`** (yakka ishga tushirishda `40.35 ms`).
-  - `@mezon/hub` HTTP E2E (`apps/hub/src/sale.test.ts`, `POST /carts/:id/complete`): `pnpm run verify` parallel yuklamasida **`107.47 ms`** (yakka ishga tushirishda `43.65 ms`).
+- [x] **T1.4 test qarzi (`adf9e67`)** — mutatsiyalar bilan isbotlangan.
+- [x] **B1 (`stock-repo.ts` yagona loader + differensial test)** — 36 qadam (`avg` + `fifo`, `'warn'`, kamomad + qayta kirim) va `rebuildProjections()` pariteti o'tdi; `lastUnitCost` va `deficitQty` mutatsiyalarining har biri alohida testni yiqitdi.
+- [x] **B2 (`validateSalePaymentsInvariant` non-cash `tenderedAmount !== null`)** — domain unit testi qo'shildi, mutatsiya bilan yiqitildi.
+- [x] **M1 (`0006 -> 0007`)** — 2 haqiqiy chek, `foreign_key_check = []`, `integrity_check = 'ok'`, triggerlar faol, `receipt_no = 3n`.
+- [x] **M2 (`cash_moves` `device_id` + `getCashDrawerBalanceSync`)** — Device A (`76_000n`), Device B (`50_000n`), Store (`126_000n`).
+- [x] **M3 (`debt > 0` → `CUSTOMER_REQUIRED`, `customerId !== null` → `VALIDATION_ERROR`)** — 0 DB yozuvi.
+- [x] **M4 (`MAX_MONEY_TIYIN = 9_223_372_036_854_775_807n`)** — max o'tadi (`200`), `+1` (`...808`) Zod darajasida `400 VALIDATION_ERROR` (0 DB yozuvi).
+- [x] **M5 (`validateSalePaymentsInvariant` mutatsiyasi)** — `db-local` da `SQLITE_CONSTRAINT_CHECK`, Hub da `500` vs kutilgan `400 VALIDATION_ERROR` bilan ushlandi.
+- [x] **Property testlar soni:** `@mezon/domain` `500` runs, `@mezon/db-local` `50` runs.
+- [x] **20 qatorli, 3 to'lovli savdo vaqti (≤ 300 ms):**
+  - `@mezon/db-local` (`card + payme + cash`): **`median=38.99 ms`**, `samples=[40.99, 34.69, 33.70, 38.99, 39.96]`
+  - `@mezon/hub` HTTP E2E (`card + uzqr + cash`): **`median=89.71 ms`**, `samples=[89.71, 99.28, 97.06, 79.50, 84.42]`
 
-### Test natijasi (buyruq va haqiqiy chiqish)
+---
 
-1. Qo'shimcha xotira cheklovli lint tekshiruvi (`NODE_OPTIONS=--max-old-space-size=1024 pnpm run lint`): 0 xato.
-2. To'liq lokal `pnpm run verify` (`a8c8634` ustida):
-   - `prettier --check .` → `All matched files use Prettier code style!`
-   - `turbo run build` → `17 successful, 17 total`
-   - `node scripts/lint-workspaces.mjs` → 0 xato
-   - `turbo run typecheck` → 0 xato
-   - `turbo run db:check` → PostgreSQL va SQLite (`0 diff statements`)
-   - `vitest run` → `Test Files 37 passed | 1 skipped (38)`, `Tests 180 passed | 2 skipped (182)` (skip: `packages/db-cloud/src/pg-rls.test.ts` lokal Windows'da Docker yo'qligi uchun)
-   - `depcruise --config .dependency-cruiser.cjs apps/*/src packages/*/src` → `no dependency violations found (222 modules, 708 dependencies cruised)`
-3. GitHub Actions CI (`a8c863474cf978fd2e11c81fb029046ec5902ad1`):
-   - Workflow runs: https://github.com/Shaxobiddin-Github/Mezon/actions/runs/42852242967 (PR) va https://github.com/Shaxobiddin-Github/Mezon/actions/runs/42851794566 (push)
-   - `Verify (ubuntu-latest)`: `success` — https://github.com/Shaxobiddin-Github/Mezon/actions/runs/42852242967/job/129955766375
-   - `Verify (windows-latest)`: `success` — https://github.com/Shaxobiddin-Github/Mezon/actions/runs/42852242967/job/129955766478
-   - `Verify PostgreSQL RLS (ubuntu-latest)`: `success` — https://github.com/Shaxobiddin-Github/Mezon/actions/runs/42852242967/job/129955766481
-   - `Build & E2E Desktop Installer (windows-latest)`: `success` — https://github.com/Shaxobiddin-Github/Mezon/actions/runs/42852242967/job/129955766153
+### Test va CI natijasi
+
+1. **Lokal `pnpm run verify` (`b3a940d` uchun, exit code `0`):**
+   - `prettier --check .` — o'tdi
+   - `turbo run build` — `17 successful, 17 total`
+   - `node scripts/lint-workspaces.mjs` — `0` xato
+   - `turbo run typecheck` — `22 successful, 22 total`
+   - `turbo run db:check` — `19 successful, 19 total` (`0 diff`)
+   - `vitest run` — `37 passed | 1 skipped (38)` fayl (`191 passed | 2 skipped (193)` test; `pg-rls.test.ts` mahalliy Docker yo'qligi uchun skip, CI da `postgres-rls` da o'tgan)
+   - `depcruise` — `0` qoidabuzarlik (`222 modules, 716 dependencies`)
+2. **GitHub Actions CI (`b3a940ddb2a6080abec62c2a51661a19bdd49139`, PR #12):**
+   - `CI` (`pull_request`, run `42865931904`) va `CI` (`push`, run `42865924043`) — barcha **8/8** check-run `success`:
+     - `Verify (ubuntu-latest)` — `success`
+     - `Verify (windows-latest)` — `success`
+     - `Verify PostgreSQL RLS (ubuntu-latest)` — `success`
+     - `Build & E2E Desktop Installer (windows-latest)` — `success`
 
 ### Tekshirilmagan narsalar
-
-- `packages/db-cloud/src/pg-rls.test.ts` lokal Windows'da Docker yo'qligi uchun skip qilindi, lekin Ubuntu CI dagi `Verify PostgreSQL RLS` job'ida `success` bilan o'tdi.
+- Real to'lov provayderlari (`Payme`, `Click`, `Uzum`, `UzQR` API), F3 PF-246 qoidalari (`packages/rules`), `customer_ledger` (T1.7), smena ochish/yopish (T1.9) — reja bo'yicha T1.5 doirasidan tashqarida.
 
 ### Qilingan taxminlar
-
-- Bo'sh savatni (`lines.length === 0`) yakunlash `400 CART_EMPTY` bilan rad etiladi.
-- `parked` holatdagi savat avval `POST /carts/:id/resume` orqali `'open'` ga qaytariladi, shundan keyingina `completeSale` qilinadi (aks holda `409 CART_NOT_OPEN`).
+- `customerId !== null` uchun T1.5 da `VALIDATION_ERROR` (`400`) tanlandi (`debtAmount > 0` → `CUSTOMER_REQUIRED`).
 
 ### Takliflar
-
-- T1.5 (aralash to'lovlar va `cash_moves`) hamda T1.6 (`voided_at_ms` bilan bekor qilish va qaytarish) uchun `sales` triggeri (`trg_sales_immutable_core`) va `payments` sxemasi allaqachon tayyor; T1.5 da `CompleteSaleRequestSchema.payments` ni `min(1)` ga ko'tarib `'cash'` qismi uchun `cash_moves` yozish kifoya bo'ladi.
+- T1.6 da naqd qaytarish `cash_moves` da `'refund_cash_out'` (manfiy `amount_delta`) bilan bir tranzaksiyada yozilsin.
 
 ### Egasi yoki Claude qarori kerak bo'lgan savollar
-
-- Yo'q. T1.4 bo'yicha barcha bandlar bajarildi; `QABUL` tasdig'i va T1.5 bo'yicha keyingi topshiriq kutilmoqda.
+- Yo'q.

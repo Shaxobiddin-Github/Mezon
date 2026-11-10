@@ -1,4 +1,9 @@
-import { PAYMENT_METHODS } from '@mezon/domain';
+import {
+  CASH_MOVE_TYPES,
+  MAX_MONEY_TIYIN,
+  MAX_PROVIDER_REF_LENGTH,
+  PAYMENT_METHODS,
+} from '@mezon/domain';
 import { z } from 'zod';
 import { BigIntStringSchema, UuidV7Schema } from './auth.js';
 import {
@@ -7,20 +12,94 @@ import {
   PositiveBigIntStringSchema,
 } from './cart.js';
 import { ProductUnitSchema } from './catalog.js';
+import { SignedBigIntStringSchema } from './stock.js';
 
 export const PaymentMethodSchema = z.enum(PAYMENT_METHODS);
 
+export const NonCashPaymentMethodSchema = z.enum([
+  'card',
+  'uzqr',
+  'payme',
+  'click',
+  'uzum',
+  'social_card',
+  'other',
+]);
+
+export const CashMoveTypeSchema = z.enum(CASH_MOVE_TYPES);
+
+/**
+ * Non-negative money string bounded to signed 64-bit SQL integer max (`<= MAX_MONEY_TIYIN`).
+ */
+export const BoundedMoneyStringSchema = BigIntStringSchema.refine(
+  (val) => BigInt(val) <= MAX_MONEY_TIYIN,
+  `Amount must not exceed ${MAX_MONEY_TIYIN.toString()} tiyin`,
+);
+
+/**
+ * Strictly positive money string bounded `[1, MAX_MONEY_TIYIN]`.
+ */
+export const PositiveBoundedMoneyStringSchema = BigIntStringSchema.refine((val) => {
+  const n = BigInt(val);
+  return n >= 1n && n <= MAX_MONEY_TIYIN;
+}, `Amount must be between 1 and ${MAX_MONEY_TIYIN.toString()} tiyin`);
+
 export const CashSalePaymentInputSchema = z.strictObject({
   method: z.literal('cash'),
-  tenderedAmount: BigIntStringSchema,
+  tenderedAmount: PositiveBoundedMoneyStringSchema,
+  amount: PositiveBoundedMoneyStringSchema.optional(),
 });
 export type CashSalePaymentInputDto = z.infer<typeof CashSalePaymentInputSchema>;
 
-export const CompleteSaleRequestSchema = z.strictObject({
-  clientRequestId: UuidV7Schema,
-  expectedTotal: BigIntStringSchema,
-  payments: z.array(CashSalePaymentInputSchema).length(1, 'T1.4 requires exactly one cash payment'),
+const ProviderRefInputSchema = z
+  .string()
+  .transform((val) => val.trim())
+  .refine(
+    (val) => val.length <= MAX_PROVIDER_REF_LENGTH,
+    `providerRef must not exceed ${String(MAX_PROVIDER_REF_LENGTH)} characters`,
+  )
+  .transform((val) => (val.length === 0 ? null : val))
+  .nullable()
+  .optional();
+
+export const NonCashSalePaymentInputSchema = z.strictObject({
+  method: NonCashPaymentMethodSchema,
+  amount: PositiveBoundedMoneyStringSchema,
+  providerRef: ProviderRefInputSchema,
 });
+export type NonCashSalePaymentInputDto = z.infer<typeof NonCashSalePaymentInputSchema>;
+
+export const SalePaymentInputSchema = z.union([
+  CashSalePaymentInputSchema,
+  NonCashSalePaymentInputSchema,
+]);
+export type SalePaymentInputDto = z.infer<typeof SalePaymentInputSchema>;
+
+export const CompleteSaleRequestSchema = z
+  .strictObject({
+    clientRequestId: UuidV7Schema,
+    expectedTotal: BoundedMoneyStringSchema,
+    debtAmount: BoundedMoneyStringSchema.optional(),
+    customerId: UuidV7Schema.nullable().optional(),
+    payments: z
+      .array(SalePaymentInputSchema)
+      .max(64, 'At most 64 payment lines may be attached to one sale'),
+  })
+  .superRefine((val, ctx) => {
+    let cashCount = 0;
+    for (let i = 0; i < val.payments.length; i += 1) {
+      if (val.payments[i]?.method === 'cash') {
+        cashCount += 1;
+        if (cashCount > 1) {
+          ctx.addIssue({
+            code: 'custom',
+            path: ['payments', i, 'method'],
+            message: 'At most one cash payment row is allowed per sale',
+          });
+        }
+      }
+    }
+  });
 export type CompleteSaleRequestDto = z.infer<typeof CompleteSaleRequestSchema>;
 
 export const SaleLineDtoSchema = z.strictObject({
@@ -61,6 +140,23 @@ export const SalePaymentDtoSchema = z.strictObject({
 });
 export type SalePaymentDto = z.infer<typeof SalePaymentDtoSchema>;
 
+export const CashMoveDtoSchema = z.strictObject({
+  id: UuidV7Schema,
+  organizationId: UuidV7Schema,
+  storeId: UuidV7Schema,
+  deviceId: UuidV7Schema,
+  shiftId: UuidV7Schema.nullable(),
+  type: CashMoveTypeSchema,
+  amountDelta: SignedBigIntStringSchema,
+  sourceType: z.string(),
+  sourceId: UuidV7Schema,
+  paymentId: UuidV7Schema.nullable(),
+  reason: z.string().nullable(),
+  createdByUserId: UuidV7Schema,
+  createdAtMs: BigIntStringSchema,
+});
+export type CashMoveDto = z.infer<typeof CashMoveDtoSchema>;
+
 export const SaleDtoSchema = z.strictObject({
   id: UuidV7Schema,
   receiptNo: PositiveBigIntStringSchema,
@@ -70,6 +166,7 @@ export const SaleDtoSchema = z.strictObject({
   deviceId: UuidV7Schema,
   sourceCartId: UuidV7Schema.nullable(),
   cashierUserId: UuidV7Schema,
+  completedByUserId: UuidV7Schema,
   customerId: UuidV7Schema.nullable(),
   shiftId: UuidV7Schema.nullable(),
   clientRequestId: UuidV7Schema,

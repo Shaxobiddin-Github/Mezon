@@ -9,7 +9,7 @@ import {
   LoginResponseSchema,
   ProductDetailResponseSchema,
 } from '@mezon/contracts';
-import type { PinHasher } from '@mezon/domain';
+import { MAX_MONEY_TIYIN, type PinHasher } from '@mezon/domain';
 import { FixedClock, SeededRandomSource } from '@mezon/test-utils';
 import { afterEach, describe, expect, it } from 'vitest';
 import { createHubLogger, createHubServer } from './index.js';
@@ -600,5 +600,569 @@ describe('@mezon/hub - T1.4 POST /carts/:id/complete, RBAC, 409 details, cost-hi
     } finally {
       await hub.close();
     }
+  }, 30_000);
+
+  it('T1.5 HTTP E2E: mixed payments, manager completedByUserId, idempotency hash, zero-total, M3/M4/M5 exact 400 codes & 0 DB writes', async () => {
+    const logLines: string[] = [];
+    const clock = new FixedClock(1_760_000_000_000n);
+    const hub = await createHubServer({
+      dbPath: makeDbPath('hub-t15.db'),
+      port: TEST_PORT + 2,
+      logLevel: 'info',
+      logStream: new Writable({
+        write(chunk, _enc, cb) {
+          logLines.push(Buffer.isBuffer(chunk) ? chunk.toString('utf8') : String(chunk));
+          cb();
+        },
+      }),
+      clock,
+      random: new SeededRandomSource(94),
+      pinHasher: makeFastTestHasher(),
+    });
+    const hostHdr = `127.0.0.1:${TEST_PORT + 2}`;
+    const hdrs = (tok?: string) =>
+      tok ? { host: hostHdr, authorization: `Bearer ${tok}` } : { host: hostHdr };
+
+    const countRows = () => ({
+      sales: (
+        hub.connection.sqlite.prepare('SELECT COUNT(*) as c FROM "sales"').get() as { c: bigint }
+      ).c,
+      payments: (
+        hub.connection.sqlite.prepare('SELECT COUNT(*) as c FROM "payments"').get() as { c: bigint }
+      ).c,
+      cashMoves: (
+        hub.connection.sqlite.prepare('SELECT COUNT(*) as c FROM "cash_moves"').get() as {
+          c: bigint;
+        }
+      ).c,
+      outbox: (
+        hub.connection.sqlite.prepare('SELECT COUNT(*) as c FROM "local_outbox"').get() as {
+          c: bigint;
+        }
+      ).c,
+    });
+
+    try {
+      await hub.app.inject({
+        method: 'POST',
+        url: '/setup',
+        headers: hdrs(),
+        payload: { owner: { fullName: 'T15 Owner', username: 'owner15', pin: '849201' } },
+      });
+      const ownerLogin = LoginResponseSchema.parse(
+        (
+          await hub.app.inject({
+            method: 'POST',
+            url: '/auth/login',
+            headers: hdrs(),
+            payload: { username: 'owner15', pin: '849201' },
+          })
+        ).json(),
+      );
+      await hub.app.inject({
+        method: 'POST',
+        url: '/users',
+        headers: hdrs(ownerLogin.token),
+        payload: { fullName: 'T15 Cashier', username: 'cashier15', role: 'cashier', pin: '319482' },
+      });
+      await hub.app.inject({
+        method: 'POST',
+        url: '/users',
+        headers: hdrs(ownerLogin.token),
+        payload: { fullName: 'T15 Manager', username: 'manager15', role: 'manager', pin: '618394' },
+      });
+      const cashierLogin = LoginResponseSchema.parse(
+        (
+          await hub.app.inject({
+            method: 'POST',
+            url: '/auth/login',
+            headers: hdrs(),
+            payload: { username: 'cashier15', pin: '319482' },
+          })
+        ).json(),
+      );
+      const managerLogin = LoginResponseSchema.parse(
+        (
+          await hub.app.inject({
+            method: 'POST',
+            url: '/auth/login',
+            headers: hdrs(),
+            payload: { username: 'manager15', pin: '618394' },
+          })
+        ).json(),
+      );
+
+      const prodRes = ProductDetailResponseSchema.parse(
+        (
+          await hub.app.inject({
+            method: 'POST',
+            url: '/products',
+            headers: hdrs(ownerLogin.token),
+            payload: {
+              name: 'Non T15',
+              unit: 'dona',
+              trackBatches: false,
+              salePrice: '50000',
+            },
+          })
+        ).json(),
+      );
+      await hub.app.inject({
+        method: 'POST',
+        url: '/stock/moves/in',
+        headers: hdrs(ownerLogin.token),
+        payload: {
+          productId: prodRes.product.id,
+          reason: 'initial',
+          qty: '100000',
+          totalCostValue: '2000000',
+        },
+      });
+
+      // 1) Cashier opens cart (2 * 50_000 = 100_000); MANAGER closes with 2x card + uzqr + cash w/ change
+      const cart1 = CartResponseSchema.parse(
+        (
+          await hub.app.inject({
+            method: 'POST',
+            url: '/carts',
+            headers: hdrs(cashierLogin.token),
+            payload: {},
+          })
+        ).json(),
+      );
+      const cart1Added = CartResponseSchema.parse(
+        (
+          await hub.app.inject({
+            method: 'POST',
+            url: `/carts/${cart1.cart.id}/lines`,
+            headers: hdrs(cashierLogin.token),
+            payload: {
+              kind: 'catalog',
+              productId: prodRes.product.id,
+              variantId: null,
+              qty: '2000',
+            },
+          })
+        ).json(),
+      );
+      expect(cart1Added.cart.totalFinal).toBe('100000');
+
+      const mixedReqId = '01950000-0000-7000-8000-f10000000001';
+      const mixedPayload = {
+        clientRequestId: mixedReqId,
+        expectedTotal: '100000',
+        payments: [
+          { method: 'card', amount: '20000', providerRef: '  CARD-A  ' },
+          { method: 'card', amount: '15000', providerRef: 'CARD-B' },
+          { method: 'uzqr', amount: '25000', providerRef: 'QR-1' },
+          // Remaining for cash = 40_000; tendered 50_000 -> change 10_000
+          { method: 'cash', tenderedAmount: '50000' },
+        ],
+      };
+
+      const resMixed = await hub.app.inject({
+        method: 'POST',
+        url: `/carts/${cart1.cart.id}/complete`,
+        headers: hdrs(managerLogin.token),
+        payload: mixedPayload,
+      });
+      expect(resMixed.statusCode).toBe(200);
+      const completed1 = CompleteSaleResponseSchema.parse(resMixed.json());
+      expect(completed1.sale.cashierUserId).toBe(cashierLogin.user.id);
+      expect(completed1.sale.completedByUserId).toBe(managerLogin.user.id);
+      expect(completed1.sale.totalPaid).toBe('100000');
+      expect(completed1.sale.debtAmount).toBe('0');
+      expect(completed1.sale.changeAmount).toBe('10000');
+      expect(completed1.sale.payments).toHaveLength(4);
+      expect(completed1.sale.payments[0]?.providerRef).toBe('CARD-A');
+      expect(completed1.sale.payments[3]?.amount).toBe('40000');
+      expect(await hub.saleStore.getTerminalCashBalance()).toBe(40_000n);
+
+      // Security: ZERO cost/profit keys in response or logs
+      const keys1 = collectJsonKeysDeep(resMixed.json());
+      for (const k of ['cost', 'costValue', 'costPrice', 'profit', 'margin', 'requestHash']) {
+        expect(keys1.has(k)).toBe(false);
+      }
+
+      // 2) Identical idempotent replay -> 200 same sale; changed payments with same clientRequestId -> 409 IDEMPOTENCY_CONFLICT
+      const replayRes = await hub.app.inject({
+        method: 'POST',
+        url: `/carts/${cart1.cart.id}/complete`,
+        headers: hdrs(managerLogin.token),
+        payload: {
+          ...mixedPayload,
+          payments: [
+            { method: 'card', amount: '20000', providerRef: 'CARD-A' },
+            ...mixedPayload.payments.slice(1),
+          ],
+        },
+      });
+      expect(replayRes.statusCode).toBe(200);
+      expect(CompleteSaleResponseSchema.parse(replayRes.json()).sale.id).toBe(completed1.sale.id);
+
+      const snapAfterMixed = countRows();
+      const conflictRes = await hub.app.inject({
+        method: 'POST',
+        url: `/carts/${cart1.cart.id}/complete`,
+        headers: hdrs(managerLogin.token),
+        payload: {
+          ...mixedPayload,
+          payments: [
+            { method: 'payme', amount: '20000', providerRef: 'CARD-A' },
+            ...mixedPayload.payments.slice(1),
+          ],
+        },
+      });
+      expect(conflictRes.statusCode).toBe(409);
+      expect(ApiErrorEnvelopeSchema.parse(conflictRes.json()).error.code).toBe(
+        'IDEMPOTENCY_CONFLICT',
+      );
+      expect(countRows()).toEqual(snapAfterMixed);
+
+      // 3) Open cart 2 (1 * 50_000) to test M3, M4, M5 HTTP validation errors & 0 DB writes
+      const cart2 = CartResponseSchema.parse(
+        (
+          await hub.app.inject({
+            method: 'POST',
+            url: '/carts',
+            headers: hdrs(cashierLogin.token),
+            payload: {},
+          })
+        ).json(),
+      );
+      await hub.app.inject({
+        method: 'POST',
+        url: `/carts/${cart2.cart.id}/lines`,
+        headers: hdrs(cashierLogin.token),
+        payload: {
+          kind: 'catalog',
+          productId: prodRes.product.id,
+          variantId: null,
+          qty: '1000',
+        },
+      });
+
+      // M3: debt > 0 -> 400 CUSTOMER_REQUIRED; customerId != null -> 400 VALIDATION_ERROR; 0 DB writes
+      const snapBeforeErrors = countRows();
+      const debtRes = await hub.app.inject({
+        method: 'POST',
+        url: `/carts/${cart2.cart.id}/complete`,
+        headers: hdrs(cashierLogin.token),
+        payload: {
+          clientRequestId: '01950000-0000-7000-8000-f10000000010',
+          expectedTotal: '50000',
+          debtAmount: '10000',
+          payments: [{ method: 'card', amount: '40000' }],
+        },
+      });
+      expect(debtRes.statusCode).toBe(400);
+      expect(ApiErrorEnvelopeSchema.parse(debtRes.json()).error.code).toBe('CUSTOMER_REQUIRED');
+      expect(countRows()).toEqual(snapBeforeErrors);
+
+      const custRes = await hub.app.inject({
+        method: 'POST',
+        url: `/carts/${cart2.cart.id}/complete`,
+        headers: hdrs(cashierLogin.token),
+        payload: {
+          clientRequestId: '01950000-0000-7000-8000-f10000000011',
+          expectedTotal: '50000',
+          customerId: '01950000-0000-7000-8000-c00000000099',
+          payments: [{ method: 'cash', tenderedAmount: '50000' }],
+        },
+      });
+      expect(custRes.statusCode).toBe(400);
+      expect(ApiErrorEnvelopeSchema.parse(custRes.json()).error.code).toBe('VALIDATION_ERROR');
+      expect(countRows()).toEqual(snapBeforeErrors);
+
+      // M5: Underpayment/overpayment/extra cash/0/negative MUST return EXACT HTTP 400 VALIDATION_ERROR (never 500) + 0 DB writes
+      const invalidPayPayloads = [
+        { payments: [{ method: 'card', amount: '49999' }] },
+        { payments: [{ method: 'card', amount: '50001' }] },
+        {
+          payments: [
+            { method: 'card', amount: '50000' },
+            { method: 'cash', tenderedAmount: '1000' },
+          ],
+        },
+        { payments: [{ method: 'cash', tenderedAmount: '49999' }] },
+        { payments: [{ method: 'cash', tenderedAmount: '50000', amount: '40000' }] },
+        { payments: [{ method: 'cash', tenderedAmount: '0' }] },
+        { payments: [{ method: 'card', amount: '0' }] },
+        { payments: [{ method: 'card', amount: '-50' }] },
+        {
+          payments: [
+            { method: 'cash', tenderedAmount: '25000' },
+            { method: 'cash', tenderedAmount: '25000' },
+          ],
+        },
+      ];
+      for (let idx = 0; idx < invalidPayPayloads.length; idx += 1) {
+        const badRes = await hub.app.inject({
+          method: 'POST',
+          url: `/carts/${cart2.cart.id}/complete`,
+          headers: hdrs(cashierLogin.token),
+          payload: {
+            clientRequestId: `01950000-0000-7000-8000-f100000001${String(idx).padStart(2, '0')}`,
+            expectedTotal: '50000',
+            ...invalidPayPayloads[idx],
+          },
+        });
+        expect(badRes.statusCode).toBe(400);
+        expect(ApiErrorEnvelopeSchema.parse(badRes.json()).error.code).toBe('VALIDATION_ERROR');
+        expect(countRows()).toEqual(snapBeforeErrors);
+      }
+
+      // M4: 1 tiyin over MAX_MONEY_TIYIN rejected at Zod layer with 400 VALIDATION_ERROR and 0 DB writes
+      const overMax = (MAX_MONEY_TIYIN + 1n).toString();
+      for (const badMaxPayload of [
+        { payments: [{ method: 'cash', tenderedAmount: overMax }] },
+        { payments: [{ method: 'card', amount: overMax }] },
+      ]) {
+        const overRes = await hub.app.inject({
+          method: 'POST',
+          url: `/carts/${cart2.cart.id}/complete`,
+          headers: hdrs(cashierLogin.token),
+          payload: {
+            clientRequestId: '01950000-0000-7000-8000-f10000000201',
+            expectedTotal: '50000',
+            ...badMaxPayload,
+          },
+        });
+        expect(overRes.statusCode).toBe(400);
+        expect(ApiErrorEnvelopeSchema.parse(overRes.json()).error.code).toBe('VALIDATION_ERROR');
+        expect(countRows()).toEqual(snapBeforeErrors);
+      }
+
+      // M4 exact max allowed cash tender passes cleanly and persists 64-bit SQLite integers + cash_moves
+      const maxStr = MAX_MONEY_TIYIN.toString();
+      const maxRes = await hub.app.inject({
+        method: 'POST',
+        url: `/carts/${cart2.cart.id}/complete`,
+        headers: hdrs(cashierLogin.token),
+        payload: {
+          clientRequestId: '01950000-0000-7000-8000-f10000000202',
+          expectedTotal: '50000',
+          payments: [{ method: 'cash', tenderedAmount: maxStr }],
+        },
+      });
+      expect(maxRes.statusCode).toBe(200);
+      const completedMax = CompleteSaleResponseSchema.parse(maxRes.json());
+      expect(completedMax.sale.changeAmount).toBe((MAX_MONEY_TIYIN - 50_000n).toString());
+      // Terminal cash drawer increased by exact net cash sale amount (+50_000) despite MAX int64 tender/change!
+      expect(await hub.saleStore.getTerminalCashBalance()).toBe(90_000n);
+
+      // 4) 100%-discounted zero-total checkout via HTTP completes with payments: [] and adds 0 payments/cash_moves
+      const cartZero = CartResponseSchema.parse(
+        (
+          await hub.app.inject({
+            method: 'POST',
+            url: '/carts',
+            headers: hdrs(ownerLogin.token),
+            payload: {},
+          })
+        ).json(),
+      );
+      await hub.app.inject({
+        method: 'POST',
+        url: `/carts/${cartZero.cart.id}/lines`,
+        headers: hdrs(ownerLogin.token),
+        payload: {
+          kind: 'catalog',
+          productId: prodRes.product.id,
+          variantId: null,
+          qty: '1000',
+        },
+      });
+      const discRes = await hub.app.inject({
+        method: 'PUT',
+        url: `/carts/${cartZero.cart.id}/discount`,
+        headers: hdrs(ownerLogin.token),
+        payload: {
+          mode: 'percent',
+          percentBp: 10_000,
+          reason: '100% owner promo',
+          override: { username: 'owner15', pin: '849201' },
+        },
+      });
+      expect(discRes.statusCode).toBe(200);
+
+      const snapBeforeZero = countRows();
+      const nonEmptyZeroRes = await hub.app.inject({
+        method: 'POST',
+        url: `/carts/${cartZero.cart.id}/complete`,
+        headers: hdrs(ownerLogin.token),
+        payload: {
+          clientRequestId: '01950000-0000-7000-8000-f10000000300',
+          expectedTotal: '0',
+          payments: [{ method: 'cash', tenderedAmount: '100' }],
+        },
+      });
+      expect(nonEmptyZeroRes.statusCode).toBe(400);
+      expect(ApiErrorEnvelopeSchema.parse(nonEmptyZeroRes.json()).error.code).toBe(
+        'VALIDATION_ERROR',
+      );
+      expect(countRows()).toEqual(snapBeforeZero);
+
+      const zeroRes = await hub.app.inject({
+        method: 'POST',
+        url: `/carts/${cartZero.cart.id}/complete`,
+        headers: hdrs(ownerLogin.token),
+        payload: {
+          clientRequestId: '01950000-0000-7000-8000-f10000000301',
+          expectedTotal: '0',
+          payments: [],
+        },
+      });
+      expect(zeroRes.statusCode).toBe(200);
+      const zeroCompleted = CompleteSaleResponseSchema.parse(zeroRes.json());
+      expect(zeroCompleted.sale.payments).toEqual([]);
+      const snapAfterZero = countRows();
+      expect(snapAfterZero.sales).toBe(snapBeforeZero.sales + 1n);
+      expect(snapAfterZero.payments).toBe(snapBeforeZero.payments);
+      expect(snapAfterZero.cashMoves).toBe(snapBeforeZero.cashMoves);
+
+      // Verify sale audit logs captured completedByUserId and paymentMethods
+      const saleAuditLogs = logLines
+        .join('')
+        .trim()
+        .split(/\r?\n/)
+        .filter((l) => l.length > 0)
+        .map((l) => JSON.parse(l) as Record<string, unknown>)
+        .filter((l) => l.event === 'sale.completed');
+      expect(saleAuditLogs.some((l) => l.completedByUserId === managerLogin.user.id)).toBe(true);
+    } finally {
+      await hub.close();
+    }
   });
+
+  it('T1.5 HTTP E2E perf: 20-line cart with 3 payment types (card + uzqr + cash) completes <= 300ms', async () => {
+    const clock = new FixedClock(1_760_000_000_000n);
+    const hub = await createHubServer({
+      dbPath: makeDbPath('hub-perf-t15-3pay.db'),
+      port: TEST_PORT + 3,
+      logLevel: 'silent',
+      clock,
+      random: new SeededRandomSource(95),
+      pinHasher: makeFastTestHasher(),
+    });
+
+    try {
+      const hdr = { host: `127.0.0.1:${TEST_PORT + 3}` };
+      await hub.app.inject({
+        method: 'POST',
+        url: '/setup',
+        headers: hdr,
+        payload: { owner: { fullName: 'Perf15 Owner', username: 'owner15p', pin: '849201' } },
+      });
+      const login = LoginResponseSchema.parse(
+        (
+          await hub.app.inject({
+            method: 'POST',
+            url: '/auth/login',
+            headers: hdr,
+            payload: { username: 'owner15p', pin: '849201' },
+          })
+        ).json(),
+      );
+      const authHdr = { ...hdr, authorization: `Bearer ${login.token}` };
+
+      const samplesMs: number[] = [];
+      let expectedDrawerTotal = 0n;
+      const prodIds: string[] = [];
+      for (let i = 0; i < 20; i += 1) {
+        const p = ProductDetailResponseSchema.parse(
+          (
+            await hub.app.inject({
+              method: 'POST',
+              url: '/products',
+              headers: authHdr,
+              payload: {
+                name: `HTTP T15 Perf ${i + 1}`,
+                unit: 'dona',
+                trackBatches: i % 2 === 0,
+                salePrice: String((i + 1) * 10_000),
+              },
+            })
+          ).json(),
+        );
+        await hub.app.inject({
+          method: 'POST',
+          url: '/stock/moves/in',
+          headers: authHdr,
+          payload: {
+            productId: p.product.id,
+            reason: 'purchase',
+            qty: '10000',
+            totalCostValue: String((i + 1) * 30_000),
+          },
+        });
+        prodIds.push(p.product.id);
+      }
+
+      for (let run = 1; run <= 5; run += 1) {
+        const runCart = CartResponseSchema.parse(
+          (
+            await hub.app.inject({
+              method: 'POST',
+              url: '/carts',
+              headers: authHdr,
+              payload: {},
+            })
+          ).json(),
+        );
+        let runTotal = '0';
+        for (const pid of prodIds) {
+          const lineAdded = CartResponseSchema.parse(
+            (
+              await hub.app.inject({
+                method: 'POST',
+                url: `/carts/${runCart.cart.id}/lines`,
+                headers: authHdr,
+                payload: { kind: 'catalog', productId: pid, variantId: null, qty: '1000' },
+              })
+            ).json(),
+          );
+          runTotal = lineAdded.cart.totalFinal;
+        }
+        const totalBig = BigInt(runTotal);
+        const pCard = (totalBig / 3n).toString();
+        const pUzqr = (totalBig / 3n).toString();
+        const cashNeed = totalBig - BigInt(pCard) - BigInt(pUzqr);
+
+        const t0 = performance.now();
+        const completeRes = await hub.app.inject({
+          method: 'POST',
+          url: `/carts/${runCart.cart.id}/complete`,
+          headers: authHdr,
+          payload: {
+            clientRequestId: `01950000-0000-7000-8000-66666666670${run}`,
+            expectedTotal: runTotal,
+            payments: [
+              { method: 'card', amount: pCard, providerRef: 'HTTP-CARD' },
+              { method: 'uzqr', amount: pUzqr, providerRef: 'HTTP-QR' },
+              { method: 'cash', tenderedAmount: (cashNeed + 25_000n).toString() },
+            ],
+          },
+        });
+        samplesMs.push(performance.now() - t0);
+
+        expect(completeRes.statusCode).toBe(200);
+        const parsed = CompleteSaleResponseSchema.parse(completeRes.json());
+        expect(parsed.sale.lines).toHaveLength(20);
+        expect(parsed.sale.payments).toHaveLength(3);
+        expect(parsed.sale.changeAmount).toBe('25000');
+        expectedDrawerTotal += cashNeed;
+      }
+
+      const sorted = [...samplesMs].sort((a, b) => a - b);
+      const medianMs = sorted[Math.floor(sorted.length / 2)] ?? 0;
+      expect(await hub.saleStore.getTerminalCashBalance()).toBe(expectedDrawerTotal);
+      expect(medianMs).toBeLessThanOrEqual(300);
+      console.info(
+        `[PERF T1.5 HTTP E2E] 20-line 3-payment POST /carts/:id/complete median=${medianMs.toFixed(2)} ms samples=[${samplesMs.map((v) => v.toFixed(2)).join(', ')}]`,
+      );
+    } finally {
+      await hub.close();
+    }
+  }, 30_000);
 });

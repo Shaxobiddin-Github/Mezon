@@ -109,6 +109,7 @@ export {
   sales,
   saleLines,
   payments,
+  cashMoves,
 } from './schema/index.js';
 
 export {
@@ -172,6 +173,9 @@ export {
   type StoredInventoryCountDetailRecord,
   type FinalizeInventoryCountOutcome,
   type RebuildStockProjectionsResult,
+  type StockPoolPrefetchTarget,
+  stockPoolKey,
+  prefetchMutablePoolStatesSync,
   applyOutboundStockMoveSync,
   rebuildStockProjections,
   SqliteStockStore,
@@ -200,8 +204,11 @@ export {
   type CompleteSaleInput,
   type StoredSaleLineRecord,
   type StoredSalePaymentRecord,
+  type StoredCashMoveRecord,
   type StoredSaleRecord,
   type CompleteSaleOutcome,
+  getCashDrawerBalanceSync,
+  getStoreCashBalanceSync,
   SqliteSaleStore,
   createSqliteSaleStore,
 } from './sale-repo.js';
