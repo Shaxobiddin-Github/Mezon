@@ -1,136 +1,145 @@
-## T0.7 Merge xulosasi (F0 yakuni)
+## Hisobot: T1.1 — Katalog
 
-- **PR #7** (`gemini/T0.7-electron-shell`, bosh SHA `fd07ecb5243291bf34b1fc4145b2c3f5e0af7b6e`, barcha 8 CI check run `success` — Run [#42819904716](https://github.com/Shaxobiddin-Github/Mezon/actions/runs/42819904716) va [#42819895783](https://github.com/Shaxobiddin-Github/Mezon/actions/runs/42819895783), artifact `mezon-desktop-win-x64-nsis`) `T0.7: Electron qobig'i va Windows o'rnatuvchi` nomi bilan Squash and merge qilindi.
-- **Merge commit SHA (`main`):** `0b65a438f8de4bcf03a93b28eb8301066a54de73`
-- **`gemini/T0.7-electron-shell` branch:** masofadan va lokaldan o'chirildi.
-- **Yangi branch (`main` @ `0b65a43` dan):** `gemini/T1.1-catalog`
+Branch / PR: `gemini/T1.1-catalog` / [PR #8](https://github.com/Shaxobiddin-Github/Mezon/pull/8)  
+Kod commit SHA: `d8f4e77b3fce5ecd76eddb903ba81e5167bd03a1` (`T1.1: Katalog, shtrix-kod, FTS5 qidiruv va Hub API`)
 
 ---
 
-## Reja: T1.1 — Katalog
+### Nima qilindi
 
-> **Eslatma:** Bu bosqichda faqat reja berilmoqda; Claude tasdig'isiz kod yozilmaydi.
+1. **Domen qoidalari (`packages/domain`):**
+   - `PRODUCT_UNITS` (`dona`, `kg`, `g`, `litr`, `metr`, `m2`, `qadoq`) va `validateQuantityForUnit`: `dona`/`qadoq` da faqat `1000n` (`1.000`) ga karrali butun miqdorlar ruxsat etiladi, kasr yoki manfiy qiymatlar `DomainError('INVALID_UNIT_QUANTITY')` bilan rad etiladi (`fast-check` property testi bilan tasdiqlangan).
+   - **GS1 va F3 (`UPC-A` ↔ `EAN-13` kanonikalizatsiyasi):** `verifyGs1CheckDigit` (`EAN-13`, `EAN-8`, `UPC-A` Modulo-10), `prepareBarcodeForStorage` (GS1 nazorat raqamini qat'iy tekshirish, `internal`/`other` istisnosi, 12 raqamli `UPC-A` ni oldiga `'0'` qo'shib kanonik 13 raqamli `EAN-13` ga keltirish), `buildScanBarcodeCandidates` (`0` + `UPC-A` birinchi nomzod sifatida).
+   - **F5 va F2 (`normalizeCatalogSearchText`, `buildFtsPrefixQuery`):** o'zbek kirill→lotin transliteratsiyasi (`х` → `x`, `ҳ` → `h`, `қ` → `q`, `ў` → `o`, `ғ` → `g`, `ш` → `sh`, `ч` → `ch`, `ё/ю/я/е/ц` kontekstli xaritalash), `ъ`/`ь` va barcha apostroflarni olib tashlash, ajratgichlarni bo'shliqqa o'girish, hamda FTS5 sintaksis in'ektsiyasini (`"`, `*`, `-`, `:`, `(`, `NEAR`, `OR`, `AND`, `NOT`) barcha tokenlarni `"tok"*` shaklida `AND` bilan ulash orqali neytrallashtirish.
+   - `canonicalizeVariantAttributes` / `parseVariantAttributesJson` (kalitlar bo'yicha kanonik tartiblangan JSON).
+   - `HubPermission` ga `'catalog:read'` (`owner`, `manager`, `cashier`) va `'catalog:write'` (`owner`, `manager`) qo'shildi.
 
-### a) Ma'lumotlar bazasi jadvallari va sinflari (`packages/db-local`)
+2. **Kontraktlar (`packages/contracts`):**
+   - Kategoriyalar, mahsulotlar, variantlar, shtrix-kodlar, narx o'zgarish tarixi va `/catalog/scan` uchun qat'iy `z.strictObject` Zod sxemalari (`packages/contracts/src/catalog.ts`). Pul (`salePrice`, `oldPrice`, `newPrice`) va miqdor (`minStock`, `quantity`) JSON da `BigIntStringSchema` satr ko'rinishida.
 
-Barcha 5 ta katalog jadvali **`tenantScope: 'organization'`** bilan `localSchemaRegistry.defineTable(...)` orqali e'lon qilinadi (chunki katalog tashkilot darajasida umumiy; do'kon bo'yicha alohida narx F5'da qo'shiladi — hozirdan `organization` darajasi 50 000 mahsulotni har filialga nusxalamasdan yuritish imkonini beradi). Pul uchun `sqliteMoney`, miqdor uchun `sqliteQuantity`, `INTEGER` tekshiruvlari va T0.5 immutability triggerlari (`assertSqliteTriggersMigrationsComplete`) majburiy.
+3. **Lokal SQLite sxemasi, FTS5 va repozitoriy (`packages/db-local`):**
+   - `packages/db-local/drizzle/0003_catalog.sql`: `categories`, `products`, `product_variants`, `product_barcodes` (`ATTR`, `organization` scope) va `price_changes` (`FACT`, `organization` scope) — barcha fiskal ustunlar (`mxik`, `package_code`, `vat_rate_bp`), partial unique indekslar, `idx_products_active_join` covering indeksi va `CHECK` cheklovlari hamda immutability triggerlari bilan.
+   - **F1 (`rowid` xavfisiz FTS5):** `products_fts` mustaqil FTS5 virtual jadvali (`product_id UNINDEXED`, `organization_id UNINDEXED`, `name_search`, `sku_search`, `tokenize='unicode61 remove_diacritics 0'`, `prefix='2 3'`), `content=` ishlatilmaydi, barcha qidiruv va triggerlar qat'iy UUID `product_id` orqali bog'lanadi (`DELETE + VACUUM` dan keyin ham to'g'ri ID lar qaytishi testlangan).
+   - **F4 (`rebuildCatalogSearchIndex` + `db:check`):** `name_search`/`sku_search` va `products_fts` ni noldan qayta qurish (outbox hodisasi chiqarmaydi) + `assertCatalogSearchMigrationsComplete` migratsiyada `products_fts`, `content=` yo'qligi va `AFTER INSERT`/`AFTER UPDATE` FTS triggerlari borligini `db:check` da tekshiradi.
+   - `SqliteCatalogStore`: kategoriya sikl va `CATEGORY_IN_USE` tekshiruvi, narx o'zgarganda atomik `price_changes` + outbox yozuvi, variant/mahsulot o'chirilganda kaskad tombstone, 1-belgili so'rovlar uchun B-tree diapazon va 2+ belgili so'rovlar uchun FTS5 qidiruvi.
 
-1. **`categories`** (`tableClass: 'ATTR'`):
-   - Umumiy ATTR sinxron ustunlari (`id`, `organization_id`, `device_id`, `hlc`, `created_at_ms`, `updated_at_ms`, `deleted_at_ms`).
-   - `name` (`text notNull`), `name_search` (`text notNull` — normalizatsiya qilingan qidiruv nomi).
-   - `parent_id` (`sqliteUuidV7`, nullable — ierarxiya uchun; repo siklik `parent_id` zanjirini rad etadi).
-   - `sort_order` (`sqliteInt notNull default 0`).
-   - Indekslar: bir ota ostidagi faol kategoriyalar nomi noyobligi uchun partial unique indeks `(organization_id, COALESCE(parent_id, ''), name_search) WHERE deleted_at_ms IS NULL` (yoki root/child alohida partial index); ota bo'yicha indeks `(organization_id, parent_id) WHERE deleted_at_ms IS NULL`.
-2. **`products`** (`tableClass: 'ATTR'`):
-   - Umumiy ATTR sinxron ustunlari.
-   - `category_id` (`sqliteUuidV7`, nullable — berilganda o'sha `organization_id` dagi faol kategoriya bo'lishi shart).
-   - `sku` (`text`, nullable — normallashtirilgan artikul).
-   - `name` (`text notNull`), `name_search` (`text notNull`).
-   - `unit` (`text notNull`, SQL `CHECK (unit IN ('dona', 'kg', 'g', 'litr', 'metr', 'm2', 'qadoq'))`).
-   - `unlimited` (`sqliteBoolean notNull default false` — xizmat va cheksiz tovarlar uchun).
-   - `min_stock` (`sqliteQuantity`, nullable — `NULL` ogohlantirish yo'q; aks holda `>= 0n` va birlik qoidasi bo'yicha tekshiriladi).
-   - `has_variants` (`sqliteBoolean notNull default false`).
-   - `sale_price` (`sqliteMoney notNull`, SQL `CHECK (sale_price >= 0)`).
-   - Fiskal maydonlar hozirdan (`GEMINI.md` 8-bo'lim): `mxik` (`text`, nullable), `package_code` (`text`, nullable), `vat_rate_bp` (`sqliteInt notNull default 0`, `CHECK (vat_rate_bp >= 0 AND vat_rate_bp <= 10000)` — `VatRate` basis points).
-   - Indekslar: `uidx_products_org_sku` (`(organization_id, sku) WHERE sku IS NOT NULL AND deleted_at_ms IS NULL`), `idx_products_org_name_search` (`(organization_id, name_search, id) WHERE deleted_at_ms IS NULL`), `idx_products_org_category` (`(organization_id, category_id) WHERE deleted_at_ms IS NULL`).
-3. **`product_variants`** (`tableClass: 'ATTR'`):
-   - Umumiy ATTR sinxron ustunlari.
-   - `product_id` (`sqliteUuidV7 notNull`, `products.id` ga tegishli va o'sha `organization_id` da).
-   - `name` (`text notNull`), `name_search` (`text notNull`).
-   - `sku` (`text`, nullable).
-   - `attributes_json` (`text notNull` — kanonik saralangan JSON atributlar ob'ekti, masalan `{"olcham":"XL","rang":"qora"}`).
-   - `sale_price` (`sqliteMoney`, nullable — `NULL` bo'lsa ota mahsulot `sale_price` ni meros oladi; belgilansa `>= 0`).
-   - Indekslar: `(organization_id, product_id) WHERE deleted_at_ms IS NULL` va `uidx_product_variants_org_sku` (`(organization_id, sku) WHERE sku IS NOT NULL AND deleted_at_ms IS NULL`).
-4. **`product_barcodes`** (`tableClass: 'ATTR'`):
-   - Umumiy ATTR sinxron ustunlari.
-   - `product_id` (`sqliteUuidV7 notNull`), `variant_id` (`sqliteUuidV7`, nullable — berilganda o'sha `product_id` va `organization_id` dagi faol variant bo'lishi shart).
-   - `barcode` (`text notNull` — normallashtirilgan shtrix-kod).
-   - `format` (`text notNull`, `CHECK (format IN ('ean13', 'ean8', 'upca', 'internal', 'other'))`).
-   - **Noyoblik va tezkor skan indeksi:** `UNIQUE INDEX uidx_product_barcodes_org_barcode ON product_barcodes(organization_id, barcode) WHERE deleted_at_ms IS NULL` — tashkilot ichida faol bitta shtrix-kod faqat bitta mahsulot/variant yozuviga bog'lanishini ham kafolatlaydi, ham 70 000 qator ichidan `O(log N)` (< 1–2 ms) da topadi.
-5. **`price_changes`** (`tableClass: 'FACT'`):
-   - Umumiy FACT sinxron ustunlari (`id`, `organization_id`, `device_id`, `hlc`, `created_at_ms`).
-   - `product_id` (`sqliteUuidV7 notNull`), `variant_id` (`sqliteUuidV7`, nullable).
-   - `old_price` (`sqliteMoney`, nullable — yangi mahsulot/variant ochilganda `NULL`, narx tahririda avvalgi `Money`).
-   - `new_price` (`sqliteMoney notNull`, SQL `CHECK (new_price >= 0)`).
-   - `changed_by_user_id` (`sqliteUuidV7 notNull`).
-   - `reason` (`text`, nullable).
-   - Indeks: `(organization_id, product_id, created_at_ms)` tarix so'rovlari uchun.
-   - **Atomik yozish:** Narx belgilash/o'zgartirish (`createProduct`, `updateProduct` narx o'zgarganda, `createVariant`, `updateVariant` narx o'zgarganda) bitta UoW tranzaksiyasida ATTR (`insertAttr`/`updateAttr`) bilan birga `insertFact` orqali `price_changes` + outbox'ga yozadi.
-
-**Sinov jadvallari emas, haqiqiy migratsiya:** `packages/db-local/drizzle/0003_catalog.sql` + `db:check` (0 diff) + barcha 5 jadvalga immutability triggerlari.
+4. **Hub API va RBAC (`apps/hub`):**
+   - `HubCatalogService` (aniq maydon ro'yxatli DTO mapperlar — `costPrice`/`profit`/`nameSearch` hech qachon javobga kirmaydi).
+   - Marshrutlar: `/categories`, `/products`, `/products/:id/variants`, `/products/:id/barcodes`, `/products/:id/price-changes` (faqat `catalog:write` — kassir `403 AUTH_FORBIDDEN` oladi), `/catalog/scan` (`catalog:read`).
 
 ---
 
-### b) Birlik va miqdor qoidasi (`packages/domain`)
+### Majburiy tuzatishlar (F1–F5) bo'yicha dalillar
 
-- Birliklar (`PRODUCT_UNITS`): `'dona' | 'kg' | 'g' | 'litr' | 'metr' | 'm2' | 'qadoq'`.
-- `packages/domain/src/catalog.ts` da sof funksiya `validateQuantityForUnit(unit, quantity, { allowZero? })`:
-  - `dona` va `qadoq` uchun `quantityToMilli(quantity) % 1000n === 0n` bo'lishi shart (kasr bo'lsa `DomainError('INVALID_UNIT_QUANTITY')`).
-  - `kg`, `g`, `litr`, `metr`, `m2` uchun 0.001 (`1n` milli) aniqlik ruxsat etiladi (`>= 1n`, yoki `min_stock` uchun `allowZero: true` bilan `>= 0n`).
-- Fast-check property testi: `dona`/`qadoq` uchun `1000n` ga karrali bo'lmagan har qanday qiymat doim xato tashlashi, `k * 1000n` esa qabul qilinishi; kasr birliklarda `>= 1n` doim qabul qilinishi tekshiriladi.
-
----
-
-### c) Shtrix-kod (`packages/domain` + `packages/db-local`)
-
-- **Normalizatsiya (`normalizeBarcode`):** bosh va oxirgi bo'shliqlar, tab/yangi qatorlar olib tashlanadi; ichki bo'shliqlar olib tashlanadi. Ruxsat etilgan belgilar: `^[A-Za-z0-9._-]+$`, uzunlik `1..64`. Aks holda `DomainError('INVALID_BARCODE')`.
-- **Nazorat raqami (`verifyGs1CheckDigit`) va rad etish/ogohlantirish tanlovi:**
-  - `EAN-13` (13 raqam), `EAN-8` (8 raqam), `UPC-A` (12 raqam) uchun GS1 Modulo-10 nazorat raqami sof domen funksiyasi bilan tekshiriladi.
-  - **Tanlov (Rad etish, lekin `internal`/`other` istisnosi bilan):** Ro'yxatdan o'tkazishda `format` GS1 (`ean13`, `ean8`, `upca`) bo'lsa (yoki 8/12/13 raqamli kodda format aniq `'internal'`/`'other'` deb belgilanmagan bo'lsa), noto'g'ri nazorat raqami **qat'iy rad etiladi (`DomainError('INVALID_BARCODE_CHECK_DIGIT')`)** — chunki xato nazorat raqami import/kiritish xatosi bo'lib, saqlansa skaner kassada hech qachon tovarni topa olmaydi. Do'kon o'zining GS1 bo'lmagan ichki raqamli kodini saqlamoqchi bo'lsa `format: 'internal'` (yoki `'other'`) ko'rsatadi — bu holda nazorat raqami tekshirilmaydi.
-- **Noyoblik:** Tashkilot ichida faol shtrix-kodlar orasida `UNIQUE(organization_id, barcode) WHERE deleted_at_ms IS NULL`; o'chirilgan (tombstone) shtrix-kod qayta ishlatilishi mumkin.
-- **Tarozi yorlig'iga tayyor skan qidiruv natijasi:** `scanCatalogBarcode` natijasi `{ product, variant, barcode, quantity }` shaklida qaytariladi (`T1.1` da `quantity: null`, `T5.8` da `2x` tarozi prefiksidan ajratilgan og'irlik/miqdor to'ldiriladi).
+- **F1 (VACUUM va `rowid` mustaqilligi):** `0003_catalog.sql` da `products_fts(product_id UNINDEXED, organization_id UNINDEXED, name_search, sku_search)` (`content=` yo'q); `catalog-repo.ts` da `INNER JOIN "products" p ON p."id" = f."product_id"`. Test: `packages/db-local/src/catalog.test.ts` — `"F1, F2, F5: survives DELETE+VACUUM without rowid drift..."` (qo'shish → o'chirish → qayta qo'shish/tahrirlash → `VACUUM;` → barcha qidiruvlar aniq UUID larni qaytaradi).
+- **F2 (FTS sintaksis in'ektsiyasi):** `buildFtsPrefixQuery` faqat `[a-z0-9]+` tokenlarni `"tok"*` shaklida `AND` bilan birlashtiradi; bo'sh/faqat belgi kiritmalarda `null` qaytarib bo'sh natija beradi. Testlar: `packages/domain/src/catalog.test.ts` (property test + jadvalli test) va `packages/db-local/src/catalog.test.ts` (`"`, `*`, `-`, `:`, `(`, `)`, `NEAR`, `OR`, `AND`, `NOT`, `cola OR "pepsi"* -not:near(`).
+- **F3 (UPC-A ↔ EAN-13):** `036000291452` va `0036000291452` saqlashda `'0036000291452'` ga keltiriladi (`uidx_product_barcodes_org_barcode` ikkalasini alohida ro'yxatdan o'tkazishni `BARCODE_ALREADY_EXISTS` / HTTP `409` bilan bloklaydi). `buildScanBarcodeCandidates` ikkala shaklda ham bitta mahsulotni topadi. Testlar: `domain/src/catalog.test.ts`, `db-local/src/catalog.test.ts`, `hub/src/catalog.test.ts`.
+- **F4 (Indeks yaxlitligi, `rebuildCatalogSearchIndex`, `db:check` salbiy dalili):**
+  - `packages/db-local/src/catalog.test.ts` da buzilgan `name_search` + orphan `products_fts` qatori `rebuildCatalogSearchIndex` bilan tiklandi (0 outbox hodisa); `fast-check` stateful property testi ketma-ket `create`/`update`/`delete` dan keyin `products_fts` va faol `products` ID to'plamlari aynan tengligini tasdiqladi.
+  - **`db:check` salbiy dalili:** Ishlab chiqish jarayonida tirik `pnpm --filter @mezon/db-local run db:check` trigger regex nomuvofiqligida `Error: AFTER INSERT trigger on "products" must insert into "products_fts"` bilan 1-kodda yiqildi; bundan tashqari `packages/db-local/src/index.test.ts` dagi `"F4 negative proof: rejects migrations missing products_fts, rowid coupling, or broken FTS sync triggers"` testi `products_fts` olib tashlanganda, `content = 'products'` qo'shilganda va `DELETE FROM products_fts` o'rniga `rowid` ishlatilganda `assertCatalogSearchMigrationsComplete` xato tashlashini doimiy tekshiradi.
+- **F5 (Transliteratsiya aniqligi):** `хона -> xona`, `ҳаво -> havo`, `маъно -> mano`, `Молоко -> moloko`, `Coca-Cola Zero -> coca cola zero` (`zero` bilan topiladi) ham `domain` unit testida, ham `db-local` FTS5 qidiruv testida, ham `apps/hub` `/products?q=...` API testida tasdiqlandi.
 
 ---
 
-### d) Nom bo'yicha qidiruv (`packages/domain` + `packages/db-local`)
+### 50 000 mahsulot / 70 000 shtrix-kod WAL disk unumdorlik natijalari
 
-- **O'zbek tili normalizatsiyasi (`normalizeCatalogSearchText`, `packages/domain` da sof funksiya):**
-  1. Unicode NFC normalizatsiya va kichik harfga o'tkazish (`toLowerCase()`).
-  2. Kirill → Lotin transliteratsiyasi (`ў → o'`, `ғ → g'`, `қ → q`, `ҳ → h`, `ш → sh`, `ч → ch`, `щ → shch`, `ё → yo`, `ю → yu`, `я → ya`, `е` so'z boshida/unlidan keyin `ye`, aks holda `e`, `ц → s`, `ж → j` va h.k.).
-  3. Barcha apostrof variantlarini (`'`, `ʻ`, `ʼ`, `‘`, `’`, `` ` ``, `´`, `ˈ`) birxillashtirish va qidiruv indeksi kalitida apostrofsiz kanonikal ko'rinishga keltirish (`"O'rik"` / `"oʻrik"` / `"ўрик"` / `"orik"` → `"orik"`, `"G'ijduvon"` / `"ғиждувон"` / `"gijduvon"` → `"gijduvon"`), chunki tezkor kassa qidiruvida kassir ko'pincha apostrof belgisini termaydi. Asl `name` maydoni o'zgartirilmay saqlanadi.
-  4. Ortiqcha bo'shliqlarni bitta bo'shliqqa siqish va `trim()`.
-- **SQLite FTS5 + Trigger sinxronizatsiyasi:**
-  - `better-sqlite3@13.0.3` da **FTS5 (`unicode61` va `trigram`) kompilyatsiya qilinganligi amalda tekshirildi**.
-  - **Tanlov:** `products_fts` virtual jadvali (`USING fts5(name_search, sku_search, content='', tokenize='unicode61 remove_diacritics 0', prefix='2 3')` yoki `rowid` bog'langan external-content FTS5) hamda `products` ga `AFTER INSERT` / `AFTER UPDATE` triggerlari (`deleted_at_ms IS NULL` faol qatorlarni FTS5 da tutadi, tombstone qilinganlarni FTS5 dan o'chiradi). Variant SKU/nomi bo'yicha ham qidirish uchun variantlar soni kichik/indekslangan `product_variants(organization_id, name_search)` yoki `products_fts` bilan birlashtiriladi.
-  - **Asos:** `LIKE '%...%'` 50 000 qatorda to'liq skan (~50–120 ms) beradi; oddiy B-tree `LIKE 'abc%'` esa ikkinchi so'zni (`"Coca Cola Zero"` → `"zero"`) topa olmaydi. `FTS5 unicode61` (`prefix='2 3'`) ko'p so'zli nomlarning istalgan so'zidan 2+ belgili prefiks qidiruvini ~1–5 ms da bajaradi; 1 belgili so'rovda `idx_products_org_name_search` ustida `name_search LIKE 'a%'` B-tree indeksi ishlaydi. Barcha so'rovlarda `products.organization_id = ? AND products.deleted_at_ms IS NULL` filtri majburiy.
+`packages/db-local/src/catalog.test.ts` (`meets <= 20ms barcode scan & fast FTS search on 50,000 products + 70,000 barcodes (real WAL disk DB)` — haqiqiy diskdagi SQLite WAL baza):
+
+- **Urug'lash (seed):** 50 000 mahsulot + 70 000 shtrix-kod + FTS5 trigger indekslash = `8949.6 ms`
+- **Skan (`n = 250`, `store.scanBarcode`):** **`p50 = 0.403 ms`**, **`p95 = 0.478 ms`** (chegara `<= 20 ms`)
+- **Nom bo'yicha qidiruv (`n = 100`, `store.listProducts({ q, limit: 20 })`):** **`p50 = 20.986 ms`**, **`p95 = 25.519 ms`** (chegara `<= 50 ms`)
+
+*(Eslatma: boshlang'ich o'lchovda `ORDER BY p.name_search` sababli 10k qatorli temp B-tree sort tufayli `p95 = 136.3 ms` chiqqan edi; `idx_products_active_join` covering indeksi, `ORDER BY f.rank ASC` va `offset === 0 && hitRows.length < limit` holatida ortiqcha `COUNT(*)` ni o'tkazib yuborish bilan `p95 = 25.519 ms` ga tushirildi.)*
 
 ---
 
-### e) Hub API va RBAC (`packages/contracts`, `packages/domain`, `apps/hub`)
+### O'zgargan fayllar (fayl — sabab)
 
-- `packages/domain/src/auth.ts` dagi `HubPermission`:
-  - `'catalog:read'` → `owner`, `manager`, `cashier`
-  - `'catalog:write'` → `owner`, `manager`
-- **Endpointlar (`apps/hub`):**
-  - Kategoriyalar (`catalog:read` / `catalog:write`): `GET /categories`, `POST /categories`, `PATCH /categories/:id`, `DELETE /categories/:id` (tombstone; faol bola kategoriya yoki faol mahsulot bog'langan bo'lsa rad etiladi).
-  - Mahsulotlar (`catalog:read` / `catalog:write`): `GET /products` (`q`, `categoryId`, `limit`, `offset`), `GET /products/:id`, `POST /products`, `PATCH /products/:id`, `DELETE /products/:id` (tombstone: mahsulot, variantlar va shtrix-kodlar bitta UoW da yopiladi).
-  - Variantlar va shtrix-kodlar (`catalog:write`): `POST /products/:id/variants`, `PATCH /products/:id/variants/:variantId`, `DELETE /products/:id/variants/:variantId`, `POST /products/:id/barcodes`, `DELETE /products/:id/barcodes/:barcodeId`.
-  - Narx tarixi (`catalog:read` yoki `catalog:write` — faqat sotish narxi tarixi, tannarx yo'q): `GET /products/:id/price-changes`.
-  - Skan qidiruvi (`catalog:read` — kassir ham foydalanadi): `GET /catalog/scan?code=...` → `{ product, variant, barcode, quantity }` yoki `404`.
-- `@mezon/contracts`: qat'iy Zod (`strictObject`) sxemalari; pul va miqdor JSON da `BigIntStringSchema` satr ko'rinishida.
-- **Tannarx himoyasi (`GEMINI.md` 3.4):** Katalogda `cost_price` ustuni yo'q (T1.2 partiyada bo'ladi), ammo javob DTO larida aniq maydon ro'yxatli mapper (`toProductDto`) ishlatiladi va kassir javobida tannarx/foyda maydonlari bo'lmasligi test bilan tekshiriladi.
-
----
-
-### f) Unumdorlik testi (`packages/db-local` / `apps/hub`)
-
-- Vaqtinchalik diskdagi SQLite WAL bazaga **50 000 ta mahsulot** (lotin + kirill aralash nomlar, kategoriyalar, variantlar bilan) va **70 000 ta shtrix-kod** urug'lanadi (seed).
-- 200+ shtrix-kod skani va 100+ turli o'zbekcha (lotin/kirill/apostrof) nom qidiruvi bo'yicha `p50` va `p95` kechikishlari `performance.now()` bilan o'lchanib natijalar hisobotga yoziladi.
-- **CI chegaralari:** Mahalliy maqsad: skan `p95 ≤ 20 ms`, nom qidiruvi `p95 ≤ 50 ms`. Sekin CI VM larda regressiyani ushlash bilan birga yolg'on yiqilish bo'lmasligi uchun testda real disk WAL da: skan `p95 ≤ 20 ms` va qidiruv `p95 ≤ 50 ms` (yoki CI yuklamasi uchun aniq asoslangan `p95` chegarasi, o'lchov paytida haqiqiy ms lar qayd etiladi).
+- `packages/domain/src/errors.ts` — Katalog va shtrix-kod `DomainErrorCode` kodlari (`INVALID_UNIT_QUANTITY`, `INVALID_BARCODE_CHECK_DIGIT`, `CATEGORY_IN_USE`, `BARCODE_ALREADY_EXISTS` va h.k.).
+- `packages/domain/src/auth.ts` — `'catalog:read'` va `'catalog:write'` `HubPermission` ruxsatlari (`cashier` faqat `'catalog:read'`).
+- `packages/domain/src/catalog.ts` — Birliklar, miqdor qoidasi, GS1 Modulo-10, F3 UPC-A→EAN-13 kanonikalizatsiyasi, F5/F2 o'zbek transliteratsiyasi va FTS so'rov tozalash, variant atributlari kanonikalizatsiyasi.
+- `packages/domain/src/index.ts`, `packages/domain/src/auth.test.ts`, `packages/domain/src/catalog.test.ts` — Eksportlar va property/unit testlar.
+- `packages/contracts/src/catalog.ts`, `packages/contracts/src/index.ts`, `packages/contracts/src/catalog.test.ts` — Barcha katalog endpointlari uchun qat'iy Zod DTO va so'rov sxemalari hamda testlar.
+- `packages/db-local/src/schema/index.ts` — `categories`, `products`, `product_variants`, `product_barcodes`, `price_changes` jadvallari (`localSchemaRegistry`).
+- `packages/db-local/src/catalog-search-schema.ts` — `products_fts` FTS5 va trigger SQL generatori hamda `assertCatalogSearchMigrationsComplete` (`db:check` verifikatori).
+- `packages/db-local/scripts/check-migrations.mjs` — `db:check` ga `assertCatalogSearchMigrationsComplete` ulandi.
+- `packages/db-local/src/uow.ts` — `runConnectionProjectionMaintenance` (mutex ostida outbox'siz proyeksiya tiklash tranzaksiyasi).
+- `packages/db-local/src/auth-repo.ts` — `getActiveRuntimeContext()` hub setup'dan keyin qayta ishga tushirishsiz `SqliteCatalogStore` ulanishi uchun.
+- `packages/db-local/src/catalog-repo.ts` — `SqliteCatalogStore` va `rebuildCatalogSearchIndex`.
+- `packages/db-local/src/index.ts`, `packages/db-local/src/index.test.ts`, `packages/db-local/src/catalog.test.ts` — Eksportlar, registr + salbiy `db:check` FTS testi, F1–F5 va 50k WAL unumdorlik testlari.
+- `packages/db-local/drizzle/0003_catalog.sql`, `meta/0003_snapshot.json`, `meta/_journal.json` — T1.1 SQL migratsiyasi (jadvallar, indekslar, CHECK'lar, immutability triggerlari va FTS5 + triggerlar).
+- `apps/hub/src/error-handler.ts` — Yangi `DomainErrorCode` larni HTTP `400`/`404`/`409` ga xaritalash.
+- `apps/hub/src/catalog-service.ts`, `apps/hub/src/catalog-routes.ts`, `apps/hub/src/routes.ts`, `apps/hub/src/server.ts`, `apps/hub/src/index.ts`, `apps/hub/src/catalog.test.ts` — Katalog xizmati, maydon ro'yxatli DTO mapper, RBAC marshrutlari va to'liq HTTP integratsion testlar.
 
 ---
 
-### g) Doiradan tashqari
+### Migratsiyalar
 
-- Ombor harakatlari, partiyalar, FIFO/o'rtacha tannarx va inventarizatsiya (`T1.2`).
-- Savat, aksiyalar va chegirmalar (`T1.3`).
-- Tarozi `2x` shtrix-kod parsinki (`T5.8`).
-- Do'konlar bo'yicha alohida narxlar (`F5`).
-- Kassa va katalog UI (`T1.11`).
+- `packages/db-local/drizzle/0003_catalog.sql`:
+  - 5 ta jadval: `categories`, `products`, `product_variants`, `product_barcodes` (`ATTR`), `price_changes` (`FACT`).
+  - Fiskal maydonlar: `products.mxik`, `products.package_code`, `products.vat_rate_bp`.
+  - Partial unique indekslar (`uidx_categories_org_root_name`, `uidx_categories_org_child_name`, `uidx_products_org_sku`, `uidx_product_variants_org_sku`, `uidx_product_barcodes_org_barcode`), covering indeks `idx_products_active_join`.
+  - 5 ta jadval immutability triggerlari + `products_fts` FTS5 virtual jadvali (`product_id UNINDEXED`, `organization_id UNINDEXED`) + `trg_products_fts_after_insert` / `trg_products_fts_after_update`.
 
 ---
 
-### Takliflar va ochiq savollar
+### Qabul mezonlari
 
-1. **T1.1 uchun `category_id` bo'yicha o'chirish siyosati:** Faol mahsulot yoki bola kategoriyasi bor kategoriyani `DELETE` (tombstone) qilishni `409 CATEGORY_IN_USE` bilan bloklash taklif etiladi (aks holda yetim kategoriya havolalari paydo bo'ladi). Tasdiqlaysizmi?
-2. **Narx o'zgarish tarixi (`GET /products/:id/price-changes`) ruxsati:** Sotish narxi tarixi (tannarxsiz) kassirga ham ko'rinishi kerakmi (`catalog:read`) yoki faqat `owner`/`manager` (`catalog:write`) gami? (`catalog:write` qilib cheklash xavfsizroq, kassirga faqat joriy narx kerak.)
+- [x] `50 000` mahsulotda skan ≤ 20 ms (`domain` va `db-local`) — `scan(n=250): p50=0.403ms, p95=0.478ms` (`packages/db-local/src/catalog.test.ts`)
+- [x] Bir shtrix-kod do'kon/tashkilot ichida bitta faol yozuvga bog'lanadi; UPC-A/EAN-13 kanonik yagona — `uidx_product_barcodes_org_barcode`, `prepareBarcodeForStorage` (F3 testlari)
+- [x] `dona`/`qadoq` kasr rad etiladi, `5.5 kg` qabul qilinadi — `validateQuantityForUnit` + `fast-check` property test
+- [x] F1–F5 talablarining barchasi (`VACUUM`, FTS5 operator xavfsizligi, UPC-A↔EAN-13, `rebuildCatalogSearchIndex` + `db:check` + property test, transliteratsiya) — barcha testlar o'tdi
+- [x] RBAC va DTO xavfsizligi (kassir `catalog:write` va `price-changes` dan `403`, tannarx maydonlari yo'q) — `apps/hub/src/catalog.test.ts`
+- [x] `pnpm verify` va 4 ta CI job (Ubuntu, Windows, PostgreSQL RLS, Desktop NSIS) yashil
+
+---
+
+### Test natijasi (buyruq va haqiqiy chiqish)
+
+1. **`pnpm verify` (lokal Windows):** `Command exited with code 0`
+   - `format:check` — All matched files use Prettier code style!
+   - `build` — 17/17 packages successful
+   - `eslint .` — 0 xato
+   - `typecheck` — 17/17 packages successful
+   - `db:check` — PostgreSQL & SQLite 0 diff statements (`assertSqliteTriggersMigrationsComplete` + `assertCatalogSearchMigrationsComplete` o'tdi)
+   - `vitest run` — **25 passed test files (135 passed tests)**; `packages/db-cloud/src/pg-rls.test.ts` (2 tests) lokal Windows da Docker yo'qligi sababli skipped (CI da yashil o'tdi).
+   - `depcruise` — `no dependency violations found (183 modules, 481 dependencies cruised)`
+
+2. **GitHub Actions CI (commit `d8f4e77b3fce5ecd76eddb903ba81e5167bd03a1`):**
+   - `push` workflow run: [#42824173511](https://github.com/Shaxobiddin-Github/Mezon/actions/runs/42824173511) — **4/4 job `success`**:
+     - `Verify (ubuntu-latest)` — `success` ([job](https://github.com/Shaxobiddin-Github/Mezon/actions/runs/42824173511/job/129856971626))
+     - `Verify (windows-latest)` — `success` ([job](https://github.com/Shaxobiddin-Github/Mezon/actions/runs/42824173511/job/129856971652))
+     - `Verify PostgreSQL RLS (ubuntu-latest)` — `success` ([job](https://github.com/Shaxobiddin-Github/Mezon/actions/runs/42824173511/job/129856971805))
+     - `Build & E2E Desktop Installer (windows-latest)` — `success` ([job](https://github.com/Shaxobiddin-Github/Mezon/actions/runs/42824173511/job/129856971313))
+   - `pull_request` (PR #8) workflow run: [#42824224171](https://github.com/Shaxobiddin-Github/Mezon/actions/runs/42824224171) — **4/4 job `success`**:
+     - `Verify (ubuntu-latest)` — `success` ([job](https://github.com/Shaxobiddin-Github/Mezon/actions/runs/42824224171/job/129857159248))
+     - `Verify (windows-latest)` — `success` ([job](https://github.com/Shaxobiddin-Github/Mezon/actions/runs/42824224171/job/129857158719))
+     - `Verify PostgreSQL RLS (ubuntu-latest)` — `success` ([job](https://github.com/Shaxobiddin-Github/Mezon/actions/runs/42824224171/job/129857159335))
+     - `Build & E2E Desktop Installer (windows-latest)` — `success` ([job](https://github.com/Shaxobiddin-Github/Mezon/actions/runs/42824224171/job/129857159220))
+
+---
+
+### Tekshirilmagan narsalar
+
+- Lokal Windows muhitida `packages/db-cloud/src/pg-rls.test.ts` (2 ta test) o'tkazib yuborilgan (`postgres-rls` Ubuntu CI jobi to'liq yashil o'tdi).
+- Katalog UI (`T1.11`), Excel import (`T1.13`), ombor/FIFO (`T1.2`) va tarozi `2x` shtrix-kod (`T5.8`) ushbu vazifa doirasidan tashqarida.
+
+---
+
+### Qilingan taxminlar
+
+- 12 raqamli `UPC-A` shtrix-kodlari saqlashda kanonik 13 raqamli `'0' + upca` ga aylantiriladi, shu bilan birga asl manbani kuzatish uchun `format: 'upca'` saqlanadi; noyoblik esa `(organization_id, barcode)` bo'yicha kanonik satr ustida ta'minlanadi.
+- FTS5 qidiruvi `f.rank ASC` bo'yicha tartiblanadi va `offset === 0 && hitRows.length < limit` holatida ortiqcha `COUNT(*)` so'rovini bajarmaydi (20 ms atrofidagi qidiruv kechikishini saqlab qolish uchun).
+
+---
+
+### Takliflar
+
+1. `F2` sinxron qabulida (`applyRemoteCatalogEvent`) yangi/o'zgargan mahsulotlarda `rebuildCatalogSearchIndex` yoki qator darajasidagi normalizatsiyani qayta qo'llash foydali bo'ladi, shunda boshqa qurilmadagi normalizator versiyasidan qat'i nazar FTS5 mos qoladi.
+2. `T5.8` (tarozi `2x` yorlig'i) da `scanCatalogBarcode` ichidagi `quantity: null` maydonini tarozi vazni/soni bilan to'ldirish marshrut kontraktini o'zgartirmasdan ulanadi.
+
+---
+
+### Egasi yoki Claude qarori kerak bo'lgan savollar
+
+Yo'q (PR #8 bo'yicha `QABUL` tekshiruvi kutilmoqda).
