@@ -263,6 +263,14 @@ describePg('@mezon/db-cloud - PostgreSQL 18 RLS, role isolation, and bigint fide
           sql`SELECT amount_tiyin FROM rls_test_ledger WHERE id = ${rowAId}`,
         );
         expect(execRes.rows[0].amount_tiyin).toBe(hugeAmount);
+        expect(typeof execRes.rows[0].amount_tiyin).toBe('bigint');
+
+        // Pool-level db.execute (no table access, tests createCloudPgPool's Drizzle wrapper directly)
+        const poolExecRes = await appConn.db.execute(
+          sql`SELECT '9007199254740993'::int8 AS big_val`,
+        );
+        expect(poolExecRes.rows[0].big_val).toBe(hugeAmount);
+        expect(typeof poolExecRes.rows[0].big_val).toBe('bigint');
 
         // Cannot UPDATE ORG_B row (0 rows affected)
         const updateForeign = await txClient.query(

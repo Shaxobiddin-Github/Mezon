@@ -17,15 +17,86 @@ export function getGlobalPgTypeParser(id: number, format?: 'text' | 'binary'): P
  * Per-pool type parser configuration decoding PostgreSQL `int8` (`bigint`) directly to JS `bigint`.
  * Never mutates global `pg.types.setTypeParser`.
  */
-export function createCloudPgTypesConfig(): pg.CustomTypesConfig {
+export function createCloudPgTypesConfig(fallback?: pg.CustomTypesConfig): pg.CustomTypesConfig {
   return {
     getTypeParser(id, format) {
       if (id === PG_INT8_OID && (format === undefined || String(format) === 'text')) {
         return (value: string) => BigInt(value);
       }
+      if (fallback) {
+        // @types/pg getTypeParser returns an untyped pg-types TypeParser function.
+        // eslint-disable-next-line @typescript-eslint/no-unsafe-return
+        return fallback.getTypeParser(id, format);
+      }
       return getGlobalPgTypeParser(id, format);
     },
   };
+}
+
+interface QueryConfigWithOptionalTypes {
+  readonly types?: pg.CustomTypesConfig;
+}
+
+function isCustomTypesConfig(value: unknown): value is pg.CustomTypesConfig {
+  return (
+    typeof value === 'object' &&
+    value !== null &&
+    'getTypeParser' in value &&
+    typeof value.getTypeParser === 'function'
+  );
+}
+
+/**
+ * Wraps a `pg.Pool` or `pg.PoolClient` passed into `drizzle(...)` so that Drizzle's internal
+ * `NodePgPreparedQuery` (`db.execute`, `db.select`, etc.) preserves our `INT8 -> BigInt` parser
+ * instead of overwriting pool `types` with a query-level fallback to global `pg.types`.
+ */
+function wrapPgExecutorForDrizzle<T extends pg.Pool | pg.PoolClient>(executor: T): T {
+  type AnyFn = (...args: unknown[]) => unknown;
+  const boundQuery = (executor.query as AnyFn).bind(executor);
+  const boundConnect =
+    executor instanceof pg.Pool
+      ? (executor.connect as (...args: unknown[]) => Promise<pg.PoolClient>).bind(executor)
+      : undefined;
+
+  return new Proxy(executor, {
+    get(target, prop) {
+      if (prop === 'query') {
+        return (configOrText: unknown, ...rest: unknown[]): unknown => {
+          if (
+            typeof configOrText === 'object' &&
+            configOrText !== null &&
+            'types' in configOrText
+          ) {
+            const cfg = configOrText as QueryConfigWithOptionalTypes;
+            if (isCustomTypesConfig(cfg.types)) {
+              return boundQuery(
+                {
+                  ...cfg,
+                  types: createCloudPgTypesConfig(cfg.types),
+                },
+                ...rest,
+              );
+            }
+          }
+          return boundQuery(configOrText, ...rest);
+        };
+      }
+      if (prop === 'connect' && boundConnect) {
+        return (...args: unknown[]): unknown => {
+          if (args.length > 0 && typeof args[0] === 'function') {
+            return (target as pg.Pool & { connect: AnyFn }).connect(...args);
+          }
+          return boundConnect(...args).then((client) => wrapPgExecutorForDrizzle(client));
+        };
+      }
+      const value: unknown = Reflect.get(target, prop, target);
+      if (typeof value === 'function') {
+        return (value as AnyFn).bind(target);
+      }
+      return value;
+    },
+  });
 }
 
 export interface CloudPgConnection<
@@ -44,8 +115,9 @@ export function createCloudPgPool<TSchema extends Record<string, unknown> = Reco
     ...poolConfig,
     types: createCloudPgTypesConfig(),
   });
+  const drizzlePool = wrapPgExecutorForDrizzle(pool);
 
-  const db = schema ? drizzle(pool, { schema }) : drizzle<TSchema>(pool);
+  const db = schema ? drizzle(drizzlePool, { schema }) : drizzle<TSchema>(drizzlePool);
 
   return {
     pool,
@@ -76,9 +148,10 @@ export async function withPgTenantContext<
   try {
     await client.query('BEGIN');
     await client.query(`SELECT set_config($1, $2, true)`, [PG_TENANT_SETTING_KEY, canonicalOrgId]);
+    const drizzleClient = wrapPgExecutorForDrizzle(client);
     const txDb = schema
-      ? drizzle<TSchema, pg.PoolClient>(client, { schema })
-      : drizzle<TSchema, pg.PoolClient>(client);
+      ? drizzle<TSchema, pg.PoolClient>(drizzleClient, { schema })
+      : drizzle<TSchema, pg.PoolClient>(drizzleClient);
     const result = await fn(txDb, client);
     await client.query('COMMIT');
     return result;

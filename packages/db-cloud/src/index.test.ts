@@ -236,10 +236,26 @@ describe('@mezon/db-cloud - PostgreSQL schema registry, RLS templates, and bigin
     expect(() => assertRlsMigrationsComplete(helperDir, reg.all())).not.toThrow();
   });
 
-  it('decodes int8 to bigint per pool without mutating global pg.types.setTypeParser', () => {
+  it('decodes int8 to bigint per pool and preserves fallback parsers without mutating global pg.types.setTypeParser', () => {
     const typesCfg = createCloudPgTypesConfig();
     const int8Parser = typesCfg.getTypeParser(20, 'text') as PgValueParser;
     expect(int8Parser('9007199254740993')).toBe(9_007_199_254_740_993n);
+
+    // Fallback parser (e.g., Drizzle TIMESTAMPTZ string passthrough) is preserved for non-int8 OIDs
+    const timestamptzOid = 1184;
+    const customFallback: pg.CustomTypesConfig = {
+      getTypeParser: ((id: number) =>
+        id === timestamptzOid
+          ? (v: string) => `raw:${v}`
+          : getGlobalPgTypeParser(id)) as pg.CustomTypesConfig['getTypeParser'],
+    };
+    const wrappedCfg = createCloudPgTypesConfig(customFallback);
+    expect((wrappedCfg.getTypeParser(20, 'text') as PgValueParser)('9007199254740993')).toBe(
+      9_007_199_254_740_993n,
+    );
+    expect(
+      (wrappedCfg.getTypeParser(timestamptzOid, 'text') as PgValueParser)('2026-01-01T00:00:00Z'),
+    ).toBe('raw:2026-01-01T00:00:00Z');
 
     // Global pg.types MUST remain untouched (default returns string)
     const globalInt8Parser = getGlobalPgTypeParser(20, 'text');
