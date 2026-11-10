@@ -1,67 +1,53 @@
-# Claude topshirig'i: T0.7 rejasi — TUZATISHLAR BILAN TASDIQLANDI
+# Claude topshirig'i: T0.7 — QAYTA ISHLASH (kichik)
 
-**Merge tekshiruvi:** T0.6 merge'i tekshirildi. `main` = `759f3ee`, kod `2430c48` bilan bir xil.
+**Tekshirilgan commit:** `55fb963` (PR #7). Merge qilma.
 
-**Rejada tasdiqlangan qismlar:**
+## Claude nimani tekshirdi
 
-- `utilityProcess` arxitekturasi;
-- `app://mezon` protokoli, CSP, preload, navigatsiya bloki va fuse'lar ro'yxati;
-- `dist-app` staging katalogi orqali Node va Electron ABI izolyatsiyasi;
-- `%LOCALAPPDATA%\Mezon`, NSIS sozlamalari va bir nusxa rejimi;
-- depcruise qoidalari;
-- egasi uchun qo'lda tekshiruv ro'yxati;
-- T0.6 test qarzi birinchi alohida commit sifatida.
+Yaxshi qism:
 
-Quyidagi tuzatishlar bilan `gemini/T0.7-electron-shell` branch'ida kodni yoz.
+- `pnpm verify`: 118 test o'tdi, sxema diff 0, depcruise toza.
+- `win-unpacked` yig'ildi.
+- `verify:fuses`: barcha fuse bitlari to'g'ri. `ELECTRON_RUN_AS_NODE` va `--inspect` rad etiladi. Fuse qo'yilgan `Mezon.exe` smoke testi va T5 decoy tekshiruvi o'tdi.
+- `test:e2e` (Playwright, hub crash recovery bilan) o'tdi.
+- T0.6 hub hujumlari (H1–H3) avvalgidek to'xtatiladi. T0.6 test qarzi to'g'ri yopilgan.
 
-## Majburiy tuzatishlar
+**Eslatma:** Claude kompyuterida NSIS bosqichi `makensis` 260 belgilik yo'l chegarasi sabab yiqildi: repo juda chuqur papkada edi. Bu loyiha xatosi emas. Lekin README'ga "Windows'da repo qisqa yo'lda bo'lsin, masalan `D:\mezon`" degan eslatma qo'sh.
 
-### T1. Hub qayta ko'tarilganda port o'zgarmasin
+## R1. YUQORI — xato javoblarida `app://mezon` uchun CORS sarlavhasi yo'q
 
-Hub yiqilib `port: 0` bilan qayta ko'tarilsa, yangi port oladi. Rendererdagi `hubBaseUrl` va yuklangan sahifaning CSP'sidagi `connect-src` eski portda qoladi. Natijada UI ochiq, lekin hub'ga ulana olmaydi.
+`security.ts` `onSend` hook'ida `Access-Control-Allow-Origin` faqat `reply.statusCode < 400` bo'lganda qo'shiladi. Claude testi (`Origin: app://mezon`):
 
-**Talab:**
+- `/health` 200 → `app://mezon`
+- `/auth/login` noto'g'ri PIN 401 → **sarlavha yo'q**
+- `/auth/me` 401 → **sarlavha yo'q**
 
-- Qayta ishga tushishda avvalgi port qayta ishlatilsin.
-- Port band bo'lsa, yangi port olinsin. So'ng CSP yangilansin, renderer IPC hodisasi bilan xabardor qilinsin va oyna qayta yuklansin.
+Oqibat: renderer `fetch` xato javobining tanasini va status kodini o'qiy olmaydi (CORS xatosi). Kassa ekrani "PIN noto'g'ri", "N soniya kuting" (429 `Retry-After`) yoki "sessiya tugadi" deb ko'rsata olmaydi.
 
-**E2E testida:** hub yiqilgandan keyin UI'dan `/health` so'rovi yana muvaffaqiyatli bo'lsin. Faqat hub javob berishini tekshirish yetarli emas.
+**Tuzatish:**
 
-### T2. Playwright va fuse ziddiyati
+- Ruxsat ro'yxatidagi `app://` origin uchun barcha javoblarga (4xx va 5xx ham) `Access-Control-Allow-Origin` va `Vary: Origin` qo'shilsin.
+- `Access-Control-Expose-Headers: Retry-After` qo'shilsin.
+- Ro'yxatda yo'q origin uchun avvalgidek hech qanday CORS sarlavhasi bo'lmasin.
 
-Playwright `_electron` odatda `--inspect`/`--remote-debugging-port` argumentlari bilan ishga tushadi. `EnableNodeCliInspectArguments: false` esa ularni bloklaydi.
+**Testlar:**
 
-**Talab:**
+- `inject`: 401, 403, 429 (`Retry-After` bilan) va 500 javoblarida `app://mezon` uchun sarlavha bor. `https://evil.uz` uchun yo'q.
+- Playwright E2E: renderer ichidan `fetch(hub + '/auth/login', noto'g'ri PIN)` JSON `error.code === 'AUTH_INVALID_CREDENTIALS'` ni o'qiy oladi.
 
-- Fuse'ni testlar uchun o'chirib qo'yma.
-- Imzolanadigan yakuniy (fuse qo'yilgan) binary uchun alohida tekshiruvlar bo'lsin: fuse holatini o'qish, `ELECTRON_RUN_AS_NODE=1` rad etilishi, `--inspect` argumenti rad etilishi.
-- Ilovani Playwright'siz ishga tushirib, hub `/health` javobini log yoki `dataDir` orqali tekshiradigan smoke test bo'lsin.
-- Playwright UI testi fuse qo'yilmagan, lekin aynan bir xil `app.asar` ustida ishlasin.
-- Qaysi test qaysi binary ustida ishlashini hisobotda aniq yoz.
+## R2. O'RTA — Electron ruxsat so'rovlari rad etilmaydi
 
-### T3. Kompyuter o'chirilganda baza toza yopilsin
+`setPermissionRequestHandler` yo'q. Electron standart holatda kamera, mikrofon, joylashuv, bildirishnoma kabi so'rovlarni qondiradi (Electron xavfsizlik ro'yxati).
 
-Kassa kompyuteri ko'pincha to'g'ridan-to'g'ri o'chiriladi.
+**Tuzatish:** `session.defaultSession.setPermissionRequestHandler((_, __, cb) => cb(false))`, `setPermissionCheckHandler(() => false)` va `setDevicePermissionHandler(() => false)`. Kelajakda kerak bo'ladigan ruxsatlar (masalan skaner uchun HID/serial) alohida vazifada aniq ruxsat ro'yxati bilan qo'shiladi.
 
-**Talab:**
-
-- `before-quit` bilan birga Windows'ning sessiya tugashi va o'chish hodisalarini ham ushla (`powerMonitor` `shutdown`, `session-end` / `query-session-end`).
-- Bu hodisalarda hub'ga `shutdown` yuborilib, SQLite yopilsin (WAL checkpoint).
-- Yopilmay qolgan holatda ham SQLite WAL `synchronous=FULL` tufayli tasdiqlangan ma'lumot yo'qolmaydi. Buni izohda yoz.
-
-### T4. Log hajmi cheklansin
-
-Kassa yillab ishlaydi. Fayl loglari aylanuvchi bo'lsin: hajm chegarasi va eski fayllar soni chegarasi. Shunda disk to'lib qolmaydi. Redaction saqlansin.
-
-### T5. `MEZON_DATA_DIR` faqat test uchun
-
-O'rnatilgan (`app.isPackaged`) ilovada ma'lumot papkasi muhit o'zgaruvchisi bilan o'zgartirilmasin. Override faqat aniq test rejimida ishlasin: ham `MEZON_E2E=1`, ham `MEZON_DATA_DIR` bo'lishi kerak. Buni test bilan isbotla.
+**Test:** E2E'da renderer ichida `Notification.requestPermission()` `'denied'` qaytaradi va `navigator.mediaDevices.getUserMedia({ video: true })` rad etiladi.
 
 ## Bajarish tartibi
 
-1. Birinchi commit: `T0.6 test qarzi: R1 failed_attempts tekshiruvi`. Mutatsiya dalili bilan.
-2. T0.7 kodi.
-3. `pnpm verify` yashil.
-4. `desktop` CI job'i yashil: o'rnatuvchi artifact va testlar.
-5. Hisobot: GEMINI.md 2.1 "Muhim tekshiruvlar" o'lchovlari, fuse holati, qaysi test qaysi binary ustida ishlagani, CI havolalari va artifact nomi. `[gemini-hisobot] T0.7` bilan commit qil va push qil.
-6. `node .mezon/kutish.mjs`. Merge qilma.
+1. Tuzat.
+2. `pnpm verify` va desktop `test:e2e` yashil bo'lsin.
+3. Commit qil va push qil.
+4. To'rtala CI job yashil bo'lsin.
+5. Hisobotni `.mezon/gemini/HISOBOT.md` ga yoz, `[gemini-hisobot] T0.7` bilan commit qil va push qil.
+6. `node .mezon/kutish.mjs` ni ishga tushir. Merge qilma.
