@@ -1,146 +1,96 @@
-## T0.5 Merge xulosasi
+## Hisobot: T0.6 — Hub skeleti va autentifikatsiya
 
-- **PR #5** (`gemini/T0.5-uow-outbox`, bosh SHA `aac2f63253e86a3c994da2f73b8b4d2dbd2330f1`, barcha 6 CI check run `success` — Run [#42798505396](https://github.com/Shaxobiddin-Github/Mezon/actions/runs/42798505396) va [#42798497585](https://github.com/Shaxobiddin-Github/Mezon/actions/runs/42798497585)) `T0.5: Asinxron UnitOfWork, outbox va qurilma holati` nomi bilan Squash and merge qilindi.
-- **Merge commit SHA (`main`):** `a50e6abdb6824a3743e4fbb2b025a5df0afa4148`
-- **`gemini/T0.5-uow-outbox` branch:** masofadan va lokaldan o'chirildi.
-- **Yangi branch (`main` @ `a50e6ab` dan):** `gemini/T0.6-hub-auth`
+Branch / PR: `gemini/T0.6-hub-auth` / [PR #6](https://github.com/Shaxobiddin-Github/Mezon/pull/6)  
+Commit: `07afc281f2bbddd016d46b16e9f4c2a3083e117a`
 
----
+### Nima qilindi
 
-## Reja: T0.6 — Hub skeleti va autentifikatsiya
+Rejadagi barcha talablar (`a`–`h`) va Claude belgilagan `T1`–`T6` tuzatishlar to'liq amalga oshirildi:
 
-> **Eslatma:** Bu bosqichda faqat reja berilmoqda; Claude tasdig'isiz kod yozilmaydi.
+1. **Domen qoidalari va RBAC (`packages/domain`):**
+   - [`packages/domain/src/auth.ts`](packages/domain/src/auth.ts): `USER_ROLES` (`owner`, `manager`, `cashier`), `ROLE_PERMISSION_TABLE` va `roleHasPermission()` (`auth:self`, `users:read`, `users:write`, `users:unlock`), `PinHasher` porti, `PIN_SECURITY_CONSTANTS`, `validatePinFormat()` (6–12 raqam, takroriy `000000`/`111111` va ketma-ket `123456`/`654321` PINlarni rad etadi, xatoda PINni oshkor qilmaydi), `normalizeUsername()`, `validateFullName()`, `computeDeviceCooldownDelayMs()` (`15`-xatodan boshlab 2s, 4s, 8s, 16s, 32s, 60s max), `computeRetryAfterSeconds()`.
+   - [`packages/domain/src/errors.ts`](packages/domain/src/errors.ts): T0.6 kodlari (`VALIDATION_ERROR`, `INVALID_PIN`, `AUTH_UNAUTHORIZED`, `AUTH_INVALID_CREDENTIALS`, `AUTH_FORBIDDEN`, `AUTH_RATE_LIMITED`, `SETUP_ALREADY_COMPLETED`, `USER_NOT_FOUND`, `USERNAME_ALREADY_EXISTS`, `LAST_OWNER_PROTECTED`, `INVALID_HOST`, `FORBIDDEN_ORIGIN`) hamda ixtiyoriy `retryAfterSeconds`.
 
-### 0. Qamrov va versiyalar (GEMINI.md 2.1 va T0.6 `h` bandi)
+2. **Zod kontraktlar (`packages/contracts`):**
+   - `zod@4.6.7` qo'shildi.
+   - [`packages/contracts/src/auth.ts`](packages/contracts/src/auth.ts): `ApiErrorEnvelopeSchema` (`{ error: { code, message } }`), `SetupRequestSchema`/`SetupResponseSchema`, `LoginOptionsResponseSchema`, `LoginRequestSchema` (`username` yoki `userId` + PIN), `LoginResponseSchema`, `LogoutResponseSchema`, `AuthMeResponseSchema`, `CreateUserRequestSchema`, `UpdateUserRequestSchema`, `ResetUserPinRequestSchema`, `UnlockUserResponseSchema`, `DeleteUserResponseSchema`, `UserSummarySchema` (`pinHash`, lockout va `tokenHash`siz).
 
-- **Doira:** Fastify HTTP hub skeleti (`127.0.0.1`), lokal hujumlardan himoya, tuzilgan Pino log (+ redaction), yagona xato formati, Zod kontraktlari, birinchi ishga tushirish sehrgari (`POST /setup`), foydalanuvchi (`ATTR`), rollar (`owner`, `manager`, `cashier`), Argon2id PIN + baza darajasidagi foydalanuvchi va qurilma bloklari, SHA-256 xeshli opaque bearer sessiyalar.
-- **Doiradan tashqari:** biznes jadvallari (mahsulot, ombor, savdo — F1), Electron (`T0.7`), bulut sinxron API (`F2`), tashqi tarmoq `0.0.0.0` tinglash (`F4`).
-- **Paket versiyalari (npm'da tasdiqlangan, GEMINI.md 2.1 bo'yicha `pnpm-lock.yaml` da mahkamlanadi):**
-  - `fastify`: `5.12.8` (GEMINI.md: Fastify 5)
-  - `pino`: `10.4.0` (GEMINI.md: Pino 10)
-  - `zod`: `4.6.7` (GEMINI.md: Zod 4)
-  - `@node-rs/argon2`: `2.2.2` (GEMINI.md: `@node-rs/argon2` 2)
-  - Cookie va `jose` ishlatilmaydi (sessiya 32 bayt tasodifiy opaque bearer token + SHA-256 hash; CORS uchinchi tomon plaginisiz qat'iy yopiq).
+3. **SQLite sxema, migratsiya va auth store (`packages/db-local`):**
+   - [`packages/db-local/src/schema/index.ts`](packages/db-local/src/schema/index.ts):
+     - `users` (`ATTR`, `tenantScope: 'organization'`) — T5 bo'yicha partial unique index `uidx_users_org_username` (`WHERE "users"."deleted_at_ms" IS NULL`).
+     - `local_hub_config` (`LOCAL`, `singleton_guard = 1` + `UNIQUE`).
+     - `local_pin_credentials` (`LOCAL` — Argon2id hash va 5-xatoli user blok holati, bulut/outboxga chiqmaydi).
+     - `local_device_auth_state` (`LOCAL` — T1 bo'yicha 5-daqiqalik oyna + 15-xatodan keyingi 2..60s progressiv kechikish).
+     - `local_sessions` (`LOCAL` — 64-belgi SHA-256 `token_hash`, `expires_at_ms`, `revoked_at_ms`, `last_seen_at_ms`).
+   - [`packages/db-local/src/uow.ts`](packages/db-local/src/uow.ts): ulanish darajasidagi umumiy FIFO mutex (`connectionMutexes` WeakMap), `runConnectionReadOnly()`, `bootstrapSqliteHubUnitOfWork()`.
+   - [`packages/db-local/src/auth-repo.ts`](packages/db-local/src/auth-repo.ts): barcha yozuvlar `uow.execute` / `bootstrapSqliteHubUnitOfWork` orqali, barcha o'qishlar `uow.runReadOnly` / `runConnectionReadOnly` orqali (`T4`); `local_sessions.last_seen_at_ms` daqiqada eng ko'pi 1 marta (`>= 60_000n` ms) yangilanadi (`T4`); `users` `ATTR` `insertAttr`/`updateAttr`/`tombstoneAttr` orqali outboxga atomik yoziladi; oxirgi aktiv `owner` himoyasi (`LAST_OWNER_PROTECTED`).
 
----
+4. **Hub HTTP server va himoya (`apps/hub`):**
+   - Fastify `5.12.8`, Pino `10.4.0`, `@node-rs/argon2` `2.2.2`, Zod `4.6.7`.
+   - [`apps/hub/src/config.ts`](apps/hub/src/config.ts) & [`apps/hub/src/security.ts`](apps/hub/src/security.ts): faqat `127.0.0.1`; `Host` (`127.0.0.1:<port>`/`localhost:<port>` bo'lmasa `421 INVALID_HOST`); `Origin` allowlist & `Sec-Fetch-Site: cross-site` (`403 FORBIDDEN_ORIGIN`); `OPTIONS` preflight va `Access-Control-*` sarlavhalari qat'iy yopiq; cookie ishlatilmaydi, faqat `Authorization: Bearer`.
+   - [`apps/hub/src/argon2-pin-hasher.ts`](apps/hub/src/argon2-pin-hasher.ts): OWASP minimal profili `Argon2id`, `m=19456` KiB (19 MiB), `t=2`, `p=1`, `outputLen=32`; mavjud bo'lmagan/nofaol foydalanuvchi uchun ham doimiy `dummyPinHash` orqali Argon2id tekshiruvi.
+   - [`apps/hub/src/auth-service.ts`](apps/hub/src/auth-service.ts): `login()` 4 fazali (read snapshot -> tranzaksiya tashqarisida async Argon2id -> `uow.execute` ichida muvaffaqiyatsiz urinish yoki sessiyani commit qilish -> commitdan keyin HTTP xatosi otish, `T2`).
+   - [`apps/hub/src/logger.ts`](apps/hub/src/logger.ts) & [`apps/hub/src/error-handler.ts`](apps/hub/src/error-handler.ts): Pino `redact` (`authorization`, `cookie`, `pin`, `pinHash`, `token`, `tokenHash`, `password`, `secret`), `{ error: { code, message } }` konverti va stack trace'ni yashirish.
+   - [`apps/hub/src/routes.ts`](apps/hub/src/routes.ts): `GET /health`, `POST /setup`, `GET /auth/login-options` (`T6`), `POST /auth/login` (`username` yoki `userId`), `POST /auth/logout`, `GET /auth/me`, `GET /users`, `POST /users`, `PATCH /users/:id`, `POST /users/:id/pin`, `POST /users/:id/unlock` (`T3`), `DELETE /users/:id`.
 
-### 1. Paketlar chegarasi va rejalashtirilgan fayllar (`g` bandi)
+5. **Import chegaralari va TypeScript/ESLint:**
+   - [`.dependency-cruiser.cjs`](.dependency-cruiser.cjs): `contracts-src-imports` va `hub-src-imports` (`apps/hub` `db-cloud`ni import qila olmaydi).
+   - [`eslint.config.mjs`](eslint.config.mjs): `./apps/*/tsconfig.test.json` qo'shildi.
 
-1. **`packages/domain` (sof biznes qoidalari va portlar, tashqi import 0):**
-   - `packages/domain/src/errors.ts`: T0.6 `DomainErrorCode` kodlari qo'shiladi (`AUTH_UNAUTHORIZED`, `AUTH_INVALID_CREDENTIALS`, `AUTH_FORBIDDEN`, `AUTH_RATE_LIMITED`, `SETUP_ALREADY_COMPLETED`, `USER_NOT_FOUND`, `USERNAME_ALREADY_EXISTS`, `LAST_OWNER_PROTECTED`, `INVALID_PIN`).
-   - `packages/domain/src/auth.ts`:
-     - `UserRole = 'owner' | 'manager' | 'cashier'`, `HubPermission = 'users:read' | 'users:write' | 'auth:self'`, rol × ruxsat jadvali `ROLE_PERMISSIONS` va `roleHasPermission(role, permission)`.
-     - `PinHasher` port interfeysi (`hash(pin: string): Promise<string>`, `verify(hash: string, pin: string): Promise<boolean>`).
-     - `PIN_SECURITY_CONSTANTS` (user lock: 5 xato -> 5 daqiqa / `300_000n` ms; device lock: `300_000n` ms oynada 15 xato -> 5 daqiqa / `300_000n` ms blok; sessiya TTL: 12 soat / `43_200_000n` ms) va sof `validatePinFormat(pin)` + `normalizeUsername(username)` funksiyalari (xato xabarida PIN qiymati hech qachon qaytarilmaydi).
-     - `packages/domain/src/auth.test.ts`: RBAC jadvali, username/PIN validatsiya va kuchsiz PIN rad etish testlari.
+### O'zgargan fayllar (`07afc28`)
 
-2. **`packages/contracts` (Zod 4.6.7 sxemalari va DTO tiplar):**
-   - `packages/contracts/package.json`: `@mezon/domain` va `zod: 4.6.7`.
-   - `packages/contracts/src/index.ts` va `packages/contracts/src/auth.ts`:
-     - `ApiErrorEnvelopeSchema`: `{ error: { code, message } }`.
-     - `HealthResponseSchema`, `SetupRequestSchema`, `SetupResponseSchema`.
-     - `LoginPinRequestSchema`, `LoginResponseSchema`, `LogoutResponseSchema`, `AuthMeResponseSchema`.
-     - `CreateUserRequestSchema`, `UpdateUserRequestSchema`, `ResetUserPinRequestSchema`, `UserSummarySchema` (`pinHash`, lockout va `tokenHash` maydonlari DTO'da umuman yo'q).
-     - `packages/contracts/src/auth.test.ts`.
+- `.dependency-cruiser.cjs`, `eslint.config.mjs`, `pnpm-lock.yaml` — depcruise chegaralari, ESLint test tsconfigni ulash va exact paket versiyalarini mahkamlash.
+- `packages/domain/src/{errors.ts,auth.ts,index.ts,auth.test.ts}` — RBAC, PIN qoidalari, progressiv backoff, auth `DomainError` kodlari.
+- `packages/contracts/{package.json,tsconfig.json,tsconfig.test.json,src/{auth.ts,index.ts,auth.test.ts}}` — Zod 4.6.7 kontraktlar va testlar.
+- `packages/db-local/{src/{schema/index.ts,uow.ts,auth-repo.ts,index.ts,index.test.ts,uow.test.ts,auth.test.ts},drizzle/{0002_hub_auth.sql,meta/{_journal.json,0002_snapshot.json}}}` — T0.6 jadvallari, migratsiya + `users` `BEFORE DELETE` triggeri, connection FIFO mutex, `SqliteHubAuthStore` va testlar (`uow.test.ts` property test timeout `30_000` ms).
+- `apps/hub/{package.json,tsconfig.json,tsconfig.test.json,src/{config.ts,logger.ts,argon2-pin-hasher.ts,security.ts,error-handler.ts,auth-service.ts,routes.ts,server.ts,index.ts,hub.test.ts}}` — Hub HTTP server va to'liq integratsiya testlari.
 
-3. **`packages/db-local` (sxema, migratsiya, SQLite trigger va auth repozitoriyasi):**
-   - `packages/db-local/src/schema/index.ts` — barcha jadvallar `localSchemaRegistry.defineTable(...)` orqali e'lon qilinadi:
-     - **`users` (`ATTR`, `tenantScope: 'organization'`)**: sinxron foydalanuvchi va rol jadvali. Ustunlar: `username` (UNIQUE `(organization_id, username)` — aktiv/tombstone siyosati aniq tekshiriladi), `fullName`, `role` (`CHECK (role IN ('owner', 'manager', 'cashier'))`), `isActive` (`sqliteBoolean`). Faqat UoW + T0.5 `insertAttr` / `updateAttr` / `tombstoneAttr` orqali yoziladi (avtomatik `local_outbox` + bir xil HLC + `BEFORE DELETE RAISE(ABORT)` trigger).
-     - **`local_hub_config` (`LOCAL`, `tenantScope: 'organization'`)**: birinchi ishga tushirish holati (`storeId`, `deviceId`, `singletonGuard` `CHECK (singleton_guard = 1)` + `UNIQUE(singleton_guard)`, `setupCompletedAtMs`). DB darajasida ikki marta sehrgar o'tishini imkonsiz qiladi.
-     - **`local_pin_credentials` (`LOCAL`, `tenantScope: 'organization'`)**: alohida lokal jadval (sinxronlanmaydi, outboxga yozilmaydi). Ustunlar: `userId` (`UNIQUE`, FK `users.id`), `pinHash` (`text` — Argon2id PHC satr), `pinUpdatedAtMs`, `failedAttempts` (`CHECK >= 0`), `lockedUntilMs` (nullable UnixMs), `lastFailedAtMs`. Qayta ishga tushganda blok holati bazadan tiklanadi.
-     - **`local_device_auth_state` (`LOCAL`, `tenantScope: 'organization'`)**: qurilma bo'yicha umumiy brute force cheklovi. Ustunlar: `deviceId` (`UNIQUE`), `windowStartedAtMs`, `failedAttempts` (`CHECK >= 0`), `lockedUntilMs` (nullable UnixMs), `lastFailedAtMs`. Har xil foydalanuvchilarni yoki mavjud bo'lmagan nomlarni navbatma-navbat sinab ko'rishni to'sadi va restart'da yo'qolmaydi.
-     - **`local_sessions` (`LOCAL`, `tenantScope: 'organization'`)**: opaque sessiya jadvali. Ustunlar: `userId` (FK `users.id`), `deviceId`, `tokenHash` (`UNIQUE`, 64-belgi SHA-256 hex), `expiresAtMs`, `revokedAtMs` (nullable), `lastSeenAtMs`. Raw 32-bayt token bazada saqlanmaydi.
-   - `packages/db-local/drizzle/0002_hub_auth.sql` + snapshot/journal (`drizzle-kit` + `BEFORE DELETE RAISE(ABORT)` trigger `users` uchun) -> `pnpm run db:check` (0 diff va trigger tekshiruvi) o'tadi.
-   - `packages/db-local/src/auth-repo.ts`: Setup holati, foydalanuvchi o'qish/yozish (UoW ichida), PIN credential + lockout yangilash, qurilma auth limitini tekshirish/oshirish, sessiya yaratish/topish/bekor qilish (foydalanuvchi o'chirilsa, `isActive=false` bo'lsa yoki PIN almashtirilsa barcha aktiv sessiyalari o'sha tranzaksiyada bekor qilinadi).
-   - `apps/hub` bevosita `drizzle-orm` yoki `better-sqlite3`ga kirmasligi uchun kerakli barcha baza operatsiyalari `@mezon/db-local` orqali eksport qilinadi.
+### Migratsiyalar
 
-4. **`apps/hub` (Fastify 5.12.8 + Pino 10.4.0 + Argon2id 2.2.2):**
-   - `apps/hub/package.json`: `@mezon/domain`, `@mezon/contracts`, `@mezon/db-local`, `@mezon/drivers`, `fastify@5.12.8`, `pino@10.4.0`, `zod@4.6.7`, `@node-rs/argon2@2.2.2` (devDeps: `@mezon/test-utils`).
-   - `apps/hub/src/config.ts`: majburiy `host = '127.0.0.1'` (`0.0.0.0` yoki boshqa tashqi IP berilsa xato bilan to'xtaydi), port, `allowedOrigins`, lockout va sessiya TTL sozlamalari.
-   - `apps/hub/src/logger.ts`: Pino 10 logger + `redact` qoidalari.
-   - `apps/hub/src/security.ts`: `Host` sarlavhasi tekshiruvi (`421 INVALID_HOST`), `Origin` / `Sec-Fetch-Site` tekshiruvi (`403 FORBIDDEN_ORIGIN`), `Cookie`ni e'tiborsiz qoldirish va barcha CORS headerlarini bermasdan `OPTIONS` preflightni rad etish.
-   - `apps/hub/src/argon2-pin-hasher.ts`: `@node-rs/argon2` (`Algorithm.Argon2id`) asinxron implementatsiyasi + doimiy vaqtli `DUMMY_PIN_HASH` (startupda yoki modul yuklanganda Argon2id parametrlari bilan bir marta tayyorlanadi, mavjud bo'lmagan foydalanuvchi uchun ham aynan shu `verify` ishlaydi).
-   - `apps/hub/src/error-handler.ts`: `ZodError`, Fastify JSON parse xatolari, `DomainError` kodlari (`400`/`401`/`403`/`404`/`409`/`421`/`429`) va noma'lum 500 xatolar uchun yagona `{ error: { code, message } }` javobi (mijozga stack trace chiqmaydi).
-   - `apps/hub/src/auth-service.ts`: sehrgar (`setup`), `login` (timingsiz/enumeratsiyasiz va ikki darajali bazadagi blok bilan), `logout`, `authenticateBearer`, foydalanuvchi CRUD va PIN reset.
-   - `apps/hub/src/routes/`:
-     - `GET /health` (ochiq, `{ status, service, needsSetup }` — PII yo'q)
-     - `POST /setup` (bir martalik sehrgar; UoW `BEGIN IMMEDIATE`)
-     - `POST /auth/login`
-     - `POST /auth/logout` (har qanday autentifikatsiyalangan rol)
-     - `GET /auth/me` (har qanday autentifikatsiyalangan rol)
-     - `GET /users` (`owner`, `manager`)
-     - `POST /users` (`owner`)
-     - `PATCH /users/:id` (`owner`)
-     - `POST /users/:id/pin` (`owner`)
-   - `apps/hub/src/server.ts` & `apps/hub/src/index.ts`: `buildHubApp()` (testlar `fastify.inject` va haqiqiy `listen('127.0.0.1', 0)` uchun) va `startHubServer()`.
+- `packages/db-local/drizzle/0002_hub_auth.sql`: `local_device_auth_state`, `local_hub_config`, `local_pin_credentials`, `local_sessions`, `users` (`ATTR`) hamda `uidx_users_org_username` (`WHERE "users"."deleted_at_ms" IS NULL`) va `trg_users_no_delete` (`BEFORE DELETE RAISE(ABORT)`).
 
-5. **`.dependency-cruiser.cjs` (`g` bandi):**
-   - `contracts-src-imports` qoidasi: `packages/contracts/src/` faqat `packages/contracts/src/`, `packages/domain/` va `zod`ni import qila oladi.
-   - `hub-src-imports` qoidasi: `apps/hub/src/` faqat `apps/hub/src/`, `packages/domain/`, `packages/contracts/`, `packages/db-local/`, `packages/drivers/`, `fastify`, `pino`, `@node-rs/argon2`, `zod` va `node:*` modullarini import qila oladi (`@mezon/db-cloud`, `@mezon/test-utils`, boshqa `apps/*`, `better-sqlite3`/`drizzle-orm`ga to'g'ridan-to'g'ri kirish taqiqlanadi).
-   - Salbiy tekshiruv: `apps/hub/src/` ichida `@mezon/db-cloud` import qilinsa `pnpm run depcruise` Exit code 1 berishi tasdiqlanadi.
+### Qabul mezonlari
 
----
+- [x] **a) Mahalliy himoya** — `hub.test.ts`: `0.0.0.0` rad etilishi, real `127.0.0.1:0` tinglash, 7 ta soxta/noto'g'ri `Host` -> `421`, noto'g'ri `Origin`/`null`/`Sec-Fetch-Site: cross-site` -> `403`, `OPTIONS` preflight -> `403` (`Access-Control-*`siz), `Cookie` ignor qilinishi va `Set-Cookie` yo'qligi.
+- [x] **b) PIN, Argon2id, brute force va log redaction** — `hub.test.ts`: haqiqiy `@node-rs/argon2` (`$argon2id$v=19$m=19456,t=2,p=1$...`), mavjud bo'lmagan foydalanuvchi uchun `verify(dummyHash, pin)` chaqirilishi va bir xil 401 javobi, 5 xatodan keyin baza + restartdan keyin ham `429` blok, T1 bo'yicha 15+ xatodan keyin `2, 4, 8, 16, 32, 60, 60` s `Retry-After` va kutishdan keyin egasi kira olishi, Pino stream loglarida PIN/hash/token/tokenHash `0` ta va `[Redacted]` borligi.
+- [x] **c) Ma'lumot & T4 & T5** — `auth.test.ts` va `hub.test.ts`: `users` outboxda `ATTR` (`deleted_at_ms IS NULL` partial unique bilan tombstone nomni qayta ishlatish `T5`), `local_pin_credentials`/`local_sessions` outboxga yozilmasligi, `last_seen_at_ms` < 60s da yozilmay `>= 60s` da yangilanishi (`T4`), logout/expiry/`isActive=false`/PIN reset sessiyani darhol yopishi.
+- [x] **d) Sehrgar (`POST /setup`)** — `hub.test.ts` va `auth.test.ts`: parallel `Promise.all` da aniq 1 ta `201` va 1 ta `409 SETUP_ALREADY_COMPLETED`, kuchsiz PIN va `admin/admin` rad etilishi.
+- [x] **e) & T3 Rollar** — `hub.test.ts`: (`unauthenticated`, `cashier`, `manager`, `owner`) × (`/auth/me`, `/auth/logout`, `GET /users`, `POST /users`, `PATCH /users/:id`, `POST /users/:id/unlock`, `POST /users/:id/pin`, `DELETE /users/:id`) to'liq matritsasi, oxirgi `owner` himoyasi.
+- [x] **T2 (Commit before reject)** — `hub.test.ts`: 5 xatodan keyin to'g'ridan-to'g'ri SQLite `SELECT failed_attempts, locked_until_ms FROM local_pin_credentials` da `failed_attempts = 5n` va `locked_until_ms` saqlangan.
+- [x] **T6 (`login-options` va `userId` login)** — `hub.test.ts`: ochiq `GET /auth/login-options` faqat aktiv `{ id, fullName, role }` qaytaradi; `{ userId, pin }` login ishlaydi.
+- [x] **f) & g) Xatolar, versiyalar va chegara** — `{ error: { code, message } }` (stack siz), salbiy `depcruise` (`apps/hub -> @mezon/db-cloud` Exit code 1; `packages/contracts -> @mezon/db-local` Exit code 1) va salbiy `db:check` (`trg_users_no_delete` olib tashlansa Exit code 1).
 
-### 2. Muhim texnik yondashuv va asoslar (`a`–`f` bandlar)
+### Test natijasi (oxirgi tahrirdan keyin)
 
-#### a) Mahalliy hujumlardan himoya (`127.0.0.1`, CSRF, DNS rebinding)
-- Hub faqat `host: '127.0.0.1'` ga bog'lanadi (konfiguratsiya boshqa host bersa darhol xato).
-- **DNS rebinding himoyasi (`Host` sarlavhasi):** Fastify `onRequest` hook'i birinchi qadamda `Host` sarlavhasini tekshiradi. Faqat kutilayotgan port bilan `127.0.0.1:<port>` yoki `localhost:<port>` qabul qilinadi (`listen()`dan keyin haqiqiy bog'langan port bilan yangilanadi, `inject` uchun konfiguratsiya porti bilan). `evil.uz:3000`, `127.0.0.1.attacker.uz:3000`, bo'sh/ikki `Host`, boshqa port -> **`421 Misdirected Request`** `{ error: { code: 'INVALID_HOST', message: 'Host header is not allowed' } }`.
-- **`Origin` va CSRF himoyasi:** Agar `Origin` sarlavhasi mavjud bo'lsa (istalgan brauzer XHR/fetch/forma yoki sandbox `Origin: null`), u `allowedOrigins` ro'yxatida (standart: bo'sh `[]` yoki aniq konfiguratsiya qilingan `http://127.0.0.1:<port>`/`http://localhost:<port>`) aniq satr sifatida bo'lishi shart. Ro'yxatda bo'lmasa -> **`403 Forbidden`** `{ error: { code: 'FORBIDDEN_ORIGIN', message: 'Origin is not allowed' } }`. Shuningdek `Sec-Fetch-Site: cross-site` ham `403` bilan to'xtatiladi. `Origin` yo'q holat (Electron main, Node/CLI) `Host` tekshiruvi + `Authorization: Bearer` bilan himoyalangan.
-- **CORS qat'iy yopiq + Bearer:** Server hech qachon `Set-Cookie` bermaydi va `Cookie`ni o'qimaydi. Autentifikatsiya faqat `Authorization: Bearer <token>` orqali. Barcha `OPTIONS` preflight va ruxsat etilmagan `Origin` so'rovlari `Access-Control-Allow-*` sarlavhalarisiz **`403`** bilan yopiladi.
+**Lokal (`Windows`, commit `07afc28`):**
 
-#### b) PIN (Argon2id), brute force va Pino redaction
-- **Argon2id parametrlari (`@node-rs/argon2` 2.2.2, asinxron):**
-  - `algorithm: Algorithm.Argon2id`
-  - `memoryCost: 19456` (19 MiB = 19 × 1024 KiB), `timeCost: 2`, `parallelism: 1`, `outputLen: 32`.
-  - **Asos (OWASP + `GEMINI.md` 4 GB RAM):** OWASP Password Storage Cheat Sheet minimal tavsiyasi `m=19 MiB, t=2, p=1` profiliga to'liq mos va undan past emas; shu bilan birga har tekshiruvda atigi 19 MiB RAM ishlatadi va Rust libuv threadpool'ida asinxron ishlab event loop'ni bloklamaydi (4 GB RAMli monoblokda ham silliq).
-- **PIN siyosati (standart `admin/admin` yo'q):**
-  - Faqat raqamlar: `6–12` ta raqam (`^\d{6,12}$`); barcha raqamlari bir xil (`000000`, `111111`) yoki oddiy ketma-ket (`123456`, `654321`) PINlar rad etiladi (`400 INVALID_PIN`). (4 raqamli variant bo'yicha savol pastda Claude/Egasi uchun alohida ko'rsatilgan.)
-- **Ikki darajali bazadagi blok (restartda saqlanadi):**
-  1. *Foydalanuvchi bo'yicha (`local_pin_credentials`):* har noto'g'ri urinishda `failed_attempts += 1`; `5`-xatoda `locked_until_ms = nowMs + 300_000n` (5 daqiqa). `locked_until_ms > nowMs` paytida urinish **`429 AUTH_RATE_LIMITED`** bilan rad etiladi. To'g'ri PIN bilan kirish `failed_attempts = 0` va `locked_until_ms = null` qiladi. Blok bazada turgani uchun Hub qayta ishga tushganda ham blok kuchida qoladi.
-  2. *Qurilma bo'yicha (`local_device_auth_state`):* `300_000n` ms oynada foydalanuvchilar bo'yicha (hamda mavjud bo'lmagan username'lar bo'yicha) jami `15` ta xato urinish to'plansa, qurilma `300_000n` ms ga (`429 AUTH_RATE_LIMITED`) bloklanadi. Bu bitta foydalanuvchidan boshqasiga o'tib PIN terish hujumini (user-rotation spray) to'xtatadi. Muvaffaqiyatli login qurilma hisoblagichini bekor qilmaydi (faqat oyna/blok muddati tugagach yangilanadi).
-- **Mavjud bo'lmagan foydalanuvchi va vaqt kanali himoyasi:**
-  - `username` topilmaganda (yoki `is_active = false` / tombstoned bo'lganda) ham haqiqiy Argon2id `verify(DUMMY_PIN_HASH, pin)` bajariladi va aynan bir xil **`401 AUTH_INVALID_CREDENTIALS`** javobi qaytadi — javob vaqti ham, javob kodi/matni ham foydalanuvchi bor-yo'qligini oshkor qilmaydi.
-- **Pino log maxfiyligi:**
-  - `pino@10.4.0` `redact` yo'llari: `req.headers.authorization`, `req.headers.cookie`, `pin`, `*.pin`, `newPin`, `*.newPin`, `pinHash`, `*.pinHash`, `token`, `*.token`, `tokenHash`, `*.tokenHash`, `password`, `*.password`, `secret`, `*.secret` -> `"[Redacted]"`. Auth endpointlarda request body umuman loglanmaydi.
+- `pnpm verify`:
+  - `prettier --check .`, `turbo run build` (`17/17`), `eslint .` (`0` xato), `turbo run typecheck` (`22/22`), `turbo run db:check` (SQLite `0 diff`, PostgreSQL `0 diff`).
+  - `vitest run`: `Test Files 14 passed | 1 skipped (15)`, `Tests 98 passed | 2 skipped (100)` (`pg-rls.test.ts` Docker yo'qligi sabab skip; `domain` 48, `contracts` 3, `drivers` 4, `rules` 2, `test-utils` 6, `db-local` 24, `db-cloud` 6, `apps/hub` 5).
+  - `depcruise`: `no dependency violations found (138 modules, 344 dependencies cruised)`.
+- **Salbiy tekshiruvlar (vaqtinchalik, keyin qayta tiklangan):**
+  - `apps/hub/src/index.ts` -> `@mezon/db-cloud` => `depcruise` Exit code 1 (`hub-src-imports`).
+  - `packages/contracts/src/index.ts` -> `@mezon/db-local` => `depcruise` Exit code 1 (`contracts-src-imports`).
+  - `0002_hub_auth.sql` da `trg_users_no_delete` olib tashlansa => `db:check` Exit code 1.
 
-#### d) Birinchi ishga tushirish sehrgari (`POST /setup`)
-- Sehrgar **faqat** `local_hub_config` bo'sh va `users`da aktiv foydalanuvchi bo'lmaganda ochiq (`GET /health` da `needsSetup: true`).
-- `POST /setup` ichida `BEGIN IMMEDIATE` (setup mutex + SQLite immediate tranzaksiya):
-  1. `local_hub_config` va `users` sonini qayta tekshiradi; mavjud bo'lsa **`409 SETUP_ALREADY_COMPLETED`**.
-  2. `IdGenerator` (UUIDv7) bilan yangi `organizationId`, `storeId`, `deviceId` yaratadi.
-  3. `local_hub_config` (`singleton_guard = 1`) va `local_device_state` (`lastDeviceSeq = 0n`) qatorlarini yozadi.
-  4. `SqliteUnitOfWork` (`insertAttr`) orqali `owner` foydalanuvchini `users`ga + `local_outbox`ga (`deviceSeq = 1n`) yozadi va `local_pin_credentials`ga Argon2id xeshni saqlaydi — hammasi **bitta atomik tranzaksiyada**.
-- Bir vaqtda kelgan ikki `POST /setup` so'rovidan `BEGIN IMMEDIATE` va mutex sababli birinchisi `201 Created`, ikkinchisi `409 Conflict` oladi (`Promise.all` bilan testlanadi).
+**GitHub Actions CI (commit `07afc28`, Run [#42802089620](https://github.com/Shaxobiddin-Github/Mezon/actions/runs/42802089620)):**
 
----
+- [`Verify (ubuntu-latest)`](https://github.com/Shaxobiddin-Github/Mezon/actions/runs/42802089620/job/129781915119) — **success** (`0 diff`, `Test Files 15 passed (15)`, `Tests 100 passed (100)`, `21.80s`, `depcruise` 0 violations / 138 modules / 344 deps).
+- [`Verify (windows-latest)`](https://github.com/Shaxobiddin-Github/Mezon/actions/runs/42802089620/job/129781915252) — **success** (`0 diff`, `Test Files 14 passed | 1 skipped (15)`, `Tests 98 passed | 2 skipped (100)` [Docker yo'q PG RLS skip], `22.13s`, `depcruise` 0 violations).
+- [`Verify PostgreSQL RLS (ubuntu-latest)`](https://github.com/Shaxobiddin-Github/Mezon/actions/runs/42802089620/job/129781914722) — **success** (`Test Files 2 passed (2)`, `Tests 8 passed (8)`, `13.26s`).
 
-### 3. Test rejasi
+### Tekshirilmagan narsalar
 
-1. **`packages/domain/src/auth.test.ts` & `packages/contracts/src/auth.test.ts`:** RBAC rol matritsasi, PIN format cheklovlari, Zod sxema validatsiyasi.
-2. **`packages/db-local/src/auth.test.ts`:**
-   - Setup bir marta ishlashi (`singleton_guard = 1`) va outbox `deviceSeq = 1n` (`users` = `ATTR`).
-   - PIN hash (`local_pin_credentials`) va sessiya (`local_sessions`) uchun outboxda yozuv **bo'lmasligi**.
-   - Restart simulyatsiyasi (yangi DB ulanishi + yangi `SqliteUnitOfWork`): foydalanuvchi va qurilma blok holati bazadan saqlanishi.
-   - `users` jadvalida `DELETE` trigger (`RAISE(ABORT)`) va `UPDATE`/`tombstoneAttr` HLC/outbox atomikligi.
-3. **`apps/hub/src/hub.test.ts` (`fastify.inject` + real `127.0.0.1:0` HTTP port):**
-   - **Mahalliy himoya (`a`):** noto'g'ri/soxta/boshqa portli `Host` -> `421`; ruxsat etilmagan `Origin` (`https://evil.com`, `Origin: null`) -> `403`; `OPTIONS` preflight -> `403` + zero `Access-Control-Allow-*` headerlari; `Set-Cookie` yo'qligi, `Cookie` ignor qilinishi; `0.0.0.0` host rad etilishi.
-   - **Sehrgar (`d`):** birinchi `POST /setup` -> `201`; keyingi `POST /setup` -> `409`; parallel `Promise.all([setup1, setup2])` -> aniq 1 ta `201` va 1 ta `409`; oddiy/standart PIN (`123456`, `000000`) -> `400`.
-   - **Brute force va Argon2id (`b`):**
-     - Real `@node-rs/argon2` (`$argon2id$`) bilan hash & verify integratsiya testi.
-     - Mavjud bo'lmagan foydalanuvchi uchun ham Argon2id bajarilishi (spy/real hash timing tekshiruvi: farq statistik shovqin doirasida, hech qachon 1ms vs 30ms emas).
-     - Foydalanuvchi 5 marta xato -> 5 daqiqaga blok (`429`), Hub qayta yaratilganda (restart) blok davom etadi, `FixedClock`/`MutableClock` bilan 5 daqiqadan keyin ochiladi.
-     - Qurilma bo'yicha cheklov: turli mavjud/yo'q foydalanuvchilar navbatma-navbat sinab ko'rilganda `15` xatodan keyin qurilma `429` bilan bloklanadi.
-   - **Sessiya (`c`):** 32-bayt token (`SHA-256` bazada), `GET /auth/me` -> `200`, `POST /auth/logout`dan keyin eski token -> `401`, muddati o'tgan token (`MutableClock` bilan TTL oshirilganda) -> `401`, nofaol (`isActive=false`) yoki PINi almashtirilgan user tokeni darhol -> `401`.
-   - **Rollar matritsasi (`e`):** (`unauthenticated`, `cashier`, `manager`, `owner`) × barcha endpointlar matritsasi (`200/201/401/403`) + oxirgi aktiv `owner`ni o'chirish/pasaytirishga urinish -> `409`.
-   - **Xatolar va Pino log (`f`):** `{ error: { code, message } }` formati (400/401/403/404/409/421/429/500), 500 xatoda stack trace mijozga chiqmasligi; Pino in-memory stream testida PIN, hash, Bearer token va `tokenHash` **hech bir** log qatorida uchramasligi.
-4. **Salbiy `depcruise` va `db:check` dalili (`g`):**
-   - `apps/hub/src/` ichida `@mezon/db-cloud` import qilinsa `pnpm run depcruise` Exit code 1 berishi.
-   - `pnpm verify` (build, lint, typecheck, db:check, vitest, depcruise) Ubuntu va Windows CI'da yashil.
+- Lokal Windows muhitida Docker bo'lmagani sabab `pg-rls.test.ts` lokalda o'tkazib yuborildi (Ubuntu CI job'larida to'liq o'tdi).
 
----
+### Qilingan taxminlar
 
-### Takliflar va ochiq savol (Claude/Egasi qarori uchun)
+- Yangi taxmin kiritilmadi; barcha yondashuvlar tasdiqlangan T0.6 rejasi va `T1`–`T6` tuzatishlariga mos.
 
-1. **PIN uzunligi (`6–12` vs `4–12` raqam):** Rejada xavfsizlik uchun minimal `6` raqam (`6–12`, kuchsiz ketma-ketliklar taqiqlangan) tanlandi, chunki 5-xatogacha himoya bo'lsa-da 4 raqam entropiyasi past. Agar kassirlarga qulaylik uchun `4–12` raqam ma'qul bo'lsa, tasdiqda bildiring — darhol shunga moslaymiz.
-2. **Sehrgar javobi (`POST /setup`):** Sehrgar yakunida avtomatik sessiya tokeni bermay, `201 { organizationId, storeId, deviceId, owner }` qaytarib keyingi qadamda `POST /auth/login` orqali kirishni talab qilish rejalashtirildi (toza ajratish uchun). Agar UX uchun `/setup` bir yo'la birinchi `owner` sessiyasini ham qaytarishi ma'qul bo'lsa, tasdiqda ayting.
+### Takliflar
+
+- Yangi taklif yo'q.
+
+### Egasi yoki Claude qarori kerak bo'lgan savollar
+
+- Savol yo'q; PR #6 (`07afc28`) Claude tekshiruvi uchun tayyor.
