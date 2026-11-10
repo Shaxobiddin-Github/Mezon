@@ -42,14 +42,64 @@ module.exports = {
     {
       name: 'rules-tests-imports-only-testing-and-domain',
       comment:
-        'packages/rules test files can only import internal source files, packages/domain, vitest, and fast-check',
+        'packages/rules test files can only import internal source files, packages/domain, packages/test-utils, vitest, and fast-check',
       severity: 'error',
       from: {
         path: '^packages/rules/src/.*\\.test\\.ts$',
       },
       to: {
         pathNot:
-          '^(packages/rules/src/|packages/domain/|node_modules/(\\.pnpm/)?(fast-check|vitest)@)',
+          '^(packages/rules/src/|packages/domain/|packages/test-utils/|node_modules/(\\.pnpm/)?(fast-check|vitest)@)',
+      },
+    },
+    {
+      name: 'drivers-src-imports',
+      comment:
+        'packages/drivers source files can only import within packages/drivers/src or from packages/domain',
+      severity: 'error',
+      from: {
+        path: '^packages/drivers/src/',
+        pathNot: '\\.test\\.ts$',
+      },
+      to: {
+        pathNot: '^(packages/drivers/src/|packages/domain/)',
+      },
+    },
+    {
+      name: 'test-utils-src-imports',
+      comment:
+        'packages/test-utils source files can only import within packages/test-utils/src or from packages/domain',
+      severity: 'error',
+      from: {
+        path: '^packages/test-utils/src/',
+        pathNot: '\\.test\\.ts$',
+      },
+      to: {
+        pathNot: '^(packages/test-utils/src/|packages/domain/)',
+      },
+    },
+    {
+      name: 'no-test-utils-in-production',
+      comment: 'Production source files outside packages/test-utils must not import test-utils',
+      severity: 'error',
+      from: {
+        path: '^(apps|packages)/.*/src/',
+        pathNot: '(^packages/test-utils/|\\.test\\.ts$)',
+      },
+      to: {
+        path: '^packages/test-utils/',
+      },
+    },
+    {
+      name: 'no-drivers-in-pure-packages',
+      comment: 'Pure/shared packages must not depend on concrete IO adapters in packages/drivers',
+      severity: 'error',
+      from: {
+        path: '^packages/(domain|rules|contracts|sync|db-local|db-cloud|ui|i18n)/src/',
+        pathNot: '\\.test\\.ts$',
+      },
+      to: {
+        path: '^packages/drivers/',
       },
     },
     {
