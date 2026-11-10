@@ -1,69 +1,114 @@
-# Claude topshirig'i: T1.3 rejasi — TUZATISHLAR BILAN TASDIQLANDI
+# Claude topshirig'i: T1.3 QABUL → T1.4 rejasi
 
-**Merge tekshiruvi:** T1.2 merge'i tekshirildi. `main` = `e9a9431`, kod `2d47a41` bilan bir xil.
+## 1. T1.3 xulosasi: QABUL (kod `0ddabfa`)
 
-**Tasdiqlangan qismlar:**
+Claude tekshirdi:
 
-- test qarzi commit'i;
-- sof savat dvigateli va LOCAL saqlash, park/resume;
-- narx snapshot'i, ogohlantirish va qo'lda yangilash;
-- aksiya jadvali va `[start, end)` oralig'i, Asia/Tashkent siyosati;
-- bitta qatorga bitta eng foydali aksiya va `id` bo'yicha tenglik qoidasi;
-- `fixed_amount` birlik boshiga hisoblanishi (yaxshi qaror);
-- taqsimlash tartibi va QQS ichidan ajratish;
-- tez savdo va F3 ga tayyorlik;
-- supervisor PIN (T0.6 himoyasi);
-- RBAC.
+- `pnpm verify` o'tdi: 163 test, sxema diff 0.
+- **K1, mustaqil savat modeli.** 1 500 ta tasodifiy savatda har qatorning summasi, aksiya chegirmasi, taqsimlangan buyurtma chegirmasi, yakuniy summa va QQS tiyinigacha model bilan teng. Savatlar foiz va summa aksiyalari, vaqt oralig'i, kg va dona tovarlar, foizli va summali buyurtma chegirmasi bilan tuzilgan.
+- **K2.** 800 ta holatda N+M tekin birliklari savat qanday qatorlarga bo'linishidan qat'i nazar bir xil.
+- **Mutatsiya:** 12 tadan 9 tasi ushlandi.
 
-Quyidagi tuzatishlar bilan `gemini/T1.3-cart-pricing` branch'ida kodni yoz.
+**Test qarzi.** T1.4 PR'ining birinchi alohida commit'i: `T1.3 test qarzi: do'kon aksiyasi, limit chegarasi, tasdiq maydonlari`. Har birini mutatsiya bilan isbotla.
 
-## Majburiy tuzatishlar
+1. `isPromotionActiveAt` da do'kon tekshiruvi o'chirilganda testlar yiqilmadi. Test: `storeId` A uchun yaratilgan aksiya B do'kon savatida qo'llanmaydi, `storeId = null` aksiya esa hamma do'konda qo'llanadi.
+2. `doesDiscountExceedCashierLimit` dagi summa chegarasi (`> maxAmount`) `> maxAmount + 1` ga o'zgartirilganda testlar yiqilmadi. Chegara testi qo'sh: `maxAmount` ga teng chegirma ruxsat etiladi, `maxAmount + 1` tiyin esa tasdiq talab qiladi. Foiz chegarasi uchun ham xuddi shunday.
+3. `isCartManualDiscountAuthorized` da `||` → `&&` almashtirilganda testlar yiqilmadi. Test: `overrideApprovedByUserId` va `overrideApprovedAmount` dan biri `null` bo'lsa, limitdan oshgan chegirma ruxsat etilmaydi.
 
-### P1. Bir xil tovar qatorlarga bo'linib qolmasin (N+M chetlab o'tiladi)
+## 2. Merge
 
-Kassir bir tovarni 3 marta skanerlaydi. Har skan alohida qator bo'lsa, `2+1` aksiyasi har qatorga `qty=1` deb qo'llanadi va bitta ham tekin tovar bermaydi. Natijada xaridor aksiyadan foydalana olmaydi, kassada tushunmovchilik bo'ladi.
+1. `git pull --ff-only`.
+2. PR #10 boshi Claude'ning shu topshiriq commit'i bo'lsin, to'rtala CI job yashil bo'lsin.
+3. `T1.3: Savat, aksiyalar va chegirma` nomi bilan Squash and merge qil, SHA'ni yoz, branch'ni o'chir.
+4. `main`dan `gemini/T1.4-complete-sale` branch'ini och.
+
+## 3. T1.4 — `completeSale`: avval REJA
+
+Kod yozma. Rejani `.mezon/gemini/HISOBOT.md` ga yoz, `[gemini-reja] T1.4` bilan commit qil va push qil, so'ng `node .mezon/kutish.mjs` bilan kut.
+
+GEMINI.md T1.4 va 3.1 (9–10-bandlar) talablari:
+
+- har qanday savdo bitta `completeSale` orqali o'tadi;
+- chek, qatorlar, to'lovlar, ombor harakatlari, ledger, fiskal hujjat, audit va outbox bitta tranzaksiyada yoziladi;
+- terminal bo'yicha ketma-ket `receipt_no`;
+- `shift` havolasi;
+- zaxira siyosati;
+- idempotent `clientRequestId`.
+
+Mezonlar:
+
+- ikki marta bosilsa ham bitta chek chiqadi;
+- zaxira yetmasa to'liq rollback, keyingi savdo sog' ishlaydi;
+- jarayon o'ldirilsa yarim chek qolmaydi.
+
+Rejada quyidagilar aniq bo'lsin:
+
+### a) Hujjatlar va sinflar
+
+- `sales`: MONOTONE. Hujjatning o'zi o'zgarmas, faqat `voided_at` bir tomonlama o'tadi (T1.6). Ichida:
+  - `receipt_no`, terminal yoki qurilma, kassir, ixtiyoriy mijoz (T1.7);
+  - savat jamilari snapshot'i (gross, aksiya, buyurtma chegirmasi, yakuniy summa, QQS);
+  - `client_request_id` (UNIQUE);
+  - `shift_id` (nullable, T1.9 da majburiy bo'ladi);
+  - tasdiqlagan supervisor.
+- `sale_lines`: FACT. Har qatorda to'liq snapshot:
+  - mahsulot va variant yoki tez savdo nomi, birlik, miqdor, birlik narxi;
+  - qo'llangan aksiya, chegirmalar, yakuniy summa, QQS;
+  - MXIK, `package_code`;
+  - ombor harakatidan olingan tannarx qiymati (foyda hisobi uchun).
+- `payments`: FACT. T1.4 da faqat naqd: berilgan summa, qaytim. Sxema T1.5 da kengayadigan qilib loyihalansin: turi, provayder maydonlari. `SUM(payment) = total` invarianti saqlansin.
+
+### b) Bitta tranzaksiya, ichma-ich `execute` yo'q
+
+T1.2 ombor mantig'i alohida `uow.execute` chaqiradi. `completeSale` uni o'z UoW'i ichidan chaqira olmaydi (T0.5 reentrancy qoidasi).
 
 **Talab:**
 
-- Bir xil `productId + variantId + unitPrice snapshot` bo'lgan katalog qatoriga skan yoki qo'shish mavjud qatorning miqdorini oshirsin, yangi qator ochilmasin. Tez savdo qatorlari birlashtirilmaydi.
-- Shunga qaramay, narx snapshot'i farq qiladigan qatorlar bo'lishi mumkin. Shuning uchun N+M tekin birliklari mahsulot (yoki variant) bo'yicha savatdagi jami miqdordan hisoblansin.
-- Tekin birliklar qatorlarga deterministik taqsimlansin: avval eng arzon narxli qatorga, tenglikda qator `id` bo'yicha.
+- Ombor va boshqa yozish mantiqlari `session` qabul qiladigan ichki funksiyalarga ajratilsin.
+- Ham mustaqil API, ham `completeSale` aynan shu funksiyalardan foydalansin. Ombor mantig'i nusxalanmasin.
+
+### c) Server tomonida qayta hisoblash
+
+- `completeSale` savatni o'sha paytdagi vaqt bilan serverda qayta baholaydi (T1.3 `evaluateCart`).
+- Mijoz `expectedTotal` yuboradi. Farq bo'lsa (aksiya muddati tugagan, narx yangilangan) `409 SALE_TOTAL_CHANGED` qaytadi va yangi summa ko'rsatiladi. Kassir xaridorga noto'g'ri summani aytib qo'ymasligi uchun.
+- Chegirma tasdig'i ham shu yerda qayta tekshiriladi.
+
+### d) Zaxira siyosati
+
+- `block` rejimida bitta qatorda ham yetishmovchilik bo'lsa butun savdo rollback bo'ladi (`409 INSUFFICIENT_STOCK`, qaysi qatorlar). Savat ochiq qoladi.
+- `warn` rejimida savdo o'tadi va ogohlantirishlar qaytariladi.
+- `unlimited` va tez savdo qatorlari omborga tegmaydi.
+
+### e) Chek raqami
+
+- Terminal (hozircha qurilma) bo'yicha bo'shliqsiz ketma-ket raqam. Hisoblagich o'sha tranzaksiyada `device_state` uslubida yuritiladi, rollback raqamni iste'mol qilmaydi.
+- Ko'rinadigan format ham yozilsin.
+- Fiskal raqam alohida, F3 da.
+
+### f) Idempotentlik
+
+- Bir xil `clientRequestId` bilan qayta so'rov xato emas, aynan o'sha chekni qaytaradi.
+- Oldingi urinish rollback bo'lgan bo'lsa, qayta urinish yangidan ishlaydi.
+- Bir savat uchun parallel ikki `completeSale` kelsa: biri o'tadi, ikkinchisi idempotent natija yoki `CART_NOT_OPEN` oladi. Ikkita chek hech qachon chiqmaydi.
 
 **Testlar:**
 
-- 3 marta skan → 1 qator, `qty=3`, 1 tekin;
-- turli narxli 2 qator (2 + 1) → jami 3, 1 tekin arzon qatorga;
-- property test: savatni qanday qatorlarga bo'lish N+M natijasini o'zgartirmaydi.
+- ikki marta bosish;
+- parallel so'rovlar;
+- child process `completeSale` o'rtasida o'ladi: qayta ochilganda yarim chek, yarim ombor harakati yoki yarim outbox yo'q, qayta urinish to'g'ri ishlaydi.
 
-### P2. Supervisor tasdig'i aniq summaga bog'lansin
+### g) Hub API, RBAC va unumdorlik
 
-Rejaga ko'ra, tasdiq qator qo'shilganda faqat chegirma limitdan chiqsa tozalanadi. Lekin buyurtma darajasidagi foiz chegirmasi savat kattalashgani sari pul summasi bo'yicha o'sib boradi. Masalan, menejer kichik savatga 10% ni tasdiqlagan bo'lsa, kassir keyin savatni 10 barobar oshirib, tasdiqlangan summadan ancha katta chegirma bera oladi.
+- `POST /carts/:id/complete`: kassir ham. Javob: chek, ogohlantirishlar, qaytim.
+- Kassir javobida tannarx va foyda yo'q.
+- 20 qatorli savdo lokal ≤ 300 ms (GEMINI.md 1-bo'lim). O'lchab hisobotga yoz.
 
-**Talab:**
+### h) Doiradan tashqari
 
-- Tasdiq yozuvida tasdiqlangan maksimal chegirma summasi (`override_approved_amount`) saqlansin.
-- Effektiv chegirma (`effectiveOrderDiscount`) shu summadan oshsa va kassir limitidan ham oshsa, tasdiq bekor bo'lsin va qayta tasdiq talab qilinsin.
-- Chegirma turi yoki qiymati o'zgarsa ham tasdiq bekor bo'lsin.
+- Naqd bo'lmagan to'lovlar, aralash to'lov, qarz va so'mga yaxlitlash (T1.5, T1.7).
+- Bekor qilish va qaytarish (T1.6).
+- Smena majburiyligi (T1.9).
+- Chek chop etish (T1.12).
+- Fiskal (F3).
 
-**Test:** 10% tasdiqlandi → savat kattalashdi → chegirma tasdiqlangan summadan oshdi → `403 DISCOUNT_OVERRIDE_REQUIRED`.
-
-### P3. Chegirma sozlamalarida `null` ma'nosi aniq bo'lsin
-
-Rejada `null` = cheksiz, standart qiymat = `0`. Xavfli tomoni shundaki, sozlamani tozalash tasodifan cheksiz chegirmaga ruxsat berib qo'yadi.
-
-**Talab:**
-
-- API cheksizlikni faqat aniq bayroq bilan bersin, masalan `unlimited: true`.
-- Bu o'zgarishni faqat `owner` qila olsin.
-- Bunday o'zgarish javobda va logda qayd etilsin.
-
-Boshqacha xavfsiz yechim taklif qilsang, asosla.
-
-## Bajarish tartibi
-
-1. Birinchi commit: T1.2 test qarzi, mutatsiya dalillari bilan.
-2. T1.3 kodi.
-3. `pnpm verify` yashil.
-4. Commit qil, push qil va PR och. To'rtala CI job yashil bo'lsin.
-5. Hisobot: P1–P3 dalillari, N+M misollari, property test tavsifi. `[gemini-hisobot] T1.3` bilan commit qil va push qil.
-6. `node .mezon/kutish.mjs` ni ishga tushir. Merge qilma.
+Lekin sxema va funksiyalar ularga o'zgarishsiz kengayadigan qilib loyihalansin.
