@@ -40,5 +40,35 @@ jobs:
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
-      - name: Run verify (lint, typecheck, test, depcruise, build)
+      - name: Run verify (format, build, lint, typecheck, db:check, test, depcruise)
         run: pnpm verify
+
+  postgres-rls:
+    name: Verify PostgreSQL RLS (ubuntu-latest)
+    runs-on: ubuntu-latest
+    env:
+      MEZON_REQUIRE_PG: '1'
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Install pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 12.18.0
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version-file: '.nvmrc'
+          cache: 'pnpm'
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Build packages
+        run: pnpm run build
+
+      - name: Run PostgreSQL RLS and bigint integration tests
+        run: pnpm exec vitest run packages/db-cloud

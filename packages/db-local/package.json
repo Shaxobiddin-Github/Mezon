@@ -7,6 +7,17 @@
   "types": "./dist/index.d.ts",
   "scripts": {
     "build": "tsc -b",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit && tsc -p tsconfig.test.json --noEmit",
+    "db:check": "node scripts/check-migrations.mjs"
+  },
+  "dependencies": {
+    "@mezon/domain": "workspace:*",
+    "better-sqlite3": "13.0.3",
+    "drizzle-orm": "0.45.4"
+  },
+  "devDependencies": {
+    "@mezon/test-utils": "workspace:*",
+    "@types/better-sqlite3": "9.6.0",
+    "drizzle-kit": "0.31.11"
   }
 }
