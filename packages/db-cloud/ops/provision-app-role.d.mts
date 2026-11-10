@@ -9,4 +9,10 @@ export interface ProvisionAppRoleOptions {
   readonly passwordEnvVar?: string;
 }
 
-export declare function provisionAppRole(options: ProvisionAppRoleOptions): Promise<void>;
+export interface ProvisionAppRoleResult {
+  readonly logSuppressed: boolean;
+}
+
+export declare function provisionAppRole(
+  options: ProvisionAppRoleOptions,
+): Promise<ProvisionAppRoleResult>;

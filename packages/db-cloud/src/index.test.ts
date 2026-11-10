@@ -12,12 +12,14 @@ import {
   PgSchemaRegistry,
   PgSchemaValidationError,
   type PgValueParser,
+  type SyncedTableClass,
   assertRlsMigrationsComplete,
   buildTenantRlsSql,
   cloudSchemaRegistry,
   createCloudPgTypesConfig,
   getDefaultCloudMigrationsFolder,
   getGlobalPgTypeParser,
+  getTenantPrivilegesForClass,
   pgBigint,
   pgBoolean,
   pgInt,
@@ -105,16 +107,44 @@ describe('@mezon/db-cloud - PostgreSQL schema registry, RLS templates, and bigin
       validatePgSchemaRegistry({ factTable, attrTable, monotoneTable, localNone }, registry),
     ).not.toThrow();
 
-    const rlsSql = buildTenantRlsSql('pg_fact').join('\n');
-    expect(rlsSql).toContain('ENABLE ROW LEVEL SECURITY');
-    expect(rlsSql).toContain('FORCE ROW LEVEL SECURITY');
-    expect(rlsSql).toContain(`CREATE POLICY "pg_fact_tenant_isolation" ON "pg_fact"`);
-    expect(rlsSql).toContain(`TO "${PG_APP_ROLE_NAME}"`);
-    expect(rlsSql).toContain('USING ("organization_id" = mezon_current_organization_id())');
-    expect(rlsSql).toContain('WITH CHECK ("organization_id" = mezon_current_organization_id())');
-    expect(rlsSql).toContain(
-      `GRANT SELECT, INSERT, UPDATE, DELETE ON TABLE "pg_fact" TO "${PG_APP_ROLE_NAME}"`,
+    const factRlsSql = buildTenantRlsSql('pg_fact', 'FACT').join('\n');
+    expect(factRlsSql).toContain('ENABLE ROW LEVEL SECURITY');
+    expect(factRlsSql).toContain('FORCE ROW LEVEL SECURITY');
+    expect(factRlsSql).toContain(`CREATE POLICY "pg_fact_tenant_isolation" ON "pg_fact"`);
+    expect(factRlsSql).toContain(`TO "${PG_APP_ROLE_NAME}"`);
+    expect(factRlsSql).toContain('USING ("organization_id" = mezon_current_organization_id())');
+    expect(factRlsSql).toContain(
+      'WITH CHECK ("organization_id" = mezon_current_organization_id())',
     );
+    expect(factRlsSql).toContain(`REVOKE ALL ON TABLE "pg_fact" FROM "${PG_APP_ROLE_NAME}"`);
+    expect(factRlsSql).toContain(
+      `GRANT SELECT, INSERT ON TABLE "pg_fact" TO "${PG_APP_ROLE_NAME}"`,
+    );
+    expect(factRlsSql).not.toContain('UPDATE');
+    expect(factRlsSql).not.toContain('DELETE');
+    expect(factRlsSql.indexOf('REVOKE ALL')).toBeLessThan(
+      factRlsSql.indexOf('GRANT SELECT, INSERT'),
+    );
+
+    const attrRlsSql = buildTenantRlsSql('pg_attr', 'ATTR').join('\n');
+    expect(attrRlsSql).toContain(`REVOKE ALL ON TABLE "pg_attr" FROM "${PG_APP_ROLE_NAME}"`);
+    expect(attrRlsSql).toContain(
+      `GRANT SELECT, INSERT, UPDATE ON TABLE "pg_attr" TO "${PG_APP_ROLE_NAME}"`,
+    );
+    expect(attrRlsSql).not.toContain('DELETE');
+
+    const monoRlsSql = buildTenantRlsSql('pg_monotone', 'MONOTONE').join('\n');
+    expect(monoRlsSql).toContain(
+      `GRANT SELECT, INSERT, UPDATE ON TABLE "pg_monotone" TO "${PG_APP_ROLE_NAME}"`,
+    );
+    expect(monoRlsSql).not.toContain('DELETE');
+
+    expect(getTenantPrivilegesForClass('FACT')).toBe('SELECT, INSERT');
+    expect(getTenantPrivilegesForClass('ATTR')).toBe('SELECT, INSERT, UPDATE');
+    expect(getTenantPrivilegesForClass('MONOTONE')).toBe('SELECT, INSERT, UPDATE');
+    expect(() =>
+      buildTenantRlsSql('pg_local_none', 'LOCAL' as unknown as SyncedTableClass),
+    ).toThrowError(RangeError);
 
     const emptySnap = generateDrizzleJson({});
     const currSnap = generateDrizzleJson({ pg_fact: factTable });
@@ -201,39 +231,178 @@ describe('@mezon/db-cloud - PostgreSQL schema registry, RLS templates, and bigin
     );
   });
 
-  it('assertRlsMigrationsComplete rejects migrations missing FORCE RLS, WITH CHECK, or GRANT', () => {
+  it('assertRlsMigrationsComplete validates RLS completeness and rejects excess privileges per class', () => {
     const reg = new PgSchemaRegistry();
-    reg.defineTable({ name: 'orders_pg', tableClass: 'FACT', tenantScope: 'store' }, (c) => ({
+    reg.defineTable({ name: 'fact_orders_pg', tableClass: 'FACT', tenantScope: 'store' }, (c) => ({
       ...c,
     }));
+    reg.defineTable(
+      { name: 'attr_customers_pg', tableClass: 'ATTR', tenantScope: 'organization' },
+      (c) => ({
+        ...c,
+      }),
+    );
+    reg.defineTable(
+      { name: 'mono_voids_pg', tableClass: 'MONOTONE', tenantScope: 'store' },
+      (c) => ({
+        ...c,
+      }),
+    );
 
-    const tmpDir = makeTempDir();
-    // Missing FORCE ROW LEVEL SECURITY
+    const allMeta = reg.all();
+    const factMeta = [allMeta[0]];
+    const attrMeta = [allMeta[1]];
+    const monoMeta = [allMeta[2]];
+
+    // 1. Missing FORCE ROW LEVEL SECURITY
+    const missingForceDir = makeTempDir();
     fs.writeFileSync(
-      path.join(tmpDir, '0001.sql'),
+      path.join(missingForceDir, '0001.sql'),
       `
-      ALTER TABLE "orders_pg" ENABLE ROW LEVEL SECURITY;
-      CREATE POLICY "orders_pg_tenant_isolation" ON "orders_pg" FOR ALL TO mezon_app
+      ALTER TABLE "attr_customers_pg" ENABLE ROW LEVEL SECURITY;
+      CREATE POLICY "attr_customers_pg_tenant_isolation" ON "attr_customers_pg" FOR ALL TO mezon_app
         USING (organization_id = mezon_current_organization_id())
         WITH CHECK (organization_id = mezon_current_organization_id());
-      GRANT SELECT, INSERT, UPDATE, DELETE ON TABLE "orders_pg" TO mezon_app;
+      REVOKE ALL ON TABLE "attr_customers_pg" FROM mezon_app;
+      GRANT SELECT, INSERT, UPDATE ON TABLE "attr_customers_pg" TO mezon_app;
       `,
     );
-    expect(() => assertRlsMigrationsComplete(tmpDir, reg.all())).toThrowError(
+    expect(() => assertRlsMigrationsComplete(missingForceDir, attrMeta)).toThrowError(
       /missing complete RLS/,
     );
 
-    // Complete explicit RLS SQL passes
-    fs.writeFileSync(path.join(tmpDir, '0002.sql'), buildTenantRlsSql('orders_pg').join('\n'));
-    expect(() => assertRlsMigrationsComplete(tmpDir, reg.all())).not.toThrow();
-
-    // Helper call SQL also passes
-    const helperDir = makeTempDir();
+    // 2. FACT table with UPDATE grant must fail
+    const factUpdateDir = makeTempDir();
     fs.writeFileSync(
-      path.join(helperDir, '0001.sql'),
-      "SELECT mezon_apply_tenant_rls('public.orders_pg');\n",
+      path.join(factUpdateDir, '0001.sql'),
+      `
+      ALTER TABLE "fact_orders_pg" ENABLE ROW LEVEL SECURITY;
+      ALTER TABLE "fact_orders_pg" FORCE ROW LEVEL SECURITY;
+      CREATE POLICY "fact_orders_pg_tenant_isolation" ON "fact_orders_pg" FOR ALL TO mezon_app
+        USING (organization_id = mezon_current_organization_id())
+        WITH CHECK (organization_id = mezon_current_organization_id());
+      REVOKE ALL ON TABLE "fact_orders_pg" FROM mezon_app;
+      GRANT SELECT, INSERT, UPDATE ON TABLE "fact_orders_pg" TO mezon_app;
+      `,
     );
-    expect(() => assertRlsMigrationsComplete(helperDir, reg.all())).not.toThrow();
+    expect(() => assertRlsMigrationsComplete(factUpdateDir, factMeta)).toThrowError(
+      /Forbidden privilege "UPDATE" granted on immutable FACT table "fact_orders_pg"/,
+    );
+
+    // 3. FACT table with DELETE grant must fail
+    const factDeleteDir = makeTempDir();
+    fs.writeFileSync(
+      path.join(factDeleteDir, '0001.sql'),
+      `
+      ALTER TABLE "fact_orders_pg" ENABLE ROW LEVEL SECURITY;
+      ALTER TABLE "fact_orders_pg" FORCE ROW LEVEL SECURITY;
+      CREATE POLICY "fact_orders_pg_tenant_isolation" ON "fact_orders_pg" FOR ALL TO mezon_app
+        USING (organization_id = mezon_current_organization_id())
+        WITH CHECK (organization_id = mezon_current_organization_id());
+      REVOKE ALL ON TABLE "fact_orders_pg" FROM mezon_app;
+      GRANT SELECT, INSERT, DELETE ON TABLE "fact_orders_pg" TO mezon_app;
+      `,
+    );
+    expect(() => assertRlsMigrationsComplete(factDeleteDir, factMeta)).toThrowError(
+      /Forbidden privilege "DELETE" granted on synced table "fact_orders_pg"/,
+    );
+
+    // 4. ATTR table with DELETE grant must fail
+    const attrDeleteDir = makeTempDir();
+    fs.writeFileSync(
+      path.join(attrDeleteDir, '0001.sql'),
+      `
+      ALTER TABLE "attr_customers_pg" ENABLE ROW LEVEL SECURITY;
+      ALTER TABLE "attr_customers_pg" FORCE ROW LEVEL SECURITY;
+      CREATE POLICY "attr_customers_pg_tenant_isolation" ON "attr_customers_pg" FOR ALL TO mezon_app
+        USING (organization_id = mezon_current_organization_id())
+        WITH CHECK (organization_id = mezon_current_organization_id());
+      REVOKE ALL ON TABLE "attr_customers_pg" FROM mezon_app;
+      GRANT SELECT, INSERT, UPDATE, DELETE ON TABLE "attr_customers_pg" TO mezon_app;
+      `,
+    );
+    expect(() => assertRlsMigrationsComplete(attrDeleteDir, attrMeta)).toThrowError(
+      /Forbidden privilege "DELETE" granted on synced table "attr_customers_pg"/,
+    );
+
+    // 5. MONOTONE table with ALL grant must fail
+    const monoAllDir = makeTempDir();
+    fs.writeFileSync(
+      path.join(monoAllDir, '0001.sql'),
+      `
+      ALTER TABLE "mono_voids_pg" ENABLE ROW LEVEL SECURITY;
+      ALTER TABLE "mono_voids_pg" FORCE ROW LEVEL SECURITY;
+      CREATE POLICY "mono_voids_pg_tenant_isolation" ON "mono_voids_pg" FOR ALL TO mezon_app
+        USING (organization_id = mezon_current_organization_id())
+        WITH CHECK (organization_id = mezon_current_organization_id());
+      REVOKE ALL ON TABLE "mono_voids_pg" FROM mezon_app;
+      GRANT ALL ON TABLE "mono_voids_pg" TO mezon_app;
+      `,
+    );
+    expect(() => assertRlsMigrationsComplete(monoAllDir, monoMeta)).toThrowError(
+      /Forbidden privilege "ALL" granted on synced table "mono_voids_pg"/,
+    );
+
+    // 6. Explicit GRANT without prior REVOKE ALL must fail
+    const missingRevokeDir = makeTempDir();
+    fs.writeFileSync(
+      path.join(missingRevokeDir, '0001.sql'),
+      `
+      ALTER TABLE "fact_orders_pg" ENABLE ROW LEVEL SECURITY;
+      ALTER TABLE "fact_orders_pg" FORCE ROW LEVEL SECURITY;
+      CREATE POLICY "fact_orders_pg_tenant_isolation" ON "fact_orders_pg" FOR ALL TO mezon_app
+        USING (organization_id = mezon_current_organization_id())
+        WITH CHECK (organization_id = mezon_current_organization_id());
+      GRANT SELECT, INSERT ON TABLE "fact_orders_pg" TO mezon_app;
+      `,
+    );
+    expect(() => assertRlsMigrationsComplete(missingRevokeDir, factMeta)).toThrowError(
+      /missing complete RLS or class-matched REVOKE ALL/,
+    );
+
+    // 7. Helper call missing mandatory table_class argument must fail
+    const missingClassArgDir = makeTempDir();
+    fs.writeFileSync(
+      path.join(missingClassArgDir, '0001.sql'),
+      "SELECT mezon_apply_tenant_rls('public.fact_orders_pg');\n",
+    );
+    expect(() => assertRlsMigrationsComplete(missingClassArgDir, factMeta)).toThrowError(
+      /without required literal table_class argument/,
+    );
+
+    // 8. Helper call with mismatched class (ATTR on FACT) must fail
+    const wrongHelperClassDir = makeTempDir();
+    fs.writeFileSync(
+      path.join(wrongHelperClassDir, '0001.sql'),
+      "SELECT mezon_apply_tenant_rls('public.fact_orders_pg', 'ATTR');\n",
+    );
+    expect(() => assertRlsMigrationsComplete(wrongHelperClassDir, factMeta)).toThrowError(
+      /registered as "FACT", but migration invokes mezon_apply_tenant_rls with class "ATTR"/,
+    );
+
+    // 9. Complete explicit SQL via buildTenantRlsSql passes for all three synced classes
+    const explicitOkDir = makeTempDir();
+    fs.writeFileSync(
+      path.join(explicitOkDir, '0001.sql'),
+      [
+        ...buildTenantRlsSql('fact_orders_pg', 'FACT'),
+        ...buildTenantRlsSql('attr_customers_pg', 'ATTR'),
+        ...buildTenantRlsSql('mono_voids_pg', 'MONOTONE'),
+      ].join('\n'),
+    );
+    expect(() => assertRlsMigrationsComplete(explicitOkDir, allMeta)).not.toThrow();
+
+    // 10. Helper call SQL with matching table classes also passes
+    const helperOkDir = makeTempDir();
+    fs.writeFileSync(
+      path.join(helperOkDir, '0001.sql'),
+      [
+        "SELECT mezon_apply_tenant_rls('public.fact_orders_pg', 'FACT');",
+        "SELECT mezon_apply_tenant_rls('public.attr_customers_pg', 'ATTR');",
+        "SELECT mezon_apply_tenant_rls('public.mono_voids_pg', 'MONOTONE');",
+      ].join('\n'),
+    );
+    expect(() => assertRlsMigrationsComplete(helperOkDir, allMeta)).not.toThrow();
   });
 
   it('decodes int8 to bigint per pool and preserves fallback parsers without mutating global pg.types.setTypeParser', () => {

@@ -14,6 +14,8 @@ export {
 export {
   PG_APP_ROLE_NAME,
   PG_TENANT_SETTING_KEY,
+  type SyncedTableClass,
+  getTenantPrivilegesForClass,
   buildTenantRlsSql,
   assertRlsMigrationsComplete,
 } from './rls.js';

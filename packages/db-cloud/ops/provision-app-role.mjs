@@ -8,7 +8,12 @@ const PG_IDENTIFIER_REGEX = /^[a-z_][a-z0-9_]{0,62}$/;
 /**
  * Provisions or updates the non-owner, non-superuser application database role (`mezon_app`).
  * Separated from Drizzle migrations so production migration roles never require `CREATEROLE`
- * and passwords never appear in SQL files or logs.
+ * and passwords never appear in SQL files or application logs.
+ *
+ * When executed by a PostgreSQL superuser, suppresses `log_statement` and
+ * `log_min_duration_statement` locally for the provisioning transaction before sending
+ * the password parameter. When run by a non-superuser admin (e.g. managed cloud PostgreSQL),
+ * `insufficient_privilege` on `SET LOCAL` is ignored and provisioning continues (see `ops/README.md`).
  */
 export async function provisionAppRole(options) {
   const {
@@ -32,8 +37,36 @@ export async function provisionAppRole(options) {
   }
 
   const client = await pool.connect();
+  let logSuppressed = false;
+
   try {
     await client.query('BEGIN');
+    await client.query(`
+      DO $$
+      DECLARE
+        v_suppressed boolean := true;
+      BEGIN
+        BEGIN
+          SET LOCAL log_statement = 'none';
+        EXCEPTION
+          WHEN insufficient_privilege THEN
+            v_suppressed := false;
+        END;
+        BEGIN
+          SET LOCAL log_min_duration_statement = -1;
+        EXCEPTION
+          WHEN insufficient_privilege THEN
+            v_suppressed := false;
+        END;
+        PERFORM set_config('mezon.prov_log_suppressed', v_suppressed::text, true);
+      END
+      $$;
+    `);
+    const suppressedRes = await client.query(
+      "SELECT current_setting('mezon.prov_log_suppressed', true) = 'true' AS suppressed",
+    );
+    logSuppressed = Boolean(suppressedRes.rows[0]?.suppressed);
+
     await client.query(
       "SELECT set_config('mezon.prov_role', $1, true), set_config('mezon.prov_pwd', $2, true)",
       [roleName, password],
@@ -64,6 +97,7 @@ export async function provisionAppRole(options) {
       $$;
     `);
     await client.query('COMMIT');
+    return { logSuppressed };
   } catch (err) {
     try {
       await client.query('ROLLBACK');
@@ -84,7 +118,12 @@ async function runCli() {
   const roleName = process.env.MEZON_APP_ROLE_NAME || DEFAULT_APP_ROLE_NAME;
   const pool = new pg.Pool({ connectionString: adminUrl });
   try {
-    await provisionAppRole({ pool, roleName });
+    const { logSuppressed } = await provisionAppRole({ pool, roleName });
+    if (!logSuppressed) {
+      console.warn(
+        `Warning: provisioning role lacked privilege to set local log_statement/log_min_duration_statement. See packages/db-cloud/ops/README.md if PostgreSQL statement logging is enabled.`,
+      );
+    }
     console.info(`Provisioned PostgreSQL role "${roleName}" cleanly.`);
   } finally {
     await pool.end();
@@ -98,6 +137,6 @@ const isEntrypoint =
 if (isEntrypoint) {
   runCli().catch((err) => {
     console.error(err instanceof Error ? err.message : String(err));
-    process.exitCode = 1;
+    process.exit(1);
   });
 }
