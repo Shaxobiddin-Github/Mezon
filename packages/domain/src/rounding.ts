@@ -8,7 +8,7 @@ import type { Quantity } from './quantity.js';
  */
 export function divideRoundHalfAwayFromZero(numerator: bigint, denominator: bigint): bigint {
   if (denominator <= 0n) {
-    throw new DomainError('INVALID_MONEY_INPUT');
+    throw new DomainError('INVALID_DENOMINATOR');
   }
   const isNegative = numerator < 0n;
   const absN = isNegative ? -numerator : numerator;

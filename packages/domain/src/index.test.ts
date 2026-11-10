@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import fc from 'fast-check';
 import {
   DomainError,
+  type DomainErrorCode,
   ZERO_MONEY,
   moneyFromTiyin,
   moneyToTiyin,
@@ -35,6 +36,16 @@ import {
   formatQuantityDecimal,
   parseQuantityDecimal,
 } from './index.js';
+
+function expectDomainError(fn: () => unknown, expectedCode: DomainErrorCode): void {
+  try {
+    fn();
+    expect.unreachable('Expected DomainError to be thrown');
+  } catch (err) {
+    expect(err).toBeInstanceOf(DomainError);
+    expect((err as DomainError).code).toBe(expectedCode);
+  }
+}
 
 describe('@mezon/domain - Money and Quantity basic operations', () => {
   it('handles basic money operations correctly', () => {
@@ -78,9 +89,9 @@ describe('@mezon/domain - Rounding and multiply', () => {
     expect(moneyToTiyin(multiply(moneyFromTiyin(1n), quantityFromMilli(499n)))).toBe(0n);
   });
 
-  it('verifies divideRoundHalfAwayFromZero denominator validation', () => {
-    expect(() => divideRoundHalfAwayFromZero(100n, 0n)).toThrowError(DomainError);
-    expect(() => divideRoundHalfAwayFromZero(100n, -10n)).toThrowError(DomainError);
+  it('verifies divideRoundHalfAwayFromZero denominator validation with exact code', () => {
+    expectDomainError(() => divideRoundHalfAwayFromZero(100n, 0n), 'INVALID_DENOMINATOR');
+    expectDomainError(() => divideRoundHalfAwayFromZero(100n, -10n), 'INVALID_DENOMINATOR');
   });
 
   it('verifies multiply identity and zero with fast-check', () => {
@@ -152,21 +163,18 @@ describe('@mezon/domain - allocate (Largest Remainder Method)', () => {
     expect(resZero.map(moneyToTiyin)).toEqual([0n, 0n]);
   });
 
-  it('throws DomainError on invalid weights', () => {
+  it('throws DomainError with exact code on invalid weights', () => {
     // empty weights
-    expect(() => allocate(moneyFromTiyin(100n), [])).toThrowError(
-      new DomainError('ALLOCATE_EMPTY_WEIGHTS'),
-    );
+    expectDomainError(() => allocate(moneyFromTiyin(100n), []), 'ALLOCATE_EMPTY_WEIGHTS');
+
+    // allocate(10n, [-1n, 2n]) -> ALLOCATE_NEGATIVE_WEIGHT (exact -1n boundary)
+    expectDomainError(() => allocate(moneyFromTiyin(10n), [-1n, 2n]), 'ALLOCATE_NEGATIVE_WEIGHT');
 
     // negative weight
-    expect(() => allocate(moneyFromTiyin(100n), [1n, -2n])).toThrowError(
-      new DomainError('ALLOCATE_NEGATIVE_WEIGHT'),
-    );
+    expectDomainError(() => allocate(moneyFromTiyin(100n), [1n, -2n]), 'ALLOCATE_NEGATIVE_WEIGHT');
 
     // zero total weight
-    expect(() => allocate(moneyFromTiyin(100n), [0n, 0n])).toThrowError(
-      new DomainError('ALLOCATE_ZERO_TOTAL_WEIGHT'),
-    );
+    expectDomainError(() => allocate(moneyFromTiyin(100n), [0n, 0n]), 'ALLOCATE_ZERO_TOTAL_WEIGHT');
   });
 
   it('verifies allocate properties with fast-check', () => {
@@ -211,13 +219,13 @@ describe('@mezon/domain - allocate (Largest Remainder Method)', () => {
 });
 
 describe('@mezon/domain - VatRate and VAT calculations', () => {
-  it('validates VatRate basis points range', () => {
+  it('validates VatRate basis points range with exact code', () => {
     expect(vatRateToBasisPoints(ZERO_VAT_RATE)).toBe(0n);
     expect(vatRateToBasisPoints(vatRateFromBasisPoints(1200n))).toBe(1200n);
     expect(vatRateToBasisPoints(vatRateFromBasisPoints(10000n))).toBe(10000n);
 
-    expect(() => vatRateFromBasisPoints(-1n)).toThrowError(new DomainError('INVALID_VAT_RATE'));
-    expect(() => vatRateFromBasisPoints(10001n)).toThrowError(new DomainError('INVALID_VAT_RATE'));
+    expectDomainError(() => vatRateFromBasisPoints(-1n), 'INVALID_VAT_RATE');
+    expectDomainError(() => vatRateFromBasisPoints(10001n), 'INVALID_VAT_RATE');
   });
 
   it('matches exact VAT calculations for 12%', () => {
@@ -234,10 +242,15 @@ describe('@mezon/domain - VatRate and VAT calculations', () => {
     expect(moneyToTiyin(exc.vat)).toBe(1200000n);
     expect(moneyToTiyin(exc.total)).toBe(11200000n);
 
-    // 0n rate
+    // calculateVatIncluded with ZERO_VAT_RATE
     const incZero = calculateVatIncluded(gross, ZERO_VAT_RATE);
     expect(moneyToTiyin(incZero.vat)).toBe(0n);
     expect(moneyToTiyin(incZero.net)).toBe(11200000n);
+
+    // calculateVatExcluded(12345n, ZERO_VAT_RATE) -> vat 0n, total 12345n (both fields asserted)
+    const excZero = calculateVatExcluded(moneyFromTiyin(12345n), ZERO_VAT_RATE);
+    expect(moneyToTiyin(excZero.vat)).toBe(0n);
+    expect(moneyToTiyin(excZero.total)).toBe(12345n);
   });
 
   it('verifies VAT invariants and sign symmetry with fast-check', () => {
@@ -276,38 +289,65 @@ describe('@mezon/domain - Serialization and Decimal Parsing', () => {
     // formatMoneyDecimal(5n) === "0.05"
     expect(formatMoneyDecimal(moneyFromTiyin(5n))).toBe('0.05');
 
+    // parseMoneyDecimal single fractional digit cases
+    // '123.5' === 12350n, '0.5' === 50n, '-0.5' === -50n
+    expect(moneyToTiyin(parseMoneyDecimal('123.5'))).toBe(12350n);
+    expect(moneyToTiyin(parseMoneyDecimal('0.5'))).toBe(50n);
+    expect(moneyToTiyin(parseMoneyDecimal('-0.5'))).toBe(-50n);
+
     // formatQuantityDecimal(-500n) === "-0.500"
     expect(formatQuantityDecimal(quantityFromMilli(-500n))).toBe('-0.500');
 
-    // parseQuantityDecimal
-    expect(quantityToMilli(parseQuantityDecimal('-0.500'))).toBe(-500n);
+    // parseQuantityDecimal: '5.5' === 5500n, '5.55' === 5550n, '5.555' === 5555n
     expect(quantityToMilli(parseQuantityDecimal('5.5'))).toBe(5500n);
+    expect(quantityToMilli(parseQuantityDecimal('5.55'))).toBe(5550n);
+    expect(quantityToMilli(parseQuantityDecimal('5.555'))).toBe(5555n);
+    expect(quantityToMilli(parseQuantityDecimal('-0.500'))).toBe(-500n);
     expect(quantityToMilli(parseQuantityDecimal('0.001'))).toBe(1n);
   });
 
-  it('strictly rejects non-canonical and malformed inputs', () => {
-    const invalidInputs = [
-      '-0',
-      '007',
-      '+1',
-      '12,5',
-      '.5',
-      '5.',
-      '',
-      '   ',
-      'abc',
-      '12.345', // > 2 decimals for money
-      '1'.repeat(31), // > 30 chars
-    ];
+  it('validates exact 30-character length limit', () => {
+    // '9'.repeat(30) passes parseMoney and parseQuantity with exact value
+    const len30 = '9'.repeat(30);
+    const expectedVal = BigInt(len30);
+    expect(moneyToTiyin(parseMoney(len30))).toBe(expectedVal);
+    expect(quantityToMilli(parseQuantity(len30))).toBe(expectedVal);
 
-    for (const bad of invalidInputs) {
-      expect(() => parseMoneyDecimal(bad)).toThrowError(DomainError);
+    // '9'.repeat(31) throws STRING_TOO_LONG
+    const len31 = '9'.repeat(31);
+    expectDomainError(() => parseMoney(len31), 'STRING_TOO_LONG');
+    expectDomainError(() => parseQuantity(len31), 'STRING_TOO_LONG');
+    expectDomainError(() => parseMoneyDecimal(len31), 'STRING_TOO_LONG');
+    expectDomainError(() => parseQuantityDecimal(len31), 'STRING_TOO_LONG');
+  });
+
+  it('strictly rejects non-canonical and malformed inputs with exact error codes', () => {
+    // parseQuantityDecimal('1.2345') -> INVALID_DECIMAL_FORMAT
+    expectDomainError(() => parseQuantityDecimal('1.2345'), 'INVALID_DECIMAL_FORMAT');
+
+    // negative zero cases -> INVALID_DECIMAL_FORMAT
+    expectDomainError(() => parseQuantityDecimal('-0.000'), 'INVALID_DECIMAL_FORMAT');
+    expectDomainError(() => parseQuantityDecimal('-0'), 'INVALID_DECIMAL_FORMAT');
+    expectDomainError(() => parseMoneyDecimal('-0.00'), 'INVALID_DECIMAL_FORMAT');
+    expectDomainError(() => parseMoneyDecimal('-0'), 'INVALID_DECIMAL_FORMAT');
+
+    // empty string -> INVALID_SERIALIZED_STRING
+    expectDomainError(() => parseMoney(''), 'INVALID_SERIALIZED_STRING');
+    expectDomainError(() => parseQuantity(''), 'INVALID_SERIALIZED_STRING');
+    expectDomainError(() => parseMoneyDecimal(''), 'INVALID_SERIALIZED_STRING');
+    expectDomainError(() => parseQuantityDecimal(''), 'INVALID_SERIALIZED_STRING');
+
+    // non-canonical integers -> INVALID_SERIALIZED_STRING
+    const invalidInts = ['-0', '007', '+1', '12.5', 'abc', '  '];
+    for (const bad of invalidInts) {
+      expectDomainError(() => parseMoney(bad), 'INVALID_SERIALIZED_STRING');
+      expectDomainError(() => parseQuantity(bad), 'INVALID_SERIALIZED_STRING');
     }
 
-    const invalidInts = ['-0', '007', '+1', '12.5', ''];
-    for (const bad of invalidInts) {
-      expect(() => parseMoney(bad)).toThrowError(DomainError);
-      expect(() => parseQuantity(bad)).toThrowError(DomainError);
+    // malformed decimal formats -> INVALID_DECIMAL_FORMAT
+    const invalidDecimals = ['007', '+1', '12,5', '.5', '5.', '   ', 'abc', '12.345'];
+    for (const bad of invalidDecimals) {
+      expectDomainError(() => parseMoneyDecimal(bad), 'INVALID_DECIMAL_FORMAT');
     }
   });
 

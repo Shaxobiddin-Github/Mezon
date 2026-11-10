@@ -35,7 +35,7 @@ export function serializeQuantity(quantity: Quantity): string {
 export function parseQuantity(raw: string): Quantity {
   validateRawString(raw);
   if (!CANONICAL_INT_REGEX.test(raw)) {
-    throw new DomainError('INVALID_QUANTITY_INPUT');
+    throw new DomainError('INVALID_SERIALIZED_STRING');
   }
   return BigInt(raw) as Quantity;
 }
