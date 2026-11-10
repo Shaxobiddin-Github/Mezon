@@ -83,6 +83,22 @@ export type CommitLoginOutcomeResult =
       readonly kind: 'invalid_credentials';
     };
 
+export type CommitPinCheckOutcomeResult =
+  | {
+      readonly kind: 'verified';
+      readonly user: StoredUserRecord;
+    }
+  | {
+      readonly kind: 'role_forbidden';
+    }
+  | {
+      readonly kind: 'rate_limited';
+      readonly retryAfterSeconds: bigint;
+    }
+  | {
+      readonly kind: 'invalid_credentials';
+    };
+
 export interface AuthenticatedSessionSnapshot {
   readonly user: StoredUserRecord;
   readonly sessionId: UuidV7;
@@ -473,6 +489,157 @@ export class SqliteHubAuthStore {
     });
   }
 
+  private runPinVerificationSync(
+    session: Parameters<SqliteUnitOfWork['execute']>[0] extends (s: infer S) => unknown ? S : never,
+    config: HubConfigSnapshot,
+    input: {
+      readonly selector: LoginSelector;
+      readonly verifiedPinForUserId: UuidV7 | null;
+      readonly verifiedPinHash: string | null;
+    },
+  ):
+    | { readonly kind: 'matched'; readonly user: StoredUserRecord; readonly commitNowMs: UnixMs }
+    | { readonly kind: 'rate_limited'; readonly retryAfterSeconds: bigint }
+    | { readonly kind: 'invalid_credentials' } {
+    const commitNowMs = session.nowUnixMs();
+
+    const deviceState = session.db
+      .select()
+      .from(localDeviceAuthState)
+      .where(eq(localDeviceAuthState.deviceId, config.deviceId))
+      .limit(1)
+      .all()[0];
+
+    if (
+      deviceState &&
+      deviceState.nextAllowedAtMs !== null &&
+      commitNowMs < deviceState.nextAllowedAtMs
+    ) {
+      return {
+        kind: 'rate_limited',
+        retryAfterSeconds: computeRetryAfterSeconds(deviceState.nextAllowedAtMs - commitNowMs),
+      };
+    }
+
+    const userRow = this.findActiveUserRowSync(config.organizationId, input.selector);
+    const cred = userRow ? this.findPinCredSync(session, userRow.id) : null;
+
+    if (
+      userRow &&
+      Boolean(userRow.isActive) &&
+      cred &&
+      cred.lockedUntilMs !== null &&
+      commitNowMs < cred.lockedUntilMs
+    ) {
+      return {
+        kind: 'rate_limited',
+        retryAfterSeconds: computeRetryAfterSeconds(cred.lockedUntilMs - commitNowMs),
+      };
+    }
+
+    // Guard against TOCTOU race where PIN was reset mid-flight during slow Argon2 verification (R1):
+    // reject without approving and without penalizing failed_attempts counters.
+    if (
+      input.verifiedPinForUserId !== null &&
+      userRow !== null &&
+      userRow.id === input.verifiedPinForUserId &&
+      cred !== null &&
+      (input.verifiedPinHash === null || cred.pinHash !== input.verifiedPinHash)
+    ) {
+      return { kind: 'invalid_credentials' };
+    }
+
+    const pinMatchesExpectedUser =
+      input.verifiedPinForUserId !== null &&
+      input.verifiedPinHash !== null &&
+      userRow !== null &&
+      Boolean(userRow.isActive) &&
+      cred !== null &&
+      userRow.id === input.verifiedPinForUserId &&
+      cred.pinHash === input.verifiedPinHash;
+
+    if (pinMatchesExpectedUser && userRow && cred) {
+      session.db
+        .update(localPinCredentials)
+        .set({
+          failedAttempts: 0,
+          lockedUntilMs: null,
+          lastFailedAtMs: null,
+          updatedAtMs: commitNowMs,
+        })
+        .where(eq(localPinCredentials.userId, userRow.id))
+        .run();
+
+      return {
+        kind: 'matched',
+        user: toStoredUser(userRow),
+        commitNowMs,
+      };
+    }
+
+    // Failed attempt: commit device backoff & user lockout inside this transaction (`T0.6` T1 & T2)
+    const windowExpired =
+      deviceState !== undefined &&
+      commitNowMs - deviceState.windowStartedAtMs >= this.deviceFailureWindowMs;
+    const nextDeviceWindowStart =
+      deviceState === undefined || windowExpired ? commitNowMs : deviceState.windowStartedAtMs;
+    const nextDeviceFails =
+      deviceState === undefined || windowExpired ? 1 : deviceState.failedAttempts + 1;
+    const cooldownMs = this.computeDeviceBackoffMs(nextDeviceFails);
+    const nextAllowedAtMs = cooldownMs > 0n ? unixMsFromBigInt(commitNowMs + cooldownMs) : null;
+
+    if (deviceState === undefined) {
+      session.db
+        .insert(localDeviceAuthState)
+        .values({
+          id: session.nextId(),
+          organizationId: config.organizationId,
+          deviceId: config.deviceId,
+          windowStartedAtMs: nextDeviceWindowStart,
+          failedAttempts: nextDeviceFails,
+          nextAllowedAtMs,
+          lastFailedAtMs: commitNowMs,
+          createdAtMs: commitNowMs,
+          updatedAtMs: commitNowMs,
+        })
+        .run();
+    } else {
+      session.db
+        .update(localDeviceAuthState)
+        .set({
+          windowStartedAtMs: nextDeviceWindowStart,
+          failedAttempts: nextDeviceFails,
+          nextAllowedAtMs,
+          lastFailedAtMs: commitNowMs,
+          updatedAtMs: commitNowMs,
+        })
+        .where(eq(localDeviceAuthState.id, deviceState.id))
+        .run();
+    }
+
+    if (userRow && Boolean(userRow.isActive) && cred) {
+      const previousLockExpired = cred.lockedUntilMs !== null && commitNowMs >= cred.lockedUntilMs;
+      const nextUserFails = previousLockExpired ? 1 : cred.failedAttempts + 1;
+      const nextUserLockedUntil =
+        nextUserFails >= this.maxUserFailedAttempts
+          ? unixMsFromBigInt(commitNowMs + this.userLockDurationMs)
+          : null;
+
+      session.db
+        .update(localPinCredentials)
+        .set({
+          failedAttempts: nextUserFails,
+          lockedUntilMs: nextUserLockedUntil,
+          lastFailedAtMs: commitNowMs,
+          updatedAtMs: commitNowMs,
+        })
+        .where(eq(localPinCredentials.userId, userRow.id))
+        .run();
+    }
+
+    return { kind: 'invalid_credentials' };
+  }
+
   async commitLoginOutcome(input: {
     readonly selector: LoginSelector;
     readonly verifiedPinForUserId: UuidV7 | null;
@@ -485,167 +652,73 @@ export class SqliteHubAuthStore {
     const { uow, config } = this.requireReady();
 
     return uow.execute((session) => {
-      const commitNowMs = session.nowUnixMs();
-
-      const deviceState = session.db
-        .select()
-        .from(localDeviceAuthState)
-        .where(eq(localDeviceAuthState.deviceId, config.deviceId))
-        .limit(1)
-        .all()[0];
-
-      if (
-        deviceState &&
-        deviceState.nextAllowedAtMs !== null &&
-        commitNowMs < deviceState.nextAllowedAtMs
-      ) {
+      const check = this.runPinVerificationSync(session, config, input);
+      if (check.kind === 'rate_limited') {
         return Promise.resolve<CommitLoginOutcomeResult>({
           kind: 'rate_limited',
-          retryAfterSeconds: computeRetryAfterSeconds(deviceState.nextAllowedAtMs - commitNowMs),
+          retryAfterSeconds: check.retryAfterSeconds,
         });
       }
-
-      const userRow = this.findActiveUserRowSync(config.organizationId, input.selector);
-      const cred = userRow ? this.findPinCredSync(session, userRow.id) : null;
-
-      if (
-        userRow &&
-        Boolean(userRow.isActive) &&
-        cred &&
-        cred.lockedUntilMs !== null &&
-        commitNowMs < cred.lockedUntilMs
-      ) {
-        return Promise.resolve<CommitLoginOutcomeResult>({
-          kind: 'rate_limited',
-          retryAfterSeconds: computeRetryAfterSeconds(cred.lockedUntilMs - commitNowMs),
-        });
+      if (check.kind === 'invalid_credentials') {
+        return Promise.resolve<CommitLoginOutcomeResult>({ kind: 'invalid_credentials' });
       }
 
-      // Guard against TOCTOU race where PIN was reset mid-flight during slow Argon2 verification (R1):
-      // reject without creating a session and without penalizing failed_attempts counters.
-      if (
-        input.verifiedPinForUserId !== null &&
-        userRow !== null &&
-        userRow.id === input.verifiedPinForUserId &&
-        cred !== null &&
-        (input.verifiedPinHash === null || cred.pinHash !== input.verifiedPinHash)
-      ) {
-        return Promise.resolve<CommitLoginOutcomeResult>({
-          kind: 'invalid_credentials',
-        });
-      }
-
-      const pinMatchesExpectedUser =
-        input.verifiedPinForUserId !== null &&
-        input.verifiedPinHash !== null &&
-        userRow !== null &&
-        Boolean(userRow.isActive) &&
-        cred !== null &&
-        userRow.id === input.verifiedPinForUserId &&
-        cred.pinHash === input.verifiedPinHash;
-
-      if (pinMatchesExpectedUser && userRow && cred) {
-        session.db
-          .update(localPinCredentials)
-          .set({
-            failedAttempts: 0,
-            lockedUntilMs: null,
-            lastFailedAtMs: null,
-            updatedAtMs: commitNowMs,
-          })
-          .where(eq(localPinCredentials.userId, userRow.id))
-          .run();
-
-        const sessionId = session.nextId();
-        const expiresAtMs = unixMsFromBigInt(commitNowMs + this.sessionTtlMs);
-        session.db
-          .insert(localSessions)
-          .values({
-            id: sessionId,
-            organizationId: config.organizationId,
-            userId: userRow.id,
-            deviceId: config.deviceId,
-            tokenHash: input.tokenHashToMint,
-            expiresAtMs,
-            revokedAtMs: null,
-            lastSeenAtMs: commitNowMs,
-            createdAtMs: commitNowMs,
-            updatedAtMs: commitNowMs,
-          })
-          .run();
-
-        return Promise.resolve<CommitLoginOutcomeResult>({
-          kind: 'authenticated',
-          user: toStoredUser(userRow),
-          sessionId,
+      const sessionId = session.nextId();
+      const expiresAtMs = unixMsFromBigInt(check.commitNowMs + this.sessionTtlMs);
+      session.db
+        .insert(localSessions)
+        .values({
+          id: sessionId,
+          organizationId: config.organizationId,
+          userId: check.user.id,
           deviceId: config.deviceId,
+          tokenHash: input.tokenHashToMint,
           expiresAtMs,
-        });
-      }
-
-      // Failed attempt: commit device backoff & user lockout inside this transaction (`T0.6` T1 & T2)
-      const windowExpired =
-        deviceState !== undefined &&
-        commitNowMs - deviceState.windowStartedAtMs >= this.deviceFailureWindowMs;
-      const nextDeviceWindowStart =
-        deviceState === undefined || windowExpired ? commitNowMs : deviceState.windowStartedAtMs;
-      const nextDeviceFails =
-        deviceState === undefined || windowExpired ? 1 : deviceState.failedAttempts + 1;
-      const cooldownMs = this.computeDeviceBackoffMs(nextDeviceFails);
-      const nextAllowedAtMs = cooldownMs > 0n ? unixMsFromBigInt(commitNowMs + cooldownMs) : null;
-
-      if (deviceState === undefined) {
-        session.db
-          .insert(localDeviceAuthState)
-          .values({
-            id: session.nextId(),
-            organizationId: config.organizationId,
-            deviceId: config.deviceId,
-            windowStartedAtMs: nextDeviceWindowStart,
-            failedAttempts: nextDeviceFails,
-            nextAllowedAtMs,
-            lastFailedAtMs: commitNowMs,
-            createdAtMs: commitNowMs,
-            updatedAtMs: commitNowMs,
-          })
-          .run();
-      } else {
-        session.db
-          .update(localDeviceAuthState)
-          .set({
-            windowStartedAtMs: nextDeviceWindowStart,
-            failedAttempts: nextDeviceFails,
-            nextAllowedAtMs,
-            lastFailedAtMs: commitNowMs,
-            updatedAtMs: commitNowMs,
-          })
-          .where(eq(localDeviceAuthState.id, deviceState.id))
-          .run();
-      }
-
-      if (userRow && Boolean(userRow.isActive) && cred) {
-        const previousLockExpired =
-          cred.lockedUntilMs !== null && commitNowMs >= cred.lockedUntilMs;
-        const nextUserFails = previousLockExpired ? 1 : cred.failedAttempts + 1;
-        const nextUserLockedUntil =
-          nextUserFails >= this.maxUserFailedAttempts
-            ? unixMsFromBigInt(commitNowMs + this.userLockDurationMs)
-            : null;
-
-        session.db
-          .update(localPinCredentials)
-          .set({
-            failedAttempts: nextUserFails,
-            lockedUntilMs: nextUserLockedUntil,
-            lastFailedAtMs: commitNowMs,
-            updatedAtMs: commitNowMs,
-          })
-          .where(eq(localPinCredentials.userId, userRow.id))
-          .run();
-      }
+          revokedAtMs: null,
+          lastSeenAtMs: check.commitNowMs,
+          createdAtMs: check.commitNowMs,
+          updatedAtMs: check.commitNowMs,
+        })
+        .run();
 
       return Promise.resolve<CommitLoginOutcomeResult>({
-        kind: 'invalid_credentials',
+        kind: 'authenticated',
+        user: check.user,
+        sessionId,
+        deviceId: config.deviceId,
+        expiresAtMs,
+      });
+    });
+  }
+
+  async commitPinVerificationOutcome(input: {
+    readonly selector: LoginSelector;
+    readonly verifiedPinForUserId: UuidV7 | null;
+    readonly verifiedPinHash: string | null;
+    readonly allowedRoles: readonly UserRole[];
+  }): Promise<CommitPinCheckOutcomeResult> {
+    if (this.uow === null || this.hubConfig === null) {
+      return { kind: 'invalid_credentials' };
+    }
+    const { uow, config } = this.requireReady();
+
+    return uow.execute((session) => {
+      const check = this.runPinVerificationSync(session, config, input);
+      if (check.kind === 'rate_limited') {
+        return Promise.resolve<CommitPinCheckOutcomeResult>({
+          kind: 'rate_limited',
+          retryAfterSeconds: check.retryAfterSeconds,
+        });
+      }
+      if (check.kind === 'invalid_credentials') {
+        return Promise.resolve<CommitPinCheckOutcomeResult>({ kind: 'invalid_credentials' });
+      }
+      if (!input.allowedRoles.includes(check.user.role)) {
+        return Promise.resolve<CommitPinCheckOutcomeResult>({ kind: 'role_forbidden' });
+      }
+      return Promise.resolve<CommitPinCheckOutcomeResult>({
+        kind: 'verified',
+        user: check.user,
       });
     });
   }

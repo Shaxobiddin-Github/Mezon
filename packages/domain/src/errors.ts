@@ -54,7 +54,14 @@ export type DomainErrorCode =
   | 'BATCH_REQUIRED'
   | 'BATCH_NOT_FOUND'
   | 'INVENTORY_COUNT_NOT_FOUND'
-  | 'INVENTORY_COUNT_NOT_OPEN';
+  | 'INVENTORY_COUNT_NOT_OPEN'
+  | 'CART_NOT_FOUND'
+  | 'CART_NOT_OPEN'
+  | 'CART_NOT_PARKED'
+  | 'CART_LINE_NOT_FOUND'
+  | 'PROMOTION_NOT_FOUND'
+  | 'INVALID_PROMOTION'
+  | 'DISCOUNT_OVERRIDE_REQUIRED';
 
 export interface DomainErrorOptions {
   readonly retryAfterSeconds?: bigint;

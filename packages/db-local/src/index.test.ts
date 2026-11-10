@@ -31,6 +31,8 @@ import {
   inventoryCountLines,
   inventoryCounts,
   localBatchBalances,
+  localCartLines,
+  localCarts,
   localDeviceAuthState,
   localDeviceState,
   localHubConfig,
@@ -46,6 +48,7 @@ import {
   productBarcodes,
   productVariants,
   products,
+  promotions,
   sqliteBigint,
   sqliteBoolean,
   sqliteInt,
@@ -109,6 +112,9 @@ describe('@mezon/db-local - Schema foundation, registry, pragmas, and bigint saf
       ['local_stock_balances', 'LOCAL'],
       ['local_batch_balances', 'LOCAL'],
       ['local_stock_conflicts', 'LOCAL'],
+      ['promotions', 'ATTR'],
+      ['local_carts', 'LOCAL'],
+      ['local_cart_lines', 'LOCAL'],
     ]);
     expect(() =>
       validateSqliteSchemaRegistry(
@@ -132,6 +138,9 @@ describe('@mezon/db-local - Schema foundation, registry, pragmas, and bigint saf
           localStockBalances,
           localBatchBalances,
           localStockConflicts,
+          promotions,
+          localCarts,
+          localCartLines,
         },
         localSchemaRegistry,
       ),
@@ -309,7 +318,7 @@ describe('@mezon/db-local - Schema foundation, registry, pragmas, and bigint saf
       const migCountRow = conn.sqlite
         .prepare('SELECT COUNT(*) as cnt FROM __drizzle_migrations')
         .get() as { cnt: bigint };
-      expect(migCountRow.cnt).toBe(5n);
+      expect(migCountRow.cnt).toBe(6n);
     } finally {
       conn.close();
     }
@@ -771,10 +780,25 @@ describe('@mezon/db-local - Schema foundation, registry, pragmas, and bigint saf
 
       const hubCfg = conn.sqlite
         .prepare(
-          'SELECT "negative_stock_policy" FROM "local_hub_config" WHERE "singleton_guard" = 1',
+          `SELECT "negative_stock_policy", "cashier_discount_percent_unlimited",
+            "cashier_max_discount_percent_bp", "cashier_discount_amount_unlimited",
+            "cashier_max_discount_amount", "quick_sale_default_mxik"
+           FROM "local_hub_config" WHERE "singleton_guard" = 1`,
         )
-        .get() as { readonly negative_stock_policy: string };
+        .get() as {
+        readonly negative_stock_policy: string;
+        readonly cashier_discount_percent_unlimited: bigint;
+        readonly cashier_max_discount_percent_bp: bigint;
+        readonly cashier_discount_amount_unlimited: bigint;
+        readonly cashier_max_discount_amount: bigint;
+        readonly quick_sale_default_mxik: string | null;
+      };
       expect(hubCfg.negative_stock_policy).toBe('warn');
+      expect(hubCfg.cashier_discount_percent_unlimited).toBe(0n);
+      expect(hubCfg.cashier_max_discount_percent_bp).toBe(0n);
+      expect(hubCfg.cashier_discount_amount_unlimited).toBe(0n);
+      expect(hubCfg.cashier_max_discount_amount).toBe(0n);
+      expect(hubCfg.quick_sale_default_mxik).toBeNull();
 
       const prod = conn.sqlite
         .prepare('SELECT "name", "track_batches" FROM "products" WHERE "id" = ?')

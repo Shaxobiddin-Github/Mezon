@@ -133,11 +133,34 @@ export const localHubConfig = localSchemaRegistry.defineTable(
     singletonGuard: sqliteInt('singleton_guard').notNull(),
     setupCompletedAtMs: sqliteUnixMs('setup_completed_at_ms').notNull(),
     negativeStockPolicy: text('negative_stock_policy').notNull().default('warn'),
+    cashierDiscountPercentUnlimited: sqliteBoolean('cashier_discount_percent_unlimited')
+      .notNull()
+      .default(false),
+    cashierMaxDiscountPercentBp: sqliteInt('cashier_max_discount_percent_bp').notNull().default(0),
+    cashierDiscountAmountUnlimited: sqliteBoolean('cashier_discount_amount_unlimited')
+      .notNull()
+      .default(false),
+    cashierMaxDiscountAmount: sqliteMoney('cashier_max_discount_amount')
+      .notNull()
+      .default(sql`0`),
+    quickSaleDefaultMxik: text('quick_sale_default_mxik'),
+    quickSaleDefaultVatRateBp: sqliteInt('quick_sale_default_vat_rate_bp'),
   }),
   (self) => [
     uniqueIndex('uidx_local_hub_config_singleton').on(self.singletonGuard),
     check('chk_local_hub_config_singleton', sql`${self.singletonGuard} = 1`),
     check('chk_local_hub_config_neg_policy', sql`${self.negativeStockPolicy} IN ('warn', 'block')`),
+    check('chk_local_hub_config_pct_unlim', sql`${self.cashierDiscountPercentUnlimited} IN (0, 1)`),
+    check(
+      'chk_local_hub_config_max_pct',
+      sql`${self.cashierMaxDiscountPercentBp} >= 0 AND ${self.cashierMaxDiscountPercentBp} <= 10000`,
+    ),
+    check('chk_local_hub_config_amt_unlim', sql`${self.cashierDiscountAmountUnlimited} IN (0, 1)`),
+    check('chk_local_hub_config_max_amt', sql`${self.cashierMaxDiscountAmount} >= 0`),
+    check(
+      'chk_local_hub_config_qs_vat',
+      sql`${self.quickSaleDefaultVatRateBp} IS NULL OR (${self.quickSaleDefaultVatRateBp} >= 0 AND ${self.quickSaleDefaultVatRateBp} <= 10000)`,
+    ),
   ],
 );
 
@@ -706,6 +729,169 @@ export const localStockConflicts = localSchemaRegistry.defineTable(
     check(
       'chk_local_stock_conflicts_reason',
       sql`${self.reason} IN ('BATCH_OVERCONSUMED', 'UNKNOWN_COST_SURPLUS', 'ORPHAN_BATCH_REFERENCE')`,
+    ),
+  ],
+);
+
+/**
+ * Store / organization pricing promotions (`ATTR`, T1.3): percent, fixed amount per unit, or N+M (`buy_x_get_y`).
+ * Validity window `[starts_at_ms, ends_at_ms)` uses half-open UTC ms boundaries; future daily/weekday
+ * time-of-day rules interpret UTC+5 (`Asia/Tashkent`).
+ */
+export const promotions = localSchemaRegistry.defineTable(
+  {
+    name: 'promotions',
+    tableClass: 'ATTR',
+    tenantScope: 'organization',
+  },
+  (common) => ({
+    ...common,
+    targetStoreId: sqliteUuidV7('target_store_id'),
+    name: text('name').notNull(),
+    type: text('type').notNull(),
+    scope: text('scope').notNull(),
+    targetProductId: sqliteUuidV7('target_product_id').references(() => products.id),
+    targetCategoryId: sqliteUuidV7('target_category_id').references(() => categories.id),
+    discountPercentBp: sqliteInt('discount_percent_bp'),
+    discountAmount: sqliteMoney('discount_amount'),
+    buyQty: sqliteInt('buy_qty'),
+    freeQty: sqliteInt('free_qty'),
+    startsAtMs: sqliteUnixMs('starts_at_ms').notNull(),
+    endsAtMs: sqliteUnixMs('ends_at_ms'),
+    isActive: sqliteBoolean('is_active').notNull().default(true),
+  }),
+  (self) => [
+    index('idx_promotions_org_active').on(
+      self.organizationId,
+      self.deletedAtMs,
+      self.isActive,
+      self.startsAtMs,
+      self.endsAtMs,
+    ),
+    check('chk_promotions_name_nonempty', sql`length(trim(${self.name})) >= 1`),
+    check('chk_promotions_type', sql`${self.type} IN ('percent', 'fixed_amount', 'buy_x_get_y')`),
+    check('chk_promotions_scope', sql`${self.scope} IN ('product', 'category', 'all')`),
+    check('chk_promotions_is_active', sql`${self.isActive} IN (0, 1)`),
+    check(
+      'chk_promotions_window',
+      sql`${self.endsAtMs} IS NULL OR ${self.endsAtMs} > ${self.startsAtMs}`,
+    ),
+    check(
+      'chk_promotions_scope_targets',
+      sql`(${self.scope} = 'product' AND ${self.targetProductId} IS NOT NULL AND ${self.targetCategoryId} IS NULL) OR (${self.scope} = 'category' AND ${self.targetCategoryId} IS NOT NULL AND ${self.targetProductId} IS NULL) OR (${self.scope} = 'all' AND ${self.targetProductId} IS NULL AND ${self.targetCategoryId} IS NULL)`,
+    ),
+    check(
+      'chk_promotions_type_fields',
+      sql`(${self.type} = 'percent' AND ${self.discountPercentBp} BETWEEN 1 AND 10000 AND ${self.discountAmount} IS NULL AND ${self.buyQty} IS NULL AND ${self.freeQty} IS NULL) OR (${self.type} = 'fixed_amount' AND ${self.discountAmount} > 0 AND ${self.discountPercentBp} IS NULL AND ${self.buyQty} IS NULL AND ${self.freeQty} IS NULL) OR (${self.type} = 'buy_x_get_y' AND ${self.buyQty} >= 1 AND ${self.freeQty} >= 1 AND ${self.discountPercentBp} IS NULL AND ${self.discountAmount} IS NULL)`,
+    ),
+  ],
+);
+
+/**
+ * Persistent terminal/hub carts (`LOCAL`, T1.3) for active sales & parked receipts.
+ * Excluded from outbox/sync; never alters stock ledger until `T1.4 completeSale`.
+ */
+export const localCarts = localSchemaRegistry.defineTable(
+  {
+    name: 'local_carts',
+    tableClass: 'LOCAL',
+    tenantScope: 'store',
+  },
+  (common) => ({
+    ...common,
+    cashierUserId: sqliteUuidV7('cashier_user_id')
+      .notNull()
+      .references(() => users.id),
+    status: text('status').notNull(),
+    parkLabel: text('park_label'),
+    parkedAtMs: sqliteUnixMs('parked_at_ms'),
+    manualDiscountMode: text('manual_discount_mode').notNull().default('none'),
+    manualDiscountValue: sqliteBigint('manual_discount_value')
+      .notNull()
+      .default(sql`0`),
+    manualDiscountReason: text('manual_discount_reason'),
+    overrideApprovedByUserId: sqliteUuidV7('override_approved_by_user_id').references(
+      () => users.id,
+    ),
+    overrideApprovedAmount: sqliteMoney('override_approved_amount'),
+    overrideApprovedAtMs: sqliteUnixMs('override_approved_at_ms'),
+  }),
+  (self) => [
+    index('idx_local_carts_store_status').on(
+      self.organizationId,
+      self.storeId,
+      self.status,
+      self.updatedAtMs,
+    ),
+    check('chk_local_carts_status', sql`${self.status} IN ('open', 'parked')`),
+    check(
+      'chk_local_carts_park_meta',
+      sql`(${self.status} = 'open' AND ${self.parkedAtMs} IS NULL) OR (${self.status} = 'parked' AND ${self.parkedAtMs} IS NOT NULL)`,
+    ),
+    check(
+      'chk_local_carts_disc_mode',
+      sql`${self.manualDiscountMode} IN ('none', 'percent', 'amount')`,
+    ),
+    check(
+      'chk_local_carts_disc_val',
+      sql`(${self.manualDiscountMode} = 'none' AND ${self.manualDiscountValue} = 0) OR (${self.manualDiscountMode} = 'percent' AND ${self.manualDiscountValue} BETWEEN 1 AND 10000) OR (${self.manualDiscountMode} = 'amount' AND ${self.manualDiscountValue} > 0)`,
+    ),
+    check(
+      'chk_local_carts_override_pair',
+      sql`(${self.overrideApprovedByUserId} IS NULL AND ${self.overrideApprovedAmount} IS NULL AND ${self.overrideApprovedAtMs} IS NULL) OR (${self.overrideApprovedByUserId} IS NOT NULL AND ${self.overrideApprovedAmount} >= 0 AND ${self.overrideApprovedAtMs} IS NOT NULL)`,
+    ),
+  ],
+);
+
+/**
+ * Cart line snapshots (`LOCAL`, T1.3) supporting both merged catalog lines and free-text quick-sale lines.
+ */
+export const localCartLines = localSchemaRegistry.defineTable(
+  {
+    name: 'local_cart_lines',
+    tableClass: 'LOCAL',
+    tenantScope: 'store',
+  },
+  (common) => ({
+    ...common,
+    cartId: sqliteUuidV7('cart_id')
+      .notNull()
+      .references(() => localCarts.id, { onDelete: 'cascade' }),
+    sortOrder: sqliteInt('sort_order').notNull(),
+    lineKind: text('line_kind').notNull(),
+    productId: sqliteUuidV7('product_id').references(() => products.id),
+    variantId: sqliteUuidV7('variant_id').references(() => productVariants.id),
+    categoryIdSnapshot: sqliteUuidV7('category_id_snapshot'),
+    itemName: text('item_name').notNull(),
+    unit: text('unit').notNull(),
+    qty: sqliteQuantity('qty').notNull(),
+    unitPriceSnapshot: sqliteMoney('unit_price_snapshot').notNull(),
+    mxikSnapshot: text('mxik_snapshot'),
+    packageCodeSnapshot: text('package_code_snapshot'),
+    vatRateBpSnapshot: sqliteInt('vat_rate_bp_snapshot').notNull().default(0),
+  }),
+  (self) => [
+    index('idx_local_cart_lines_cart_sort').on(self.cartId, self.sortOrder, self.id),
+    check('chk_local_cart_lines_sort_nonneg', sql`${self.sortOrder} >= 0`),
+    check('chk_local_cart_lines_kind', sql`${self.lineKind} IN ('catalog', 'quick_sale')`),
+    check(
+      'chk_local_cart_lines_kind_product',
+      sql`(${self.lineKind} = 'catalog' AND ${self.productId} IS NOT NULL) OR (${self.lineKind} = 'quick_sale' AND ${self.productId} IS NULL AND ${self.variantId} IS NULL)`,
+    ),
+    check('chk_local_cart_lines_name_nonempty', sql`length(trim(${self.itemName})) >= 1`),
+    check(
+      'chk_local_cart_lines_unit',
+      sql`${self.unit} IN ('dona', 'kg', 'g', 'litr', 'metr', 'm2', 'qadoq')`,
+    ),
+    check('chk_local_cart_lines_qty_pos', sql`${self.qty} > 0`),
+    check(
+      'chk_local_cart_lines_unit_int',
+      sql`${self.unit} NOT IN ('dona', 'qadoq') OR (${self.qty} % 1000) = 0`,
+    ),
+    check('chk_local_cart_lines_price_nonneg', sql`${self.unitPriceSnapshot} >= 0`),
+    check(
+      'chk_local_cart_lines_vat_bp',
+      sql`${self.vatRateBpSnapshot} >= 0 AND ${self.vatRateBpSnapshot} <= 10000`,
     ),
   ],
 );

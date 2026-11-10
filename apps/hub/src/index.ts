@@ -6,4 +6,5 @@ export { Argon2PinHasher, HUB_ARGON2_OPTIONS, ARGON2ID_PHC_PREFIX } from './argo
 export { HubAuthService, hashBearerToken, extractBearerToken } from './auth-service.js';
 export { HubCatalogService } from './catalog-service.js';
 export { HubStockService } from './stock-service.js';
+export { HubCartService } from './cart-service.js';
 export { createHubServer, type CreateHubServerOptions, type HubServer } from './server.js';

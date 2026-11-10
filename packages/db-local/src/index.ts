@@ -101,6 +101,9 @@ export {
   localStockBalances,
   localBatchBalances,
   localStockConflicts,
+  promotions,
+  localCarts,
+  localCartLines,
 } from './schema/index.js';
 
 export {
@@ -120,6 +123,7 @@ export {
   type LoginSelector,
   type LoginCredentialSnapshot,
   type CommitLoginOutcomeResult,
+  type CommitPinCheckOutcomeResult,
   type AuthenticatedSessionSnapshot,
   type CreateSqliteHubAuthStoreOptions,
   SqliteHubAuthStore,
@@ -163,3 +167,18 @@ export {
   SqliteStockStore,
   createSqliteStockStore,
 } from './stock-repo.js';
+
+export {
+  type CartRuntimeContext,
+  type CreateSqliteCartStoreOptions,
+  type StoredPromotionRecord,
+  type StoredCartDiscountSettings,
+  type StoredPriceChangeWarning,
+  type StoredCartLineRecord,
+  type StoredCartSummaryRecord,
+  type StoredCartDetailRecord,
+  type AddCartLineInput,
+  type SetCartDiscountInput,
+  SqliteCartStore,
+  createSqliteCartStore,
+} from './cart-repo.js';
