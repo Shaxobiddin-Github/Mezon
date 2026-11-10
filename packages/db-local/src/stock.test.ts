@@ -601,6 +601,96 @@ describe('@mezon/db-local - T1.2 Stock Ledger, Batches, FIFO/Average Costing, S1
     }
   });
 
+  it('T1.2 test debt: FIFO rounds up 10,000 / 3 * 2 = 6,667 and exact batch drain produces zero conflicts on rebuild', async () => {
+    const env = await setupStockEnv();
+    try {
+      const fifoRound = (
+        await env.catalogStore.createProduct({
+          name: 'Olma FIFO Rounding',
+          unit: 'kg',
+          trackBatches: true,
+          salePrice: '15000',
+          actorUserId: env.ownerId,
+        })
+      ).product;
+
+      const batchIn = await env.stockStore.recordInboundMove({
+        productId: fifoRound.id,
+        reason: 'purchase',
+        qty: '3000', // 3.000 kg
+        totalCostValue: '10000', // 10,000 tiyin
+        batchNumber: 'LOT-ROUND-UP',
+        actorUserId: env.ownerId,
+      });
+
+      const out2kg = await env.stockStore.recordOutboundMove({
+        productId: fifoRound.id,
+        reason: 'sale',
+        qty: '2000', // 2.000 kg -> round_half_away_from_zero(10,000 * 2 / 3) = 6,667 tiyin
+        actorUserId: env.ownerId,
+      });
+      expect(out2kg.moves[0]?.costValueDelta).toBe(-6667n);
+
+      const batchesAfterPartial = await env.stockStore.listBatches({
+        productId: fifoRound.id,
+        includeEmpty: true,
+      });
+      const partialBatch = batchesAfterPartial.find((b) => b.id === batchIn.batch?.id)!;
+      expect(partialBatch.remainingQty).toBe(1000n);
+      expect(partialBatch.remainingValue).toBe(3333n);
+
+      // Exact batch boundary drain (remBatchMilli === needMilli) -> rebuild emits 0 conflicts
+      const fifoExact = (
+        await env.catalogStore.createProduct({
+          name: 'Guruch FIFO Exact',
+          unit: 'kg',
+          trackBatches: true,
+          salePrice: '20000',
+          actorUserId: env.ownerId,
+        })
+      ).product;
+
+      const exactBatch = await env.stockStore.recordInboundMove({
+        productId: fifoExact.id,
+        reason: 'purchase',
+        qty: '3000',
+        totalCostValue: '10000',
+        batchNumber: 'LOT-EXACT',
+        actorUserId: env.ownerId,
+      });
+
+      const exactOut = await env.stockStore.recordOutboundMove({
+        productId: fifoExact.id,
+        reason: 'sale',
+        qty: '3000',
+        actorUserId: env.ownerId,
+      });
+      expect(exactOut.moves[0]?.costValueDelta).toBe(-10000n);
+      expect(exactOut.warnings).toEqual([]);
+
+      const rebuild = await env.stockStore.rebuildProjections();
+      expect(rebuild.conflictsDetected).toBe(0);
+      expect(await env.stockStore.listConflicts()).toEqual([]);
+
+      const exactBatches = await env.stockStore.listBatches({
+        productId: fifoExact.id,
+        includeEmpty: true,
+      });
+      expect(exactBatches.find((b) => b.id === exactBatch.batch?.id)?.remainingQty).toBe(0n);
+      expect(exactBatches.find((b) => b.id === exactBatch.batch?.id)?.remainingValue).toBe(0n);
+
+      const exactVal = (await env.stockStore.listStockValuations()).find(
+        (v) => v.productId === fifoExact.id,
+      )!;
+      expect(exactVal.qtyOnHand).toBe(0n);
+      expect(exactVal.totalValue).toBe(0n);
+      expect(exactVal.deficitQty).toBe(0n);
+      expect(exactVal.costVarianceValue).toBe(0n);
+    } finally {
+      env.connection.close();
+    }
+  });
+
   it('(g) property test: live SQLite state & rebuildStockProjections match independent naive ledger model exactly across random ops', async () => {
     type RandomOp =
       | { readonly kind: 'in'; readonly qtyMilli: bigint; readonly costTiyin: bigint }
