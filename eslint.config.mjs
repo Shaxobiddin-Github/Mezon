@@ -4,6 +4,11 @@ export default tseslint.config(
   {
     ignores: [
       '**/dist/**',
+      '**/dist-app/**',
+      '**/dist-electron/**',
+      '**/release/**',
+      '**/playwright-report/**',
+      '**/test-results/**',
       '**/node_modules/**',
       '**/.turbo/**',
       '**/coverage/**',

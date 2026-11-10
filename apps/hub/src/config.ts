@@ -7,6 +7,27 @@ export interface ResolvedHubSecurityConfig {
   readonly allowedOrigins: ReadonlySet<string>;
 }
 
+const ALLOWED_ORIGIN_PROTOCOLS = new Set(['http:', 'https:', 'app:']);
+
+function normalizeAllowedOrigin(raw: string): string {
+  const trimmed = raw.trim();
+  if (trimmed === '' || trimmed === 'null' || trimmed === '*') {
+    throw new RangeError(`Disallowed CORS origin in config allowlist: "${raw}"`);
+  }
+  const parsed = new URL(trimmed);
+  if (!ALLOWED_ORIGIN_PROTOCOLS.has(parsed.protocol) || parsed.hostname.length === 0) {
+    throw new RangeError(`Allowed origin has unsupported scheme or empty host: "${raw}"`);
+  }
+  const canonicalOrigin = `${parsed.protocol}//${parsed.host}`;
+  if (canonicalOrigin !== trimmed) {
+    throw new RangeError(`Allowed origin must be an exact origin without path: "${raw}"`);
+  }
+  if (parsed.protocol !== 'app:' && (parsed.origin === 'null' || parsed.origin !== trimmed)) {
+    throw new RangeError(`Allowed origin must be an exact origin without path: "${raw}"`);
+  }
+  return canonicalOrigin;
+}
+
 export function resolveHubSecurityConfig(options?: {
   readonly host?: string;
   readonly port?: number;
@@ -26,15 +47,7 @@ export function resolveHubSecurityConfig(options?: {
 
   const normalizedOrigins = new Set<string>();
   for (const raw of options?.allowedOrigins ?? []) {
-    const trimmed = raw.trim();
-    if (trimmed === '' || trimmed === 'null' || trimmed === '*') {
-      throw new RangeError(`Disallowed CORS origin in config allowlist: "${raw}"`);
-    }
-    const parsed = new URL(trimmed);
-    if (parsed.origin === 'null' || parsed.origin !== trimmed) {
-      throw new RangeError(`Allowed origin must be an exact origin without path: "${raw}"`);
-    }
-    normalizedOrigins.add(parsed.origin);
+    normalizedOrigins.add(normalizeAllowedOrigin(raw));
   }
 
   return {

@@ -55,14 +55,27 @@ module.exports = {
     {
       name: 'drivers-src-imports',
       comment:
-        'packages/drivers source files can only import within packages/drivers/src or from packages/domain',
+        'Pure packages/drivers source files outside src/node/ can only import non-node drivers or packages/domain',
       severity: 'error',
       from: {
-        path: '^packages/drivers/src/',
+        path: '^packages/drivers/src/(?!node/)',
         pathNot: '\\.test\\.ts$',
       },
       to: {
-        pathNot: '^(packages/drivers/src/|packages/domain/)',
+        pathNot: '^(packages/drivers/src/(?!node/)|packages/domain/)',
+      },
+    },
+    {
+      name: 'drivers-node-src-imports',
+      comment:
+        'packages/drivers/src/node source files can only import within packages/drivers/src, packages/domain, node:fs, and node:path',
+      severity: 'error',
+      from: {
+        path: '^packages/drivers/src/node/',
+        pathNot: '\\.test\\.ts$',
+      },
+      to: {
+        pathNot: '^(packages/drivers/src/|packages/domain/|(node:)?(fs|path)$)',
       },
     },
     {
@@ -131,6 +144,34 @@ module.exports = {
       to: {
         pathNot:
           '^(apps/hub/src/|packages/(domain|contracts|db-local|drivers)/|node_modules/(\\.pnpm/)?(fastify|pino|@node-rs/argon2|@node-rs\\+argon2|zod)@|(node:)?(crypto|fs|path|stream)$)',
+      },
+    },
+    {
+      name: 'desktop-src-imports',
+      comment:
+        'apps/desktop source files can only import internal files, domain, contracts, drivers, electron, pino, koffi, and safe node builtins (never db-local, db-cloud, hub, or pos)',
+      severity: 'error',
+      from: {
+        path: '^apps/desktop/src/',
+        pathNot: '\\.test\\.ts$',
+      },
+      to: {
+        pathNot:
+          '^(apps/desktop/src/|packages/(domain|contracts|drivers)/|electron$|node_modules/(\\.pnpm/)?(electron|pino|koffi)@|(node:)?(events|fs|fs/promises|os|path)$)',
+      },
+    },
+    {
+      name: 'pos-src-imports',
+      comment:
+        'apps/pos browser UI source files can only import internal files, contracts, i18n, ui, react, and react-dom (no node builtins, electron, db-local, db-cloud, drivers, or hub)',
+      severity: 'error',
+      from: {
+        path: '^apps/pos/src/',
+        pathNot: '\\.test\\.(ts|tsx)$',
+      },
+      to: {
+        pathNot:
+          '^(apps/pos/src/|packages/(contracts|i18n|ui)/|node_modules/(\\.pnpm/)?(react|react-dom)@)',
       },
     },
     {

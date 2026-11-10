@@ -5,6 +5,9 @@ packages:
 allowBuilds:
   better-sqlite3: true
   cpu-features: false
+  electron: true
+  electron-winstaller: false
   esbuild: true
+  koffi: true
   protobufjs: false
   ssh2: false

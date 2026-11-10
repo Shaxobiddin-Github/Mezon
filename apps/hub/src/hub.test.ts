@@ -1162,4 +1162,73 @@ describe('@mezon/hub - HTTP security, Argon2id PIN auth, setup wizard, RBAC, and
       await hub.close();
     }
   }, 30_000);
+
+  it('allows allowlisted app://mezon Electron custom scheme with strict non-credentialed CORS while keeping other origins locked down', async () => {
+    await expect(
+      createHubServer({
+        dbPath: makeDbPath('bad-app-origin.db'),
+        allowedOrigins: ['app://mezon/subpath'],
+        logLevel: 'silent',
+        pinHasher: makeFastTestHasher(),
+      }),
+    ).rejects.toThrow(/without path/);
+
+    await expect(
+      createHubServer({
+        dbPath: makeDbPath('bad-file-origin.db'),
+        allowedOrigins: ['file://'],
+        logLevel: 'silent',
+        pinHasher: makeFastTestHasher(),
+      }),
+    ).rejects.toThrow();
+
+    const hub = await createHubServer({
+      dbPath: makeDbPath('electron-origin.db'),
+      port: TEST_PORT,
+      allowedOrigins: ['app://mezon'],
+      logLevel: 'silent',
+      pinHasher: makeFastTestHasher(),
+    });
+
+    try {
+      const allowedGet = await hub.app.inject({
+        method: 'GET',
+        url: '/health',
+        headers: loopHeaders({
+          origin: 'app://mezon',
+          'sec-fetch-site': 'cross-site',
+        }),
+      });
+      expect(allowedGet.statusCode).toBe(200);
+      expect(allowedGet.headers['access-control-allow-origin']).toBe('app://mezon');
+      expect(allowedGet.headers['access-control-allow-credentials']).toBeUndefined();
+      expect(allowedGet.headers['vary']).toBe('Origin');
+
+      const allowedPreflight = await hub.app.inject({
+        method: 'OPTIONS',
+        url: '/auth/login',
+        headers: loopHeaders({
+          origin: 'app://mezon',
+          'sec-fetch-site': 'cross-site',
+          'access-control-request-method': 'POST',
+          'access-control-request-headers': 'authorization, content-type',
+        }),
+      });
+      expect(allowedPreflight.statusCode).toBe(204);
+      expect(allowedPreflight.headers['access-control-allow-origin']).toBe('app://mezon');
+      expect(allowedPreflight.headers['access-control-allow-credentials']).toBeUndefined();
+
+      for (const badOrigin of ['app://evil', 'file://', 'https://evil.uz']) {
+        const denied = await hub.app.inject({
+          method: 'GET',
+          url: '/health',
+          headers: loopHeaders({ origin: badOrigin, 'sec-fetch-site': 'cross-site' }),
+        });
+        expect(denied.statusCode).toBe(403);
+        expect(denied.headers['access-control-allow-origin']).toBeUndefined();
+      }
+    } finally {
+      await hub.close();
+    }
+  });
 });
