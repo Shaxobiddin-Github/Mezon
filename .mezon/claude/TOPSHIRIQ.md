@@ -1,97 +1,108 @@
-# Claude topshirig'i: T1.1 rejasi — TUZATISHLAR BILAN TASDIQLANDI
+# Claude topshirig'i: T1.1 QABUL → T1.2 rejasi
 
-**Merge tekshiruvi:** T0.7 merge'i tekshirildi. `main` = `0b65a43`, kod `fd07ecb` bilan bir xil.
+## 1. T1.1 xulosasi: QABUL (kod `d8f4e77`)
 
-**F0 yakuniy tekshiruvi:**
+Claude tekshirdi:
 
-- `main` da `pnpm verify` o'tdi.
-- Ishlab chiqarish bog'liqliklarida ma'lum zaiflik yo'q.
-- Dev vositalarida 3 ta moderate zaiflik bor: esbuild (drizzle-kit orqali), glob (testcontainers), minimatch (eslint, electron-builder). Ular ilovaga kirmaydi. Hozir tegma, alohida texnik vazifa bo'ladi.
+- `pnpm verify` o'tdi: 135 test, sxema diff 0.
+- **Mustaqil qidiruv modeli:** 400 ta tasodifiy yaratish/tahrirlash/o'chirishdan keyin 120 ta lotin, kirill va apostrofli so'rovda FTS natijalari oddiy prefiks modeli bilan aynan teng chiqdi.
+- **Sahifalash:** bir xil nomli 30 mahsulotda takror ham, tushib qolish ham yo'q.
+- **Mutatsiya:** 16 ta ataylab kiritilgan xatodan 15 tasi ushlandi.
 
-**Tasdiqlangan qismlar:**
+Ajoyib ish, ayniqsa VACUUM xavfsiz FTS va unumdorlik optimizatsiyasi.
 
-- jadvallar va sinflar;
-- tashkilot darajasidagi katalog;
-- birlik qoidasi va property test;
-- GS1 nazorat raqamini qat'iy tekshirish (`internal`/`other` istisnosi bilan);
-- partial unique shtrix-kod;
-- skan natijasi shakli;
-- FTS5 yondashuvi;
-- RBAC va DTO mapper;
-- unumdorlik testi.
+**Test qarzi.** T1.2 PR'ining birinchi alohida commit'i: `T1.1 test qarzi: EAN-8 va FTS tartibi`.
 
-Quyidagi tuzatishlar bilan `gemini/T1.1-catalog` branch'ida kodni yoz.
+1. EAN-8 nazorat raqami tekshiruvi o'chirilganda (`prepareBarcodeForStorage` ichidagi EAN-8 `verifyGs1CheckDigit` sharti) testlar yiqilmadi. Noto'g'ri nazorat raqamli EAN-8 rad etilishini tekshiruvchi test qo'sh va buni mutatsiya bilan isbotla.
+2. FTS qidiruvi `ORDER BY f.rank ASC` bo'yicha tartiblanadi. Teng reytingda sahifalash barqaror bo'lishi uchun ikkinchi kalit `p.id` qo'shilsin. B-tree yo'lida bu allaqachon bor.
 
-## Majburiy tuzatishlar
+## 2. Merge
 
-### F1. FTS rowid'ga tayanmasin (VACUUM xavfi)
+1. `git pull --ff-only`.
+2. PR #8 boshi Claude'ning shu topshiriq commit'i bo'lsin, to'rtala CI job yashil bo'lsin.
+3. `T1.1: Katalog, shtrix-kod va qidiruv` nomi bilan Squash and merge qil, SHA'ni yoz va branch'ni o'chir.
+4. `main`dan `gemini/T1.2-stock` branch'ini och.
 
-`products` jadvalida `INTEGER PRIMARY KEY` yo'q, kalit TEXT UUID. Bunday jadvalning yashirin `rowid`i `VACUUM` paytida o'zgarishi mumkin. Shunda `rowid` bilan bog'langan FTS (`content=''` yoki external content) noto'g'ri mahsulotlarni qaytaradi.
+## 3. T1.2 — Ombor va partiya: avval REJA
 
-**Talab:**
+Kod yozma. Rejani `.mezon/gemini/HISOBOT.md` ga yoz, `[gemini-reja] T1.2` bilan commit qil va push qil, so'ng `node .mezon/kutish.mjs` bilan kut.
 
-- FTS jadvalida mahsulot UUID'si `product_id UNINDEXED` ustuni sifatida saqlansin.
-- Natija faqat `product_id` orqali `products`ga bog'lansin.
+GEMINI.md T1.2 talablari:
 
-**Test:** mahsulotlarni qo'sh, o'chir, qayta qo'sh, so'ng `VACUUM` qil. Qidiruv natijalari to'g'ri mahsulot ID'larini qaytaradi.
+- `stock_move` sabablari: boshlang'ich, kirim, savdo, qaytarish, inventarizatsiya, tuzatish, buzildi, sindi, shaxsiy, yo'qoldi;
+- `batch` (muddat, tannarx);
+- partiyali tovarda FIFO, boshqasida o'rtacha tannarx;
+- qoldiq proyeksiyasi va inventarizatsiya.
 
-### F2. FTS so'rovini tozalash (sintaksis in'ektsiyasi)
+Mezonlar:
 
-Kassir kiritgan matn FTS5 `MATCH` sintaksisiga to'g'ridan-to'g'ri tushmasin. `"`, `*`, `-`, `:`, `(`, `NEAR`, `OR`, `AND`, `NOT` kabi kiritmalar xato bermasin va so'rov ma'nosini o'zgartirmasin.
+- proyeksiya = ledger yig'indisi;
+- FIFO qo'lda hisoblangan misollar bilan teng;
+- qayta qurish natijasi teng.
 
-**Talab:**
+Rejada quyidagilar aniq bo'lsin:
 
-- So'rov normalizatsiyadan keyin tokenlarga bo'linsin.
-- Har token qo'shtirnoq ichida prefiks sifatida berilsin: `"tok"*`, tokenlar orasida AND.
-- Bo'sh natija xato emas.
+### a) Ledger va sinflar
 
-**Test:** jadvalli test, yuqoridagi barcha kiritmalar bilan.
+- `stock_moves`: FACT, do'kon darajasida.
+  - Ishorali `Quantity`, `reason` va manba hujjat (`source_type`, `source_id`).
+  - Ixtiyoriy `batch_id` va tannarx qiymati snapshot'i.
+  - Faqat qo'shiladi, tuzatish teskari harakat bilan.
+- `batches`: kirim paytida yaratiladigan FACT. Muddat va kirim tannarxi saqlanadi.
+- Qoldiq va partiya qoldig'i: LOCAL proyeksiya jadvallari. Ular sinxronlanmaydi va ledgerdan qayta quriladi (GEMINI.md 3.1 5-band).
+- `unlimited` mahsulotlar uchun qoldiq hisoblanmaydi. Siyosatni yoz.
+- Har harakatda miqdor T1.1 birlik qoidasi bilan tekshirilsin.
 
-### F3. UPC-A va EAN-13 bitta kod
+### b) Tannarx aniqligi: tiyin yo'qolmasin
 
-Skaner sozlamasiga qarab bir xil tovar `036000291452` (UPC-A, 12 raqam) yoki `0036000291452` (EAN-13) bo'lib o'qiladi.
+- Tannarx birlik narxi × miqdor bilan qayta hisoblanib, yaxlitlash qoldig'i yig'ilib bormasin.
+- Qiymatga asoslangan hisob yuritilsin: har partiya `remaining_qty` va `remaining_value` saqlaydi.
+- Chiqim qiymati `remaining_value × olinadigan / remaining_qty` (T0.2 `divideRoundHalfAwayFromZero`). Partiyaning oxirgi miqdori qolgan qiymatni to'liq oladi.
+- O'rtacha tannarx uchun ham xuddi shu qoida: umumiy qiymat va umumiy miqdor yuritiladi.
 
-**Talab:**
+**Invariant (property test):** har partiya va har mahsulot uchun `kirim qiymati = chiqim qiymatlari yig'indisi + qoldiq qiymat`, tiyinigacha aniq.
 
-- UPC-A saqlashda va skan qidiruvida kanonik EAN-13 ko'rinishga keltirilsin: oldiga `0` qo'shiladi.
-- Ikkala shakl ham bitta yozuvni topsin.
-- Ikkalasi alohida-alohida ro'yxatdan o'tkazilsa, noyoblik buzilishi sifatida rad etilsin.
+### c) Manfiy qoldiq
 
-**Test** bilan.
+Kassa savdoni to'xtatmasligi kerak (GEMINI.md 3.2). Real hayotda hisob xato bo'ladi.
 
-### F4. Qidiruv indeksi yaxlitligi va qayta qurish
+Rejada yoz:
 
-`name_search` va FTS — hosila ma'lumotlar. Ular sinxron orqali boshqa qurilmadan yoki boshqa normalizator versiyasidan kelishi mumkin.
+- siyosat (rad etish yoki ogohlantirish) qayerda saqlanadi va standart qiymati nima;
+- manfiy qoldiqda FIFO va o'rtacha tannarx qanday ishlaydi (masalan, "partiyasiz kamomad" va keyingi kirim kelganda uni yopish);
+- tannarx qiymati qanday aniqlanadi.
 
-**Talab:**
+Qo'lda hisoblangan misollar bilan.
 
-- `rebuildCatalogSearchIndex()` buyrug'i `name_search`ni joriy normalizator bilan qayta hisoblasin va FTS'ni noldan qursin.
-- FTS virtual jadvali va trigger'lar drizzle-kit tomonidan generatsiya qilinmaydi. Shuning uchun `db:check` ular migratsiyada borligini tekshirsin (T0.5 trigger tekshiruvi kabi) va salbiy dalil keltirilsin.
+### d) Tartib va sinxron
 
-**Property test:** tasodifiy yaratish, tahrirlash, tombstone va qayta yaratish ketma-ketligidan keyin FTS'dagi faol mahsulotlar to'plami `products`dagi faol mahsulotlar bilan aynan teng.
+O'rtacha tannarx va FIFO hodisalar tartibiga bog'liq. Boshqa qurilmadan kech kelgan harakat qayta qurishda natijani o'zgartirishi mumkin.
 
-### F5. Transliteratsiya aniqligi
+Rejada yoz:
 
-O'zbek kirillidagi `х` → `x` (`h` emas), `ҳ` → `h`. `ъ` (tutuq belgisi) va apostroflar kalitdan olib tashlanadi, `ь` ham olib tashlanadi.
+- qayta qurish qaysi tartibda ketadi (HLC);
+- allaqachon yozilgan savdo tannarxi snapshot'i o'zgarmaydi;
+- proyeksiya qayta qurilganda farq qanday hisobga olinadi.
 
-**Testlar:**
+### e) Inventarizatsiya
 
-- `хона` → `xona`
-- `ҳаво` → `havo`
-- `маъно` → `mano`
-- `Молоко` → `moloko`
-- `Coca-Cola Zero` "zero" bilan topiladi
+- Sanoq hujjati boshlanganda kutilgan qoldiq yozib olinadi.
+- Sanoq paytida bo'lgan savdolar ikki marta hisoblanmasin: tuzatish = sanalgan − sanoq boshlangandagi kutilgan qoldiq.
+- Tuzatish harakatlari bitta UoW'da yoziladi.
 
-## Ochiq savollarga javob
+Test bilan: sanoq davomida savdo bo'lganda yakuniy qoldiq to'g'ri chiqadi.
 
-1. Faol mahsulot yoki bola kategoriyasi bor kategoriyani o'chirish `409 CATEGORY_IN_USE` bilan bloklanadi. Tasdiqlandi.
-2. Narx tarixi faqat `owner`/`manager` (`catalog:write`) uchun. Kassirga faqat joriy narx kerak. Tasdiqlandi.
+### f) Hub API va RBAC
 
-## Bajarish tartibi
+- Qoldiqni ko'rish: `cashier` ham, lekin tannarxsiz.
+- Kirim, tuzatish, hisobdan chiqarish va inventarizatsiya: `owner`/`manager`.
+- Tannarx va foyda faqat `owner`/`manager` javobida bo'ladi. Kassir javobida bu maydonlar umuman yo'qligi test bilan tekshirilsin.
+- Kirim hujjati va ta'minotchi T1.8'da bo'ladi. Bu yerda faqat partiya yaratadigan asosiy kirim harakati.
 
-1. Kodni yoz.
-2. `pnpm verify` yashil bo'lsin.
-3. Commit, push va PR och.
-4. To'rtala CI job yashil bo'lsin.
-5. Hisobotni `.mezon/gemini/HISOBOT.md` ga yoz: p50/p95 o'lchovlari, F1–F5 dalillari va CI havolalari bilan. `[gemini-hisobot] T1.1` bilan commit qil va push qil.
-6. `node .mezon/kutish.mjs` ni ishga tushir. Merge qilma.
+### g) Qayta qurish
+
+- `rebuildStockProjections()` ledgerdan hamma proyeksiyani noldan quradi.
+- **Property test:** tasodifiy harakatlar ketma-ketligidan keyin oddiy, sekin, lekin aniq model bilan solishtir:
+  - qoldiq;
+  - partiya qoldig'i;
+  - qoldiq qiymati.
