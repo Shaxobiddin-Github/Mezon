@@ -286,10 +286,6 @@ export function validateSqliteSchemaRegistry(
     if (isSynced) {
       assertColumnExists(cfg.name, colsByName, 'device_id', true);
       assertColumnExists(cfg.name, colsByName, 'hlc', true);
-    } else {
-      if (colsByName.has('hlc') || colsByName.has('device_id')) {
-        throw new SchemaValidationError(`LOCAL table "${cfg.name}" must not declare hlc/device_id`);
-      }
     }
 
     if (meta.tableClass === 'FACT') {

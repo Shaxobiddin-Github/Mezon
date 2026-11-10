@@ -15,13 +15,18 @@ export type DomainErrorCode =
   | 'UUID_TIMESTAMP_OVERFLOW'
   | 'INVALID_HLC_FORMAT'
   | 'INVALID_HLC_COUNTER'
-  | 'INVALID_MAX_SKEW';
+  | 'INVALID_MAX_SKEW'
+  | 'UNIT_OF_WORK_REENTRANCY'
+  | 'UNIT_OF_WORK_REQUIRED'
+  | 'UNIT_OF_WORK_SESSION_CLOSED'
+  | 'UNIT_OF_WORK_CONCURRENT_NESTED'
+  | 'UNIT_OF_WORK_TENANT_MISMATCH';
 
 export class DomainError extends Error {
   readonly code: DomainErrorCode;
 
-  constructor(code: DomainErrorCode) {
-    super(code);
+  constructor(code: DomainErrorCode, detail?: string) {
+    super(detail ? `${code}: ${detail}` : code);
     this.name = 'DomainError';
     this.code = code;
   }

@@ -94,3 +94,15 @@ export {
   compareHlc,
   HlcClock,
 } from './hlc.js';
+
+export {
+  type OutboxEntityClass,
+  type OutboxPushStatus,
+  type OutboxEnvelope,
+  type PersistedOutboxRecord,
+  type DeviceStateSnapshot,
+  type UnitOfWorkSession,
+  type UnitOfWork,
+  type OutboxRepository,
+  type DeviceStateRepository,
+} from './uow.js';
