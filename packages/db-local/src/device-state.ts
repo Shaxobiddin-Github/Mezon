@@ -154,6 +154,53 @@ export function advanceDeviceSeqAndStateSync(
   return result.last_device_seq;
 }
 
+/**
+ * Atomically allocates the next gapless per-device `receipt_no` (`last_receipt_seq + 1`) inside the
+ * caller's active `BEGIN IMMEDIATE` transaction so failed sales and crashes never consume numbers.
+ */
+export function advanceReceiptSeqSync(
+  sqlite: Database.Database,
+  params: {
+    readonly deviceId: UuidV7;
+    readonly updatedAtMs: bigint;
+  },
+): bigint {
+  const validDeviceId = parseUuidV7(params.deviceId);
+  const validUpdatedAtMs = unixMsFromBigInt(params.updatedAtMs);
+
+  const result = sqlite
+    .prepare<[bigint, string], { readonly last_receipt_seq: unknown }>(
+      `
+      UPDATE local_device_state
+      SET
+        last_receipt_seq = last_receipt_seq + 1,
+        updated_at_ms = ?
+      WHERE device_id = ?
+      RETURNING last_receipt_seq
+      `,
+    )
+    .get(validUpdatedAtMs, validDeviceId);
+
+  if (!result || typeof result.last_receipt_seq !== 'bigint') {
+    throw new Error(
+      `Cannot allocate receipt_no: local_device_state row missing or invalid for device "${validDeviceId}"`,
+    );
+  }
+
+  return result.last_receipt_seq;
+}
+
+export function readReceiptSeqSync(db: BetterSQLite3Database, deviceId: UuidV7): bigint {
+  const validDeviceId = parseUuidV7(deviceId);
+  const rows = db
+    .select({ lastReceiptSeq: localDeviceState.lastReceiptSeq })
+    .from(localDeviceState)
+    .where(eq(localDeviceState.deviceId, validDeviceId))
+    .limit(1)
+    .all();
+  return rows[0]?.lastReceiptSeq ?? 0n;
+}
+
 export class SqliteDeviceStateRepository implements DeviceStateRepository<SqliteSessionDbAccess> {
   getByDeviceId(
     session: SqliteSessionDbAccess,

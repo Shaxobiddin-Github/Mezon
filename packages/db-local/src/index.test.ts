@@ -19,11 +19,13 @@ import {
   SchemaValidationError,
   SqliteSchemaRegistry,
   assertCatalogSearchMigrationsComplete,
+  assertSaleMigrationsComplete,
   assertSqliteTriggersMigrationsComplete,
   assertStockMigrationsComplete,
   batches,
   buildAllSqliteTriggersSql,
   buildCatalogSearchFtsSql,
+  buildSaleMonotoneTriggersSql,
   buildSqliteImmutabilityTriggersSql,
   buildStockMonotoneTriggersSql,
   categories,
@@ -44,11 +46,14 @@ import {
   localStockConflicts,
   migrateLocalDatabase,
   openLocalSqliteDatabase,
+  payments,
   priceChanges,
   productBarcodes,
   productVariants,
   products,
   promotions,
+  saleLines,
+  sales,
   sqliteBigint,
   sqliteBoolean,
   sqliteInt,
@@ -115,6 +120,9 @@ describe('@mezon/db-local - Schema foundation, registry, pragmas, and bigint saf
       ['promotions', 'ATTR'],
       ['local_carts', 'LOCAL'],
       ['local_cart_lines', 'LOCAL'],
+      ['sales', 'MONOTONE'],
+      ['sale_lines', 'FACT'],
+      ['payments', 'FACT'],
     ]);
     expect(() =>
       validateSqliteSchemaRegistry(
@@ -141,6 +149,9 @@ describe('@mezon/db-local - Schema foundation, registry, pragmas, and bigint saf
           promotions,
           localCarts,
           localCartLines,
+          sales,
+          saleLines,
+          payments,
         },
         localSchemaRegistry,
       ),
@@ -318,7 +329,7 @@ describe('@mezon/db-local - Schema foundation, registry, pragmas, and bigint saf
       const migCountRow = conn.sqlite
         .prepare('SELECT COUNT(*) as cnt FROM __drizzle_migrations')
         .get() as { cnt: bigint };
-      expect(migCountRow.cnt).toBe(6n);
+      expect(migCountRow.cnt).toBe(7n);
     } finally {
       conn.close();
     }
@@ -706,6 +717,21 @@ describe('@mezon/db-local - Schema foundation, registry, pragmas, and bigint saf
     expect(() => assertStockMigrationsComplete(missingLineInsertDir)).toThrowError(
       /BEFORE INSERT trigger on "inventory_count_lines"/,
     );
+
+    // T1.4 MONOTONE trigger checks for `sales`
+    const validSaleTrig = buildSaleMonotoneTriggersSql().join('\n');
+    const okSaleDir = makeMigDir();
+    fs.writeFileSync(path.join(okSaleDir, '0006.sql'), validSaleTrig);
+    expect(() => assertSaleMigrationsComplete(okSaleDir)).not.toThrow();
+
+    const missingVoidedTrigDir = makeMigDir();
+    fs.writeFileSync(
+      path.join(missingVoidedTrigDir, '0006.sql'),
+      validSaleTrig.replace(/CREATE TRIGGER "trg_sales_voided_monotone"[\s\S]*?END;/i, ''),
+    );
+    expect(() => assertSaleMigrationsComplete(missingVoidedTrigDir)).toThrowError(
+      /trg_sales_voided_monotone/,
+    );
   });
 
   it('cleanly upgrades a pre-populated 0003 database to 0004 without losing products or FTS triggers', () => {
@@ -820,6 +846,92 @@ describe('@mezon/db-local - Schema foundation, registry, pragmas, and bigint saf
           .prepare('DELETE FROM "products" WHERE "id" = ?')
           .run('01950000-0000-7000-8000-000000000020'),
       ).toThrow(/forbids physical DELETE/);
+    } finally {
+      conn.close();
+    }
+  });
+
+  it('cleanly upgrades a pre-populated 0005 database (with open carts, lines & device state) to 0006 under PRAGMA foreign_keys=ON', () => {
+    const migDir = getDefaultLocalMigrationsFolder();
+    const partialMigDir = path.join(os.tmpdir(), `mezon-mig-0005-${Date.now()}-${Math.random()}`);
+    fs.mkdirSync(path.join(partialMigDir, 'meta'), { recursive: true });
+    tempDirs.push(partialMigDir);
+
+    const journal = JSON.parse(
+      fs.readFileSync(path.join(migDir, 'meta', '_journal.json'), 'utf8'),
+    ) as {
+      readonly version: string;
+      readonly dialect: string;
+      entries: Array<{ readonly idx: number; readonly tag: string }>;
+    };
+    const entries05 = journal.entries.filter((e) => e.idx <= 5);
+    for (const entry of entries05) {
+      fs.copyFileSync(
+        path.join(migDir, `${entry.tag}.sql`),
+        path.join(partialMigDir, `${entry.tag}.sql`),
+      );
+    }
+    fs.writeFileSync(
+      path.join(partialMigDir, 'meta', '_journal.json'),
+      JSON.stringify({ ...journal, entries: entries05 }, null, 2),
+    );
+
+    const dbPath = makeTempDbPath('upgrade-0005-to-0006.db');
+    const conn = openLocalSqliteDatabase(dbPath);
+    try {
+      migrateLocalDatabase(conn.db, partialMigDir);
+
+      const devId = '01950000-0000-7000-8000-000000000001';
+      const orgId = '01950000-0000-7000-8000-000000000011';
+      const storeId = '01950000-0000-7000-8000-000000000012';
+      const userId = '01950000-0000-7000-8000-000000000013';
+      const cartId = '01950000-0000-7000-8000-000000000014';
+      const lineId = '01950000-0000-7000-8000-000000000015';
+      const hlc58 = serializeHlc(
+        createHlcTimestamp(unixMsFromBigInt(1_760_000_000_000n), 0, parseUuidV7(devId)),
+      );
+
+      conn.sqlite
+        .prepare(
+          `INSERT INTO "local_device_state" ("id", "organization_id", "created_at_ms", "updated_at_ms", "device_id", "last_device_seq", "last_hlc", "last_uuid_ms")
+           VALUES (?, ?, 1760000000000, 1760000000000, ?, 3, ?, 1760000000000)`,
+        )
+        .run('01950000-0000-7000-8000-000000000010', orgId, devId, hlc58);
+      conn.sqlite
+        .prepare(
+          `INSERT INTO "users" ("id", "organization_id", "device_id", "hlc", "created_at_ms", "updated_at_ms", "deleted_at_ms", "username", "full_name", "role", "is_active")
+           VALUES (?, ?, ?, ?, 1760000000000, 1760000000000, NULL, 'cashier1', 'Cashier One', 'cashier', 1)`,
+        )
+        .run(userId, orgId, devId, hlc58);
+      conn.sqlite
+        .prepare(
+          `INSERT INTO "local_carts" ("id", "organization_id", "store_id", "created_at_ms", "updated_at_ms", "cashier_user_id", "status", "park_label", "parked_at_ms", "manual_discount_mode", "manual_discount_value", "manual_discount_reason", "override_approved_by_user_id", "override_approved_amount", "override_approved_at_ms")
+           VALUES (?, ?, ?, 1760000000000, 1760000000000, ?, 'open', NULL, NULL, 'none', 0, NULL, NULL, NULL, NULL)`,
+        )
+        .run(cartId, orgId, storeId, userId);
+      conn.sqlite
+        .prepare(
+          `INSERT INTO "local_cart_lines" ("id", "organization_id", "store_id", "created_at_ms", "updated_at_ms", "cart_id", "sort_order", "line_kind", "product_id", "variant_id", "category_id_snapshot", "item_name", "unit", "qty", "unit_price_snapshot", "mxik_snapshot", "package_code_snapshot", "vat_rate_bp_snapshot")
+           VALUES (?, ?, ?, 1760000000000, 1760000000000, ?, 0, 'quick_sale', NULL, NULL, NULL, 'Fast Item', 'dona', 1000, 50000, NULL, NULL, 0)`,
+        )
+        .run(lineId, orgId, storeId, cartId);
+
+      // Upgrade to 0006 cleanly under PRAGMA foreign_keys = ON inside Drizzle transaction
+      migrateLocalDatabase(conn.db, migDir);
+
+      const devRow = conn.sqlite
+        .prepare(
+          'SELECT "last_device_seq", "last_receipt_seq" FROM "local_device_state" WHERE "device_id" = ?',
+        )
+        .get(devId) as { readonly last_device_seq: bigint; readonly last_receipt_seq: bigint };
+      expect(devRow.last_device_seq).toBe(3n);
+      expect(devRow.last_receipt_seq).toBe(0n);
+
+      const lineRow = conn.sqlite
+        .prepare('SELECT "item_name", "unit_price_snapshot" FROM "local_cart_lines" WHERE "id" = ?')
+        .get(lineId) as { readonly item_name: string; readonly unit_price_snapshot: bigint };
+      expect(lineRow.item_name).toBe('Fast Item');
+      expect(lineRow.unit_price_snapshot).toBe(50_000n);
     } finally {
       conn.close();
     }

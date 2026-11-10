@@ -31,6 +31,7 @@ const DOMAIN_ERROR_HTTP_STATUS: Readonly<Record<DomainErrorCode, number>> = {
   INVALID_STOCK_MOVE_REASON: 400,
   BATCH_REQUIRED: 400,
   INVALID_PROMOTION: 400,
+  CART_EMPTY: 400,
   AUTH_UNAUTHORIZED: 401,
   AUTH_INVALID_CREDENTIALS: 401,
   AUTH_FORBIDDEN: 403,
@@ -61,6 +62,8 @@ const DOMAIN_ERROR_HTTP_STATUS: Readonly<Record<DomainErrorCode, number>> = {
   INVENTORY_COUNT_NOT_OPEN: 409,
   CART_NOT_OPEN: 409,
   CART_NOT_PARKED: 409,
+  SALE_TOTAL_CHANGED: 409,
+  IDEMPOTENCY_CONFLICT: 409,
   INVALID_HOST: 421,
   AUTH_RATE_LIMITED: 429,
   UNIT_OF_WORK_REENTRANCY: 500,
@@ -131,6 +134,7 @@ export function registerHubErrorHandlers(app: FastifyInstance): void {
         error: {
           code: err.code,
           message: err.message,
+          ...(err.details !== undefined ? { details: err.details } : {}),
         },
       } satisfies ApiErrorEnvelope);
     }

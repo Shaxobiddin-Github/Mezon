@@ -1,4 +1,9 @@
-export { DomainError, type DomainErrorCode, type DomainErrorOptions } from './errors.js';
+export {
+  DomainError,
+  type DomainErrorCode,
+  type DomainErrorDetails,
+  type DomainErrorOptions,
+} from './errors.js';
 
 export {
   USER_ROLES,
@@ -226,3 +231,15 @@ export {
   evaluateCart,
   assertCartDiscountAuthorized,
 } from './cart.js';
+
+export {
+  PAYMENT_METHODS,
+  type PaymentMethod,
+  type ValidatedCashPayment,
+  type SalePaymentInvariantItem,
+  isPaymentMethod,
+  parsePaymentMethod,
+  formatReceiptCode,
+  validateCashSalePayment,
+  validateSalePaymentsInvariant,
+} from './sale.js';

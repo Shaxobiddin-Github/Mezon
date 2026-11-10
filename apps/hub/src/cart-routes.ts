@@ -2,6 +2,7 @@ import {
   AddCartLineRequestSchema,
   CartIdParamsSchema,
   CartLineParamsSchema,
+  CompleteSaleRequestSchema,
   CreateCartRequestSchema,
   CreatePromotionRequestSchema,
   ListPromotionsQuerySchema,
@@ -16,6 +17,7 @@ import type { HubPermission } from '@mezon/domain';
 import type { FastifyInstance, FastifyRequest } from 'fastify';
 import type { HubAuthService } from './auth-service.js';
 import type { HubCartService } from './cart-service.js';
+import type { HubSaleService } from './sale-service.js';
 
 async function authorize(
   authService: HubAuthService,
@@ -31,6 +33,7 @@ export function registerCartRoutes(
   app: FastifyInstance,
   authService: HubAuthService,
   cartService: HubCartService,
+  saleService?: HubSaleService,
 ): void {
   // --- Cashier Discount Limits & Quick-Sale Defaults (P3) ---
 
@@ -158,4 +161,29 @@ export function registerCartRoutes(
     const params = CartIdParamsSchema.parse(request.params);
     return cartService.resumeCart(params.id);
   });
+
+  if (saleService) {
+    app.post('/carts/:id/complete', async (request) => {
+      const session = await authorize(authService, request, 'cart:write');
+      const params = CartIdParamsSchema.parse(request.params);
+      const body = CompleteSaleRequestSchema.parse(request.body);
+      const res = await saleService.completeSale(params.id, session.user.id, body);
+      request.log.info(
+        {
+          event: 'sale.completed',
+          organizationId: res.sale.organizationId,
+          storeId: res.sale.storeId,
+          saleId: res.sale.id,
+          receiptNo: res.sale.receiptNo,
+          receiptCode: res.sale.receiptCode,
+          cashierUserId: res.sale.cashierUserId,
+          totalFinal: res.sale.totalFinal,
+          lineCount: res.sale.lines.length,
+          warningCount: res.warnings.length,
+        },
+        'Completed POS sale',
+      );
+      return res;
+    });
+  }
 }

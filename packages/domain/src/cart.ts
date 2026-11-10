@@ -50,7 +50,7 @@ export type PromotionScope = (typeof PROMOTION_SCOPES)[number];
 export const MANUAL_DISCOUNT_MODES = ['none', 'percent', 'amount'] as const;
 export type ManualDiscountMode = (typeof MANUAL_DISCOUNT_MODES)[number];
 
-export const CART_STATUSES = ['open', 'parked'] as const;
+export const CART_STATUSES = ['open', 'parked', 'completed'] as const;
 export type CartStatus = (typeof CART_STATUSES)[number];
 
 export const CART_LINE_KINDS = ['catalog', 'quick_sale'] as const;

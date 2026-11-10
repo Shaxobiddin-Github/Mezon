@@ -58,23 +58,31 @@ export type DomainErrorCode =
   | 'CART_NOT_FOUND'
   | 'CART_NOT_OPEN'
   | 'CART_NOT_PARKED'
+  | 'CART_EMPTY'
   | 'CART_LINE_NOT_FOUND'
   | 'PROMOTION_NOT_FOUND'
   | 'INVALID_PROMOTION'
-  | 'DISCOUNT_OVERRIDE_REQUIRED';
+  | 'DISCOUNT_OVERRIDE_REQUIRED'
+  | 'SALE_TOTAL_CHANGED'
+  | 'IDEMPOTENCY_CONFLICT';
+
+export type DomainErrorDetails = Readonly<Record<string, unknown>>;
 
 export interface DomainErrorOptions {
   readonly retryAfterSeconds?: bigint;
+  readonly details?: DomainErrorDetails;
 }
 
 export class DomainError extends Error {
   readonly code: DomainErrorCode;
   readonly retryAfterSeconds?: bigint;
+  readonly details?: DomainErrorDetails;
 
   constructor(code: DomainErrorCode, detail?: string, options?: DomainErrorOptions) {
     super(detail ? `${code}: ${detail}` : code);
     this.name = 'DomainError';
     this.code = code;
     this.retryAfterSeconds = options?.retryAfterSeconds;
+    this.details = options?.details;
   }
 }

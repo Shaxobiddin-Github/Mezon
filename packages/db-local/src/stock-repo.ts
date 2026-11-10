@@ -262,6 +262,428 @@ function toStoredConflict(row: typeof localStockConflicts.$inferSelect): StoredS
   };
 }
 
+export interface OutboundStockMoveSessionParams {
+  readonly organizationId: UuidV7;
+  readonly storeId: UuidV7;
+  readonly productId: UuidV7;
+  readonly variantId: UuidV7 | null;
+  readonly reason: StockMoveReason;
+  readonly needQty: Quantity;
+  readonly overridePolicy?: NegativeStockPolicy;
+  readonly sourceType: StockSourceType;
+  readonly sourceId: UuidV7;
+  readonly note: string | null;
+  readonly actorUserId: UuidV7;
+  /** Optional prefetched tracked product row from the same UoW session (avoids N+1 queries). */
+  readonly prefetchedProduct?: typeof products.$inferSelect;
+  /** Optional prefetched pool-state cache shared across multiple lines in one transaction. */
+  readonly sessionPoolCache?: Map<string, ReplayStockPoolState>;
+}
+
+export interface OutboundStockMoveSessionOutcome {
+  readonly moves: readonly StoredStockMoveRecord[];
+  readonly warnings: readonly StockMoveWarningRecord[];
+}
+
+function requireTrackedProductSync(
+  session: SqliteUnitOfWorkSession,
+  organizationId: UuidV7,
+  productId: UuidV7,
+  variantId: UuidV7 | null,
+  prefetchedProduct?: typeof products.$inferSelect,
+): {
+  readonly product: typeof products.$inferSelect;
+  readonly variant: typeof productVariants.$inferSelect | null;
+} {
+  const product =
+    prefetchedProduct ??
+    session.db
+      .select()
+      .from(products)
+      .where(
+        and(
+          eq(products.id, productId),
+          eq(products.organizationId, organizationId),
+          isNull(products.deletedAtMs),
+        ),
+      )
+      .limit(1)
+      .all()[0];
+  if (!product || product.deletedAtMs !== null) {
+    throw new DomainError('PRODUCT_NOT_FOUND', `Product "${productId}" was not found`);
+  }
+  if (Boolean(product.unlimited)) {
+    throw new DomainError(
+      'UNLIMITED_PRODUCT_STOCK_NOT_TRACKED',
+      `Unlimited product "${product.name}" does not track stock`,
+    );
+  }
+
+  let variant: typeof productVariants.$inferSelect | null = null;
+  if (variantId !== null && prefetchedProduct === undefined) {
+    variant =
+      session.db
+        .select()
+        .from(productVariants)
+        .where(
+          and(
+            eq(productVariants.id, variantId),
+            eq(productVariants.organizationId, organizationId),
+            eq(productVariants.productId, productId),
+            isNull(productVariants.deletedAtMs),
+          ),
+        )
+        .limit(1)
+        .all()[0] ?? null;
+    if (!variant) {
+      throw new DomainError(
+        'VARIANT_NOT_FOUND',
+        `Variant "${variantId}" was not found for product "${productId}"`,
+      );
+    }
+  }
+
+  return { product, variant };
+}
+
+function readPoolRowSync(
+  session: SqliteUnitOfWorkSession,
+  organizationId: UuidV7,
+  storeId: UuidV7,
+  productId: UuidV7,
+  variantId: UuidV7 | null,
+): typeof localStockBalances.$inferSelect | null {
+  return (
+    session.db
+      .select()
+      .from(localStockBalances)
+      .where(
+        and(
+          eq(localStockBalances.organizationId, organizationId),
+          eq(localStockBalances.storeId, storeId),
+          eq(localStockBalances.productId, productId),
+          variantId === null
+            ? isNull(localStockBalances.variantId)
+            : eq(localStockBalances.variantId, variantId),
+        ),
+      )
+      .limit(1)
+      .all()[0] ?? null
+  );
+}
+
+function loadMutablePoolStateSync(
+  session: SqliteUnitOfWorkSession,
+  organizationId: UuidV7,
+  storeId: UuidV7,
+  productId: UuidV7,
+  variantId: UuidV7 | null,
+  trackBatches: boolean,
+): ReplayStockPoolState {
+  const state = createEmptyStockPoolState();
+  const row = readPoolRowSync(session, organizationId, storeId, productId, variantId);
+  if (row) {
+    state.qtyOnHand = row.qtyOnHand;
+    state.totalValue = row.totalValue;
+    state.deficitQty = row.deficitQty;
+    state.provisionalDeficitValue = row.provisionalDeficitValue;
+    state.costVarianceValue = row.costVarianceValue;
+    state.lastUnitCost = row.lastUnitCost;
+  }
+
+  if (trackBatches) {
+    const batchRows = session.db
+      .select()
+      .from(localBatchBalances)
+      .where(
+        and(
+          eq(localBatchBalances.organizationId, organizationId),
+          eq(localBatchBalances.storeId, storeId),
+          eq(localBatchBalances.productId, productId),
+          variantId === null
+            ? isNull(localBatchBalances.variantId)
+            : eq(localBatchBalances.variantId, variantId),
+        ),
+      )
+      .orderBy(asc(localBatchBalances.hlc), asc(localBatchBalances.batchId))
+      .all();
+
+    for (const b of batchRows) {
+      state.batches.set(b.batchId, {
+        batchId: b.batchId,
+        hlc: b.hlc,
+        remainingQty: b.remainingQty,
+        remainingValue: b.remainingValue,
+      });
+    }
+  }
+
+  return state;
+}
+
+function savePoolAndBatchesSync(
+  session: SqliteUnitOfWorkSession,
+  organizationId: UuidV7,
+  storeId: UuidV7,
+  productId: UuidV7,
+  variantId: UuidV7 | null,
+  state: ReplayStockPoolState,
+  nowMs: UnixMs,
+  touchedBatchIds: readonly UuidV7[],
+): void {
+  const existing = readPoolRowSync(session, organizationId, storeId, productId, variantId);
+  if (existing) {
+    session.db
+      .update(localStockBalances)
+      .set({
+        qtyOnHand: state.qtyOnHand,
+        totalValue: state.totalValue,
+        deficitQty: state.deficitQty,
+        provisionalDeficitValue: state.provisionalDeficitValue,
+        costVarianceValue: state.costVarianceValue,
+        lastUnitCost: state.lastUnitCost,
+        updatedAtMs: nowMs,
+      })
+      .where(eq(localStockBalances.id, existing.id))
+      .run();
+  } else {
+    session.db
+      .insert(localStockBalances)
+      .values({
+        id: session.nextId(),
+        organizationId,
+        storeId,
+        productId,
+        variantId,
+        qtyOnHand: state.qtyOnHand,
+        totalValue: state.totalValue,
+        deficitQty: state.deficitQty,
+        provisionalDeficitValue: state.provisionalDeficitValue,
+        costVarianceValue: state.costVarianceValue,
+        lastUnitCost: state.lastUnitCost,
+        createdAtMs: nowMs,
+        updatedAtMs: nowMs,
+      })
+      .run();
+  }
+
+  for (const batchId of touchedBatchIds) {
+    const mem = state.batches.get(batchId);
+    if (!mem) {
+      continue;
+    }
+    const existingBatch = session.db
+      .select({ id: localBatchBalances.id })
+      .from(localBatchBalances)
+      .where(eq(localBatchBalances.batchId, batchId))
+      .limit(1)
+      .all()[0];
+    if (existingBatch) {
+      session.db
+        .update(localBatchBalances)
+        .set({
+          remainingQty: mem.remainingQty,
+          remainingValue: mem.remainingValue,
+          updatedAtMs: nowMs,
+        })
+        .where(eq(localBatchBalances.id, existingBatch.id))
+        .run();
+    } else {
+      session.db
+        .insert(localBatchBalances)
+        .values({
+          id: session.nextId(),
+          organizationId,
+          storeId,
+          batchId: mem.batchId,
+          productId,
+          variantId,
+          hlc: mem.hlc,
+          remainingQty: mem.remainingQty,
+          remainingValue: mem.remainingValue,
+          createdAtMs: nowMs,
+          updatedAtMs: nowMs,
+        })
+        .run();
+    }
+  }
+}
+
+/**
+ * Authoritative internal session helper for outbound stock moves (FIFO batch & average costing,
+ * negative stock policy, balance projections, and `stock_move.created` outbox event).
+ * Shared directly by standalone `SqliteStockStore.recordOutboundMove` and `completeSale` so
+ * there is no nested `uow.execute` and no duplicated stock logic.
+ */
+export function applyOutboundStockMoveSync(
+  session: SqliteUnitOfWorkSession,
+  params: OutboundStockMoveSessionParams,
+): OutboundStockMoveSessionOutcome {
+  session.assertActiveTransaction();
+  const { product } = requireTrackedProductSync(
+    session,
+    params.organizationId,
+    params.productId,
+    params.variantId,
+    params.prefetchedProduct,
+  );
+  const unit = parseProductUnit(product.unit);
+  const needQty = validatePositiveStockQuantity(unit, params.needQty);
+  const trackBatches = Boolean(product.trackBatches);
+  const nowMs = session.nowUnixMs();
+
+  const policy =
+    params.overridePolicy ??
+    parseNegativeStockPolicy(
+      session.db
+        .select({ policy: localHubConfig.negativeStockPolicy })
+        .from(localHubConfig)
+        .limit(1)
+        .all()[0]?.policy ?? 'warn',
+    );
+
+  const key = poolKey(params.productId, params.variantId);
+  const cachedState = params.sessionPoolCache?.get(key);
+  const poolState =
+    cachedState ??
+    loadMutablePoolStateSync(
+      session,
+      params.organizationId,
+      params.storeId,
+      params.productId,
+      params.variantId,
+      trackBatches,
+    );
+  if (params.sessionPoolCache && !cachedState) {
+    params.sessionPoolCache.set(key, poolState);
+  }
+
+  const writtenMoves: StoredStockMoveRecord[] = [];
+  const warnings: StockMoveWarningRecord[] = [];
+  const touchedBatchIds: UuidV7[] = [];
+
+  if (trackBatches) {
+    const orderedBatches = [...poolState.batches.values()]
+      .filter((b) => quantityToMilli(b.remainingQty) > 0n)
+      .sort((a, b) => (a.hlc < b.hlc ? -1 : a.hlc > b.hlc ? 1 : a.batchId < b.batchId ? -1 : 1));
+
+    const plan = planFifoOutboundLegs({
+      batches: orderedBatches,
+      needQty,
+      lastUnitCost: poolState.lastUnitCost,
+      negativePolicy: policy,
+    });
+
+    for (const leg of plan.legs) {
+      const moveWrite = insertFact(session, stockMoves, {
+        organizationId: params.organizationId,
+        storeId: params.storeId,
+        values: {
+          productId: params.productId,
+          variantId: params.variantId,
+          batchId: leg.batchId,
+          qtyDelta: quantityFromMilli(-quantityToMilli(leg.qty)),
+          costValueDelta: moneyFromTiyin(-moneyToTiyin(leg.costValue)),
+          reason: params.reason,
+          sourceType: params.sourceType,
+          sourceId: params.sourceId,
+          createdByUserId: params.actorUserId,
+          note: params.note,
+        },
+        eventType: 'stock_move.created',
+        schemaVersion: 1,
+      });
+
+      applyReplayStockMove(poolState, {
+        moveId: moveWrite.entityId,
+        productId: params.productId,
+        variantId: params.variantId,
+        batchId: leg.batchId,
+        hlc: moveWrite.hlc,
+        reason: params.reason,
+        qtyDelta: quantityFromMilli(-quantityToMilli(leg.qty)),
+        costValueDelta: moneyFromTiyin(-moneyToTiyin(leg.costValue)),
+        trackBatches: true,
+      });
+      if (leg.batchId !== null) {
+        touchedBatchIds.push(leg.batchId);
+      }
+      writtenMoves.push(toStoredMove(moveWrite.row));
+    }
+
+    if (plan.negativeStockWarning) {
+      warnings.push({
+        code: 'NEGATIVE_STOCK',
+        productId: params.productId,
+        variantId: params.variantId,
+        deficitQty: poolState.deficitQty,
+      });
+    }
+  } else {
+    const plan = planAverageOutboundCost({
+      qtyOnHand: poolState.qtyOnHand,
+      totalValue: poolState.totalValue,
+      lastUnitCost: poolState.lastUnitCost,
+      needQty,
+      negativePolicy: policy,
+    });
+
+    const moveWrite = insertFact(session, stockMoves, {
+      organizationId: params.organizationId,
+      storeId: params.storeId,
+      values: {
+        productId: params.productId,
+        variantId: params.variantId,
+        batchId: null,
+        qtyDelta: quantityFromMilli(-quantityToMilli(needQty)),
+        costValueDelta: moneyFromTiyin(-moneyToTiyin(plan.costValue)),
+        reason: params.reason,
+        sourceType: params.sourceType,
+        sourceId: params.sourceId,
+        createdByUserId: params.actorUserId,
+        note: params.note,
+      },
+      eventType: 'stock_move.created',
+      schemaVersion: 1,
+    });
+
+    applyReplayStockMove(poolState, {
+      moveId: moveWrite.entityId,
+      productId: params.productId,
+      variantId: params.variantId,
+      batchId: null,
+      hlc: moveWrite.hlc,
+      reason: params.reason,
+      qtyDelta: quantityFromMilli(-quantityToMilli(needQty)),
+      costValueDelta: moneyFromTiyin(-moneyToTiyin(plan.costValue)),
+      trackBatches: false,
+    });
+    writtenMoves.push(toStoredMove(moveWrite.row));
+
+    if (plan.negativeStockWarning) {
+      warnings.push({
+        code: 'NEGATIVE_STOCK',
+        productId: params.productId,
+        variantId: params.variantId,
+        deficitQty: poolState.deficitQty,
+      });
+    }
+  }
+
+  savePoolAndBatchesSync(
+    session,
+    params.organizationId,
+    params.storeId,
+    params.productId,
+    params.variantId,
+    poolState,
+    nowMs,
+    touchedBatchIds,
+  );
+
+  return { moves: writtenMoves, warnings };
+}
+
 function parsePositiveBigInt(
   raw: string,
   code: 'INVALID_UNIT_QUANTITY' | 'VALIDATION_ERROR',
@@ -831,7 +1253,7 @@ export class SqliteStockStore {
     const note = input.note?.trim() ? input.note.trim() : null;
 
     return uow.execute((session) => {
-      const outcome = this.applyOutboundInsideSessionSync(session, {
+      const outcome = applyOutboundStockMoveSync(session, {
         organizationId,
         storeId,
         productId,
@@ -988,7 +1410,7 @@ export class SqliteStockStore {
       for (const item of lines) {
         const productId = parseUuidV7(item.productId);
         const variantId = item.variantId ? parseUuidV7(item.variantId) : null;
-        const { product } = this.requireTrackedProductSync(
+        const { product } = requireTrackedProductSync(
           session,
           organizationId,
           productId,
@@ -1151,13 +1573,13 @@ export class SqliteStockStore {
         }
 
         if (adjMilli > 0n) {
-          const { product } = this.requireTrackedProductSync(
+          const { product } = requireTrackedProductSync(
             session,
             organizationId,
             line.productId,
             line.variantId,
           );
-          const poolRow = this.readPoolRowSync(
+          const poolRow = readPoolRowSync(
             session,
             organizationId,
             storeId,
@@ -1191,7 +1613,7 @@ export class SqliteStockStore {
           createdConflicts.push(...inboundOut.conflicts);
         } else {
           const needQty = quantityFromMilli(-adjMilli);
-          const outboundOut = this.applyOutboundInsideSessionSync(session, {
+          const outboundOut = applyOutboundStockMoveSync(session, {
             organizationId,
             storeId,
             productId: line.productId,
@@ -1292,7 +1714,7 @@ export class SqliteStockStore {
     readonly batch: StoredBatchRecord | null;
     readonly conflicts: readonly StoredStockConflictRecord[];
   } {
-    const { product } = this.requireTrackedProductSync(
+    const { product } = requireTrackedProductSync(
       session,
       params.organizationId,
       params.productId,
@@ -1303,7 +1725,7 @@ export class SqliteStockStore {
     const trackBatches = Boolean(product.trackBatches);
     const nowMs = session.nowUnixMs();
 
-    const poolState = this.loadMutablePoolStateSync(
+    const poolState = loadMutablePoolStateSync(
       session,
       params.organizationId,
       params.storeId,
@@ -1363,7 +1785,7 @@ export class SqliteStockStore {
       trackBatches,
     });
 
-    this.savePoolAndBatchesSync(
+    savePoolAndBatchesSync(
       session,
       params.organizationId,
       params.storeId,
@@ -1406,402 +1828,6 @@ export class SqliteStockStore {
       batch: batchRecord,
       conflicts: savedConflicts,
     };
-  }
-
-  private applyOutboundInsideSessionSync(
-    session: SqliteUnitOfWorkSession,
-    params: {
-      readonly organizationId: UuidV7;
-      readonly storeId: UuidV7;
-      readonly productId: UuidV7;
-      readonly variantId: UuidV7 | null;
-      readonly reason: StockMoveReason;
-      readonly needQty: Quantity;
-      readonly overridePolicy?: NegativeStockPolicy;
-      readonly sourceType: StockSourceType;
-      readonly sourceId: UuidV7;
-      readonly note: string | null;
-      readonly actorUserId: UuidV7;
-    },
-  ): {
-    readonly moves: readonly StoredStockMoveRecord[];
-    readonly warnings: readonly StockMoveWarningRecord[];
-  } {
-    const { product } = this.requireTrackedProductSync(
-      session,
-      params.organizationId,
-      params.productId,
-      params.variantId,
-    );
-    const unit = parseProductUnit(product.unit);
-    const needQty = validatePositiveStockQuantity(unit, params.needQty);
-    const trackBatches = Boolean(product.trackBatches);
-    const nowMs = session.nowUnixMs();
-
-    const policy =
-      params.overridePolicy ??
-      parseNegativeStockPolicy(
-        session.db
-          .select({ policy: localHubConfig.negativeStockPolicy })
-          .from(localHubConfig)
-          .limit(1)
-          .all()[0]?.policy ?? 'warn',
-      );
-
-    const poolState = this.loadMutablePoolStateSync(
-      session,
-      params.organizationId,
-      params.storeId,
-      params.productId,
-      params.variantId,
-      trackBatches,
-    );
-
-    const writtenMoves: StoredStockMoveRecord[] = [];
-    const warnings: StockMoveWarningRecord[] = [];
-    const touchedBatchIds: UuidV7[] = [];
-
-    if (trackBatches) {
-      const orderedBatches = [...poolState.batches.values()]
-        .filter((b) => quantityToMilli(b.remainingQty) > 0n)
-        .sort((a, b) => (a.hlc < b.hlc ? -1 : a.hlc > b.hlc ? 1 : a.batchId < b.batchId ? -1 : 1));
-
-      const plan = planFifoOutboundLegs({
-        batches: orderedBatches,
-        needQty,
-        lastUnitCost: poolState.lastUnitCost,
-        negativePolicy: policy,
-      });
-
-      for (const leg of plan.legs) {
-        const moveWrite = insertFact(session, stockMoves, {
-          organizationId: params.organizationId,
-          storeId: params.storeId,
-          values: {
-            productId: params.productId,
-            variantId: params.variantId,
-            batchId: leg.batchId,
-            qtyDelta: quantityFromMilli(-quantityToMilli(leg.qty)),
-            costValueDelta: moneyFromTiyin(-moneyToTiyin(leg.costValue)),
-            reason: params.reason,
-            sourceType: params.sourceType,
-            sourceId: params.sourceId,
-            createdByUserId: params.actorUserId,
-            note: params.note,
-          },
-          eventType: 'stock_move.created',
-          schemaVersion: 1,
-        });
-
-        applyReplayStockMove(poolState, {
-          moveId: moveWrite.entityId,
-          productId: params.productId,
-          variantId: params.variantId,
-          batchId: leg.batchId,
-          hlc: moveWrite.hlc,
-          reason: params.reason,
-          qtyDelta: quantityFromMilli(-quantityToMilli(leg.qty)),
-          costValueDelta: moneyFromTiyin(-moneyToTiyin(leg.costValue)),
-          trackBatches: true,
-        });
-        if (leg.batchId !== null) {
-          touchedBatchIds.push(leg.batchId);
-        }
-        writtenMoves.push(toStoredMove(moveWrite.row));
-      }
-
-      if (plan.negativeStockWarning) {
-        warnings.push({
-          code: 'NEGATIVE_STOCK',
-          productId: params.productId,
-          variantId: params.variantId,
-          deficitQty: poolState.deficitQty,
-        });
-      }
-    } else {
-      const plan = planAverageOutboundCost({
-        qtyOnHand: poolState.qtyOnHand,
-        totalValue: poolState.totalValue,
-        lastUnitCost: poolState.lastUnitCost,
-        needQty,
-        negativePolicy: policy,
-      });
-
-      const moveWrite = insertFact(session, stockMoves, {
-        organizationId: params.organizationId,
-        storeId: params.storeId,
-        values: {
-          productId: params.productId,
-          variantId: params.variantId,
-          batchId: null,
-          qtyDelta: quantityFromMilli(-quantityToMilli(needQty)),
-          costValueDelta: moneyFromTiyin(-moneyToTiyin(plan.costValue)),
-          reason: params.reason,
-          sourceType: params.sourceType,
-          sourceId: params.sourceId,
-          createdByUserId: params.actorUserId,
-          note: params.note,
-        },
-        eventType: 'stock_move.created',
-        schemaVersion: 1,
-      });
-
-      applyReplayStockMove(poolState, {
-        moveId: moveWrite.entityId,
-        productId: params.productId,
-        variantId: params.variantId,
-        batchId: null,
-        hlc: moveWrite.hlc,
-        reason: params.reason,
-        qtyDelta: quantityFromMilli(-quantityToMilli(needQty)),
-        costValueDelta: moneyFromTiyin(-moneyToTiyin(plan.costValue)),
-        trackBatches: false,
-      });
-      writtenMoves.push(toStoredMove(moveWrite.row));
-
-      if (plan.negativeStockWarning) {
-        warnings.push({
-          code: 'NEGATIVE_STOCK',
-          productId: params.productId,
-          variantId: params.variantId,
-          deficitQty: poolState.deficitQty,
-        });
-      }
-    }
-
-    this.savePoolAndBatchesSync(
-      session,
-      params.organizationId,
-      params.storeId,
-      params.productId,
-      params.variantId,
-      poolState,
-      nowMs,
-      touchedBatchIds,
-    );
-
-    return { moves: writtenMoves, warnings };
-  }
-
-  private requireTrackedProductSync(
-    session: SqliteUnitOfWorkSession,
-    organizationId: UuidV7,
-    productId: UuidV7,
-    variantId: UuidV7 | null,
-  ): {
-    readonly product: typeof products.$inferSelect;
-    readonly variant: typeof productVariants.$inferSelect | null;
-  } {
-    const product = session.db
-      .select()
-      .from(products)
-      .where(
-        and(
-          eq(products.id, productId),
-          eq(products.organizationId, organizationId),
-          isNull(products.deletedAtMs),
-        ),
-      )
-      .limit(1)
-      .all()[0];
-    if (!product) {
-      throw new DomainError('PRODUCT_NOT_FOUND', `Product "${productId}" was not found`);
-    }
-    if (Boolean(product.unlimited)) {
-      throw new DomainError(
-        'UNLIMITED_PRODUCT_STOCK_NOT_TRACKED',
-        `Unlimited product "${product.name}" does not track stock`,
-      );
-    }
-
-    let variant: typeof productVariants.$inferSelect | null = null;
-    if (variantId !== null) {
-      variant =
-        session.db
-          .select()
-          .from(productVariants)
-          .where(
-            and(
-              eq(productVariants.id, variantId),
-              eq(productVariants.organizationId, organizationId),
-              eq(productVariants.productId, productId),
-              isNull(productVariants.deletedAtMs),
-            ),
-          )
-          .limit(1)
-          .all()[0] ?? null;
-      if (!variant) {
-        throw new DomainError(
-          'VARIANT_NOT_FOUND',
-          `Variant "${variantId}" was not found for product "${productId}"`,
-        );
-      }
-    }
-
-    return { product, variant };
-  }
-
-  private readPoolRowSync(
-    session: SqliteUnitOfWorkSession,
-    organizationId: UuidV7,
-    storeId: UuidV7,
-    productId: UuidV7,
-    variantId: UuidV7 | null,
-  ): typeof localStockBalances.$inferSelect | null {
-    return (
-      session.db
-        .select()
-        .from(localStockBalances)
-        .where(
-          and(
-            eq(localStockBalances.organizationId, organizationId),
-            eq(localStockBalances.storeId, storeId),
-            eq(localStockBalances.productId, productId),
-            variantId === null
-              ? isNull(localStockBalances.variantId)
-              : eq(localStockBalances.variantId, variantId),
-          ),
-        )
-        .limit(1)
-        .all()[0] ?? null
-    );
-  }
-
-  private loadMutablePoolStateSync(
-    session: SqliteUnitOfWorkSession,
-    organizationId: UuidV7,
-    storeId: UuidV7,
-    productId: UuidV7,
-    variantId: UuidV7 | null,
-    trackBatches: boolean,
-  ): ReplayStockPoolState {
-    const state = createEmptyStockPoolState();
-    const row = this.readPoolRowSync(session, organizationId, storeId, productId, variantId);
-    if (row) {
-      state.qtyOnHand = row.qtyOnHand;
-      state.totalValue = row.totalValue;
-      state.deficitQty = row.deficitQty;
-      state.provisionalDeficitValue = row.provisionalDeficitValue;
-      state.costVarianceValue = row.costVarianceValue;
-      state.lastUnitCost = row.lastUnitCost;
-    }
-
-    if (trackBatches) {
-      const batchRows = session.db
-        .select()
-        .from(localBatchBalances)
-        .where(
-          and(
-            eq(localBatchBalances.organizationId, organizationId),
-            eq(localBatchBalances.storeId, storeId),
-            eq(localBatchBalances.productId, productId),
-            variantId === null
-              ? isNull(localBatchBalances.variantId)
-              : eq(localBatchBalances.variantId, variantId),
-          ),
-        )
-        .orderBy(asc(localBatchBalances.hlc), asc(localBatchBalances.batchId))
-        .all();
-
-      for (const b of batchRows) {
-        state.batches.set(b.batchId, {
-          batchId: b.batchId,
-          hlc: b.hlc,
-          remainingQty: b.remainingQty,
-          remainingValue: b.remainingValue,
-        });
-      }
-    }
-
-    return state;
-  }
-
-  private savePoolAndBatchesSync(
-    session: SqliteUnitOfWorkSession,
-    organizationId: UuidV7,
-    storeId: UuidV7,
-    productId: UuidV7,
-    variantId: UuidV7 | null,
-    state: ReplayStockPoolState,
-    nowMs: UnixMs,
-    touchedBatchIds: readonly UuidV7[],
-  ): void {
-    const existing = this.readPoolRowSync(session, organizationId, storeId, productId, variantId);
-    if (existing) {
-      session.db
-        .update(localStockBalances)
-        .set({
-          qtyOnHand: state.qtyOnHand,
-          totalValue: state.totalValue,
-          deficitQty: state.deficitQty,
-          provisionalDeficitValue: state.provisionalDeficitValue,
-          costVarianceValue: state.costVarianceValue,
-          lastUnitCost: state.lastUnitCost,
-          updatedAtMs: nowMs,
-        })
-        .where(eq(localStockBalances.id, existing.id))
-        .run();
-    } else {
-      session.db
-        .insert(localStockBalances)
-        .values({
-          id: session.nextId(),
-          organizationId,
-          storeId,
-          productId,
-          variantId,
-          qtyOnHand: state.qtyOnHand,
-          totalValue: state.totalValue,
-          deficitQty: state.deficitQty,
-          provisionalDeficitValue: state.provisionalDeficitValue,
-          costVarianceValue: state.costVarianceValue,
-          lastUnitCost: state.lastUnitCost,
-          createdAtMs: nowMs,
-          updatedAtMs: nowMs,
-        })
-        .run();
-    }
-
-    for (const batchId of touchedBatchIds) {
-      const mem = state.batches.get(batchId);
-      if (!mem) {
-        continue;
-      }
-      const existingBatch = session.db
-        .select({ id: localBatchBalances.id })
-        .from(localBatchBalances)
-        .where(eq(localBatchBalances.batchId, batchId))
-        .limit(1)
-        .all()[0];
-      if (existingBatch) {
-        session.db
-          .update(localBatchBalances)
-          .set({
-            remainingQty: mem.remainingQty,
-            remainingValue: mem.remainingValue,
-            updatedAtMs: nowMs,
-          })
-          .where(eq(localBatchBalances.id, existingBatch.id))
-          .run();
-      } else {
-        session.db
-          .insert(localBatchBalances)
-          .values({
-            id: session.nextId(),
-            organizationId,
-            storeId,
-            batchId: mem.batchId,
-            productId,
-            variantId,
-            hlc: mem.hlc,
-            remainingQty: mem.remainingQty,
-            remainingValue: mem.remainingValue,
-            createdAtMs: nowMs,
-            updatedAtMs: nowMs,
-          })
-          .run();
-      }
-    }
   }
 
   private persistConflictsSync(
