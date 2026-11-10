@@ -159,6 +159,7 @@ describe('@mezon/db-local - SqliteHubAuthStore, partial username uniqueness, per
         const okRes = await store.commitLoginOutcome({
           selector: { kind: 'userId', userId: ownerId },
           verifiedPinForUserId: ownerId,
+          verifiedPinHash: 'hash-owner',
           tokenHashToMint: tokenHash,
         });
         expect(okRes.kind).toBe('authenticated');
@@ -187,6 +188,7 @@ describe('@mezon/db-local - SqliteHubAuthStore, partial username uniqueness, per
           const failRes = await store.commitLoginOutcome({
             selector: { kind: 'username', username: 'owner' },
             verifiedPinForUserId: null,
+            verifiedPinHash: null,
             tokenHashToMint: 'unused',
           });
           expect(failRes).toEqual({ kind: 'invalid_credentials' });

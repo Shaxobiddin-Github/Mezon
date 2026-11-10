@@ -170,6 +170,7 @@ export class HubAuthService {
     const committed = await this.store.commitLoginOutcome({
       selector,
       verifiedPinForUserId,
+      verifiedPinHash: verifiedPinForUserId !== null ? snap.pinHash : null,
       tokenHashToMint: tokenHash,
     });
 

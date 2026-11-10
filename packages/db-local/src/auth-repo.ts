@@ -466,6 +466,7 @@ export class SqliteHubAuthStore {
   async commitLoginOutcome(input: {
     readonly selector: LoginSelector;
     readonly verifiedPinForUserId: UuidV7 | null;
+    readonly verifiedPinHash: string | null;
     readonly tokenHashToMint: string;
   }): Promise<CommitLoginOutcomeResult> {
     if (this.uow === null || this.hubConfig === null) {
@@ -510,12 +511,28 @@ export class SqliteHubAuthStore {
         });
       }
 
+      // Guard against TOCTOU race where PIN was reset mid-flight during slow Argon2 verification (R1):
+      // reject without creating a session and without penalizing failed_attempts counters.
+      if (
+        input.verifiedPinForUserId !== null &&
+        userRow !== null &&
+        userRow.id === input.verifiedPinForUserId &&
+        cred !== null &&
+        (input.verifiedPinHash === null || cred.pinHash !== input.verifiedPinHash)
+      ) {
+        return Promise.resolve<CommitLoginOutcomeResult>({
+          kind: 'invalid_credentials',
+        });
+      }
+
       const pinMatchesExpectedUser =
         input.verifiedPinForUserId !== null &&
+        input.verifiedPinHash !== null &&
         userRow !== null &&
         Boolean(userRow.isActive) &&
         cred !== null &&
-        userRow.id === input.verifiedPinForUserId;
+        userRow.id === input.verifiedPinForUserId &&
+        cred.pinHash === input.verifiedPinHash;
 
       if (pinMatchesExpectedUser && userRow && cred) {
         session.db

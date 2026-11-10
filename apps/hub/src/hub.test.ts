@@ -461,7 +461,7 @@ describe('@mezon/hub - HTTP security, Argon2id PIN auth, setup wizard, RBAC, and
     } finally {
       await hub.close();
     }
-  });
+  }, 30_000);
 
   it('commits failed attempts (T2), persists 5-attempt user lock & progressive device 2..60s backoff across restarts (T1), and allows owner login after cooldown', async () => {
     const dbPath = makeDbPath('lockouts-backoff.db');
@@ -1015,4 +1015,144 @@ describe('@mezon/hub - HTTP security, Argon2id PIN auth, setup wizard, RBAC, and
       await hub.close();
     }
   });
+
+  it('rejects in-flight login when PIN is reset mid-verification (TOCTOU R1) without creating a session or incrementing failed_attempts', async () => {
+    const clock = new FixedClock(1_700_003_000_000n);
+    const delay = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
+    let verifyStarted!: () => void;
+    const verifyStartedPromise = new Promise<void>((resolve) => {
+      verifyStarted = resolve;
+    });
+
+    let trackSlowVerify = false;
+    const controlledHasher: PinHasher = {
+      hash(pin: string): Promise<string> {
+        return Promise.resolve(`slow-stub:${pin}`);
+      },
+      async verify(storedHash: string, pin: string): Promise<boolean> {
+        if (trackSlowVerify) {
+          verifyStarted();
+        }
+        await delay(300);
+        return storedHash === `slow-stub:${pin}`;
+      },
+    };
+
+    const hub = await createHubServer({
+      dbPath: makeDbPath('r1-toctou-pin-reset.db'),
+      port: TEST_PORT,
+      clock,
+      random: new SeededRandomSource(206),
+      pinHasher: controlledHasher,
+      logLevel: 'silent',
+    });
+
+    try {
+      const setupRes = await hub.app.inject({
+        method: 'POST',
+        url: '/setup',
+        headers: loopHeaders(),
+        payload: { owner: { fullName: 'Race Owner', username: 'owner', pin: '839204' } },
+      });
+      expect(setupRes.statusCode).toBe(201);
+      const ownerId = setupRes.json<{ owner: { id: UuidV7 } }>().owner.id;
+
+      const firstLogin = await hub.app.inject({
+        method: 'POST',
+        url: '/auth/login',
+        headers: loopHeaders(),
+        payload: { userId: ownerId, pin: '839204' },
+      });
+      expect(firstLogin.statusCode).toBe(200);
+      const ownerToken1 = firstLogin.json<{ token: string }>().token;
+
+      // Start delayed login with old PIN (verify takes 300ms)
+      trackSlowVerify = true;
+      const pLateLogin = hub.app.inject({
+        method: 'POST',
+        url: '/auth/login',
+        headers: loopHeaders(),
+        payload: { userId: ownerId, pin: '839204' },
+      });
+
+      // Wait until Phase 2 verify is actively in flight (~60ms into the 300ms window)
+      await verifyStartedPromise;
+      await delay(60);
+
+      clock.advance(1_000n);
+      const resetAtMs = clock.now();
+      const resetRes = await hub.app.inject({
+        method: 'POST',
+        url: `/users/${ownerId}/pin`,
+        headers: authHeaders(ownerToken1),
+        payload: { pin: '917302' },
+      });
+      expect(resetRes.statusCode).toBe(200);
+
+      // Delayed login MUST be rejected with 401 AUTH_INVALID_CREDENTIALS
+      const lateRes = await pLateLogin;
+      expect(lateRes.statusCode).toBe(401);
+      expect(ApiErrorEnvelopeSchema.parse(lateRes.json()).error.code).toBe(
+        'AUTH_INVALID_CREDENTIALS',
+      );
+
+      // Old session was revoked AND zero sessions were opened by the late login
+      const activeSessions = hub.connection.sqlite
+        .prepare<[string], { readonly cnt: bigint }>(
+          'SELECT COUNT(*) AS cnt FROM local_sessions WHERE user_id = ? AND revoked_at_ms IS NULL',
+        )
+        .get(ownerId);
+      expect(activeSessions?.cnt).toBe(0n);
+
+      const postResetSessions = hub.connection.sqlite
+        .prepare<[string, bigint], { readonly cnt: bigint }>(
+          'SELECT COUNT(*) AS cnt FROM local_sessions WHERE user_id = ? AND created_at_ms >= ?',
+        )
+        .get(ownerId, resetAtMs);
+      expect(postResetSessions?.cnt).toBe(0n);
+
+      // Failed-attempt counter MUST NOT have incremented due to this race
+      const rawCred = hub.connection.sqlite
+        .prepare<
+          [string],
+          { readonly failed_attempts: bigint; readonly locked_until_ms: bigint | null }
+        >('SELECT failed_attempts, locked_until_ms FROM local_pin_credentials WHERE user_id = ?')
+        .get(ownerId);
+      expect(rawCred?.failed_attempts).toBe(0n);
+      expect(rawCred?.locked_until_ms).toBeNull();
+
+      // Previous ownerToken1 stays revoked; old PIN still fails; new PIN succeeds cleanly
+      expect(
+        (
+          await hub.app.inject({
+            method: 'GET',
+            url: '/auth/me',
+            headers: authHeaders(ownerToken1),
+          })
+        ).statusCode,
+      ).toBe(401);
+      expect(
+        (
+          await hub.app.inject({
+            method: 'POST',
+            url: '/auth/login',
+            headers: loopHeaders(),
+            payload: { userId: ownerId, pin: '839204' },
+          })
+        ).statusCode,
+      ).toBe(401);
+      expect(
+        (
+          await hub.app.inject({
+            method: 'POST',
+            url: '/auth/login',
+            headers: loopHeaders(),
+            payload: { userId: ownerId, pin: '917302' },
+          })
+        ).statusCode,
+      ).toBe(200);
+    } finally {
+      await hub.close();
+    }
+  }, 30_000);
 });

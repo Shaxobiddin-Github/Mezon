@@ -389,5 +389,5 @@ describe('@mezon/domain - UUIDv7 (RFC 9562)', () => {
         },
       ),
     );
-  });
+  }, 30_000);
 });

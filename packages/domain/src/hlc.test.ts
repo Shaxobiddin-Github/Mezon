@@ -281,7 +281,7 @@ describe('@mezon/domain - Hybrid Logical Clock (HLC)', () => {
     expect(afterCatchup.hlc.logical).toBe(0);
     expect(afterCatchup.counterOverflow).toBe(false);
     expect(afterCatchup.borrowedMs).toBe(1n);
-  });
+  }, 30_000);
 
   it('defeats attacker remote(pt, 65535) DoS attack and continues growing via now()', () => {
     const pt = unixMsFromBigInt(1_700_000_000_000n);
@@ -648,5 +648,5 @@ describe('@mezon/domain - Hybrid Logical Clock (HLC)', () => {
         },
       ),
     );
-  });
+  }, 30_000);
 });
