@@ -9,6 +9,7 @@ export default tseslint.config(
       '**/coverage/**',
       '**/*.config.*',
       '.dependency-cruiser.cjs',
+      '.mezon/**',
     ],
   },
   ...tseslint.configs.recommendedTypeChecked,
