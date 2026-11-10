@@ -11,6 +11,8 @@ import type { FastifyInstance, FastifyRequest } from 'fastify';
 import type { HubAuthService } from './auth-service.js';
 import { registerCatalogRoutes } from './catalog-routes.js';
 import type { HubCatalogService } from './catalog-service.js';
+import { registerStockRoutes } from './stock-routes.js';
+import type { HubStockService } from './stock-service.js';
 
 async function authorize(
   authService: HubAuthService,
@@ -26,6 +28,7 @@ export function registerHubRoutes(
   app: FastifyInstance,
   authService: HubAuthService,
   catalogService?: HubCatalogService,
+  stockService?: HubStockService,
 ): void {
   app.get('/health', async () => {
     return authService.getHealth();
@@ -96,5 +99,8 @@ export function registerHubRoutes(
 
   if (catalogService) {
     registerCatalogRoutes(app, authService, catalogService);
+  }
+  if (stockService) {
+    registerStockRoutes(app, authService, stockService);
   }
 }

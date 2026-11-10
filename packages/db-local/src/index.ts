@@ -76,6 +76,8 @@ export {
   insertAttr,
   updateAttr,
   tombstoneAttr,
+  insertMonotone,
+  updateMonotone,
 } from './writers.js';
 
 export {
@@ -92,12 +94,24 @@ export {
   productVariants,
   productBarcodes,
   priceChanges,
+  batches,
+  stockMoves,
+  inventoryCounts,
+  inventoryCountLines,
+  localStockBalances,
+  localBatchBalances,
+  localStockConflicts,
 } from './schema/index.js';
 
 export {
   buildCatalogSearchFtsSql,
   assertCatalogSearchMigrationsComplete,
 } from './catalog-search-schema.js';
+
+export {
+  buildStockMonotoneTriggersSql,
+  assertStockMigrationsComplete,
+} from './stock-migrations.js';
 
 export {
   type HubConfigSnapshot,
@@ -129,3 +143,23 @@ export {
   SqliteCatalogStore,
   createSqliteCatalogStore,
 } from './catalog-repo.js';
+
+export {
+  type StockRuntimeContext,
+  type CreateSqliteStockStoreOptions,
+  type StoredCashierBalanceRecord,
+  type StoredStockValuationRecord,
+  type StoredBatchRecord,
+  type StoredStockMoveRecord,
+  type StockMoveWarningRecord,
+  type CreateStockMovesOutcome,
+  type StoredStockConflictRecord,
+  type StoredInventoryCountRecord,
+  type StoredInventoryCountLineRecord,
+  type StoredInventoryCountDetailRecord,
+  type FinalizeInventoryCountOutcome,
+  type RebuildStockProjectionsResult,
+  rebuildStockProjections,
+  SqliteStockStore,
+  createSqliteStockStore,
+} from './stock-repo.js';

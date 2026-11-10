@@ -34,6 +34,7 @@ import {
   productBarcodes,
   productVariants,
   products,
+  stockMoves,
 } from './schema/index.js';
 import {
   type SqliteUnitOfWork,
@@ -72,6 +73,7 @@ export interface StoredProductRecord {
   readonly unlimited: boolean;
   readonly minStock: Quantity | null;
   readonly hasVariants: boolean;
+  readonly trackBatches: boolean;
   readonly salePrice: Money;
   readonly mxik: string | null;
   readonly packageCode: string | null;
@@ -173,6 +175,7 @@ function toStoredProduct(row: typeof products.$inferSelect): StoredProductRecord
     unlimited: Boolean(row.unlimited),
     minStock: row.minStock,
     hasVariants: Boolean(row.hasVariants),
+    trackBatches: Boolean(row.trackBatches),
     salePrice: row.salePrice,
     mxik: row.mxik,
     packageCode: row.packageCode,
@@ -793,6 +796,7 @@ export class SqliteCatalogStore {
     readonly unlimited?: boolean;
     readonly minStock?: string | null;
     readonly hasVariants?: boolean;
+    readonly trackBatches?: boolean;
     readonly salePrice: string;
     readonly mxik?: string | null;
     readonly packageCode?: string | null;
@@ -814,6 +818,7 @@ export class SqliteCatalogStore {
     const unit = parseProductUnit(input.unit);
     const unlimited = Boolean(input.unlimited ?? false);
     const hasVariants = Boolean(input.hasVariants ?? false);
+    const trackBatches = Boolean(input.trackBatches ?? false);
     const salePrice = parseMoneyBigIntString(input.salePrice, 'Sale price');
     const minStock =
       input.minStock !== undefined && input.minStock !== null
@@ -863,6 +868,7 @@ export class SqliteCatalogStore {
           unlimited,
           minStock,
           hasVariants,
+          trackBatches,
           salePrice,
           mxik,
           packageCode,
@@ -920,6 +926,7 @@ export class SqliteCatalogStore {
       readonly unlimited?: boolean;
       readonly minStock?: string | null;
       readonly hasVariants?: boolean;
+      readonly trackBatches?: boolean;
       readonly salePrice?: string;
       readonly mxik?: string | null;
       readonly packageCode?: string | null;
@@ -969,6 +976,24 @@ export class SqliteCatalogStore {
         patch.unit !== undefined ? parseProductUnit(patch.unit) : parseProductUnit(existing.unit);
       const nextUnlimited = patch.unlimited ?? Boolean(existing.unlimited);
       const nextHasVariants = patch.hasVariants ?? Boolean(existing.hasVariants);
+      const prevTrackBatches = Boolean(existing.trackBatches);
+      const nextTrackBatches = patch.trackBatches ?? prevTrackBatches;
+      if (nextTrackBatches !== prevTrackBatches) {
+        const existingMove = session.db
+          .select({ id: stockMoves.id })
+          .from(stockMoves)
+          .where(
+            and(eq(stockMoves.organizationId, organizationId), eq(stockMoves.productId, targetId)),
+          )
+          .limit(1)
+          .all()[0];
+        if (existingMove) {
+          throw new DomainError(
+            'STOCK_COSTING_LOCKED',
+            'Cannot change batch tracking method after stock moves have been recorded',
+          );
+        }
+      }
 
       const rawNextMinStock =
         patch.minStock !== undefined
@@ -1008,6 +1033,7 @@ export class SqliteCatalogStore {
           unlimited: nextUnlimited,
           minStock: nextMinStock,
           hasVariants: nextHasVariants,
+          trackBatches: nextTrackBatches,
           salePrice: nextSalePrice,
           mxik: nextMxik,
           packageCode: nextPackageCode,
