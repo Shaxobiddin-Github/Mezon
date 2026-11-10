@@ -15,9 +15,13 @@ import {
   buildAllSqliteTriggersSql,
   buildSqliteImmutabilityTriggersSql,
   getDefaultLocalMigrationsFolder,
+  localDeviceAuthState,
   localDeviceState,
+  localHubConfig,
   localOutbox,
+  localPinCredentials,
   localSchemaRegistry,
+  localSessions,
   migrateLocalDatabase,
   openLocalSqliteDatabase,
   sqliteBigint,
@@ -26,6 +30,7 @@ import {
   sqliteMoney,
   sqliteQuantity,
   sqliteUnixMs,
+  users,
   validateSqliteSchemaRegistry,
 } from './index.js';
 
@@ -59,14 +64,30 @@ afterEach(() => {
 });
 
 describe('@mezon/db-local - Schema foundation, registry, pragmas, and bigint safety', () => {
-  it('exports package marker, registers only operational LOCAL foundation tables, and validates cleanly', () => {
+  it('exports package marker, registers foundation & T0.6 auth tables, and validates cleanly', () => {
     expect(DB_LOCAL_PACKAGE).toBe('@mezon/db-local');
     expect(localSchemaRegistry.all().map((m) => [m.tableName, m.tableClass])).toEqual([
       ['local_device_state', 'LOCAL'],
       ['local_outbox', 'LOCAL'],
+      ['users', 'ATTR'],
+      ['local_hub_config', 'LOCAL'],
+      ['local_pin_credentials', 'LOCAL'],
+      ['local_device_auth_state', 'LOCAL'],
+      ['local_sessions', 'LOCAL'],
     ]);
     expect(() =>
-      validateSqliteSchemaRegistry({ localDeviceState, localOutbox }, localSchemaRegistry),
+      validateSqliteSchemaRegistry(
+        {
+          localDeviceState,
+          localOutbox,
+          users,
+          localHubConfig,
+          localPinCredentials,
+          localDeviceAuthState,
+          localSessions,
+        },
+        localSchemaRegistry,
+      ),
     ).not.toThrow();
   });
 
@@ -241,7 +262,7 @@ describe('@mezon/db-local - Schema foundation, registry, pragmas, and bigint saf
       const migCountRow = conn.sqlite
         .prepare('SELECT COUNT(*) as cnt FROM __drizzle_migrations')
         .get() as { cnt: bigint };
-      expect(migCountRow.cnt).toBe(2n);
+      expect(migCountRow.cnt).toBe(3n);
     } finally {
       conn.close();
     }

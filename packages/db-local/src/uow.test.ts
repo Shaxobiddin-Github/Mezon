@@ -919,7 +919,7 @@ describe('@mezon/db-local - Async UnitOfWork, Outbox, DeviceState & SQLite Trigg
     } finally {
       connRecovered.close();
     }
-  });
+  }, 30_000);
 
   it('continues deviceSeq gaplessly and preserves strict HLC & UUIDv7 monotonicity across restart even when system clock jumps backward', async () => {
     const dbPath = path.join(makeTempDir(), 'restart-backward-clock.db');
@@ -1250,7 +1250,7 @@ describe('@mezon/db-local - Async UnitOfWork, Outbox, DeviceState & SQLite Trigg
       }),
       { numRuns: 15 },
     );
-  });
+  }, 30_000);
 
   it('K1: rejects concurrent parallel nested() calls and parent-session writes while child savepoint is active, while allowing deep & sequential nested()', async () => {
     const dbPath = path.join(makeTempDir(), 'k1-nested-stack.db');
@@ -1768,7 +1768,7 @@ describe('@mezon/db-local - Async UnitOfWork, Outbox, DeviceState & SQLite Trigg
       await closedPromise;
       conn1.close();
     }
-  });
+  }, 30_000);
 
   it('K3.3, K3.4, K3.6: enforces appendOutboxEventSync inTransaction check, listPending status filtering, and mid-callback ROLLBACK/close guard', async () => {
     const dbPath = path.join(makeTempDir(), 'k3-guards.db');

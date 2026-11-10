@@ -1,88 +1,106 @@
-## Hisobot: T0.5 (Windows CI `EPERM` test tuzatishi — qayta tekshiruv so'rovi)
+## Hisobot: T0.6 — Qayta ishlash (`R1` va `R2`)
 
-Branch / PR: `gemini/T0.5-uow-outbox` / [PR #5](https://github.com/Shaxobiddin-Github/Mezon/pull/5)  
-Commit: `9cacebac4fd6eba69c51d2a7185b63d87a574d43` (faqat test tuzatishi; K1–K3 kod commit'i: `0702dcc`, Claude `QABUL` commit'i: `e3c5854`, boshlang'ich T0.5: `d9e43c0`)
+Branch / PR: `gemini/T0.6-hub-auth` / [PR #6](https://github.com/Shaxobiddin-Github/Mezon/pull/6)  
+Commit: `9b7a75b6b4089986be0bbcd3b92ff6d2767f1fea` (`R1`–`R2` tuzatishlari; boshlang'ich T0.6: `07afc281f2bbddd016d46b16e9f4c2a3083e117a`)
 
-### Nima uchun merge qilinmasdan qayta tekshiruv so'ralmoqda (`GEMINI.md` 3.6)
+### Qayta ishlash (`R1` va `R2`)
 
-- Claude'ning `QABUL` commit'i (`e3c5854`) uchun CI [`Verify (windows-latest)`](https://github.com/Shaxobiddin-Github/Mezon/actions/runs/42796990210/job/129764580032) job'i `K3.2` testidan keyin `afterEach` (`fs.rmSync`) da `EPERM: Permission denied` bilan yiqildi (`uow.test.ts` bola OS jarayoni `conn.close()` va chiqishni tugatmasdan `process.send` bilan testni yakunlagan edi).
-- `GEMINI.md` 3.6 ("PR'ning oxirgi commit'i uchun Claude `QABUL` bergan va CI Ubuntu hamda Windows'da yashil") ga ko'ra qizil CI bilan ham merge qilib bo'lmasdi, yangi commitdan keyin esa Claude qayta tasdig'i shart.
-- **`9caceba` da ishlab chiqarish kodi umuman o'zgarmagan (`0702dcc` bilan bir xil)**; faqat `packages/db-local/src/uow.test.ts` (+19/-4) tuzatildi:
-  - `conn2-worker.mjs` ichida `conn.close()` IPC javobidan oldin bajariladi va `process.send(reply, () => process.exit(0))` orqali yopiladi;
-  - `K3.2` testida ham, `finally`da ham `child` `'close'` hodisasi (`closedPromise`) kutiladi;
-  - `afterEach` `fs.rmSync(..., { maxRetries: 5, retryDelay: 50 })` qo'shildi.
+1. **R1 (YUQORI — PIN reset bilan login TOCTOU poygasi):**
+   - [`packages/db-local/src/auth-repo.ts`](packages/db-local/src/auth-repo.ts) ichidagi `commitLoginOutcome()` endi `verifiedPinHash: string | null` ni majburiy parametr sifatida qabul qiladi (`auth-service.ts` Phase 1 snapshotdagi `snap.pinHash` ni uzatadi).
+   - `BEGIN IMMEDIATE` tranzaksiyasi ichida bazadagi `cred.pinHash !== input.verifiedPinHash` bo'lsa (PIN tekshiruv paytida `POST /users/:id/pin` orqali almashtirilgan bo'lsa), sessiya ochilmaydi hamda `failed_attempts` (user va device) oshirilmasdan `{ kind: 'invalid_credentials' }` qaytadi -> mijoz **`401 AUTH_INVALID_CREDENTIALS`** oladi.
+   - Test ([`hub.test.ts`](apps/hub/src/hub.test.ts)): `rejects in-flight login when PIN is reset mid-verification (TOCTOU R1) without creating a session or incrementing failed_attempts` (300 ms kechikadigan maxsus `pinHasher`, 60 ms o'tgach `POST /users/:id/pin` = `200`, kechikkan login = `401`, resetdan keyingi `local_sessions` soni = `0n`, `failed_attempts` = `0n`, `locked_until_ms` = `null`).
 
-### Nima qilindi (K1–K3 umumiy)
+2. **R2 (O'RTA — paralel yuklamada 5000 ms timeout barqarorligi):**
+   - Og'ir tsikl, `fast-check` property va ko'p jarayonli testlarga aniq `30_000` ms timeout berildi (`hech bir assertion zaiflashtirilmadi`):
+     - `packages/domain/src/hlc.test.ts`: `survives 70,000 now() calls ...` (284-qator) va HLC `fast-check` property testi (651-qator) -> `30_000` ms.
+     - `packages/domain/src/uuidv7.test.ts`: UUIDv7 `fast-check` property testi (392-qator) -> `30_000` ms.
+     - `packages/db-local/src/uow.test.ts`: child-process crash recovery (`process.exit(42)`), `fast-check` property test va `K3.2` 2-process `BEGIN IMMEDIATE` testi -> `30_000` ms.
+     - `apps/hub/src/hub.test.ts`: haqiqiy `@node-rs/argon2` testi va `R1` sekin hasher testi -> `30_000` ms.
 
-Claude'ning `.mezon/claude/TOPSHIRIQ.md` (`d9e43c0` bo'yicha `QAYTA ISHLASH`) barcha topilmalari tuzatildi va testlar bilan isbotlandi:
+### Nima qilindi (T0.6 umumiy)
 
-1. **K1 (`UNIT_OF_WORK_CONCURRENT_NESTED`):**
-   - [`packages/domain/src/errors.ts`](packages/domain/src/errors.ts) ga `'UNIT_OF_WORK_CONCURRENT_NESTED'` va `'UNIT_OF_WORK_TENANT_MISMATCH'` xato kodlari qo'shildi.
-   - [`packages/db-local/src/uow.ts`](packages/db-local/src/uow.ts) ichidagi `SqliteUnitOfWork` endi har bir tashqi tranzaksiya davomida `activeSessionStack` yuritadi (`execute()` boshida tashqi sessiya push/pop, `nested()` boshida `childSession` push/pop).
-   - `SqliteUnitOfWorkSession.assertActiveTransaction()` eng ustki tekshiruv sifatida `this.uow.topActiveSession() !== this` bo'lsa darhol `DomainError('UNIT_OF_WORK_CONCURRENT_NESTED')` otadi.
-   - Natija: parallel `s.nested()` chaqiruvlari (`Promise.allSettled([p1, p2])`) ham, bola savepoint ochiq turganda ota sessiyadan yozish (`insertFact`, `insertAttr`, `updateAttr`, `tombstoneAttr`) yoki `s.nested()` ochish ham darhol rad etiladi; chuqur ichma-ich (`c1.nested(c2)`) va ketma-ket `nested()` esa avvalgidek ishlaydi.
+Rejadagi barcha talablar (`a`–`h`) va Claude belgilagan `T1`–`T6` tuzatishlar to'liq amalga oshirildi:
 
-2. **K2 (`UNIT_OF_WORK_TENANT_MISMATCH`):**
-   - [`packages/db-local/src/writers.ts`](packages/db-local/src/writers.ts) ichidagi umumiy `prepareSyncedWriteContext()` yordamchisida (`insertFact`, `insertAttr`, `updateAttr`, `tombstoneAttr` tomonidan chaqiriladi) `validOrgId !== session.organizationId` tekshiruvi qo'shildi; teng bo'lmasa `DomainError('UNIT_OF_WORK_TENANT_MISMATCH')` tashlanadi.
+1. **Domen qoidalari va RBAC (`packages/domain`):**
+   - [`packages/domain/src/auth.ts`](packages/domain/src/auth.ts): `USER_ROLES` (`owner`, `manager`, `cashier`), `ROLE_PERMISSION_TABLE` va `roleHasPermission()` (`auth:self`, `users:read`, `users:write`, `users:unlock`), `PinHasher` porti, `PIN_SECURITY_CONSTANTS`, `validatePinFormat()` (6–12 raqam, takroriy `000000`/`111111` va ketma-ket `123456`/`654321` PINlarni rad etadi, xatoda PINni oshkor qilmaydi), `normalizeUsername()`, `validateFullName()`, `computeDeviceCooldownDelayMs()` (`15`-xatodan boshlab 2s, 4s, 8s, 16s, 32s, 60s max), `computeRetryAfterSeconds()`.
+   - [`packages/domain/src/errors.ts`](packages/domain/src/errors.ts): T0.6 kodlari (`VALIDATION_ERROR`, `INVALID_PIN`, `AUTH_UNAUTHORIZED`, `AUTH_INVALID_CREDENTIALS`, `AUTH_FORBIDDEN`, `AUTH_RATE_LIMITED`, `SETUP_ALREADY_COMPLETED`, `USER_NOT_FOUND`, `USERNAME_ALREADY_EXISTS`, `LAST_OWNER_PROTECTED`, `INVALID_HOST`, `FORBIDDEN_ORIGIN`) hamda ixtiyoriy `retryAfterSeconds`.
 
-3. **K3 (6 ta test qamrovi bo'shlig'i yopildi):**
-   - **K3.1:** `nested()` tugagach (muvaffaqiyatli ham, xato bilan rollback bo'lganda ham) tashqariga saqlab qolingan `child` sessiyadan yozish yoki `child.nested()` chaqirish darhol `UNIT_OF_WORK_SESSION_CLOSED` qaytarishi alohida test bilan tekshirildi.
-   - **K3.2:** Ikki alohida OS jarayonidagi ikki ulanish (`conn1` asosiy jarayonda `SELECT` -> IPC signal `'write'` -> `await delay(150)` -> `insertFact`; `conn2` child jarayonda real `SqliteUnitOfWork` orqali `insertFact`) testi yozildi. Muhim kuzatuv: bir xil Node.js oqimida `better-sqlite3` sinxron C++ `busy_timeout` chaqiruvi event loop'ni band qilib qo'ygani uchun ikki OS jarayonida tekshirildi — `BEGIN IMMEDIATE` bilan ikkala ulanish `busy_timeout` doirasida muvaffaqiyatli yakunlaydi, `BEGIN IMMEDIATE` o'rniga oddiy `BEGIN` qo'yilganda esa `conn1` eski read-snapshot'dan write-upgrade qila olmay `SqliteError: database is locked` (`SQLITE_BUSY`) bilan yiqiladi (mutatsiya bilan tasdiqlandi).
-   - **K3.3:** `appendOutboxEventSync` ni SQLite tranzaksiyasidan tashqarida chaqirish darhol xato berishi testlandi.
-   - **K3.4:** `SqliteOutboxRepository.listPending()` `acked` va `rejected` qatorlarni chiqarib tashlab faqat `pending` qatorlarni `device_seq` tartibida (hamda `limit` bilan) qaytarishi testlandi.
-   - **K3.5:** Tashkilot (`organization`) darajasidagi `attrItems` jadvaliga `storeId` berilganda `insertAttr` darhol rad etishi (`must not receive a storeId`) va do'kon (`store`) darajasidagi `factSales` jadvalida `storeId`siz `insertFact` rad etilishi testlandi.
-   - **K3.6:** `assertActiveTransaction()` ichidagi `!sqlite.open || !sqlite.inTransaction` tekshiruvi **yetib bo'ladigan** (`reachable`) tarmoqdir: callback ichida xom SQL `ROLLBACK` (yoki `OR ROLLBACK`) bajarilsa, `session.closed === false` va `AsyncLocalStorage` konteksti faol turgan holda SQLite tranzaksiyasi yopilgan bo'ladi va keyingi operatsiya `UNIT_OF_WORK_REQUIRED` otadi, mutex esa `finally` orqali toza bo'shatiladi. Test bilan isbotlandi (shuningdek `sqlite.close()` ham avvalgi crash testida bor).
+2. **Zod kontraktlar (`packages/contracts`):**
+   - `zod@4.6.7` qo'shildi.
+   - [`packages/contracts/src/auth.ts`](packages/contracts/src/auth.ts): `ApiErrorEnvelopeSchema` (`{ error: { code, message } }`), `SetupRequestSchema`/`SetupResponseSchema`, `LoginOptionsResponseSchema`, `LoginRequestSchema` (`username` yoki `userId` + PIN), `LoginResponseSchema`, `LogoutResponseSchema`, `AuthMeResponseSchema`, `CreateUserRequestSchema`, `UpdateUserRequestSchema`, `ResetUserPinRequestSchema`, `UnlockUserResponseSchema`, `DeleteUserResponseSchema`, `UserSummarySchema` (`pinHash`, lockout va `tokenHash`siz).
 
-### O'zgargan fayllar (`0702dcc` + `9caceba`)
+3. **SQLite sxema, migratsiya va auth store (`packages/db-local`):**
+   - [`packages/db-local/src/schema/index.ts`](packages/db-local/src/schema/index.ts):
+     - `users` (`ATTR`, `tenantScope: 'organization'`) — T5 bo'yicha partial unique index `uidx_users_org_username` (`WHERE "users"."deleted_at_ms" IS NULL`).
+     - `local_hub_config` (`LOCAL`, `singleton_guard = 1` + `UNIQUE`).
+     - `local_pin_credentials` (`LOCAL` — Argon2id hash va 5-xatoli user blok holati, bulut/outboxga chiqmaydi).
+     - `local_device_auth_state` (`LOCAL` — T1 bo'yicha 5-daqiqalik oyna + 15-xatodan keyingi 2..60s progressiv kechikish).
+     - `local_sessions` (`LOCAL` — 64-belgi SHA-256 `token_hash`, `expires_at_ms`, `revoked_at_ms`, `last_seen_at_ms`).
+   - [`packages/db-local/src/uow.ts`](packages/db-local/src/uow.ts): ulanish darajasidagi umumiy FIFO mutex (`connectionMutexes` WeakMap), `runConnectionReadOnly()`, `bootstrapSqliteHubUnitOfWork()`.
+   - [`packages/db-local/src/auth-repo.ts`](packages/db-local/src/auth-repo.ts): barcha yozuvlar `uow.execute` / `bootstrapSqliteHubUnitOfWork` orqali, barcha o'qishlar `uow.runReadOnly` / `runConnectionReadOnly` orqali (`T4`); `local_sessions.last_seen_at_ms` daqiqada eng ko'pi 1 marta (`>= 60_000n` ms) yangilanadi (`T4`); `users` `ATTR` `insertAttr`/`updateAttr`/`tombstoneAttr` orqali outboxga atomik yoziladi; oxirgi aktiv `owner` himoyasi (`LAST_OWNER_PROTECTED`).
 
-- `packages/domain/src/errors.ts` (`0702dcc`) — `'UNIT_OF_WORK_CONCURRENT_NESTED' | 'UNIT_OF_WORK_TENANT_MISMATCH'` kodlari qo'shildi.
-- `packages/db-local/src/uow.ts` (`0702dcc`) — `SqliteUnitOfWork` `activeSessionStack` va `assertActiveTransaction()` da eng ustki faol sessiya tekshiruvi.
-- `packages/db-local/src/writers.ts` (`0702dcc`) — `prepareSyncedWriteContext()` da `session.organizationId` tenglik tekshiruvi (`UNIT_OF_WORK_TENANT_MISMATCH`).
-- `packages/db-local/src/uow.test.ts` (`0702dcc`, `9caceba`) — K1 (`a`/`b`/`c`), K2 (barcha 4 writer), K3.1, K3.2 (2 OS ulanish + Windows `child` `'close'` kutish), K3.3, K3.4, K3.5 va K3.6 testlari qo'shildi.
+4. **Hub HTTP server va himoya (`apps/hub`):**
+   - Fastify `5.12.8`, Pino `10.4.0`, `@node-rs/argon2` `2.2.2`, Zod `4.6.7`.
+   - [`apps/hub/src/config.ts`](apps/hub/src/config.ts) & [`apps/hub/src/security.ts`](apps/hub/src/security.ts): faqat `127.0.0.1`; `Host` (`127.0.0.1:<port>`/`localhost:<port>` bo'lmasa `421 INVALID_HOST`); `Origin` allowlist & `Sec-Fetch-Site: cross-site` (`403 FORBIDDEN_ORIGIN`); `OPTIONS` preflight va `Access-Control-*` sarlavhalari qat'iy yopiq; cookie ishlatilmaydi, faqat `Authorization: Bearer`.
+   - [`apps/hub/src/argon2-pin-hasher.ts`](apps/hub/src/argon2-pin-hasher.ts): OWASP minimal profili `Argon2id`, `m=19456` KiB (19 MiB), `t=2`, `p=1`, `outputLen=32`; mavjud bo'lmagan/nofaol foydalanuvchi uchun ham doimiy `dummyPinHash` orqali Argon2id tekshiruvi.
+   - [`apps/hub/src/auth-service.ts`](apps/hub/src/auth-service.ts): `login()` 4 fazali (read snapshot -> tranzaksiya tashqarisida async Argon2id -> `uow.execute` ichida muvaffaqiyatsiz urinish yoki sessiyani commit qilish -> commitdan keyin HTTP xatosi otish, `T2`).
+   - [`apps/hub/src/logger.ts`](apps/hub/src/logger.ts) & [`apps/hub/src/error-handler.ts`](apps/hub/src/error-handler.ts): Pino `redact` (`authorization`, `cookie`, `pin`, `pinHash`, `token`, `tokenHash`, `password`, `secret`), `{ error: { code, message } }` konverti va stack trace'ni yashirish.
+   - [`apps/hub/src/routes.ts`](apps/hub/src/routes.ts): `GET /health`, `POST /setup`, `GET /auth/login-options` (`T6`), `POST /auth/login` (`username` yoki `userId`), `POST /auth/logout`, `GET /auth/me`, `GET /users`, `POST /users`, `PATCH /users/:id`, `POST /users/:id/pin`, `POST /users/:id/unlock` (`T3`), `DELETE /users/:id`.
 
-(Boshlang'ich T0.5 (`d9e43c0`) da yaratilgan/yangilangan fayllar ham PR #5 tarkibida saqlanadi: `packages/domain/src/uow.ts`, `packages/domain/src/index.ts`, `packages/db-local/src/schema/index.ts`, `packages/db-local/src/device-state.ts`, `packages/db-local/src/outbox.ts`, `packages/db-local/src/triggers.ts`, `packages/db-local/src/registry.ts`, `packages/db-local/src/index.ts`, `packages/db-local/src/index.test.ts`, `packages/db-local/scripts/check-migrations.mjs`, `packages/db-local/drizzle/0001_uow_outbox_device_state.sql`, `packages/db-local/drizzle/meta/0001_snapshot.json`, `packages/db-local/drizzle/meta/_journal.json`, `packages/db-local/package.json`, `.dependency-cruiser.cjs`, `pnpm-lock.yaml`.)
+5. **Import chegaralari va TypeScript/ESLint:**
+   - [`.dependency-cruiser.cjs`](.dependency-cruiser.cjs): `contracts-src-imports` va `hub-src-imports` (`apps/hub` `db-cloud`ni import qila olmaydi).
+   - [`eslint.config.mjs`](eslint.config.mjs): `./apps/*/tsconfig.test.json` qo'shildi.
+
+### O'zgargan fayllar (`07afc28`)
+
+- `.dependency-cruiser.cjs`, `eslint.config.mjs`, `pnpm-lock.yaml` — depcruise chegaralari, ESLint test tsconfigni ulash va exact paket versiyalarini mahkamlash.
+- `packages/domain/src/{errors.ts,auth.ts,index.ts,auth.test.ts}` — RBAC, PIN qoidalari, progressiv backoff, auth `DomainError` kodlari.
+- `packages/contracts/{package.json,tsconfig.json,tsconfig.test.json,src/{auth.ts,index.ts,auth.test.ts}}` — Zod 4.6.7 kontraktlar va testlar.
+- `packages/db-local/{src/{schema/index.ts,uow.ts,auth-repo.ts,index.ts,index.test.ts,uow.test.ts,auth.test.ts},drizzle/{0002_hub_auth.sql,meta/{_journal.json,0002_snapshot.json}}}` — T0.6 jadvallari, migratsiya + `users` `BEFORE DELETE` triggeri, connection FIFO mutex, `SqliteHubAuthStore` va testlar (`uow.test.ts` property test timeout `30_000` ms).
+- `apps/hub/{package.json,tsconfig.json,tsconfig.test.json,src/{config.ts,logger.ts,argon2-pin-hasher.ts,security.ts,error-handler.ts,auth-service.ts,routes.ts,server.ts,index.ts,hub.test.ts}}` — Hub HTTP server va to'liq integratsiya testlari.
 
 ### Migratsiyalar
 
-- Yangi migratsiya qo'shilmadi (PR #5 dagi `packages/db-local/drizzle/0001_uow_outbox_device_state.sql` o'zgarmagan).
-- `pnpm run db:check`: SQLite (`0 diff statements`) va PostgreSQL (`0 diff statements`) hamda SQLite immutability trigger tekshiruvi o'tdi.
+- `packages/db-local/drizzle/0002_hub_auth.sql`: `local_device_auth_state`, `local_hub_config`, `local_pin_credentials`, `local_sessions`, `users` (`ATTR`) hamda `uidx_users_org_username` (`WHERE "users"."deleted_at_ms" IS NULL`) va `trg_users_no_delete` (`BEFORE DELETE RAISE(ABORT)`).
 
-### Qabul mezonlari (K1–K3 va T0.5)
+### Qabul mezonlari
 
-- [x] **K1 (a/b/c)** — `uow.test.ts`: `K1: rejects concurrent parallel nested() calls and parent-session writes while child savepoint is active, while allowing deep & sequential nested()` (`Promise.allSettled([p1, p2])` da `p2` `UNIT_OF_WORK_CONCURRENT_NESTED` bilan rad etildi, 0 yo'qolgan qator; `s` dan barcha 4 writer + `c1` dan ichki `c2` ochiq paytda rad etildi; `c1 -> c2` va ketma-ket `nested()` o'tdi).
-- [x] **K2** — `uow.test.ts`: `K2: rejects writes with foreign organizationId across all 4 writers with UNIT_OF_WORK_TENANT_MISMATCH` (`insertFact`, `insertAttr`, `updateAttr`, `tombstoneAttr` begona `orgB` bilan `UNIT_OF_WORK_TENANT_MISMATCH` qaytardi).
-- [x] **K3.1** — `uow.test.ts`: `K3.1: closes child savepoint session immediately on exit or rollback while outer UoW is still active` (`UNIT_OF_WORK_SESSION_CLOSED` muvaffaqiyatli va xato rollback holatlarida).
-- [x] **K3.2** — `uow.test.ts`: `K3.2: BEGIN IMMEDIATE acquires write lock upfront across two separate OS connections preventing SQLITE_BUSY write-upgrade error` + `BEGIN` mutatsiya tekshiruvi (`SqliteError: database is locked` ushlandi).
-- [x] **K3.3, K3.4, K3.6** — `uow.test.ts`: `K3.3, K3.4, K3.6: enforces appendOutboxEventSync inTransaction check, listPending status filtering, and mid-callback ROLLBACK/close guard`.
-- [x] **K3.5** — `uow.test.ts`: Test 1 da `insertAttr(..., { organizationId, storeId })` `must not receive a storeId` xatosi bilan rad etildi.
-- [x] **T0.5 asosiy mezonlari (saqlanib qolgan)** — rollback'da outbox bo'sh, `rollback -> commit` ketma-ketligi, savepoint izolyatsiyasi, reentrant `execute()`/`runReadOnly()` rad etilishi, `COMMIT` xatosida mutex bo'shashi, OS jarayon qulashi (`process.exit(42)`), qayta ishga tushganda `device_seq` va HLC/UUIDv7 monotonligi, triggerlar (`FACT`/`ATTR`/`MONOTONE`), `fast-check` property test.
+- [x] **a) Mahalliy himoya** — `hub.test.ts`: `0.0.0.0` rad etilishi, real `127.0.0.1:0` tinglash, 7 ta soxta/noto'g'ri `Host` -> `421`, noto'g'ri `Origin`/`null`/`Sec-Fetch-Site: cross-site` -> `403`, `OPTIONS` preflight -> `403` (`Access-Control-*`siz), `Cookie` ignor qilinishi va `Set-Cookie` yo'qligi.
+- [x] **b) PIN, Argon2id, brute force va log redaction** — `hub.test.ts`: haqiqiy `@node-rs/argon2` (`$argon2id$v=19$m=19456,t=2,p=1$...`), mavjud bo'lmagan foydalanuvchi uchun `verify(dummyHash, pin)` chaqirilishi va bir xil 401 javobi, 5 xatodan keyin baza + restartdan keyin ham `429` blok, T1 bo'yicha 15+ xatodan keyin `2, 4, 8, 16, 32, 60, 60` s `Retry-After` va kutishdan keyin egasi kira olishi, Pino stream loglarida PIN/hash/token/tokenHash `0` ta va `[Redacted]` borligi.
+- [x] **c) Ma'lumot & T4 & T5** — `auth.test.ts` va `hub.test.ts`: `users` outboxda `ATTR` (`deleted_at_ms IS NULL` partial unique bilan tombstone nomni qayta ishlatish `T5`), `local_pin_credentials`/`local_sessions` outboxga yozilmasligi, `last_seen_at_ms` < 60s da yozilmay `>= 60s` da yangilanishi (`T4`), logout/expiry/`isActive=false`/PIN reset sessiyani darhol yopishi.
+- [x] **d) Sehrgar (`POST /setup`)** — `hub.test.ts` va `auth.test.ts`: parallel `Promise.all` da aniq 1 ta `201` va 1 ta `409 SETUP_ALREADY_COMPLETED`, kuchsiz PIN va `admin/admin` rad etilishi.
+- [x] **e) & T3 Rollar** — `hub.test.ts`: (`unauthenticated`, `cashier`, `manager`, `owner`) × (`/auth/me`, `/auth/logout`, `GET /users`, `POST /users`, `PATCH /users/:id`, `POST /users/:id/unlock`, `POST /users/:id/pin`, `DELETE /users/:id`) to'liq matritsasi, oxirgi `owner` himoyasi.
+- [x] **T2 (Commit before reject)** — `hub.test.ts`: 5 xatodan keyin to'g'ridan-to'g'ri SQLite `SELECT failed_attempts, locked_until_ms FROM local_pin_credentials` da `failed_attempts = 5n` va `locked_until_ms` saqlangan.
+- [x] **T6 (`login-options` va `userId` login)** — `hub.test.ts`: ochiq `GET /auth/login-options` faqat aktiv `{ id, fullName, role }` qaytaradi; `{ userId, pin }` login ishlaydi.
+- [x] **f) & g) Xatolar, versiyalar va chegara** — `{ error: { code, message } }` (stack siz), salbiy `depcruise` (`apps/hub -> @mezon/db-cloud` Exit code 1; `packages/contracts -> @mezon/db-local` Exit code 1) va salbiy `db:check` (`trg_users_no_delete` olib tashlansa Exit code 1).
 
 ### Test natijasi (oxirgi tahrirdan keyin)
 
-**Lokal (`Windows`, commit `9caceba`):**
+**Lokal (`Windows`, commit `9b7a75b`, `pnpm verify` ketma-ket 3 marta):**
 
-1. `pnpm verify`:
-   - `prettier --check .`, `turbo run build` (`17 successful, 17 total`), `eslint .` (0 xato), `turbo run typecheck` (`19 successful, 19 total`), `turbo run db:check` (SQLite `0 diff`, PostgreSQL `0 diff`), `depcruise` (0 xato, 99 modul / 216 bog'liqlik).
-   - `vitest run`: `Test Files 10 passed | 1 skipped (11)`, `Tests 82 passed | 2 skipped (84)` (`pg-rls.test.ts` Docker yo'qligi sabab skip; `packages/db-local/src/uow.test.ts` `14 passed (14)`).
-2. `K3.2` stress-tekshiruvi (`Windows` da 5 marta ketma-ket `vitest run packages/db-local/src/uow.test.ts -t "K3.2"`): 5/5 passed (1137ms, 1155ms, 1164ms, 1145ms, 1299ms), `EPERM` 0 ta.
-3. **Mutatsiya / salbiy tekshiruvlar (`0702dcc` kodida, vaqtinchalik, keyin qayta tiklangan):**
-   - `packages/db-local/src/uow.ts` da `BEGIN IMMEDIATE` -> `BEGIN` qilinganda `vitest run packages/db-local/src/uow.test.ts -t "K3.2"` -> Exit code 1 (`SqliteError: database is locked` `insertSyncedRecord` ichida).
-   - `FACT` trigger yetishmasligi, `ATTR` da `RAISE(IGNORE)` va shartsiz `BEFORE UPDATE RAISE(ABORT)` -> `pnpm run db:check` Exit code 1; `db-local -> node:http` -> `depcruise` Exit code 1.
+1. **1-run:** `Test Files 14 passed | 1 skipped (15)`, `Tests 99 passed | 2 skipped (101)`, Vitest `10.50s` (`70,000 now()` `4447ms`, `TOCTOU R1` `1335ms`), `db:check` `0 diff`, `depcruise` `0` xato (`138 modules, 344 deps`).
+2. **2-run:** `Test Files 14 passed | 1 skipped (15)`, `Tests 99 passed | 2 skipped (101)`, Vitest `10.66s` (`70,000 now()` `4598ms`, `TOCTOU R1` `1335ms`), `0` xato.
+3. **3-run:** `Test Files 14 passed | 1 skipped (15)`, `Tests 99 passed | 2 skipped (101)`, Vitest `11.04s` (`70,000 now()` `4761ms`, `TOCTOU R1` `1327ms`), `0` xato.
+   *(Lokal Windows muhitida Docker bo'lmagani uchun `pg-rls.test.ts` skip qilingan.)*
+- **Salbiy tekshiruvlar (`07afc28` da tasdiqlangan, qayta tiklangan):**
+  - `apps/hub/src/index.ts` -> `@mezon/db-cloud` => `depcruise` Exit code 1 (`hub-src-imports`).
+  - `packages/contracts/src/index.ts` -> `@mezon/db-local` => `depcruise` Exit code 1 (`contracts-src-imports`).
+  - `0002_hub_auth.sql` da `trg_users_no_delete` olib tashlansa => `db:check` Exit code 1.
 
-**GitHub Actions CI (commit `9caceba`, PR Run [#42797713887](https://github.com/Shaxobiddin-Github/Mezon/actions/runs/42797713887) va push Run [#42797704345](https://github.com/Shaxobiddin-Github/Mezon/actions/runs/42797704345)):**
+**GitHub Actions CI (commit `9b7a75b`, PR Run [#42804480413](https://github.com/Shaxobiddin-Github/Mezon/actions/runs/42804480413) va push Run [#42804472884](https://github.com/Shaxobiddin-Github/Mezon/actions/runs/42804472884)):**
 
-- [`Verify (ubuntu-latest)`](https://github.com/Shaxobiddin-Github/Mezon/actions/runs/42797713887/job/129767032018) — **success** (`0 diff`, `Test Files 11 passed (11)`, `Tests 84 passed (84)`, `depcruise` 0 violations / 99 modules / 216 deps).
-- [`Verify (windows-latest)`](https://github.com/Shaxobiddin-Github/Mezon/actions/runs/42797713887/job/129767032217) — **success** (`0 diff`, `Test Files 10 passed | 1 skipped (11)`, `Tests 82 passed | 2 skipped (84)` [Docker yo'q PG RLS skip], `depcruise` 0 violations).
-- [`Verify PostgreSQL RLS (ubuntu-latest)`](https://github.com/Shaxobiddin-Github/Mezon/actions/runs/42797713887/job/129767031614) — **success** (`Test Files 2 passed (2)`, `Tests 8 passed (8)`).
-- (`push` Run [#42797704345](https://github.com/Shaxobiddin-Github/Mezon/actions/runs/42797704345) ham uchala job'da **success**.)
+- [`Verify (ubuntu-latest)`](https://github.com/Shaxobiddin-Github/Mezon/actions/runs/42804480413/job/129790023611) — **success** (`0 diff`, `Test Files 14 passed | 1 skipped (15)`, `Tests 99 passed | 2 skipped (101)` [`pg-rls`], `13.71s`, `depcruise` 0 violations / 138 modules / 344 deps).
+- [`Verify (windows-latest)`](https://github.com/Shaxobiddin-Github/Mezon/actions/runs/42804480413/job/129790023547) — **success** (`0 diff`, `Test Files 14 passed | 1 skipped (15)`, `Tests 99 passed | 2 skipped (101)`, `24.66s`, `depcruise` 0 violations).
+- [`Verify PostgreSQL RLS (ubuntu-latest)`](https://github.com/Shaxobiddin-Github/Mezon/actions/runs/42804480413/job/129790023313) — **success** (`Test Files 2 passed (2)`, `Tests 8 passed (8)`, `14.00s`).
+- (`push` Run [#42804472884](https://github.com/Shaxobiddin-Github/Mezon/actions/runs/42804472884) ham uchala job'da **success**.)
 
 ### Tekshirilmagan narsalar
 
-- Lokal Windows muhitida Docker bo'lmagani uchun `pg-rls.test.ts` lokalda o'tkazib yuborildi (Ubuntu CI job'da to'liq o'tdi).
+- Lokal Windows muhitida Docker bo'lmagani sabab `pg-rls.test.ts` lokalda o'tkazib yuborildi (Ubuntu CI job'larida to'liq o'tdi).
 
 ### Qilingan taxminlar
 
-- Yangi taxmin kiritilmadi.
+- Yangi taxmin kiritilmadi; barcha yondashuvlar tasdiqlangan T0.6 rejasi va `T1`–`T6` tuzatishlariga mos.
 
 ### Takliflar
 
@@ -90,4 +108,4 @@ Claude'ning `.mezon/claude/TOPSHIRIQ.md` (`d9e43c0` bo'yicha `QAYTA ISHLASH`) ba
 
 ### Egasi yoki Claude qarori kerak bo'lgan savollar
 
-- PR #5 boshi `9caceba` (faqat `uow.test.ts` dagi Windows `EPERM` poygasi tuzatishi) uchun Claude'ning qayta `QABUL` tasdig'i kerak (`GEMINI.md` 3.6); shundan so'ng darhol Squash and merge qilib `gemini/T0.6-hub-auth` da T0.6 rejasini yozamiz.
+- Savol yo'q; PR #6 (`9b7a75b`) Claude tekshiruvi uchun tayyor.

@@ -1,0 +1,97 @@
+import { describe, expect, it } from 'vitest';
+import {
+  DomainError,
+  PIN_SECURITY_CONSTANTS,
+  USER_ROLES,
+  computeDeviceCooldownDelayMs,
+  computeRetryAfterSeconds,
+  isUserRole,
+  normalizeUsername,
+  roleHasPermission,
+  validateFullName,
+  validatePinFormat,
+} from './index.js';
+
+describe('@mezon/domain - auth rules, RBAC, and PIN security policy', () => {
+  it('enforces strict role permissions matrix across owner, manager, and cashier', () => {
+    expect(USER_ROLES).toEqual(['owner', 'manager', 'cashier']);
+    expect(isUserRole('owner')).toBe(true);
+    expect(isUserRole('manager')).toBe(true);
+    expect(isUserRole('cashier')).toBe(true);
+    expect(isUserRole('admin')).toBe(false);
+
+    expect(roleHasPermission('owner', 'auth:self')).toBe(true);
+    expect(roleHasPermission('owner', 'users:read')).toBe(true);
+    expect(roleHasPermission('owner', 'users:write')).toBe(true);
+    expect(roleHasPermission('owner', 'users:unlock')).toBe(true);
+
+    expect(roleHasPermission('manager', 'auth:self')).toBe(true);
+    expect(roleHasPermission('manager', 'users:read')).toBe(true);
+    expect(roleHasPermission('manager', 'users:unlock')).toBe(true);
+    expect(roleHasPermission('manager', 'users:write')).toBe(false);
+
+    expect(roleHasPermission('cashier', 'auth:self')).toBe(true);
+    expect(roleHasPermission('cashier', 'users:read')).toBe(false);
+    expect(roleHasPermission('cashier', 'users:write')).toBe(false);
+    expect(roleHasPermission('cashier', 'users:unlock')).toBe(false);
+  });
+
+  it('validates 6-12 digit PINs and rejects trivial or leaking error messages', () => {
+    expect(validatePinFormat('849201')).toBe('849201');
+    expect(validatePinFormat('9048172635')).toBe('9048172635');
+    expect(validatePinFormat('112233445566')).toBe('112233445566');
+
+    const rejected = [
+      '1234',
+      '12345',
+      '000000',
+      '77777777',
+      '123456',
+      '654321',
+      '1234567',
+      '84920a',
+      '1234567890123',
+    ];
+    for (const bad of rejected) {
+      try {
+        validatePinFormat(bad);
+        expect.unreachable(`Expected PIN ${bad} to be rejected`);
+      } catch (err) {
+        expect(err).toBeInstanceOf(DomainError);
+        expect((err as DomainError).code).toBe('INVALID_PIN');
+        // Never leak the rejected PIN into error message
+        expect((err as DomainError).message).not.toContain(bad);
+      }
+    }
+  });
+
+  it('normalizes usernames and validates full names safely', () => {
+    expect(normalizeUsername('  Owner_Main ')).toBe('owner_main');
+    expect(normalizeUsername('kassir.1')).toBe('kassir.1');
+    expect(() => normalizeUsername('a')).toThrow(DomainError);
+    expect(() => normalizeUsername('user name')).toThrow(DomainError);
+    expect(() => normalizeUsername('-invalid')).toThrow(DomainError);
+
+    expect(validateFullName('  Ali Valiyev  ')).toBe('Ali Valiyev');
+    expect(() => validateFullName('   ')).toThrow(DomainError);
+    expect(() => validateFullName('x'.repeat(121))).toThrow(DomainError);
+  });
+
+  it('computes progressive device backoff capped at 60s starting after 15th failure', () => {
+    for (let i = 0; i < PIN_SECURITY_CONSTANTS.MAX_DEVICE_FAILED_ATTEMPTS_IN_WINDOW; i++) {
+      expect(computeDeviceCooldownDelayMs(i)).toBe(0n);
+    }
+    expect(computeDeviceCooldownDelayMs(15)).toBe(2_000n);
+    expect(computeDeviceCooldownDelayMs(16)).toBe(4_000n);
+    expect(computeDeviceCooldownDelayMs(17)).toBe(8_000n);
+    expect(computeDeviceCooldownDelayMs(18)).toBe(16_000n);
+    expect(computeDeviceCooldownDelayMs(19)).toBe(32_000n);
+    expect(computeDeviceCooldownDelayMs(20)).toBe(60_000n);
+    expect(computeDeviceCooldownDelayMs(50)).toBe(60_000n);
+
+    expect(computeRetryAfterSeconds(0n)).toBe(0n);
+    expect(computeRetryAfterSeconds(1n)).toBe(1n);
+    expect(computeRetryAfterSeconds(1_500n)).toBe(2n);
+    expect(computeRetryAfterSeconds(60_000n)).toBe(60n);
+  });
+});

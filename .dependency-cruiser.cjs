@@ -107,6 +107,33 @@ module.exports = {
       },
     },
     {
+      name: 'contracts-src-imports',
+      comment:
+        'packages/contracts source files can only import internal files, packages/domain, and zod',
+      severity: 'error',
+      from: {
+        path: '^packages/contracts/src/',
+        pathNot: '\\.test\\.ts$',
+      },
+      to: {
+        pathNot: '^(packages/contracts/src/|packages/domain/|node_modules/(\\.pnpm/)?zod@)',
+      },
+    },
+    {
+      name: 'hub-src-imports',
+      comment:
+        'apps/hub source files can only import internal files, domain, contracts, db-local, drivers, fastify, pino, @node-rs/argon2, zod, and node builtins (never db-cloud)',
+      severity: 'error',
+      from: {
+        path: '^apps/hub/src/',
+        pathNot: '\\.test\\.ts$',
+      },
+      to: {
+        pathNot:
+          '^(apps/hub/src/|packages/(domain|contracts|db-local|drivers)/|node_modules/(\\.pnpm/)?(fastify|pino|@node-rs/argon2|@node-rs\\+argon2|zod)@|(node:)?(crypto|fs|path|stream)$)',
+      },
+    },
+    {
       name: 'no-test-utils-in-production',
       comment: 'Production source files outside packages/test-utils must not import test-utils',
       severity: 'error',
