@@ -26,6 +26,7 @@ import {
   createSqliteHubAuthStore,
   createSqliteSaleStore,
   createSqliteStockStore,
+  insertMonotone,
   listAllOutboxRecordsSync,
   localCarts,
   migrateLocalDatabase,
@@ -34,6 +35,7 @@ import {
   readReceiptSeqSync,
   saleLines,
   sales,
+  stockMoves,
 } from './index.js';
 
 const FAST_TEST_HASHER: PinHasher = {
@@ -826,6 +828,199 @@ describe('@mezon/db-local - T1.4 completeSale atomic TX, receipts, stock policy,
       console.info(
         `[PERF T1.4 db-local] 20-line completeSale (10 FIFO batched + 10 avg) took ${elapsedMs.toFixed(2)} ms`,
       );
+    } finally {
+      env.connection.close();
+    }
+  });
+
+  it('T1.4 debt (1): block mode enforces exact 1-milli threshold across single & multi-line carts without partial writes', async () => {
+    const env = await setupSaleEnv();
+    try {
+      await env.stockStore.setNegativeStockPolicy('block');
+      const sugar = await env.catalogStore.createProduct({
+        name: 'Shakar',
+        unit: 'kg',
+        trackBatches: false,
+        salePrice: '15000',
+        vatRateBp: 0,
+        actorUserId: env.ownerId,
+      });
+      await env.stockStore.recordInboundMove({
+        productId: sugar.product.id,
+        reason: 'initial',
+        qty: '5000', // exactly 5.000 kg
+        totalCostValue: '50000',
+        actorUserId: env.ownerId,
+      });
+
+      const snapshotBeforeReject = () => ({
+        salesCount: env.connection.db.select().from(sales).all().length,
+        linesCount: env.connection.db.select().from(saleLines).all().length,
+        paymentsCount: env.connection.db.select().from(payments).all().length,
+        movesCount: env.connection.db.select().from(stockMoves).all().length,
+        outboxCount: listAllOutboxRecordsSync(env.connection.db).length,
+        receiptSeq: readReceiptSeqSync(env.connection.db, env.deviceId),
+      });
+
+      // 5.001 kg in one line MUST fail (1 milli short) and write nothing
+      const overSingle = await env.cartStore.openCart(env.cashierId);
+      const overSingleDetail = await env.cartStore.addLine(overSingle.id, {
+        kind: 'catalog',
+        productId: sugar.product.id,
+        variantId: null,
+        qty: quantityFromMilli(5_001n),
+      });
+      const beforeSingle = snapshotBeforeReject();
+      await expect(
+        env.saleStore.completeSale({
+          cartId: overSingle.id,
+          actorUserId: env.cashierId,
+          clientRequestId: parseUuidV7('01950000-0000-7000-8000-666666666601'),
+          expectedTotal: overSingleDetail.totalFinal,
+          payments: [{ method: 'cash', tenderedAmount: overSingleDetail.totalFinal }],
+        }),
+      ).rejects.toMatchObject({ code: 'INSUFFICIENT_STOCK' });
+      expect(snapshotBeforeReject()).toEqual(beforeSingle);
+
+      // 3.000 kg + 2.001 kg = 5.001 kg across two lines of same product MUST also fail and write nothing
+      const overSplit = await env.cartStore.openCart(env.cashierId);
+      await env.cartStore.addLine(overSplit.id, {
+        kind: 'catalog',
+        productId: sugar.product.id,
+        variantId: null,
+        qty: quantityFromMilli(3_000n),
+      });
+      const overSplitDetail = await env.cartStore.addLine(overSplit.id, {
+        kind: 'catalog',
+        productId: sugar.product.id,
+        variantId: null,
+        qty: quantityFromMilli(2_001n),
+      });
+      await expect(
+        env.saleStore.completeSale({
+          cartId: overSplit.id,
+          actorUserId: env.cashierId,
+          clientRequestId: parseUuidV7('01950000-0000-7000-8000-666666666602'),
+          expectedTotal: overSplitDetail.totalFinal,
+          payments: [{ method: 'cash', tenderedAmount: overSplitDetail.totalFinal }],
+        }),
+      ).rejects.toMatchObject({ code: 'INSUFFICIENT_STOCK' });
+      expect(snapshotBeforeReject()).toEqual(beforeSingle);
+
+      // Exact 5.000 kg succeeds and leaves 0.000 kg stock
+      const exactCart = await env.cartStore.openCart(env.cashierId);
+      const exactDetail = await env.cartStore.addLine(exactCart.id, {
+        kind: 'catalog',
+        productId: sugar.product.id,
+        variantId: null,
+        qty: quantityFromMilli(5_000n),
+      });
+      const ok = await env.saleStore.completeSale({
+        cartId: exactCart.id,
+        actorUserId: env.cashierId,
+        clientRequestId: parseUuidV7('01950000-0000-7000-8000-666666666603'),
+        expectedTotal: exactDetail.totalFinal,
+        payments: [{ method: 'cash', tenderedAmount: exactDetail.totalFinal }],
+      });
+      expect(ok.sale.receiptNo).toBe(1n);
+      const balances = await env.stockStore.listCashierBalances();
+      const sugarAfter = balances.find((b) => b.productId === sugar.product.id);
+      expect(sugarAfter?.qtyOnHand).toBe(quantityFromMilli(0n));
+    } finally {
+      env.connection.close();
+    }
+  });
+
+  it('T1.4 debt (2): clientRequestId used in a different store rejects with IDEMPOTENCY_CONFLICT and writes nothing', async () => {
+    const env = await setupSaleEnv();
+    try {
+      const rice = await env.catalogStore.createProduct({
+        name: 'Guruch',
+        unit: 'kg',
+        trackBatches: false,
+        salePrice: '20000',
+        vatRateBp: 0,
+        actorUserId: env.ownerId,
+      });
+      await env.stockStore.recordInboundMove({
+        productId: rice.product.id,
+        reason: 'initial',
+        qty: '2000',
+        totalCostValue: '24000',
+        actorUserId: env.ownerId,
+      });
+
+      const sharedClientRequestId = parseUuidV7('01950000-0000-7000-8000-777777777701');
+      const otherStoreId = parseUuidV7('01950000-0000-7000-8000-777777777799');
+      const ctx = env.authStore.getActiveRuntimeContext()!;
+
+      const cartA = await env.cartStore.openCart(env.cashierId);
+      const detailA = await env.cartStore.addLine(cartA.id, {
+        kind: 'catalog',
+        productId: rice.product.id,
+        variantId: null,
+        qty: quantityFromMilli(1_000n),
+      });
+
+      // Fixture: another store within the same organization already used sharedClientRequestId
+      // (with matching sourceCartId to isolate `existingSale.storeId !== ctx.storeId` specifically)
+      await ctx.uow.execute((session) => {
+        insertMonotone(session, sales, {
+          organizationId: env.organizationId,
+          storeId: otherStoreId,
+          values: {
+            receiptNo: 1n,
+            receiptCode: 'FFFF-000001',
+            sourceCartId: cartA.id,
+            cashierUserId: env.cashierId,
+            customerId: null,
+            shiftId: null,
+            clientRequestId: sharedClientRequestId,
+            subtotalGross: moneyFromTiyin(20_000n),
+            totalPromoDiscount: ZERO_MONEY,
+            subtotalAfterPromo: moneyFromTiyin(20_000n),
+            manualDiscountMode: 'none',
+            manualDiscountValue: 0n,
+            manualDiscountReason: null,
+            orderDiscountAmount: ZERO_MONEY,
+            totalFinal: moneyFromTiyin(20_000n),
+            totalNetExVat: moneyFromTiyin(20_000n),
+            totalVat: ZERO_MONEY,
+            totalPaid: moneyFromTiyin(20_000n),
+            debtAmount: ZERO_MONEY,
+            changeAmount: ZERO_MONEY,
+            overrideApprovedByUserId: null,
+            overrideApprovedAmount: null,
+            overrideApprovedAtMs: null,
+            voidedAtMs: null,
+            voidedByUserId: null,
+            voidReason: null,
+          },
+          eventType: 'sale.completed',
+          schemaVersion: 1,
+        });
+        return Promise.resolve();
+      });
+
+      const outboxBefore = listAllOutboxRecordsSync(env.connection.db).length;
+      const salesBefore = env.connection.db.select().from(sales).all().length;
+      const receiptSeqBefore = readReceiptSeqSync(env.connection.db, env.deviceId);
+
+      await expect(
+        env.saleStore.completeSale({
+          cartId: cartA.id,
+          actorUserId: env.cashierId,
+          clientRequestId: sharedClientRequestId,
+          expectedTotal: detailA.totalFinal,
+          payments: [{ method: 'cash', tenderedAmount: detailA.totalFinal }],
+        }),
+      ).rejects.toMatchObject({ code: 'IDEMPOTENCY_CONFLICT' });
+
+      expect(env.connection.db.select().from(sales).all().length).toBe(salesBefore);
+      expect(listAllOutboxRecordsSync(env.connection.db).length).toBe(outboxBefore);
+      expect(readReceiptSeqSync(env.connection.db, env.deviceId)).toBe(receiptSeqBefore);
+      const cartAfter = await env.cartStore.getCart(cartA.id);
+      expect(cartAfter.status).toBe('open');
     } finally {
       env.connection.close();
     }
