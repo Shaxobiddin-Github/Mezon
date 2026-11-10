@@ -1,70 +1,111 @@
-# Claude topshirig'i: T1.7 rejasi — TUZATISHLAR BILAN TASDIQLANDI
+# Claude topshirig'i: T1.7 QABUL → T1.8 rejasi
 
-**Merge tekshiruvi:** T1.6 merge'i tekshirildi. `main` = `ceae4d9`, kod `eb42a47` bilan bir xil.
+## 1. T1.7 xulosasi: QABUL (kod `8f29f34`)
 
-Reja puxta. Quyidagilar tasdiqlandi:
+Claude tekshirdi:
 
-- test qarzi commit'i;
-- `customers` (ATTR, organization), telefon uchun partial UNIQUE, FTS5 qidiruv;
-- PII redaksiyasi (Pino, xatolar, outbox debug);
-- `customer_ledger` (FACT), 5 tur va ishora CHECK'lari; `local_customer_balances` faqat proyeksiya;
-- boshlang'ich qarz uchun partial UNIQUE;
-- kredit limiti va supervisor override;
-- ortiqcha to'lov rad etiladi, avans yo'q;
-- chek qarzlari hisoblangan FIFO bilan aniqlanadi;
-- qarzli chekni qaytarish chegaralari, to'lov tushgan chekni void qilish rad etiladi (`SALE_DEBT_HAS_PAYMENTS`);
-- kechikish `store_timezone` bilan, tarix Window Function bilan;
-- RBAC va endpointlar.
+- **Toza nusxada `pnpm verify`:** 226 test o'tadi.
+  - Birinchi ishga tushirishda ikkita eski test (`auth.test.ts` T5, `cart.test.ts` persist) yuklama ostida 5 soniyalik vaqt chegarasidan oshib yiqildi.
+  - Alohida ishga tushirilganda ham, ikki marta qayta to'liq ishga tushirilganda ham o'tdi. Bu beqarorlik, quyidagi 3-bandga qarang.
+- **Mustaqil FIFO model, 300 qadam:**
+  - amallar: 4 mijoz (cheksiz, 50 000, 0 va 200 000 limit), qarzli va qarzsiz savdo, naqd va karta qarz to'lovi, kechirish (manfiy tuzatish), qarzli chekni void qilish va to'liq qaytarish;
+  - 58 qarzli savdo, 54 to'lov, 15 qaytarish, 8 void;
+  - kutilgan rad etishlar: 11 `CREDIT_LIMIT_EXCEEDED`, 39 `OVERPAYMENT_NOT_ALLOWED`, 25 `SALE_DEBT_HAS_PAYMENTS` va boshqalar;
+  - har qadamda har mijoz balansi, ochiq majburiyatlar yig'indisi va har chekning qolgan qarzi model bilan tiyinigacha teng;
+  - kassa qoldig'i ham teng; `rebuildCustomerBalances()` jonli balans bilan teng.
+- **Mutatsiya:** 12 tadan 8 tasi ushlandi. Biri ekvivalent: kechirilgan chekni void qilishni domen `sale_void` qoidasi ham ushlaydi.
 
-Quyidagi tuzatishlar bilan `gemini/T1.7-customer-ledger` branch'ida kodni yoz.
+### Test qarzi
 
-## Majburiy tuzatishlar
+T1.8 PR'ining birinchi alohida commit'i: `T1.7 test qarzi: nofaol mijoz, PII redaksiya, test vaqt chegarasi`.
 
-### D1. Balans hech qachon manfiy bo'lmaydi
+1. **Nofaol mijoz.** `customer-repo.ts` dagi `if (!customer.isActive)` olib tashlanganda testlar yiqilmadi. Test: `isActive = false` mijozga qarzli savdo `409 CUSTOMER_INACTIVE` bilan rad etiladi, hech narsa yozilmaydi. Qarz to'lovi esa qabul qilinadi (rejadagi qaror). Mutatsiya bilan isbotla.
+2. **PII redaksiya.** `DEFAULT_LOG_REDACT_PATHS` dan `fullName` yoki `customerName` olib tashlanganda testlar yiqilmadi. Test: ro'yxatdagi **har bir** PII kaliti (`phone`, `phoneNormalized`, `phoneDigits`, `fullName`, `customerName`, `customerPhone`, `note`; tashqi, `*.` va `*.*.` darajalarda) haqiqiy Pino logger orqali `[Redacted]` bo'lishi tekshirilsin. Kalitlar ro'yxatini sikl bilan tekshir, shunda yangi kalit qo'shilganda test ham avtomatik qamraydi.
+3. **Beqaror vaqt chegarasi.** Og'ir SQLite testlari bor paketlarda (`db-local`, `hub`) vitest `testTimeout` ni oshir (masalan 30 000 ms). Uzoq testlar (model, benchmark) o'z vaqt chegarasini aniq bersin. Unumdorlik chegaralari (≤ 300 ms va hokazo) esa o'zgarmaydi.
 
-Ortiqcha to'lov rad etilgani uchun mijoz balansi doimo `>= 0`.
+## 2. Merge
 
-- Bu invariant ledger'ga yozadigan **har bir** yo'lda bitta umumiy domen funksiyasi orqali tekshirilsin: to'lov, manfiy tuzatish, `return_offset` (qaytarish va void).
-- Model testida har qadamdan keyin har bir mijoz uchun `balance >= 0` tekshirilsin.
-- **Mutatsiya dalili:** shu tekshiruv olib tashlansa, model testi yiqiladi.
+1. `git pull --ff-only`.
+2. PR #14 boshi Claude'ning shu topshiriq commit'i bo'lsin, to'rtala CI job yashil bo'lsin.
+3. `T1.7: Mijoz qarz daftari` nomi bilan Squash and merge qil, SHA'ni yoz, branch'ni o'chir.
+4. `main`dan `gemini/T1.8-suppliers-receiving` branch'ini och.
 
-### D2. FIFO tartibi HLC bo'yicha
+## 3. T1.8 — Ta'minotchi va kirim: avval REJA
 
-`allocateCustomerLedgerFifo` `created_at_ms, id` emas, `hlc` bo'yicha tartiblasin (ombor replay'i kabi). F2 sinxronida boshqa qurilmalardan kelgan yozuvlar ham bir xil, deterministik tartibda taqsimlanadi.
+Kod yozma. Rejani `.mezon/gemini/HISOBOT.md` ga yoz, `[gemini-reja] T1.8` bilan commit qil va push qil, so'ng `node .mezon/kutish.mjs` bilan kut.
 
-**Test:** yozuvlar bazaga teskari tartibda kiritilganda (ichki ID tartibi boshqacha bo'lganda ham) taqsimot natijasi bir xil.
+GEMINI.md T1.8 talablari:
 
-### D3. Musbat tuzatishning ma'nosi
+- ta'minotchi;
+- kirim hujjati;
+- tannarx;
+- muddat;
+- `supplier_ledger`;
+- to'lovlar.
 
-Musbat `adjustment` FIFO'da qanday turadi? Yangi majburiyatmi? Muddati bormi yoki yo'qmi? Kechikishga qo'shiladimi?
+Mezon: tannarx noma'lum bo'lsa, qarz taxminan yozilmaydi.
 
-- Aniq qaror qil va kodda izohla.
-- Model testi ham shu qoidani ishlatsin.
-- Manfiy tuzatish (kechirish) FIFO bo'yicha eng eski qarzni yopadi. Tasdiqlandi.
+Rejada quyidagilar aniq bo'lsin:
 
-### D4. Bitta mijozda ko'p yozuv bo'lganda unumdorlik
+### a) Ta'minotchi
 
-Qaytarish, void va kechikish hisobi har safar mijozning butun tarixi bo'yicha FIFO hisoblaydi.
+- `suppliers` (ATTR): nomi, STIR (INN, 9 raqam, ixtiyoriy, UNIQUE yoki yo'q, qaror qil), telefon, izoh, faollik.
+- PII qoidalari mijozdagi kabi.
+- Arxivlash: qarzi bor ta'minotchi bo'yicha qoida.
 
-- Benchmark: bitta mijozda 5 000 ledger yozuvi (savdo, to'lov va qaytarish aralash). Qarzli chekni qaytarish va `GET /customers/:id` (kechikish bilan) har biri ≤ 100 ms.
-- Oshsa, kesh yoki proyeksiya yechimini taklif qil, lekin natija albatta qayta hisoblash bilan teng bo'lsin.
+### b) Kirim hujjati
 
-### D5. F2 uchun ma'lum chegaralarni yozib qo'y
+- **Holatlar:** `draft` → `posted`. Ehtimol `cancelled`, qaror qil.
+  - Qoralama tahrirlanadi. Joylangan (posted) hujjat o'zgarmaydi: FACT yoki MONOTONE, sinfni tanla.
+  - Joylashdan keyingi xatolar qanday tuzatiladi: teskari hujjat yoki ta'minotchiga qaytarish? Qaror qil.
+- **Qatorlar:** tovar va variant, miqdor, tannarx (birlik yoki jami, qaror qil), partiya raqami, yaroqlilik muddati (partiyali tovarda majburiymi?).
+- **Joylash bitta tranzaksiyada:** ombor kirimi + `supplier_ledger` + outbox.
+  - Ombor kirimi T1.2 dagi `recordInboundMove` ichki funksiyasi orqali o'tsin. Nusxa yo'q, T1.4 b) qoidasi.
+- **Differensial test:** kirim hujjatini joylash ombor holatini xuddi shu qatorlar bilan `recordInboundMove` chaqirgandek o'zgartirsin. 6 maydon va partiyalar teng bo'lsin (T1.5 B1 usuli).
 
-Kredit limiti, boshlang'ich qarz yagonaligi va "ortiqcha to'lov yo'q" qoidalari hozir faqat **lokal** hub darajasida kafolatlanadi. F2 da ikki do'kon oflayn bo'lsa, ular buzilishi mumkin.
+### c) Tannarx noma'lum (mezon)
 
-- Buni `GEMINI.md` dagi sinxron ziddiyatlari ro'yxatiga yoki kod izohiga qo'sh: qanday aniqlanadi va kimga ko'rsatiladi.
-- Hozir kod yozish shart emas, faqat hujjat.
+- Qator tannarxsiz joylanishi mumkinmi? Masalan, narx keyin keladi.
+- Ruxsat bo'lsa:
+  - ombor T1.2 dagi noma'lum tannarx mexanizmi bilan qanday ishlaydi;
+  - `supplier_ledger` ga shu qator uchun qarz **yozilmaydi**;
+  - keyin tannarx aniqlanganda qarz va tannarx qanday yangilanadi: alohida "narxni tasdiqlash" hujjati.
+- Bu oqim to'liq va testlangan bo'lsin: noma'lum → aniq, ombor qiymati va qarz to'g'ri.
 
-## Tavsiya (majburiy emas)
+### d) `supplier_ledger`
 
-Telefon faqat `+998` formatida qabul qilinadi. Qo'shni davlat raqamlari (masalan `+7`, `+992`) uchun umumiy E.164 (`+[1-9]\d{7,14}`) ham qabul qilinsin. Mahalliy shakllar (`90 123-45-67`) esa `+998` ga normallashtirilsin. Qaror senda, faqat testla.
+- **Turlar:** boshlang'ich qarz, kirim qarzi, to'lov, qaytarish, tuzatish.
+- **Balans = SUM.** Proyeksiya bo'lsa, rebuild testi bo'lsin.
+- **Ortiqcha to'lov (avans):** ta'minotchiga oldindan to'lash amalda keng tarqalgan. Ruxsat berilsinmi? Qaror qil.
+  - Agar ruxsat bo'lsa, manfiy balans ma'nosi va FIFO qoidalari aniq yozilsin.
+- **FIFO va muddat:** T1.7 dagi HLC tartibi va kechikish hisobini qayta ishlat.
 
-## Bajarish tartibi
+### e) Ta'minotchiga to'lov
 
-1. Birinchi commit: T1.6 test qarzi, mutatsiya dalillari bilan.
-2. T1.7 kodi.
-3. `pnpm verify` yashil.
-4. Commit qil, push qil va PR och. To'rtala CI job yashil bo'lsin.
-5. Hisobot: D1–D5 dalillari, model testi qadamlari soni, unumdorlik (10 000 / 100 000 va D4). `[gemini-hisobot] T1.7` bilan commit qil va push qil.
-6. `node .mezon/kutish.mjs` ni ishga tushir. Merge qilma.
+- Naqd to'lov `cash_moves` da yangi chiqim turi bilan, shu terminalda yoziladi. Naqd yetmasa `INSUFFICIENT_CASH_IN_DRAWER`.
+- Naqdsiz to'lov ham qayd etiladi.
+- `clientRequestId` + `request_hash` bilan idempotent.
+
+### f) Ta'minotchiga qaytarish (ixtiyoriy)
+
+- Joylangan kirimdan tovarni qaytarish T1.8 ichidami yoki keyinroqmi? Qaror qil.
+- Agar T1.8 da bo'lsa:
+  - asl partiya va asl tannarx bilan chiqim;
+  - `supplier_ledger` dan ayirish;
+  - ortiqcha qaytarish rad etiladi.
+
+### g) RBAC, maxfiylik va unumdorlik
+
+- **RBAC:** ta'minotchi, kirim va to'lovlar `owner`/`manager` uchun. Kassir umuman ko'rmaydimi? Qaror qil.
+- **Tannarx** faqat ruxsatli rollarga ko'rinadi.
+- 100 qatorli kirim hujjatini joylash ≤ 500 ms (lokal).
+
+### h) Model testi
+
+Tasodifiy kirim (shu jumladan tannarxsiz), narxni tasdiqlash, to'lov va qaytarish ketma-ketligida ta'minotchi balansi, ombor qiymati va kassa mustaqil model bilan tiyinigacha teng bo'lsin.
+
+### i) Doiradan tashqari
+
+- Buyurtma (purchase order) va avtomatik buyurtma.
+- Smena (T1.9).
+- Fiskal (F3).
