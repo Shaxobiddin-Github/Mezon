@@ -52,6 +52,9 @@ if (schemaPkg.localSchemaRegistry) {
     schemaPkg.localSchemaRegistry.all(),
   );
 }
+if (schemaPkg.assertCatalogSearchMigrationsComplete) {
+  schemaPkg.assertCatalogSearchMigrationsComplete(migrationsDir);
+}
 
 const currSnapshot = await generateSQLiteDrizzleJson(schemaTables);
 const diffStatements = await generateSQLiteMigration(prevSnapshot, currSnapshot);

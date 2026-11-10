@@ -9,6 +9,8 @@ import {
 import type { HubPermission } from '@mezon/domain';
 import type { FastifyInstance, FastifyRequest } from 'fastify';
 import type { HubAuthService } from './auth-service.js';
+import { registerCatalogRoutes } from './catalog-routes.js';
+import type { HubCatalogService } from './catalog-service.js';
 
 async function authorize(
   authService: HubAuthService,
@@ -20,7 +22,11 @@ async function authorize(
   return session;
 }
 
-export function registerHubRoutes(app: FastifyInstance, authService: HubAuthService): void {
+export function registerHubRoutes(
+  app: FastifyInstance,
+  authService: HubAuthService,
+  catalogService?: HubCatalogService,
+): void {
   app.get('/health', async () => {
     return authService.getHealth();
   });
@@ -87,4 +93,8 @@ export function registerHubRoutes(app: FastifyInstance, authService: HubAuthServ
     const params = UserIdParamsSchema.parse(request.params);
     return authService.deleteUser(params.id);
   });
+
+  if (catalogService) {
+    registerCatalogRoutes(app, authService, catalogService);
+  }
 }

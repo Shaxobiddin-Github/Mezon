@@ -61,6 +61,7 @@ export {
   createSqliteUnitOfWork,
   bootstrapSqliteHubUnitOfWork,
   runConnectionReadOnly,
+  runConnectionProjectionMaintenance,
   getSessionSqlite,
 } from './uow.js';
 
@@ -86,7 +87,17 @@ export {
   localPinCredentials,
   localDeviceAuthState,
   localSessions,
+  categories,
+  products,
+  productVariants,
+  productBarcodes,
+  priceChanges,
 } from './schema/index.js';
+
+export {
+  buildCatalogSearchFtsSql,
+  assertCatalogSearchMigrationsComplete,
+} from './catalog-search-schema.js';
 
 export {
   type HubConfigSnapshot,
@@ -100,3 +111,21 @@ export {
   SqliteHubAuthStore,
   createSqliteHubAuthStore,
 } from './auth-repo.js';
+
+export {
+  type CatalogRuntimeContext,
+  type CreateSqliteCatalogStoreOptions,
+  type StoredCategoryRecord,
+  type StoredProductRecord,
+  type StoredProductVariantRecord,
+  type StoredProductBarcodeRecord,
+  type StoredPriceChangeRecord,
+  type StoredProductDetailRecord,
+  type StoredBarcodeScanResult,
+  type ListProductsFilter,
+  type ListProductsPageResult,
+  type RebuildCatalogSearchResult,
+  rebuildCatalogSearchIndex,
+  SqliteCatalogStore,
+  createSqliteCatalogStore,
+} from './catalog-repo.js';
