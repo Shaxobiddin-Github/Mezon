@@ -19,6 +19,7 @@ import {
   SchemaValidationError,
   SqliteSchemaRegistry,
   assertCatalogSearchMigrationsComplete,
+  assertCustomerMigrationsComplete,
   assertReturnAndViewMigrationsComplete,
   assertSaleMigrationsComplete,
   assertSqliteTriggersMigrationsComplete,
@@ -26,18 +27,22 @@ import {
   batches,
   buildAllSqliteTriggersSql,
   buildCatalogSearchFtsSql,
+  buildCustomerSearchFtsSql,
   buildSaleMonotoneTriggersSql,
   buildSalesLinesViewSql,
   buildSqliteImmutabilityTriggersSql,
   buildStockMonotoneTriggersSql,
   cashMoves,
   categories,
+  customerLedger,
+  customers,
   getDefaultLocalMigrationsFolder,
   inventoryCountLines,
   inventoryCounts,
   localBatchBalances,
   localCartLines,
   localCarts,
+  localCustomerBalances,
   localDeviceAuthState,
   localDeviceState,
   localHubConfig,
@@ -133,6 +138,9 @@ describe('@mezon/db-local - Schema foundation, registry, pragmas, and bigint saf
       ['returns', 'FACT'],
       ['return_lines', 'FACT'],
       ['return_payments', 'FACT'],
+      ['customers', 'ATTR'],
+      ['customer_ledger', 'FACT'],
+      ['local_customer_balances', 'LOCAL'],
     ]);
     expect(() =>
       validateSqliteSchemaRegistry(
@@ -166,6 +174,9 @@ describe('@mezon/db-local - Schema foundation, registry, pragmas, and bigint saf
           returns,
           returnLines,
           returnPayments,
+          customers,
+          customerLedger,
+          localCustomerBalances,
         },
         localSchemaRegistry,
       ),
@@ -343,7 +354,7 @@ describe('@mezon/db-local - Schema foundation, registry, pragmas, and bigint saf
       const migCountRow = conn.sqlite
         .prepare('SELECT COUNT(*) as cnt FROM __drizzle_migrations')
         .get() as { cnt: bigint };
-      expect(migCountRow.cnt).toBe(9n);
+      expect(migCountRow.cnt).toBe(10n);
     } finally {
       conn.close();
     }
@@ -769,6 +780,24 @@ describe('@mezon/db-local - Schema foundation, registry, pragmas, and bigint saf
     expect(() => assertReturnAndViewMigrationsComplete(missingVoidFilterDir)).toThrowError(
       /voided_at_ms IS NULL/,
     );
+
+    // T1.7 customer_fts & opening_balance unique validator negative/positive tests
+    const openingIdxSql = `CREATE UNIQUE INDEX "uidx_customer_ledger_opening_balance" ON "customer_ledger" ("organization_id", "customer_id") WHERE "customer_ledger"."entry_type" = 'opening_balance';`;
+    const okCustDir = makeMigDir();
+    fs.writeFileSync(
+      path.join(okCustDir, '0009.sql'),
+      `${buildCustomerSearchFtsSql().join('\n')}\n${openingIdxSql}`,
+    );
+    expect(() => assertCustomerMigrationsComplete(okCustDir)).not.toThrow();
+
+    const missingOpeningIdxDir = makeMigDir();
+    fs.writeFileSync(
+      path.join(missingOpeningIdxDir, '0009.sql'),
+      buildCustomerSearchFtsSql().join('\n'),
+    );
+    expect(() => assertCustomerMigrationsComplete(missingOpeningIdxDir)).toThrowError(
+      /uidx_customer_ledger_opening_balance/,
+    );
   });
 
   it('cleanly upgrades a pre-populated 0003 database to 0004 without losing products or FTS triggers', () => {
@@ -1087,9 +1116,15 @@ describe('@mezon/db-local - Schema foundation, registry, pragmas, and bigint saf
       expect(viewRows).toEqual([{ record_kind: 'sale', sign: 1n, signed_final_total: 10000n }]);
 
       const cfgRow = conn.sqlite
-        .prepare('SELECT "store_timezone" FROM "local_hub_config" WHERE "singleton_guard" = 1')
-        .get() as { readonly store_timezone: string };
+        .prepare(
+          'SELECT "store_timezone", "default_customer_due_days" FROM "local_hub_config" WHERE "singleton_guard" = 1',
+        )
+        .get() as {
+        readonly store_timezone: string;
+        readonly default_customer_due_days: bigint | null;
+      };
       expect(cfgRow.store_timezone).toBe('Asia/Tashkent');
+      expect(cfgRow.default_customer_due_days).toBe(14n);
 
       // Existing immutability & void triggers survived upgrade intact
       expect(() =>

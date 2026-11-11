@@ -379,6 +379,7 @@ export function canonicalizeCompleteSaleRequest(params: {
   readonly expectedTotal: Money;
   readonly debtAmount: Money;
   readonly customerId: UuidV7 | null;
+  readonly dueDays?: number | null;
   readonly payments: readonly SalePaymentInput[];
 }): string {
   const normalizedPayments = params.payments.map((row) => {
@@ -397,12 +398,17 @@ export function canonicalizeCompleteSaleRequest(params: {
     ] as const;
   });
 
-  return JSON.stringify([
+  const basePayload = [
     'mezon.complete_sale.v1',
     parseUuidV7(params.cartId),
     moneyToTiyin(params.expectedTotal).toString(),
     moneyToTiyin(params.debtAmount).toString(),
     params.customerId !== null ? parseUuidV7(params.customerId) : null,
     normalizedPayments,
-  ]);
+  ] as const;
+
+  if (params.dueDays !== undefined && params.dueDays !== null) {
+    return JSON.stringify([...basePayload, params.dueDays]);
+  }
+  return JSON.stringify(basePayload);
 }

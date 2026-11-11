@@ -616,6 +616,11 @@ export class SqliteUnitOfWork implements UnitOfWork<SqliteUnitOfWorkSession> {
     return this.hlcClock.now().hlc;
   }
 
+  /** Returns current millisecond timestamp from injected Clock adapter (read-only). */
+  nowUnixMs(): UnixMs {
+    return unixMsFromBigInt(this.clock.now());
+  }
+
   /** @internal */
   internalCurrentUuidMs(): UnixMs {
     return this.uuidGenerator.currentLastTimestampMs() ?? unixMsFromBigInt(this.clock.now());

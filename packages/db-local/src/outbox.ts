@@ -192,6 +192,81 @@ export function listAllOutboxRecordsSync(
   return db.select().from(localOutbox).orderBy(asc(localOutbox.deviceSeq)).all().map(mapOutboxRow);
 }
 
+const OUTBOX_DEBUG_REDACTED_KEYS = new Set<string>([
+  'pin',
+  'newPin',
+  'pinHash',
+  'token',
+  'accessToken',
+  'tokenHash',
+  'password',
+  'secret',
+  'fullName',
+  'full_name',
+  'nameSearch',
+  'name_search',
+  'phone',
+  'phoneNormalized',
+  'phone_normalized',
+  'phoneDigits',
+  'phone_digits',
+  'customerName',
+  'customerPhone',
+  'customerNote',
+  'note',
+]);
+
+/**
+ * Redacts PII (customer names, phones, notes) and secrets recursively before writing any outbox
+ * record to debug logs, crash diagnostics, or support bundles while leaving the persisted sync
+ * envelope untouched.
+ */
+export function redactOutboxPayloadForDebug(value: unknown): unknown {
+  if (value === null || typeof value === 'boolean' || typeof value === 'number') {
+    return value;
+  }
+  if (typeof value === 'bigint') {
+    return value.toString();
+  }
+  if (typeof value === 'string') {
+    return /^\+[1-9]\d{7,14}$/.test(value) ? '[Redacted]' : value;
+  }
+  if (Array.isArray(value)) {
+    return value.map((item) => redactOutboxPayloadForDebug(item));
+  }
+  if (typeof value === 'object') {
+    const out: Record<string, unknown> = {};
+    for (const [k, v] of Object.entries(value)) {
+      if (OUTBOX_DEBUG_REDACTED_KEYS.has(k)) {
+        out[k] = v === null || v === undefined ? v : '[Redacted]';
+      } else {
+        out[k] = redactOutboxPayloadForDebug(v);
+      }
+    }
+    return out;
+  }
+  return '[Redacted]';
+}
+
+export function formatOutboxRecordForDebug(record: PersistedOutboxRecord): string {
+  return JSON.stringify({
+    eventId: record.eventId,
+    organizationId: record.organizationId,
+    storeId: record.storeId,
+    deviceId: record.deviceId,
+    deviceSeq: record.deviceSeq.toString(),
+    hlc: record.hlc,
+    type: record.type,
+    entity: record.entity,
+    entityId: record.entityId,
+    class: record.class,
+    schemaVersion: record.schemaVersion,
+    status: record.status,
+    attempts: record.attempts,
+    payload: redactOutboxPayloadForDebug(record.payload),
+  });
+}
+
 export class SqliteOutboxRepository implements OutboxRepository<SqliteSessionDbAccess> {
   listPending(
     session: SqliteSessionDbAccess,

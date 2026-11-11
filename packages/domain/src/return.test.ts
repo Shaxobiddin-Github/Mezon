@@ -256,6 +256,38 @@ describe('@mezon/domain - return, void window, cumulative allocation, and paymen
     );
   });
 
+  it('T1.6 test debt: half-tiyin cumulative rounding uses HalfAwayFromZero (10 tiyin / 2.000 kg -> 0.250 gives 1, next 0.250 gives 2)', () => {
+    const r1 = computeCumulativeReturnLineAmounts({
+      saleLineId: LINE_ID,
+      unit: 'kg',
+      soldQty: quantityFromMilli(2_000n),
+      previouslyReturnedQty: quantityFromMilli(0n),
+      requestedQty: quantityFromMilli(250n),
+      soldFinalTotal: moneyFromTiyin(10n),
+      soldNetExVat: moneyFromTiyin(10n),
+      soldVatTotal: moneyFromTiyin(0n),
+      previouslyRefunded: moneyFromTiyin(0n),
+      previouslyReturnedNet: moneyFromTiyin(0n),
+      previouslyReturnedVat: moneyFromTiyin(0n),
+    });
+    expect(moneyToTiyin(r1.refundAmount)).toBe(1n);
+
+    const r2 = computeCumulativeReturnLineAmounts({
+      saleLineId: LINE_ID,
+      unit: 'kg',
+      soldQty: quantityFromMilli(2_000n),
+      previouslyReturnedQty: quantityFromMilli(250n),
+      requestedQty: quantityFromMilli(250n),
+      soldFinalTotal: moneyFromTiyin(10n),
+      soldNetExVat: moneyFromTiyin(10n),
+      soldVatTotal: moneyFromTiyin(0n),
+      previouslyRefunded: r1.refundAmount,
+      previouslyReturnedNet: r1.netExVat,
+      previouslyReturnedVat: r1.vatTotal,
+    });
+    expect(moneyToTiyin(r2.refundAmount)).toBe(2n);
+  });
+
   it('allocates partial & multi-batch FIFO return stock legs identically to full reversal, and skips V5 non-tracked lines', () => {
     const origLegs = [
       {
@@ -394,7 +426,7 @@ describe('@mezon/domain - return, void window, cumulative allocation, and paymen
       }),
     ).toThrowError(/VALIDATION_ERROR/);
 
-    // T1.7 debt offset rejected until T1.7
+    // T1.7 debt offset caps: cannot offset > remainingSaleDebt (even on non-debt sale), and supports remainingSaleDebt + paidTowardDebtByMethod
     expect(() =>
       resolveReturnPayments({
         totalRefund: moneyFromTiyin(50_000n),
@@ -405,6 +437,26 @@ describe('@mezon/domain - return, void window, cumulative allocation, and paymen
         priorReturnedByMethod: prior,
         payments: [{ method: 'cash', amount: moneyFromTiyin(40_000n) }],
       }),
-    ).toThrowError(/CUSTOMER_REQUIRED/);
+    ).toThrowError(/RETURN_DEBT_OFFSET_EXCEEDED/);
+
+    const paidTowardDebt = createEmptyPaymentMethodMap();
+    paidTowardDebt.card = moneyFromTiyin(20_000n);
+    const debtRes = resolveReturnPayments({
+      totalRefund: moneyFromTiyin(100_000n),
+      debtOffsetAmount: moneyFromTiyin(30_000n),
+      saleTotalPaid: moneyFromTiyin(50_000n),
+      saleDebtAmount: moneyFromTiyin(50_000n),
+      remainingSaleDebt: moneyFromTiyin(30_000n),
+      paidTowardDebtByMethod: paidTowardDebt,
+      originalPaidByMethod: cashOnlyPaid,
+      priorReturnedByMethod: prior,
+      payments: [
+        { method: 'cash', amount: moneyFromTiyin(50_000n) },
+        { method: 'card', amount: moneyFromTiyin(20_000n), providerRef: 'CARD-DEBT-REF' },
+      ],
+    });
+    expect(moneyToTiyin(debtRes.debtOffsetAmount)).toBe(30_000n);
+    expect(moneyToTiyin(debtRes.cashRefundAmount)).toBe(50_000n);
+    expect(moneyToTiyin(debtRes.nonCashRefundAmount)).toBe(20_000n);
   });
 });

@@ -1,7 +1,6 @@
 import { createHash } from 'node:crypto';
 import {
   type CartLineKind,
-  type CashMoveType,
   DomainError,
   MAX_MONEY_TIYIN,
   type ManualDiscountMode,
@@ -35,6 +34,11 @@ import {
   requireCartRowInDbSync,
 } from './cart-repo.js';
 import type { LocalSqliteConnection } from './connection.js';
+import {
+  type StoredCashMoveRecord,
+  prepareCustomerForSaleInTxSync,
+  recordSaleDebtInTxSync,
+} from './customer-repo.js';
 import { advanceReceiptSeqSync } from './device-state.js';
 import { cashMoves, localCarts, payments, saleLines, sales } from './schema/index.js';
 import {
@@ -78,6 +82,8 @@ export interface CompleteSaleInput {
   readonly expectedTotal: Money;
   readonly debtAmount?: Money;
   readonly customerId?: UuidV7 | null;
+  readonly dueDays?: number | null;
+  readonly creditOverrideApprovedByUserId?: UuidV7 | null;
   readonly payments: readonly SalePaymentInput[];
 }
 
@@ -119,21 +125,7 @@ export interface StoredSalePaymentRecord {
   readonly createdAtMs: UnixMs;
 }
 
-export interface StoredCashMoveRecord {
-  readonly id: UuidV7;
-  readonly organizationId: UuidV7;
-  readonly storeId: UuidV7;
-  readonly deviceId: UuidV7;
-  readonly shiftId: UuidV7 | null;
-  readonly type: CashMoveType;
-  readonly amountDelta: Money;
-  readonly sourceType: string;
-  readonly sourceId: UuidV7;
-  readonly paymentId: UuidV7 | null;
-  readonly reason: string | null;
-  readonly createdByUserId: UuidV7;
-  readonly createdAtMs: UnixMs;
-}
+export type { StoredCashMoveRecord };
 
 export interface StoredSaleRecord {
   readonly id: UuidV7;
@@ -181,6 +173,7 @@ function computeCompleteSaleRequestHash(params: {
   readonly expectedTotal: Money;
   readonly debtAmount: Money;
   readonly customerId: UuidV7 | null;
+  readonly dueDays?: number | null;
   readonly payments: readonly SalePaymentInput[];
 }): string {
   const canonical = canonicalizeCompleteSaleRequest(params);
@@ -428,12 +421,19 @@ export class SqliteSaleStore {
       input.customerId !== undefined && input.customerId !== null
         ? parseUuidV7(input.customerId)
         : null;
+    const dueDays = input.dueDays ?? null;
+    const creditOverrideApprovedByUserId =
+      input.creditOverrideApprovedByUserId !== undefined &&
+      input.creditOverrideApprovedByUserId !== null
+        ? parseUuidV7(input.creditOverrideApprovedByUserId)
+        : null;
 
     const incomingRequestHash = computeCompleteSaleRequestHash({
       cartId,
       expectedTotal: input.expectedTotal,
       debtAmount,
       customerId,
+      dueDays,
       payments: input.payments,
     });
 
@@ -553,8 +553,7 @@ export class SqliteSaleStore {
         discountOverrideRequired: detail.discountOverrideRequired,
       });
 
-      // 4) T1.5 debt & customer gates + mixed payment resolution + strict invariant check against server totalFinal.
-      //    T1.7 replaces these gates with real customer registry lookup and `customer_ledger` insert in this tx.
+      // 4) T1.7 customer registry & debt validation + mixed payment resolution + strict invariant check
       const debtTiyin = moneyToTiyin(debtAmount);
       if (debtTiyin < 0n || debtTiyin > MAX_MONEY_TIYIN) {
         throw new DomainError(
@@ -562,16 +561,10 @@ export class SqliteSaleStore {
           `debtAmount must be between 0 and ${MAX_MONEY_TIYIN.toString()} tiyin`,
         );
       }
-      if (debtTiyin > 0n) {
+      if (debtTiyin > 0n && customerId === null) {
         throw new DomainError(
           'CUSTOMER_REQUIRED',
-          'Partial or full debt requires a customer ledger (available in T1.7)',
-        );
-      }
-      if (customerId !== null) {
-        throw new DomainError(
-          'VALIDATION_ERROR',
-          'customerId is not supported in T1.5 until T1.7 adds customer registry',
+          'Partial or full debt requires an active customer',
         );
       }
 
@@ -587,6 +580,18 @@ export class SqliteSaleStore {
         customerId,
         payments: resolvedPayments.payments,
       });
+
+      const customerSalePrep =
+        customerId !== null
+          ? prepareCustomerForSaleInTxSync(session, {
+              organizationId: ctx.organizationId,
+              customerId,
+              debtAmount,
+              dueDays: input.dueDays,
+              creditOverrideApprovedByUserId,
+              saleCreatedAtMs: session.nowUnixMs(),
+            })
+          : null;
 
       // F3 HOOK POINT (`packages/rules`, PF-246 compliance):
       // Evaluate signed legal rule bundle here (banned MXIK cash block, mixed receipt cash ban,
@@ -703,7 +708,7 @@ export class SqliteSaleStore {
           sourceCartId: cartId,
           cashierUserId: cartRow.cashierUserId,
           completedByUserId: actorUserId,
-          customerId: null,
+          customerId,
           shiftId: null,
           clientRequestId,
           requestHash: incomingRequestHash,
@@ -858,6 +863,21 @@ export class SqliteSaleStore {
             });
           }
         }
+      }
+
+      // 9b) Record `sale_debt` in `customer_ledger` (`FACT`) & update `local_customer_balances` in the same tx
+      if (customerSalePrep !== null && customerId !== null && debtTiyin > 0n) {
+        recordSaleDebtInTxSync(session, {
+          organizationId: ctx.organizationId,
+          storeId: ctx.storeId,
+          customerId,
+          saleId,
+          debtAmount: resolvedPayments.debtAmount,
+          dueAtMs: customerSalePrep.dueAtMs,
+          actorUserId,
+          overrideApprovedByUserId: creditOverrideApprovedByUserId,
+          nowMs: saleWrite.row.createdAtMs,
+        });
       }
 
       // 10) Mark cart `'completed'` inside the same transaction so subsequent conflicting requests get CART_NOT_OPEN

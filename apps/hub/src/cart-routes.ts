@@ -178,6 +178,8 @@ export function registerCartRoutes(
           receiptCode: res.sale.receiptCode,
           cashierUserId: res.sale.cashierUserId,
           completedByUserId: res.sale.completedByUserId,
+          customerId: res.sale.customerId,
+          creditOverrideUsed: body.creditOverride !== undefined,
           paymentMethods: res.sale.payments.map((p) => p.method),
           totalFinal: res.sale.totalFinal,
           totalPaid: res.sale.totalPaid,

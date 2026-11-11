@@ -1628,6 +1628,207 @@ describe('@mezon/db-local - T1.6 Void, Return, V1-V5, Oracle Parity, C1 Crash & 
     }
   }, 20_000);
 
+  it('T1.6 test debt (1): voidSale restores exact pre-sale stock balances (all 6 fields incl. lastUnitCost != avg) & FIFO batches after two distinct unit-cost purchases', async () => {
+    const env = await setupReturnEnv({ seed: 915 });
+    try {
+      await seedCashInDrawer(env, 1_000_000n, 915);
+
+      const fifoProd = await env.catalogStore.createProduct({
+        name: 'Void Exact FIFO',
+        unit: 'kg',
+        trackBatches: true,
+        salePrice: '50000',
+        vatRateBp: 0,
+        actorUserId: env.ownerId,
+      });
+      const avgProd = await env.catalogStore.createProduct({
+        name: 'Void Exact Avg',
+        unit: 'kg',
+        trackBatches: false,
+        salePrice: '50000',
+        vatRateBp: 0,
+        actorUserId: env.ownerId,
+      });
+
+      // Two distinct unit costs so lastUnitCost (30_000) !== weighted average (20_000) & FIFO batch A cost (10_000)
+      await env.stockStore.recordInboundMove({
+        productId: fifoProd.product.id,
+        reason: 'purchase',
+        qty: '2000',
+        totalCostValue: '20000',
+        batchNumber: 'VA-1',
+        actorUserId: env.ownerId,
+      });
+      await env.stockStore.recordInboundMove({
+        productId: fifoProd.product.id,
+        reason: 'purchase',
+        qty: '2000',
+        totalCostValue: '60000',
+        batchNumber: 'VA-2',
+        actorUserId: env.ownerId,
+      });
+
+      await env.stockStore.recordInboundMove({
+        productId: avgProd.product.id,
+        reason: 'purchase',
+        qty: '2000',
+        totalCostValue: '20000',
+        actorUserId: env.ownerId,
+      });
+      await env.stockStore.recordInboundMove({
+        productId: avgProd.product.id,
+        reason: 'purchase',
+        qty: '2000',
+        totalCostValue: '60000',
+        actorUserId: env.ownerId,
+      });
+
+      const fifoPreSale = readPoolSnapshot(
+        env.connection,
+        env.organizationId,
+        env.storeId,
+        fifoProd.product.id,
+      );
+      const avgPreSale = readPoolSnapshot(
+        env.connection,
+        env.organizationId,
+        env.storeId,
+        avgProd.product.id,
+      );
+      const fifoPreBatches = readNormalizedBatchSnapshots(
+        env.connection,
+        env.organizationId,
+        env.storeId,
+        fifoProd.product.id,
+      );
+      expect(fifoPreSale.lastUnitCost).toBe(30_000n);
+      expect(avgPreSale.lastUnitCost).toBe(30_000n);
+
+      const cart = await env.cartStore.openCart(env.cashierId);
+      await env.cartStore.addLine(cart.id, {
+        kind: 'catalog',
+        productId: fifoProd.product.id,
+        variantId: null,
+        qty: quantityFromMilli(1_000n),
+      });
+      await env.cartStore.addLine(cart.id, {
+        kind: 'catalog',
+        productId: avgProd.product.id,
+        variantId: null,
+        qty: quantityFromMilli(1_000n),
+      });
+
+      const sale = await env.saleStore.completeSale({
+        cartId: cart.id,
+        actorUserId: env.cashierId,
+        clientRequestId: nextTestUuid(),
+        expectedTotal: moneyFromTiyin(100_000n),
+        payments: [{ method: 'cash', tenderedAmount: moneyFromTiyin(100_000n) }],
+      });
+
+      await env.returnStore.voidSale({
+        saleId: sale.sale.id,
+        actorUserId: env.managerId,
+        reason: 'T1.6 debt exact restore',
+        clientRequestId: nextTestUuid(),
+      });
+
+      const fifoPostVoid = readPoolSnapshot(
+        env.connection,
+        env.organizationId,
+        env.storeId,
+        fifoProd.product.id,
+      );
+      const avgPostVoid = readPoolSnapshot(
+        env.connection,
+        env.organizationId,
+        env.storeId,
+        avgProd.product.id,
+      );
+      const fifoPostBatches = readNormalizedBatchSnapshots(
+        env.connection,
+        env.organizationId,
+        env.storeId,
+        fifoProd.product.id,
+      );
+
+      expect(fifoPostVoid).toEqual(fifoPreSale);
+      expect(avgPostVoid).toEqual(avgPreSale);
+      expect(fifoPostBatches).toEqual(fifoPreBatches);
+
+      await env.stockStore.rebuildProjections();
+      expect(
+        readPoolSnapshot(env.connection, env.organizationId, env.storeId, fifoProd.product.id),
+      ).toEqual(fifoPreSale);
+      expect(
+        readPoolSnapshot(env.connection, env.organizationId, env.storeId, avgProd.product.id),
+      ).toEqual(avgPreSale);
+    } finally {
+      env.connection.close();
+    }
+  });
+
+  it('T1.6 test debt (2): half-tiyin cumulative rounding in createReturn (final_total=10, 2.000 kg: 0.250->1, next 0.250->2)', async () => {
+    const env = await setupReturnEnv({ seed: 916 });
+    try {
+      await seedCashInDrawer(env, 10_000n, 916);
+      const prod = await env.catalogStore.createProduct({
+        name: 'Half Tiyin Kg',
+        unit: 'kg',
+        trackBatches: false,
+        salePrice: '5',
+        vatRateBp: 0,
+        actorUserId: env.ownerId,
+      });
+      await env.stockStore.recordInboundMove({
+        productId: prod.product.id,
+        reason: 'purchase',
+        qty: '2000',
+        totalCostValue: '4',
+        actorUserId: env.ownerId,
+      });
+
+      const cart = await env.cartStore.openCart(env.cashierId);
+      await env.cartStore.addLine(cart.id, {
+        kind: 'catalog',
+        productId: prod.product.id,
+        variantId: null,
+        qty: quantityFromMilli(2_000n),
+      });
+      const sale = await env.saleStore.completeSale({
+        cartId: cart.id,
+        actorUserId: env.cashierId,
+        clientRequestId: nextTestUuid(),
+        expectedTotal: moneyFromTiyin(10n),
+        payments: [{ method: 'cash', tenderedAmount: moneyFromTiyin(10n) }],
+      });
+      const lineId = sale.sale.lines[0].id;
+      expect(moneyToTiyin(sale.sale.lines[0].finalTotal)).toBe(10n);
+
+      const ret1 = await env.returnStore.createReturn({
+        saleId: sale.sale.id,
+        actorUserId: env.managerId,
+        reason: 'First 0.250 kg',
+        clientRequestId: nextTestUuid(),
+        items: [{ saleLineId: lineId, qty: quantityFromMilli(250n) }],
+        payments: [{ method: 'cash', amount: moneyFromTiyin(1n) }],
+      });
+      expect(moneyToTiyin(ret1.returnDoc.totalRefund)).toBe(1n);
+
+      const ret2 = await env.returnStore.createReturn({
+        saleId: sale.sale.id,
+        actorUserId: env.managerId,
+        reason: 'Second 0.250 kg',
+        clientRequestId: nextTestUuid(),
+        items: [{ saleLineId: lineId, qty: quantityFromMilli(250n) }],
+        payments: [{ method: 'cash', amount: moneyFromTiyin(2n) }],
+      });
+      expect(moneyToTiyin(ret2.returnDoc.totalRefund)).toBe(2n);
+    } finally {
+      env.connection.close();
+    }
+  });
+
   it('meets <= 300ms latency for full return of a 20-line tracked receipt (10 FIFO + 10 avg) on disk WAL SQLite', async () => {
     const samplesMs: number[] = [];
     for (let runIdx = 0; runIdx < 5; runIdx += 1) {
