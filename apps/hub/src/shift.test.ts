@@ -564,6 +564,87 @@ describe('@mezon/hub - T1.9 Shifts, Cashier Sessions, X1-X4, RBAC, Supervisor PI
       );
       expect(det.closures).toHaveLength(2);
 
+      // B1 HTTP E2E: Handoff shortage (-100) clamps GET /shifts/current drawerCashBalance & outflow guards to 8,473
+      const openB1Res = await hub.app.inject({
+        method: 'POST',
+        url: '/shifts/open',
+        headers: authHeaders(cashALogin.token),
+        payload: {
+          clientRequestId: reqUuid(),
+          openingCash: '0',
+          openingDiscrepancyReason: 'Fresh drawer for B1 HTTP test',
+        },
+      });
+      expect(openB1Res.statusCode).toBe(201);
+      const b1ShiftId = OpenShiftResponseSchema.parse(openB1Res.json()).shift.id;
+
+      await hub.app.inject({
+        method: 'POST',
+        url: `/shifts/${b1ShiftId}/cash-moves`,
+        headers: authHeaders(mgrLogin.token),
+        payload: {
+          clientRequestId: reqUuid(),
+          type: 'cash_in',
+          amount: '8573',
+          reason: 'B1 seed expected 8,573',
+        },
+      });
+
+      const hoB1Res = await hub.app.inject({
+        method: 'POST',
+        url: `/shifts/${b1ShiftId}/handoff`,
+        headers: authHeaders(cashALogin.token),
+        payload: {
+          clientRequestId: reqUuid(),
+          nextCashierUserId: cashBLogin.user.id,
+          countedCash: '8473',
+          discrepancyReason: 'Missing 100 tiyin',
+        },
+      });
+      expect(hoB1Res.statusCode).toBe(200);
+      expect(HandoffCashierResponseSchema.parse(hoB1Res.json()).drawerCashBalance).toBe('8473');
+
+      const curB1 = CurrentShiftResponseSchema.parse(
+        (
+          await hub.app.inject({
+            method: 'GET',
+            url: '/shifts/current',
+            headers: authHeaders(cashBLogin.token),
+          })
+        ).json(),
+      );
+      expect(curB1.drawerCashBalance).toBe('8473');
+
+      const blockedEncash = await hub.app.inject({
+        method: 'POST',
+        url: `/shifts/${b1ShiftId}/cash-moves`,
+        headers: authHeaders(mgrLogin.token),
+        payload: {
+          clientRequestId: reqUuid(),
+          type: 'encashment',
+          amount: '8474',
+          reason: 'Exceeds physical cash',
+        },
+      });
+      expect(blockedEncash.statusCode).toBe(409);
+      expect(ApiErrorEnvelopeSchema.parse(blockedEncash.json()).error.code).toBe(
+        'INSUFFICIENT_CASH_IN_DRAWER',
+      );
+
+      const exactEncash = await hub.app.inject({
+        method: 'POST',
+        url: `/shifts/${b1ShiftId}/cash-moves`,
+        headers: authHeaders(mgrLogin.token),
+        payload: {
+          clientRequestId: reqUuid(),
+          type: 'encashment',
+          amount: '8473',
+          reason: 'Exact physical cash',
+        },
+      });
+      expect(exactEncash.statusCode).toBe(201);
+      expect(ShiftCashMoveResponseSchema.parse(exactEncash.json()).drawerCashBalance).toBe('0');
+
       // Zero PINs / bearer tokens leaked in Pino logs
       const rawLogs = logLines.join('');
       for (const secret of [

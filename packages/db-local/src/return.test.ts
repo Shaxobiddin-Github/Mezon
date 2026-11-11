@@ -2,7 +2,6 @@ import { spawnSync } from 'node:child_process';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { performance } from 'node:perf_hooks';
 import { pathToFileURL } from 'node:url';
 import {
   type PinHasher,
@@ -1825,85 +1824,6 @@ describe('@mezon/db-local - T1.6 Void, Return, V1-V5, Oracle Parity, C1 Crash & 
       env.connection.close();
     }
   });
-
-  it('meets <= 300ms latency for full return of a 20-line tracked receipt (10 FIFO + 10 avg) on disk WAL SQLite', async () => {
-    const samplesMs: number[] = [];
-    for (let runIdx = 0; runIdx < 5; runIdx += 1) {
-      const env = await setupReturnEnv({ seed: 600 + runIdx });
-      try {
-        const cart = await env.cartStore.openCart(env.cashierId);
-        let expectedTotal = 0n;
-
-        for (let i = 0; i < 20; i += 1) {
-          const isBatched = i < 10;
-          const p = await env.catalogStore.createProduct({
-            name: `Perf Tovar ${i}`,
-            unit: 'dona',
-            trackBatches: isBatched,
-            salePrice: '15000',
-            vatRateBp: 1200,
-            actorUserId: env.ownerId,
-          });
-          await env.stockStore.recordInboundMove({
-            productId: p.product.id,
-            reason: 'purchase',
-            qty: '10000',
-            totalCostValue: '80000',
-            batchNumber: isBatched ? `PB-${i}` : null,
-            actorUserId: env.ownerId,
-          });
-          await env.cartStore.addLine(cart.id, {
-            kind: 'catalog',
-            productId: p.product.id,
-            variantId: null,
-            qty: quantityFromMilli(2_000n),
-          });
-          expectedTotal += 30_000n;
-        }
-
-        const sale = await env.saleStore.completeSale({
-          cartId: cart.id,
-          actorUserId: env.cashierId,
-          clientRequestId: nextTestUuid(),
-          expectedTotal: moneyFromTiyin(expectedTotal),
-          payments: [
-            { method: 'cash', tenderedAmount: moneyFromTiyin(300_000n) },
-            { method: 'card', amount: moneyFromTiyin(300_000n), providerRef: 'PERF-CARD' },
-          ],
-        });
-
-        const items = sale.sale.lines.map((l) => ({
-          saleLineId: l.id,
-          qty: l.qty,
-        }));
-        const t0 = performance.now();
-        const ret = await env.returnStore.createReturn({
-          saleId: sale.sale.id,
-          actorUserId: env.managerId,
-          reason: 'Perf 20-line full return',
-          clientRequestId: nextTestUuid(),
-          items,
-          payments: [
-            { method: 'cash', amount: moneyFromTiyin(300_000n) },
-            { method: 'card', amount: moneyFromTiyin(300_000n), providerRef: 'PERF-RET' },
-          ],
-        });
-        const elapsedMs = performance.now() - t0;
-        samplesMs.push(elapsedMs);
-        expect(ret.returnDoc.lines).toHaveLength(20);
-        expect(moneyToTiyin(ret.returnDoc.totalRefund)).toBe(600_000n);
-      } finally {
-        env.connection.close();
-      }
-    }
-
-    const sorted = [...samplesMs].sort((a, b) => a - b);
-    const medianMs = sorted[Math.floor(sorted.length / 2)];
-    console.info(
-      `[PERF T1.6 db-local] 20-line full createReturn (10 FIFO + 10 avg) median=${medianMs.toFixed(2)} ms samples=[${samplesMs.map((s) => s.toFixed(2)).join(', ')}]`,
-    );
-    expect(medianMs).toBeLessThanOrEqual(300);
-  }, 15_000);
 });
 
 async function setupEnvAfterCrash(

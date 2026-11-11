@@ -256,8 +256,14 @@ export function validateDenominationCounts(
 }
 
 /**
- * X1 Single Source of Truth for terminal drawer cash:
- * `shift.openingCash + SUM(cash_moves.amount_delta WHERE shift_id = shift.id)`.
+ * X1 Single Source of Truth for physical cash currently in a terminal drawer:
+ * `activeSession.openingFloat + SUM(cash_moves.amount_delta WHERE shift_cashier_session_id = activeSession.id)`.
+ *
+ * Unlike shift-level closure expected cash (`shift.openingCash + SUM(all shift cash_moves)`),
+ * physical spendable/returnable drawer cash starts from each active cashier's handed-over
+ * `openingFloat` so prior session shortages cannot inflate available cash. Because each handoff's
+ * `nextSession.openingFloat = prevSession.countedCash`, shift-level discrepancy satisfies:
+ * `D_shift = C_final - (O_shift + SUM(M_i)) = SUM(D_i)`.
  */
 export function computeActiveShiftDrawerBalance(params: {
   readonly openingCash: Money;
@@ -426,7 +432,12 @@ export interface ShiftClosureAggregatedBuckets {
 
 /**
  * Shared pure closure calculation engine accepting pre-aggregated per-method and per-session
- * buckets (O(1) SQL GROUP BY path for >=1,000-receipt shifts in `<= 500 ms`).
+ * buckets (accumulated via streaming indexed SQLite reads in arbitrary-precision `bigint`).
+ *
+ * Shift-level expected cash remains `O_shift + SUM(all cash_moves)` so that shift-level
+ * discrepancy equals the telescoping sum of all cashier session discrepancies:
+ * `D_shift = C_final - (O_shift + SUM(M_i)) = SUM(D_i)`, while active physical drawer
+ * availability uses `activeSession.openingFloat + SUM(activeSession cash_moves)`.
  */
 export function computeShiftClosureFromAggregates(
   params: ShiftClosureAggregatedBuckets,

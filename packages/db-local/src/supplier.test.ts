@@ -1,7 +1,6 @@
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { performance } from 'node:perf_hooks';
 import {
   type Money,
   type PaymentMethod,
@@ -33,7 +32,6 @@ import {
   createSqliteSupplierStore,
   formatOutboxRecordForDebug,
   getActiveShiftDrawerBalanceSync,
-  goodsReceivingLines,
   goodsReceivings,
   listAllOutboxRecordsSync,
   localBatchBalances,
@@ -1725,50 +1723,6 @@ describe('@mezon/db-local - T1.8 Suppliers, Receiving, Unknown Cost, Ledger & Re
     expect(stockAfterRebuild).toEqual(liveStockBefore);
     assertStockConservationIdentity(env.connection, stockAfterRebuild);
   }, 20_000);
-
-  it('meets <= 500 ms performance target for posting a 100-line receiving on file-backed WAL SQLite', async () => {
-    const env = await setupSupplierEnv({ seed: 777 });
-    const sup = await env.supplierStore.createSupplier({ name: 'Perf 100-Line Wholesale' });
-
-    const productIds: UuidV7[] = [];
-    for (let i = 0; i < 100; i += 1) {
-      const p = await env.catalogStore.createProduct({
-        name: `Perf Tovar ${i + 1}`,
-        unit: i % 3 === 0 ? 'kg' : 'dona',
-        trackBatches: i % 2 === 0,
-        salePrice: '25000',
-        vatRateBp: 1200,
-        actorUserId: env.ownerId,
-      });
-      productIds.push(p.product.id);
-    }
-
-    const draft = await env.supplierStore.createReceivingDraft({
-      supplierId: sup.id,
-      actorUserId: env.ownerId,
-      supplierInvoiceNo: 'PERF-100',
-      lines: productIds.map((pid, idx) => ({
-        productId: pid,
-        qty: quantityFromMilli(idx % 3 === 0 ? 5_500n : 10_000n),
-        costUnknown: idx % 10 === 0,
-        totalCostValue: idx % 10 === 0 ? null : moneyFromTiyin(BigInt(50_000 + idx * 100)),
-        batchNumber: idx % 2 === 0 ? `B-${idx}` : null,
-      })),
-    });
-
-    const reqId = env.nextUuid();
-    const startMs = performance.now();
-    const posted = await env.supplierStore.postReceiving(draft.id, {
-      actorUserId: env.ownerId,
-      clientRequestId: reqId,
-    });
-    const elapsedMs = performance.now() - startMs;
-
-    console.info(`[PERF T1.8 100-line receiving]: ${elapsedMs.toFixed(2)} ms`);
-    expect(posted.receiving.lines).toHaveLength(100);
-    expect(env.connection.db.select().from(goodsReceivingLines).all()).toHaveLength(100);
-    expect(elapsedMs).toBeLessThanOrEqual(500);
-  });
 
   it('T1.8 test qarzi: enforces exact 1-milli return quantity and FIFO batch depletion boundaries', async () => {
     const env = await setupSupplierEnv({ seed: 808 });

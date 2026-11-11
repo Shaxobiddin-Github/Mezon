@@ -821,9 +821,15 @@ export function requireOpenShiftSessionSync(
 }
 
 /**
- * X1 single source of truth for terminal drawer cash:
- * `openShift.openingCash + SUM(cash_moves.amount_delta WHERE shift_id = openShift.id)`.
- * Returns `0n` if no shift is currently open on `deviceId`.
+ * X1 single source of truth for physical cash currently available in a terminal drawer:
+ * `activeSession.openingFloat + SUM(cash_moves.amount_delta WHERE shift_cashier_session_id = activeSession.id)`.
+ *
+ * Why session `openingFloat` instead of `shift.openingCash + all cash_moves`:
+ * If Cashier A hands off with a cash shortage (e.g. expected 8,573, counted 8,473 -> `-100`),
+ * Cashier B physically receives 8,473 (`openingFloat`). Any return/outflow check must enforce
+ * physical drawer availability (rejecting 8,474 with `INSUFFICIENT_CASH_IN_DRAWER`), whereas
+ * shift-closure `expectedCash` still equals `shift.openingCash + SUM(all cash_moves)` so
+ * `D_shift = SUM(D_i)`. Returns `0n` if no shift is currently open on `deviceId`.
  */
 export function getActiveShiftDrawerBalanceSync(
   db: BetterSQLite3Database,
@@ -840,24 +846,36 @@ export function getActiveShiftDrawerBalanceSync(
   }
   // Accumulate in arbitrary-precision JS bigint so large transient moves (e.g. MAX_MONEY_TIYIN
   // tender + change) cannot trigger SQLite signed int64 SUM() intermediate integer overflow.
-  const moveStmt = sqlite.prepare<[string, string, string], { readonly amount_delta: unknown }>(
+  // Session #1 fallback (`shift_cashier_session_id IS NULL`) handles pre-0011 open shifts cleanly.
+  const moveStmt = sqlite.prepare<
+    [string, string, string, string, number],
+    { readonly amount_delta: unknown }
+  >(
     `SELECT amount_delta
      FROM cash_moves
-     WHERE organization_id = ? AND store_id = ? AND shift_id = ?`,
+     WHERE organization_id = ? AND store_id = ? AND shift_id = ?
+       AND (shift_cashier_session_id = ? OR (? = 1 AND shift_cashier_session_id IS NULL))`,
   );
   let deltaSumTiyin = 0n;
-  for (const row of moveStmt.iterate(ctx.shift.organizationId, ctx.shift.storeId, ctx.shift.id)) {
+  for (const row of moveStmt.iterate(
+    ctx.shift.organizationId,
+    ctx.shift.storeId,
+    ctx.shift.id,
+    ctx.activeSession.id,
+    ctx.activeSession.sessionSeq,
+  )) {
     deltaSumTiyin += toBigIntStrict(row.amount_delta);
   }
 
   return computeActiveShiftDrawerBalance({
-    openingCash: ctx.shift.openingCash,
+    openingCash: ctx.activeSession.openingFloat,
     cashMovesDeltas: [moneyFromTiyin(deltaSumTiyin)],
   });
 }
 
 /**
- * X1 single source of truth for active store-wide cash across all currently open terminal shifts.
+ * X1 single source of truth for active store-wide physical cash across all currently open
+ * terminal shifts (`SUM(getActiveShiftDrawerBalanceSync)` per open terminal in the store).
  */
 export function getActiveStoreCashBalanceSync(
   db: BetterSQLite3Database,
@@ -871,7 +889,7 @@ export function getActiveStoreCashBalanceSync(
   const storeId = parseUuidV7(params.storeId);
 
   const openShifts = db
-    .select({ id: shifts.id, openingCash: shifts.openingCash })
+    .select({ deviceId: shifts.deviceId })
     .from(shifts)
     .where(
       and(eq(shifts.organizationId, orgId), eq(shifts.storeId, storeId), eq(shifts.status, 'open')),
@@ -883,18 +901,14 @@ export function getActiveStoreCashBalanceSync(
   }
 
   let totalTiyin = 0n;
-  const moveStmt = sqlite.prepare<[string, string, string], { readonly amount_delta: unknown }>(
-    `SELECT amount_delta
-     FROM cash_moves
-     WHERE organization_id = ? AND store_id = ? AND shift_id = ?`,
-  );
-
   for (const sh of openShifts) {
-    let moveSum = 0n;
-    for (const row of moveStmt.iterate(orgId, storeId, sh.id)) {
-      moveSum += toBigIntStrict(row.amount_delta);
-    }
-    totalTiyin += moneyToTiyin(sh.openingCash) + moveSum;
+    totalTiyin += moneyToTiyin(
+      getActiveShiftDrawerBalanceSync(db, sqlite, {
+        organizationId: orgId,
+        storeId,
+        deviceId: sh.deviceId,
+      }),
+    );
   }
   return moneyFromTiyin(totalTiyin);
 }

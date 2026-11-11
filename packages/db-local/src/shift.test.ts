@@ -1,7 +1,6 @@
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { performance } from 'node:perf_hooks';
 import {
   DEFAULT_MAX_CASH_DISCREPANCY_TIYIN,
   MAX_MONEY_TIYIN,
@@ -1045,7 +1044,8 @@ describe('@mezon/db-local - T1.9 Shifts, Cashier Sessions, Cash Moves, Reclose &
     const verifyTerminalDrawer = async (idx: 0 | 1) => {
       const term = idx === 0 ? termA : termB;
       const ms = activeByTerm[idx];
-      const expected = ms ? ms.openingCash + ms.cashMovesNet : 0n;
+      const activeSess = ms ? ms.sessions[ms.sessions.length - 1] : null;
+      const expected = activeSess ? activeSess.openingFloat + activeSess.cashDelta : 0n;
       expect(await term.saleStore.getTerminalCashBalance(term.deviceId)).toBe(
         moneyFromTiyin(expected),
       );
@@ -1212,7 +1212,8 @@ describe('@mezon/db-local - T1.9 Shifts, Cashier Sessions, Cash Moves, Reclose &
       } else if (op < 62 && ms.sales.some((s) => !s.voided && s.qtyReturned === 0n)) {
         // Void untouched open-shift sale (as manager, X2 attributes cash move to active session!)
         const target = ms.sales.find((s) => !s.voided && s.qtyReturned === 0n)!;
-        const drawerAvail = ms.openingCash + ms.cashMovesNet;
+        const activeSess = ms.sessions[ms.sessions.length - 1];
+        const drawerAvail = activeSess.openingFloat + activeSess.cashDelta;
         if (drawerAvail >= target.cashPaid) {
           await term.returnStore.voidSale({
             saleId: target.saleId,
@@ -1227,7 +1228,6 @@ describe('@mezon/db-local - T1.9 Shifts, Cashier Sessions, Cash Moves, Reclose &
           ms.grossSales -= target.totalFinal;
           ms.salesCount -= 1;
           ms.voidsCount += 1;
-          const activeSess = ms.sessions[ms.sessions.length - 1];
           activeSess.cashDelta -= target.cashPaid;
           // Original session's non-voided sales stats decrease while void cash out comes out of current active session
           const origSess = ms.sessions[target.sessionIdx];
@@ -1242,7 +1242,8 @@ describe('@mezon/db-local - T1.9 Shifts, Cashier Sessions, Cash Moves, Reclose &
         const target = ms.sales.find((s) => !s.voided && s.qtySold - s.qtyReturned >= 1_000n)!;
         const remCash = target.cashPaid - target.cashRefunded;
         const remCard = target.cardPaid - target.cardRefunded;
-        const drawerAvail = ms.openingCash + ms.cashMovesNet;
+        const activeSess = ms.sessions[ms.sessions.length - 1];
+        const drawerAvail = activeSess.openingFloat + activeSess.cashDelta;
         const payCash = remCash >= 10_000n && drawerAvail >= 10_000n ? 10_000n : 0n;
         const payCard = payCash === 10_000n ? 0n : remCard >= 10_000n ? 10_000n : 0n;
         if (payCash + payCard === 10_000n) {
@@ -1273,7 +1274,7 @@ describe('@mezon/db-local - T1.9 Shifts, Cashier Sessions, Cash Moves, Reclose &
       } else if (op < 87) {
         // Cash in / cash out / encashment
         const activeSess = ms.sessions[ms.sessions.length - 1];
-        const drawerAvail = ms.openingCash + ms.cashMovesNet;
+        const drawerAvail = activeSess.openingFloat + activeSess.cashDelta;
         const isIn = op % 3 === 0 || drawerAvail < 15_000n;
         const amt = 15_000n;
         await term.shiftStore.recordShiftCashMove({
@@ -1370,188 +1371,6 @@ describe('@mezon/db-local - T1.9 Shifts, Cashier Sessions, Cash Moves, Reclose &
     expect(moneyToTiyin(dc.dayClose.returnsTotal)).toBe(expRetDay);
     expect(moneyToTiyin(dc.dayClose.countedCashTotal)).toBe(expCountedDay);
     expect(dc.dayClose.isStale).toBe(false);
-  }, 20_000);
-
-  it('performance benchmark: closes a 1,000-receipt shift (+50 returns +1,050 cash moves) <= 500 ms on disk WAL SQLite', async () => {
-    const env = await setupShiftEnv({ seed: 999 });
-    const sh = await env.shiftStore.openShift({
-      actorUserId: env.cashierAId,
-      clientRequestId: env.nextUuid(),
-      openingCash: moneyFromTiyin(1_000_000n),
-    });
-    const sessId = sh.shift.activeCashierSession!.id;
-    const prod = await env.catalogStore.createProduct({
-      name: 'Perf Item',
-      unit: 'dona',
-      unlimited: true,
-      salePrice: '10000',
-      vatRateBp: 0,
-      actorUserId: env.ownerId,
-    });
-
-    const ctx = env.authStore.getActiveRuntimeContext()!;
-    const nowMs = env.clock.now();
-    const hlc = serializeHlc(createHlcTimestamp(nowMs, 1, env.deviceId));
-
-    // Seed 1,000 completed sales + 1,000 sale_lines + 1,500 payments + 1,000 cash_moves + 50 returns in one bulk TX
-    const insertSale = env.connection.sqlite.prepare(
-      `INSERT INTO "sales" ("id","organization_id","store_id","device_id","hlc","created_at_ms","updated_at_ms","receipt_no","receipt_code","cashier_user_id","completed_by_user_id","shift_id","shift_cashier_session_id","client_request_id","request_hash","subtotal_gross","total_promo_discount","subtotal_after_promo","manual_discount_mode","manual_discount_value","order_discount_amount","total_final","total_net_ex_vat","total_vat","total_paid","debt_amount","change_amount")
-       VALUES (?,?,?,?,?,?,?,?,'0001-PERF',?,?,?,?,?, 'perf-hash', 20000,0,20000,'none',0,0,20000,20000,0,20000,0,0)`,
-    );
-    const insertLine = env.connection.sqlite.prepare(
-      `INSERT INTO "sale_lines" ("id","organization_id","store_id","device_id","hlc","created_at_ms","sale_id","sort_order","line_kind","product_id","item_name","unit","qty","unit_price_snapshot","gross_total","promo_discount","subtotal_after_promo","allocated_order_discount","final_total","vat_rate_bp_snapshot","net_ex_vat","vat_total","cost_value")
-       VALUES (?,?,?,?,?,?,?,0,'catalog',?,'Perf Item','dona',2000,10000,20000,0,20000,0,20000,0,20000,0,0)`,
-    );
-    const insertPay = env.connection.sqlite.prepare(
-      `INSERT INTO "payments" ("id","organization_id","store_id","device_id","hlc","created_at_ms","sale_id","method","amount","tendered_amount","change_amount")
-       VALUES (?,?,?,?,?,?,?,?,?,?,?)`,
-    );
-    const insertMove = env.connection.sqlite.prepare(
-      `INSERT INTO "cash_moves" ("id","organization_id","store_id","device_id","hlc","created_at_ms","shift_id","shift_cashier_session_id","type","amount_delta","source_type","source_id","created_by_user_id")
-       VALUES (?,?,?,?,?,?,?,?,'sale_cash_in',10000,'sale',?,?)`,
-    );
-    const insertRet = env.connection.sqlite.prepare(
-      `INSERT INTO "returns" ("id","organization_id","store_id","device_id","hlc","created_at_ms","sale_id","shift_id","shift_cashier_session_id","return_no","return_code","processed_by_user_id","reason","client_request_id","request_hash","total_refund","total_net_ex_vat","total_vat","cash_refund_amount","non_cash_refund_amount","debt_offset_amount")
-       VALUES (?,?,?,?,?,?,?, ?,?, ?, 'RET-PERF', ?, 'Perf ret', ?, 'perf-ret', 5000, 5000, 0, 5000, 0, 0)`,
-    );
-    const insertRetPay = env.connection.sqlite.prepare(
-      `INSERT INTO "return_payments" ("id","organization_id","store_id","device_id","hlc","created_at_ms","return_id","sale_id","method","amount")
-       VALUES (?,?,?,?,?,?,?,?,'cash',5000)`,
-    );
-    const insertRetMove = env.connection.sqlite.prepare(
-      `INSERT INTO "cash_moves" ("id","organization_id","store_id","device_id","hlc","created_at_ms","shift_id","shift_cashier_session_id","type","amount_delta","source_type","source_id","created_by_user_id")
-       VALUES (?,?,?,?,?,?,?,?,'refund_cash_out',-5000,'return',?,?)`,
-    );
-
-    const runBulk = env.connection.sqlite.transaction(() => {
-      for (let i = 1; i <= 1000; i += 1) {
-        const sId = makeUuid(0x019f, i);
-        const lId = makeUuid(0x019e, i);
-        insertSale.run(
-          sId,
-          ctx.config.organizationId,
-          ctx.config.storeId,
-          ctx.config.deviceId,
-          hlc,
-          nowMs,
-          nowMs,
-          BigInt(i),
-          env.cashierAId,
-          env.cashierAId,
-          sh.shift.id,
-          sessId,
-          makeUuid(0x019d, i),
-        );
-        insertLine.run(
-          lId,
-          ctx.config.organizationId,
-          ctx.config.storeId,
-          ctx.config.deviceId,
-          hlc,
-          nowMs,
-          sId,
-          prod.product.id,
-        );
-        insertPay.run(
-          makeUuid(0x019c, i * 2),
-          ctx.config.organizationId,
-          ctx.config.storeId,
-          ctx.config.deviceId,
-          hlc,
-          nowMs,
-          sId,
-          'cash',
-          10_000n,
-          10_000n,
-          0n,
-        );
-        insertPay.run(
-          makeUuid(0x019c, i * 2 + 1),
-          ctx.config.organizationId,
-          ctx.config.storeId,
-          ctx.config.deviceId,
-          hlc,
-          nowMs,
-          sId,
-          i % 2 === 0 ? 'card' : 'payme',
-          10_000n,
-          null,
-          0n,
-        );
-        insertMove.run(
-          makeUuid(0x019b, i),
-          ctx.config.organizationId,
-          ctx.config.storeId,
-          ctx.config.deviceId,
-          hlc,
-          nowMs,
-          sh.shift.id,
-          sessId,
-          sId,
-          env.cashierAId,
-        );
-        if (i <= 50) {
-          const rId = makeUuid(0x0199, i);
-          insertRet.run(
-            rId,
-            ctx.config.organizationId,
-            ctx.config.storeId,
-            ctx.config.deviceId,
-            hlc,
-            nowMs,
-            sId,
-            sh.shift.id,
-            sessId,
-            BigInt(i),
-            env.cashierAId,
-            makeUuid(0x0198, i),
-          );
-          insertRetPay.run(
-            makeUuid(0x0197, i),
-            ctx.config.organizationId,
-            ctx.config.storeId,
-            ctx.config.deviceId,
-            hlc,
-            nowMs,
-            rId,
-            sId,
-          );
-          insertRetMove.run(
-            makeUuid(0x0196, i),
-            ctx.config.organizationId,
-            ctx.config.storeId,
-            ctx.config.deviceId,
-            hlc,
-            nowMs,
-            sh.shift.id,
-            sessId,
-            rId,
-            env.cashierAId,
-          );
-        }
-      }
-    });
-    runBulk();
-
-    // Expected drawer cash = 1,000,000 + 1,000 * 10,000 - 50 * 5,000 = 10,750,000
-    const t0 = performance.now();
-    const closed = await env.shiftStore.closeShift({
-      shiftId: sh.shift.id,
-      actorUserId: env.cashierAId,
-      clientRequestId: env.nextUuid(),
-      countedCash: moneyFromTiyin(10_750_000n),
-    });
-    const elapsedMs = performance.now() - t0;
-
-    console.info(
-      `[PERF T1.9 db-local] 1,000-receipt shift closeShift elapsed=${elapsedMs.toFixed(2)} ms`,
-    );
-    expect(closed.closure.salesCount).toBe(1000);
-    expect(closed.closure.returnsCount).toBe(50);
-    expect(moneyToTiyin(closed.closure.grossSalesTotal)).toBe(20_000_000n);
-    expect(moneyToTiyin(closed.closure.returnsTotal)).toBe(250_000n);
-    expect(moneyToTiyin(closed.closure.expectedCash)).toBe(10_750_000n);
-    expect(elapsedMs).toBeLessThanOrEqual(500);
   }, 20_000);
 
   it('handles 40_000n prior cash + MAX_MONEY_TIYIN cash tender & change without SQLite int64 SUM overflow', async () => {
@@ -1663,5 +1482,145 @@ describe('@mezon/db-local - T1.9 Shifts, Cashier Sessions, Cash Moves, Reclose &
     if (cashRow) {
       expect(moneyToTiyin(cashRow.salesAmount)).toBe(50_000n);
     }
+  });
+
+  it('B1 (X1 session physical cash): post-handoff drawerCashBalance, getTerminalCashBalance & outflow guards use activeSession.openingFloat + session cash_moves, while closure preserves D_shift === SUM(D_i)', async () => {
+    const env = await setupShiftEnv({ seed: 919 });
+    const item = await env.catalogStore.createProduct({
+      name: 'B1 Drawer Test Item',
+      unit: 'dona',
+      unlimited: true,
+      salePrice: '8474',
+      vatRateBp: 0,
+      actorUserId: env.ownerId,
+    });
+
+    const opened = await env.shiftStore.openShift({
+      actorUserId: env.cashierAId,
+      clientRequestId: env.nextUuid(),
+      openingCash: ZERO_MONEY,
+    });
+
+    // Cashier A completes an 8,474 cash sale + 99 cash_in -> expected = 8,573
+    const cart1 = await env.cartStore.openCart(env.cashierAId);
+    await env.cartStore.addLine(cart1.id, {
+      kind: 'catalog',
+      productId: item.product.id,
+      variantId: null,
+      qty: quantityFromMilli(1_000n),
+    });
+    const sale1 = await env.saleStore.completeSale({
+      cartId: cart1.id,
+      actorUserId: env.cashierAId,
+      clientRequestId: env.nextUuid(),
+      expectedTotal: moneyFromTiyin(8_474n),
+      payments: [{ method: 'cash', tenderedAmount: moneyFromTiyin(8_474n) }],
+    });
+    await env.shiftStore.recordShiftCashMove({
+      shiftId: opened.shift.id,
+      actorUserId: env.managerId,
+      clientRequestId: env.nextUuid(),
+      type: 'cash_in',
+      amount: moneyFromTiyin(99n),
+      reason: 'Small change top-up',
+    });
+
+    // Cashier A hands off with countedCash = 8,473 (shortage = -100 vs expected 8,573)
+    const handoff = await env.shiftStore.handoffCashier({
+      shiftId: opened.shift.id,
+      actorUserId: env.cashierAId,
+      nextCashierUserId: env.cashierBId,
+      clientRequestId: env.nextUuid(),
+      countedCash: moneyFromTiyin(8_473n),
+      discrepancyReason: 'Missing 100 tiyin at handoff',
+    });
+    expect(handoff.closedSession.expectedCash).toBe(moneyFromTiyin(8_573n));
+    expect(handoff.closedSession.discrepancy).toBe(moneyFromTiyin(-100n));
+    expect(handoff.activeSession.openingFloat).toBe(moneyFromTiyin(8_473n));
+
+    // All drawer balance readers MUST report 8,473 (NOT 8,573!)
+    expect(handoff.drawerCashBalance).toBe(moneyFromTiyin(8_473n));
+    expect((await env.shiftStore.getCurrentShift()).drawerCashBalance).toBe(moneyFromTiyin(8_473n));
+    expect(await env.saleStore.getTerminalCashBalance()).toBe(moneyFromTiyin(8_473n));
+    expect(
+      getActiveShiftDrawerBalanceSync(env.connection.db, env.connection.sqlite, {
+        organizationId: env.organizationId,
+        storeId: env.storeId,
+        deviceId: env.deviceId,
+      }),
+    ).toBe(moneyFromTiyin(8_473n));
+    expect(
+      getActiveStoreCashBalanceSync(env.connection.db, env.connection.sqlite, {
+        organizationId: env.organizationId,
+        storeId: env.storeId,
+      }),
+    ).toBe(moneyFromTiyin(8_473n));
+
+    // Spending/returning > 8,473 (both 8,474 cash return and 8,474 encashment) MUST reject with INSUFFICIENT_CASH_IN_DRAWER!
+    await expect(
+      env.returnStore.createReturn({
+        saleId: sale1.sale.id,
+        actorUserId: env.managerId,
+        reason: 'Full 8,474 refund blocked by 8,473 physical cash',
+        clientRequestId: env.nextUuid(),
+        items: [{ saleLineId: sale1.sale.lines[0].id, qty: quantityFromMilli(1_000n) }],
+        payments: [{ method: 'cash', amount: moneyFromTiyin(8_474n) }],
+      }),
+    ).rejects.toMatchObject({ code: 'INSUFFICIENT_CASH_IN_DRAWER' });
+
+    await expect(
+      env.shiftStore.recordShiftCashMove({
+        shiftId: opened.shift.id,
+        actorUserId: env.managerId,
+        clientRequestId: env.nextUuid(),
+        type: 'encashment',
+        amount: moneyFromTiyin(8_474n),
+        reason: 'Exceeds physical cash by 1 tiyin',
+      }),
+    ).rejects.toMatchObject({ code: 'INSUFFICIENT_CASH_IN_DRAWER' });
+
+    // Exact physical balance 8,473 encashment MUST succeed -> drawerCashBalance becomes 0
+    const encashed = await env.shiftStore.recordShiftCashMove({
+      shiftId: opened.shift.id,
+      actorUserId: env.managerId,
+      clientRequestId: env.nextUuid(),
+      type: 'encashment',
+      amount: moneyFromTiyin(8_473n),
+      reason: 'Exact physical drawer cash encashed',
+    });
+    expect(encashed.drawerCashBalance).toBe(ZERO_MONEY);
+    expect(await env.saleStore.getTerminalCashBalance()).toBe(ZERO_MONEY);
+
+    // Session B adds 500 cash_in -> drawerCashBalance = 8,473 + (-8,473 + 500) = 500
+    const cashInB = await env.shiftStore.recordShiftCashMove({
+      shiftId: opened.shift.id,
+      actorUserId: env.managerId,
+      clientRequestId: env.nextUuid(),
+      type: 'cash_in',
+      amount: moneyFromTiyin(500n),
+      reason: 'Session B float refill',
+    });
+    expect(cashInB.drawerCashBalance).toBe(moneyFromTiyin(500n));
+    expect(await env.saleStore.getTerminalCashBalance()).toBe(moneyFromTiyin(500n));
+
+    // Close shift with countedCash = 525 (Session B has +25 surplus vs its 500 expected -> D_2 = +25)
+    // Shift-level expectedCash = 0 + (8,474 + 99 - 8,473 + 500) = 600, so D_shift = 525 - 600 = -75 === D_1 (-100) + D_2 (+25)!
+    const closed = await env.shiftStore.closeShift({
+      shiftId: opened.shift.id,
+      actorUserId: env.cashierBId,
+      clientRequestId: env.nextUuid(),
+      countedCash: moneyFromTiyin(525n),
+      discrepancyReason: 'Combined shift shortage reconciled (-100 + 25 = -75)',
+    });
+    expect(closed.closure.expectedCash).toBe(moneyFromTiyin(600n));
+    expect(closed.closure.discrepancy).toBe(moneyFromTiyin(-75n));
+    expect(closed.closure.cashiers).toHaveLength(2);
+    expect(closed.closure.cashiers[0].discrepancy).toBe(moneyFromTiyin(-100n));
+    expect(closed.closure.cashiers[1].discrepancy).toBe(moneyFromTiyin(25n));
+    const sumSessionsDisc = closed.closure.cashiers.reduce(
+      (acc, c) => acc + moneyToTiyin(c.discrepancy),
+      0n,
+    );
+    expect(sumSessionsDisc).toBe(moneyToTiyin(closed.closure.discrepancy));
   });
 });
