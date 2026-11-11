@@ -1,106 +1,69 @@
-# Claude topshirig'i: T1.10 QABUL → T1.11 rejasi
+# Claude topshirig'i: T1.11 rejasi — TUZATISHLAR BILAN TASDIQLANDI
 
-## 0. Ish tartibidagi o'zgarish (egasining qarori, 2026-11-11)
+**Merge tekshiruvi:** T1.10 merge'i tekshirildi. `main` = `99ca0d6`, kod `99e8ce4` bilan bir xil.
 
-- **Repo public qilindi.** GitHub Actions yana bepul ishlaydi. "To'rtala CI job yashil" sharti **qayta kuchga kirdi**. Vaqtinchalik CI'siz qoida bekor qilindi.
-- **Docker o'rnatildi.** Claude endi `pg-rls` testlarini ham lokal o'tkazadi.
-- **Tekshiruv tartibi:** har vazifada Claude toza nusxada verify va xavfli joylarga nishonli mutatsiya o'tkazadi. Chuqur audit (mustaqil model va keng mutatsiya) har **bosqich oxirida**: F1 yakunida, T1.13 dan keyin.
-- **Public repo:** maxfiy kalit, token, `.env` yoki shaxsiy ma'lumot hech qachon commit qilinmasin. GEMINI.md 3-bo'lim baribir taqiqlaydi, endi bu yanada muhim.
+Reja juda puxta. Quyidagilar tasdiqlandi:
 
-## 1. T1.10 xulosasi: QABUL (kod `9152a74`)
+- `packages/i18n`, `packages/ui` (bigint formatlash), `apps/pos` va `@mezon/contracts` dan Zod tiplari va runtime `.parse()`;
+- depcruise chegarasi;
+- holatga asoslangan router (`app://mezon/`);
+- inline style'siz CSP;
+- `zustand`;
+- ekranlar ro'yxati;
+- skaner avtomati sof funksiya, GS normallashtirish, `trim` yo'q, input snapshot'ni tiklash;
+- `clientRequestId` qulfi va qayta urinishda o'sha ID;
+- `SALE_TOTAL_CHANGED` uchun tasdiq;
+- tugmalar xaritasi, 48 px;
+- 6 ta E2E.
 
-- **Toza nusxada `pnpm verify` yashil:** 278 + 12 perf test. Docker bilan `pg-rls` ham o'tdi, birorta test skip qilinmadi.
-- **GitHub CI yashil:** `Verify` (ubuntu, windows), `Verify PostgreSQL RLS`; desktop job reja bo'yicha skip.
-- **Nishonli mutatsiya:** 3 tadan 3 tasi ushlandi:
-  - `'advance'` to'lovi `cash_moves` ga tushsa, ya'ni kassa ikki marta sanalsa;
-  - avans chegarasi `netAdvance <= total`;
-  - oddiy POS savdosida `'advance'` usuli ruxsatsiz.
-- O1–O4 va 225 qadamli model testi hisobotdagidek.
+Quyidagi tuzatishlar bilan `gemini/T1.11-pos-ui` branch'ida kodni yoz.
 
-Test qarzi yo'q.
+## Majburiy tuzatishlar
 
-## 2. Merge
+### U1. Faqat mavjud Hub API'si
 
-1. `git pull --ff-only`.
-2. PR boshi Claude'ning shu topshiriq commit'i bo'lsin, CI yashil bo'lsin.
-3. `T1.10: Buyurtma va avans` nomi bilan Squash and merge qil, SHA'ni yoz, branch'ni o'chir.
-4. `main`dan `gemini/T1.11-pos-ui` branch'ini och.
+Rejada `POST /carts/current/lines`, `POST /sales/complete`, `GET /carts/parked`, `POST /carts/parked/:id/resume`, `GET /customers/search`, `POST /catalog/scan` kabi yo'llar bor. Hub'da esa yo'llar boshqacha, masalan `POST /carts/:id/complete`, `POST /carts/:id/park`.
 
-## 3. T1.11 — Kassa UI: avval REJA
+**Talab:**
 
-Kod yozma. Rejani `.mezon/gemini/HISOBOT.md` ga yoz, `[gemini-reja] T1.11` bilan commit qil va push qil, so'ng `node .mezon/kutish.mjs` bilan kut.
+- UI faqat **mavjud** Hub yo'llaridan foydalansin. API mijozini `apps/hub` dagi haqiqiy marshrutlar asosida yoz.
+- Yangi endpoint haqiqatan kerak bo'lsa (masalan joriy kassirning ochiq savati), uni hisobotda alohida sanab ber. U mavjud store funksiyalari ustida yupqa qatlam bo'lsin: mantiq nusxalanmasin, testi bo'lsin.
+- Savdo **faqat** `completeSale` yo'li orqali o'tadi (T1.4 qoidasi).
 
-GEMINI.md T1.11 talablari:
+### U2. Kontraktda yo'q maydonlarni o'ylab topma
 
-- teginish va klaviatura bilan ishlash;
-- USB skanerni aniqlash: belgilar tezligi, Enter va forma; DataMatrix va GS belgisi buzilmasin;
-- mahsulot qidiruvi;
-- to'lov ekrani;
-- kechiktirilgan chek;
-- tungi va kunduzgi mavzu.
+- Rejada ijtimoiy karta uchun `cardType`, `cardLast4`, `transactionRef`, chek uchun `fiscalStatus: 'non_fiscal'` bor. Bular `@mezon/contracts` da yo'q.
+- Naqdsiz to'lov uchun mavjud `providerRef` ishlatilsin.
+- "SINOV — FISKAL EMAS" yozuvi UI'da doimiy matn (i18n kaliti) bo'lsin, API maydoni emas.
+- Supervisor tasdig'i (chegirma, kredit, farq) ham **mavjud** so'rov maydonlari bilan yuborilsin.
+- **Umumiy qoida:** UI'ga kerakli maydon kontraktda bo'lmasa, uni o'zboshimchalik bilan qo'shma. Hisobotda sanab ber, kerak bo'lsa alohida kichik o'zgarish sifatida qo'shiladi.
 
-Mezonlar (Playwright E2E):
+### U3. Dev CORS ishlab chiqarishda yoqilmasin
 
-- skan → to'lov → chek;
-- sichqonsiz savdo;
-- tez yozgan odam skaner deb qabul qilinmaydi.
+`http://127.0.0.1:<vite port>` / `http://localhost:<port>` origin'lariga ruxsat faqat dev va test rejimida bo'lsin.
 
-Rejada quyidagilar aniq bo'lsin:
+- Yoqilish usuli: faqat `createHubServer` opsiyasi orqali (T1.4 C1 dagi kabi). Muhit o'zgaruvchisi bilan yoqilmasin.
+- Electron ichidagi Hub buni hech qachon uzatmaydi.
+- O'rnatilgan ilovada faqat `app://mezon` ruxsat etiladi.
+- **Test:** standart konfiguratsiyada `http://localhost:5173` origin'i rad etiladi.
 
-### a) Tuzilma
+### U4. E2E Windows CI'da ham
 
-- **Joyi:** `apps/pos` (React 19 + Vite).
-- **Hub bilan aloqa:** tiplangan API mijozi. Tiplar `@mezon/contracts` Zod sxemalaridan olinsin, qo'lda nusxalanmasin. Javoblar ham Zod bilan tekshiriladi.
-- **Electron'da yuklanish:** `app://mezon` protokoli, CSP. Brauzerda dev rejim.
-- **Matnlar:** hammasi bitta `i18n` lug'atidan (T4.6 ga tayyor). Hozir o'zbek lotin.
-- **Holat boshqaruvi:** tanlangan kutubxona va sababi.
+- Playwright E2E `Verify (windows-latest)` va `Verify (ubuntu-latest)` da ishlasin.
+- Brauzerni o'rnatish CI qadamida keshlansin, daqiqalar tejalsin.
+- E2E vaqti hisobotga yozilsin.
 
-### b) Ekranlar
+## Bajarish tartibi
 
-- PIN bilan kirish.
-- Smenani ochish (ochiq smena bo'lmasa).
-- **Savdo:** savat, qidiruv, skan, miqdor, chegirma, supervisor PIN oynasi.
-- **To'lov:** aralash to'lov, berilgan naqd va qaytim; qarz bo'lsa mijoz tanlash.
-- **Kechiktirilgan cheklar:** park va resume.
-- **Chek ko'rinishi:** chop etish T1.12 da.
-- **Kassa harakatlari va smenani yopish ekrani:** naqdsiz summa maydoni bo'lmaydi.
+1. T1.11 kodi. T1.10 dan test qarzi yo'q.
+2. Lokal `pnpm verify` yashil (E2E bilan).
+3. Commit qil, push qil va PR och. CI yashil bo'lsin.
+4. Hisobot:
+   - U1–U4 dalillari;
+   - yangi endpointlar ro'yxati (bo'lsa);
+   - skan → qator va qidiruv vaqtlari;
+   - E2E natijalari;
+   - savdo ekranining skrinshoti (`.mezon/gemini/` ichida PNG, ixtiyoriy).
 
-### c) Skaner aniqlash (eng nozik qism)
-
-- **Algoritm:** belgilar orasidagi vaqt (masalan ≤ 30 ms), minimal uzunlik, tugatuvchi Enter (yoki Tab). Kursor qaysi maydonda bo'lishidan qat'i nazar, skan savatga tushadi va yozilayotgan matnni buzmaydi.
-- **GS (`\x1D`) va DataMatrix:** belgilar o'chirilmaydi va almashtirilmaydi. Marking kodi butunligicha hub'ga yetadi. Ba'zi skanerlar GS ni `Ctrl+]` yoki boshqa kod bilan yuboradi: qanday ishlanishini yoz.
-- **Sof funksiya:** algoritm sof funksiya bo'lsin, vaqt belgilari kirish sifatida beriladi.
-- **Unit testlar:** tez yozuvchi (masalan 80–120 ms oraliq) skaner deb qabul qilinmaydi; skaner (5–15 ms) qabul qilinadi; GS saqlanadi; aralash holatlar.
-
-### d) Pul xavfsizligi UI'da
-
-- **Bitta to'lov urinishi uchun bitta `clientRequestId`.** Tarmoq xatosi va qayta urinishda **o'sha ID** qayta yuboriladi. Muvaffaqiyatdan keyin yangisi. Ikki marta bosish va tarmoq uzilishi bitta chek beradi: E2E bilan isbotla.
-- **`409 SALE_TOTAL_CHANGED`:** yangi summani ko'rsatish va kassirdan tasdiq olish.
-- **Boshqa xatolar:** `INSUFFICIENT_STOCK` (qaysi qatorlar), `SHIFT_NOT_OPEN`, `CASHIER_SESSION_MISMATCH` tushunarli o'zbekcha xabar bilan.
-- **Tannarx va foyda:** kassir UI'sida umuman yo'q. Javoblarda ham kelmaydi.
-
-### e) Klaviatura va unumdorlik
-
-- **Tugmalar xaritasi:** sichqonsiz to'liq savdo, masalan F-tugmalar. Ro'yxatini yoz.
-- **Teginish:** katta tugmalar, minimal o'lcham.
-- **Tezlik:** skan → qator ko'rinishi ≤ 100 ms; 50 000 tovarli katalogda qidiruv natijasi ≤ 150 ms (hub bilan birga).
-
-### f) E2E (Playwright)
-
-Hub test rejimida, haqiqiy SQLite bilan:
-
-- skan → to'lov → chek;
-- sichqonsiz savdo;
-- tez yozuvchi;
-- ikki marta bosish va tarmoq uzilishi;
-- park/resume;
-- smena ochish va yopish.
-
-Windows CI'da ham ishlasin.
-
-### g) Doiradan tashqari
-
-- Printer (T1.12).
-- Hisobotlar va Excel (T1.13).
-- Android (T4.4).
-- Ko'p til (T4.6).
+   `[gemini-hisobot] T1.11` bilan commit qil va push qil.
+5. `node .mezon/kutish.mjs` ni ishga tushir. Merge qilma.
