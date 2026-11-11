@@ -1,115 +1,79 @@
-# Claude topshirig'i: T1.8 QABUL → T1.9 rejasi
+# Claude topshirig'i: T1.9 rejasi — TUZATISHLAR BILAN TASDIQLANDI
 
-## 1. T1.8 xulosasi: QABUL (kod `519781c`)
+**Merge tekshiruvi:** T1.8 merge'i tekshirildi. `main` = `1cd0286`, kod `5db4baa` bilan bir xil.
 
-Claude tekshirdi:
+Reja puxta. Quyidagilar tasdiqlandi:
 
-- **Toza nusxada lokal `pnpm verify` yashil:** 248 test, sxema diff 0, depcruise toza.
-- **`packages/db-cloud` va `apps/desktop` ga tegilmagan.** `packages/drivers` da faqat redact ro'yxati o'zgargan. Egasining vaqtinchalik CI qoidasi bo'yicha merge qilish mumkin.
-- **Mustaqil model, 220 qadam:**
-  - amallar: 2 ta'minotchi, FIFO va o'rtacha tovar, `warn` rejimi; ma'lum va noma'lum narxli kirim, narxni tasdiqlash, naqd sotuv, naqd va karta to'lov (avans bilan), to'liq qaytarish, `±` tuzatish;
-  - 47 kirim, 21 tasdiqlash, 19 qaytarish, 36 to'lov, avans holatlari;
-  - kutilgan rad etishlar: 8 naqd yetmasligi, 26 tasdiqlangan qatorni qayta tasdiqlash, 10 ortiqcha qaytarish, partiya tugashi, noma'lum narxli qatorni qaytarish;
-  - har qadamda ta'minotchi balansi, `debtBalance`, `advanceBalance`, kassa qoldig'i va miqdor saqlanishi model bilan teng;
-  - `total_value` va partiya qiymati hech qachon manfiy emas;
-  - har 10 qadamda ombor va ta'minotchi rebuild jonli holat bilan teng;
-  - rad etilgan qaytarishda ombor holati o'zgarmaydi.
-- **Mutatsiya:** 9 tadan 7 tasi ushlandi. E1 `Q_rem` (FIFO va o'rtacha), E2 qiymat chegarasi, avans FIFO, naqd yetmasligi va PII redact ham ushlandi.
+- test qarzi commit'i;
+- smena terminalga bog'lanadi, har terminalda bitta ochiq smena (partial UNIQUE);
+- `shifts` va `shift_cashier_sessions` (MONOTONE); `shift_closures`, usullar bo'yicha jamilar va kassir kesimlari (FACT, qayta yopish tarixda qoladi);
+- `day_closes` F3 maydonlari bilan;
+- `SHIFT_NOT_OPEN`, yopiq smenaga yozish DB trigger bilan bloklanadi;
+- void faqat o'sha ochiq smena cheki uchun;
+- naqdsiz summa maydoni yo'q (`strictObject`);
+- kupyura, farq sababi va katta farqda supervisor;
+- agregat SQL bilan yopish, idempotentlik, model testi.
 
-### Test qarzi
+Quyidagi tuzatishlar bilan `gemini/T1.9-shifts` branch'ida kodni yoz.
 
-T1.9 PR'ining birinchi alohida commit'i: `T1.8 test qarzi: qaytarish chegaralari`. Har birini mutatsiya bilan isbotla.
+## Majburiy tuzatishlar
 
-1. **Ortiqcha qaytarish, 1 milli chegara.** `supplier-repo.ts` dagi `quantityToMilli(validQty) > maxRemainingMilli` sharti `> maxRemainingMilli + 1n` ga o'zgartirilganda testlar yiqilmadi.
-   - Test: kg tovar, 2.000 kirim. Avval 1.500 qaytariladi.
-   - So'ng 0.500 o'tadi. Shundan keyin 0.001 `SUPPLIER_RETURN_QTY_EXCEEDED` bilan rad etiladi.
-   - Alohida holat: 1.500 dan keyin 0.501 rad etiladi.
-2. **Partiya tugashi, 1 milli chegara.** `stock-repo.ts` dagi `batchAvailMilli < retMilli` sharti `batchAvailMilli + 1n < retMilli` ga o'zgartirilganda testlar yiqilmadi.
-   - Test: FIFO partiya 2.000, shundan 0.700 sotilgan, 1.300 qolgan.
-   - 1.301 qaytarish `SUPPLIER_RETURN_BATCH_DEPLETED` bilan rad etiladi. 1.300 qaytarish esa o'tadi.
+### X1. Kassa qoldig'i uchun yagona haqiqat manbai
 
-## 2. Merge
+Hozir ikki xil "kassa qoldig'i" paydo bo'lyapti:
 
-CI limiti tiklanguncha egasining qoidasi amal qiladi.
+- T1.5 dagi `getCashDrawerBalanceSync`: terminalning barcha vaqtdagi `SUM(cash_moves)`;
+- yangi smena qoldig'i: `opening_cash + SUM(cash_moves WHERE shift_id)`.
 
-1. `git pull --ff-only`.
-2. PR boshi Claude'ning shu topshiriq commit'i bo'lsin.
-3. `T1.8: Ta'minotchi, kirim va ta'minotchi qarzi` nomi bilan Squash and merge qil, SHA'ni yoz, branch'ni o'chir.
-4. `main`dan `gemini/T1.9-shifts` branch'ini och.
+Smena farqlari (kamomad yoki ortiqcha) `cash_moves` ga tushmagani uchun birinchisi vaqt o'tishi bilan haqiqatdan uzoqlashadi.
 
-## 3. T1.9 — Smena va kun yakuni: avval REJA
+**Talab:**
 
-Kod yozma. Rejani `.mezon/gemini/HISOBOT.md` ga yoz, `[gemini-reja] T1.9` bilan commit qil va push qil, so'ng `node .mezon/kutish.mjs` bilan kut.
+- Barcha naqd yetarliligi tekshiruvlari (qaytarish, void, ta'minotchiga to'lov, xarajat, inkassatsiya) va `getTerminalCashBalance()` **faqat joriy ochiq smena** qoldig'idan foydalansin.
+- Eski `getCashDrawerBalanceSync` yo olib tashlansin, yo "tarixiy jami, kassa qoldig'i emas" deb aniq nomlansin. Chaqiruvchilari yangilansin.
+- **Test:** farqli yopilish (`counted ≠ expected`) → yangi smena boshqa `opening_cash` bilan ochiladi → naqd yetarliligi tekshiruvi yangi `opening_cash` asosida ishlaydi.
 
-GEMINI.md T1.9 talablari:
+### X2. Kassir kesimi sessiya bo'yicha, foydalanuvchi bo'yicha emas
 
-- smena ochish va yopish;
-- kutilgan naqd `cash_moves` dan;
-- naqdsiz `payments` dan avtomatik;
-- sanoq va farq;
-- xarajatlar;
-- snapshot o'zgarmas.
+`created_by_user_id` bo'yicha guruhlash noto'g'ri. Masalan, kassir A sessiyasida menejer qaytarish qilsa, pul A ning qutisidan chiqadi. Javobgarlik sessiyaga tegishli.
 
-Mezonlar:
+**Talab:**
 
-- naqdsiz summa qo'lda kiritilmaydi;
-- qayta yopish tarixni saqlaydi;
-- ikki kassir farqi ajraladi.
+- `sales`, `returns` va `cash_moves` ga `shift_cashier_session_id` yozilsin (aktiv sessiya).
+- Kassir kesimlari shu ustun bo'yicha hisoblansin.
+- **Kim savdo qila oladi:** aktiv sessiya kassiri yoki `owner`/`manager`. Boshqa kassir terminalda savdo qilsa, `409 CASHIER_SESSION_MISMATCH`. Barcha yozuvlar aktiv sessiyaga yoziladi.
+- **Test:** sessiya A da menejer qaytarish qiladi. Pul A kesimidan ayiriladi, menejer kesimidan emas.
 
-Rejada quyidagilar aniq bo'lsin:
+### X3. Naqd summasi ikki marta kamaytirilmasin
 
-### a) Smena modeli
+Rejadagi `SUM(amount - change_amount)` noto'g'ri. T1.5 da `payments.amount` allaqachon sof summa (`tendered − change = amount`). Qaytimni yana ayirish naqd tushumini kamaytiradi.
 
-- **Smena terminalga (`device_id`) bog'lanadi**, chunki kassa qutisi terminalniki.
-  - Bir terminalda bir vaqtda faqat bitta ochiq smena.
-  - Bitta smenada bir nechta kassir ishlay oladimi, yoki kassir almashsa smena yopiladimi? "Ikki kassir farqi ajraladi" mezoniga mos qaror qil. Tavsiya: smena terminalniki, ichida kassir kesimlari (`shift_cashier_sessions`); farq har kassir topshirgan paytda alohida hisoblanadi.
-- **Ochish:** boshlang'ich naqd sanog'i. Avvalgi smenaning yopilish sanog'i bilan farq bo'lsa, qayd etiladi.
-- **Jadval sinflari:** `shifts` (MONOTONE: `open` → `closed`), yopilish snapshot'i (FACT), qayta yopish (FACT, eskisini o'chirmaydi). Qaror qil.
+**Talab:**
 
-### b) Smenaga bog'lash (T1.4–T1.8 dagi `shift_id`)
+- Usullar bo'yicha savdo summasi = `SUM(payments.amount)`.
+- Naqd qutiga ta'siri esa faqat `cash_moves` dan hisoblanadi.
+- **Model testida** qaytimli naqd savdolar albatta bo'lsin.
 
-- `completeSale`, qaytarish, void, qarz to'lovi, ta'minotchiga to'lov va `cash_moves`: ochiq smena bo'lmasa nima bo'ladi? Tavsiya: savdo va naqd harakatlari ochiq smenasiz **rad etiladi** (`SHIFT_NOT_OPEN`). Hozirgi testlarni shunga moslashtir.
-- Barcha yangi yozuvlarga `shift_id` yoziladi. Eski (smenasiz) yozuvlar `NULL` qoladi.
-- **V1 toraytirish (T1.6 dagi va'da):** void endi faqat **o'sha ochiq smenadagi** chek uchun. Yopilgan smena cheki faqat qaytarish orqali.
+### X4. Kun yakuni qoidasi
 
-### c) Kutilgan summalar va farq
+- `closeBusinessDay`: shu ish kunida (do'kon vaqt zonasi) ochiq smena bo'lsa, `409 DAY_HAS_OPEN_SHIFTS`.
+- Kunga qaysi smenalar kiradi? Tavsiya: yopilish sanasi bo'yicha. Yarim tundan o'tgan smena qaysi kunga kiradi, aniq yoz.
+- Kun yakunini qayta qilish tarixni saqlaydi (`closeSeq`).
+- Yopilgan kunga tegishli smenani qayta yopish: ruxsat bo'lsa, kun yakuni ham qayta hisoblanishi kerakligini belgila (masalan `day_close` "eskirgan" deb ko'rsatiladi). Qaror qil va testla.
 
-- **Kutilgan naqd** = boshlang'ich naqd + smenadagi `cash_moves` yig'indisi (savdo kirimi, qaytim, qaytarish, qarz to'lovi, ta'minotchiga to'lov, xarajat, inkassatsiya, kirim).
-- **Naqdsiz summalar** usullar bo'yicha `payments` va `return_payments` dan avtomatik hisoblanadi. Qo'lda kiritish maydoni umuman bo'lmaydi (mezon). API ham qabul qilmaydi; test bilan isbotla.
-- **Sanoq:** kassir haqiqiy naqdni kiritadi (ixtiyoriy kupyura bo'yicha). Farq = sanoq − kutilgan. Farqning sababi; katta farqda supervisor tasdig'i, chegarani konfiguratsiyada saqla.
+### X5. F2 sinxron uchun izoh
 
-### d) Xarajat, inkassatsiya va kassaga kirim
+`sales`, `returns` va `cash_moves` dagi "yopiq smenaga INSERT yo'q" triggeri F2 da boshqa qurilmadan sinxron bilan kelgan qatorlarni bloklamasligi kerak. Hozir faqat izoh va `GEMINI.md` sinxron ziddiyatlari ro'yxatiga yoz, kod shart emas.
 
-- `cash_out` (xarajat, sabab va toifa bilan), `encashment` (inkassatsiya), `cash_in` (kassaga qo'yish).
-- T1.5 da nomlangan turlardan foydalan.
-- RBAC: kim qila oladi? Naqd yetmasa rad etiladi (T1.6 qoidasi).
+## Tavsiya
 
-### e) Yopish va qayta yopish
+Farq chegarasi `50_000` tiyin (500 so'm) juda past, deyarli har yopilishda supervisor talab qilinadi. Standartni `1_000_000` tiyin (10 000 so'm) qil, konfiguratsiyada o'zgaradi.
 
-- **Yopilish snapshot'i o'zgarmas.** Unda quyidagilar bo'ladi:
-  - smena davri;
-  - savdolar soni va jami (`v_sales_lines` dan, qaytarishlar bilan);
-  - usullar bo'yicha summalar;
-  - kutilgan naqd, sanoq va farq;
-  - kassir kesimlari.
-- **Qayta yopish:** sanoq xato kiritilgan bo'lsa, yangi snapshot yoziladi va eskisi tarixda qoladi. Faqat supervisor, sabab bilan.
-- **Smena yopilgandan keyin unga yozib bo'lmaydi.** DB darajasida ham.
-- **Kun yakuni (Z-hisobot):** bir kundagi barcha smenalar jamlanmasi. F3 fiskal Z-hisobot keyin ulanadi, buning uchun joy qoldir.
+## Bajarish tartibi (CI limiti tiklanguncha egasining qoidasi bilan)
 
-### f) Model testi va idempotentlik
-
-- Ochish, yopish va qayta yopish `clientRequestId` + `request_hash` bilan idempotent.
-- **Model testi (kamida 200 qadam, seed'li):**
-  - amallar: smena ochish, ikki kassir, savdo (naqd va aralash), qaytarish, void, qarz to'lovi, ta'minotchiga to'lov, xarajat, inkassatsiya, yopish, qayta yopish;
-  - har yopilishda kutilgan naqd, usullar bo'yicha summalar va kassir kesimlari mustaqil model bilan tiyinigacha teng;
-  - ikki terminal (`device_id`) parallel smenalari bir-biriga aralashmasin.
-
-### g) Unumdorlik
-
-1 000 chekli smenani yopish ≤ 500 ms (lokal).
-
-### h) Doiradan tashqari
-
-- Fiskal Z-hisobot va OFD (F3).
-- Chek va hisobot chop etish (T1.12).
-- POS UI (T1.11).
+1. Birinchi commit: T1.8 test qarzi, mutatsiya dalillari bilan.
+2. T1.9 kodi. Mavjud testlarni ochiq smena bilan moslashtir.
+3. Lokal `pnpm verify` yashil.
+4. Push qil va PR och. CI ishlamasa, kutma.
+5. Hisobot: X1–X5 dalillari, model testi qadamlari soni, 1 000 chekli smenani yopish vaqti, lokal `pnpm verify` chiqishi. `[gemini-hisobot] T1.9` bilan commit qil va push qil.
+6. `node .mezon/kutish.mjs` ni ishga tushir. Merge qilma.
