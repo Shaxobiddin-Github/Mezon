@@ -63,7 +63,7 @@ import type { BetterSQLite3Database } from 'drizzle-orm/better-sqlite3';
 import { type LocalSqliteConnection } from './connection.js';
 import { type StoredCashMoveRecord, toStoredCashMove } from './customer-repo.js';
 import { advanceReceivingSeqSync, advanceSupplierReturnSeqSync } from './device-state.js';
-import { getCashDrawerBalanceSync } from './sale-repo.js';
+import { getActiveShiftDrawerBalanceSync, requireOpenShiftSessionSync } from './shift-repo.js';
 import {
   cashMoves,
   goodsReceivingLines,
@@ -3370,7 +3370,13 @@ export class SqliteSupplierStore {
 
       let cashMoveRecord: StoredCashMoveRecord | null = null;
       if (method === 'cash') {
-        const drawerBalance = getCashDrawerBalanceSync(session.db, {
+        const activeShift = requireOpenShiftSessionSync(session.db, {
+          organizationId: ctx.organizationId,
+          storeId: ctx.storeId,
+          deviceId: session.deviceId,
+          actorUserId: validActorId,
+        });
+        const drawerBalance = getActiveShiftDrawerBalanceSync(session.db, sqlite, {
           organizationId: ctx.organizationId,
           storeId: ctx.storeId,
           deviceId: session.deviceId,
@@ -3392,12 +3398,14 @@ export class SqliteSupplierStore {
           organizationId: ctx.organizationId,
           storeId: ctx.storeId,
           values: {
-            shiftId: null,
+            shiftId: activeShift.shift.id,
+            shiftCashierSessionId: activeShift.activeSession.id,
             type: 'supplier_payment_out',
             amountDelta: negateMoney(input.amount),
             sourceType: 'supplier_payment',
             sourceId: sup.id,
             paymentId: null,
+            expenseCategory: null,
             reason: reasonOpt ?? 'Supplier cash payment',
             createdByUserId: validActorId,
           },

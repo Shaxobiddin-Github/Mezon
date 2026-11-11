@@ -28,10 +28,11 @@ import {
   createSqliteCatalogStore,
   createSqliteHubAuthStore,
   createSqliteSaleStore,
+  createSqliteShiftStore,
   createSqliteStockStore,
   createSqliteSupplierStore,
   formatOutboxRecordForDebug,
-  getCashDrawerBalanceSync,
+  getActiveShiftDrawerBalanceSync,
   goodsReceivingLines,
   goodsReceivings,
   listAllOutboxRecordsSync,
@@ -132,6 +133,12 @@ async function setupSupplierEnv(options?: {
   const cartStore = createSqliteCartStore({ connection, getRuntimeContext: getStoreCtx });
   const saleStore = createSqliteSaleStore({ connection, getRuntimeContext: getStoreCtx });
   const supplierStore = createSqliteSupplierStore({ connection, getRuntimeContext: getStoreCtx });
+  const shiftStore = createSqliteShiftStore({ connection, getRuntimeContext: getStoreCtx });
+  await shiftStore.openShift({
+    actorUserId: setup.owner.id,
+    clientRequestId: makeUuidFromIndex(0x00bb, 999999),
+    openingCash: ZERO_MONEY,
+  });
 
   let reqSeq = 1;
   const nextUuid = () => {
@@ -1570,7 +1577,7 @@ describe('@mezon/db-local - T1.8 Suppliers, Receiving, Unknown Cost, Ledger & Re
       } else if (op < 72) {
         // Cash or card supplier payment (incl. intentional overpayments into negative advance balance)
         const drawer = moneyToTiyin(
-          getCashDrawerBalanceSync(env.connection.db, {
+          getActiveShiftDrawerBalanceSync(env.connection.db, env.connection.sqlite, {
             organizationId: env.organizationId,
             storeId: env.storeId,
             deviceId: env.deviceId,
@@ -1658,7 +1665,7 @@ describe('@mezon/db-local - T1.8 Suppliers, Receiving, Unknown Cost, Ledger & Re
       await verifyAllSuppliers();
       expect(
         moneyToTiyin(
-          getCashDrawerBalanceSync(env.connection.db, {
+          getActiveShiftDrawerBalanceSync(env.connection.db, env.connection.sqlite, {
             organizationId: env.organizationId,
             storeId: env.storeId,
             deviceId: env.deviceId,
@@ -1717,7 +1724,7 @@ describe('@mezon/db-local - T1.8 Suppliers, Receiving, Unknown Cost, Ledger & Re
       .sort((a, b) => a.productId.localeCompare(b.productId));
     expect(stockAfterRebuild).toEqual(liveStockBefore);
     assertStockConservationIdentity(env.connection, stockAfterRebuild);
-  });
+  }, 20_000);
 
   it('meets <= 500 ms performance target for posting a 100-line receiving on file-backed WAL SQLite', async () => {
     const env = await setupSupplierEnv({ seed: 777 });

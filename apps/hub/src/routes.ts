@@ -22,6 +22,8 @@ import { registerStockRoutes } from './stock-routes.js';
 import type { HubStockService } from './stock-service.js';
 import { registerSupplierRoutes } from './supplier-routes.js';
 import type { HubSupplierService } from './supplier-service.js';
+import { registerShiftRoutes } from './shift-routes.js';
+import type { HubShiftService } from './shift-service.js';
 
 async function authorize(
   authService: HubAuthService,
@@ -43,6 +45,7 @@ export function registerHubRoutes(
   returnService?: HubReturnService,
   customerService?: HubCustomerService,
   supplierService?: HubSupplierService,
+  shiftService?: HubShiftService,
 ): void {
   app.get('/health', async () => {
     return authService.getHealth();
@@ -128,5 +131,8 @@ export function registerHubRoutes(
   }
   if (supplierService) {
     registerSupplierRoutes(app, authService, supplierService);
+  }
+  if (shiftService) {
+    registerShiftRoutes(app, authService, shiftService);
   }
 }

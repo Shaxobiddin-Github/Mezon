@@ -164,7 +164,11 @@ export function advanceDeviceSeqAndStateSync(
 }
 
 type DeviceSequenceColumn =
-  'last_receipt_seq' | 'last_return_seq' | 'last_receiving_seq' | 'last_supplier_return_seq';
+  | 'last_receipt_seq'
+  | 'last_return_seq'
+  | 'last_receiving_seq'
+  | 'last_supplier_return_seq'
+  | 'last_shift_seq';
 
 function advanceSeqColumnSync(
   sqlite: Database.Database,
@@ -292,6 +296,30 @@ export function readSupplierReturnSeqSync(db: BetterSQLite3Database, deviceId: U
   const validDeviceId = parseUuidV7(deviceId);
   const rows = db
     .select({ val: localDeviceState.lastSupplierReturnSeq })
+    .from(localDeviceState)
+    .where(eq(localDeviceState.deviceId, validDeviceId))
+    .limit(1)
+    .all();
+  return rows[0]?.val ?? 0n;
+}
+
+/**
+ * Atomically allocates the next gapless per-device `shift_no` (`last_shift_seq + 1`).
+ */
+export function advanceShiftSeqSync(
+  sqlite: Database.Database,
+  params: {
+    readonly deviceId: UuidV7;
+    readonly updatedAtMs: bigint;
+  },
+): bigint {
+  return advanceSeqColumnSync(sqlite, 'last_shift_seq', 'shift_no', params);
+}
+
+export function readShiftSeqSync(db: BetterSQLite3Database, deviceId: UuidV7): bigint {
+  const validDeviceId = parseUuidV7(deviceId);
+  const rows = db
+    .select({ val: localDeviceState.lastShiftSeq })
     .from(localDeviceState)
     .where(eq(localDeviceState.deviceId, validDeviceId))
     .limit(1)

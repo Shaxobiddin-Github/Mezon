@@ -131,6 +131,17 @@ describe('@mezon/hub - T1.4 POST /carts/:id/complete, RBAC, 409 details, cost-hi
         ).json(),
       );
 
+      const shiftOpenRes = await hub.app.inject({
+        method: 'POST',
+        url: '/shifts/open',
+        headers: authHeaders(cashierLogin.token),
+        payload: {
+          clientRequestId: '01950000-0000-7000-8000-1400000000a1',
+          openingCash: '0',
+        },
+      });
+      expect(shiftOpenRes.statusCode).toBe(201);
+
       // Owner sets 'block' negative stock policy & creates product with batch cost
       const polRes = await hub.app.inject({
         method: 'PUT',
@@ -525,6 +536,17 @@ describe('@mezon/hub - T1.4 POST /carts/:id/complete, RBAC, 409 details, cost-hi
       );
       const authHdr = { ...headersHost, authorization: `Bearer ${login.token}` };
 
+      const shiftPerf1 = await hub.app.inject({
+        method: 'POST',
+        url: '/shifts/open',
+        headers: authHdr,
+        payload: {
+          clientRequestId: '01950000-0000-7000-8000-1400000000b1',
+          openingCash: '0',
+        },
+      });
+      expect(shiftPerf1.statusCode).toBe(201);
+
       const cart = CartResponseSchema.parse(
         (
           await hub.app.inject({
@@ -691,6 +713,17 @@ describe('@mezon/hub - T1.4 POST /carts/:id/complete, RBAC, 409 details, cost-hi
           })
         ).json(),
       );
+
+      const shiftOpen15 = await hub.app.inject({
+        method: 'POST',
+        url: '/shifts/open',
+        headers: hdrs(cashierLogin.token),
+        payload: {
+          clientRequestId: '01950000-0000-7000-8000-1500000000a1',
+          openingCash: '0',
+        },
+      });
+      expect(shiftOpen15.statusCode).toBe(201);
 
       const prodRes = ProductDetailResponseSchema.parse(
         (
@@ -1065,6 +1098,17 @@ describe('@mezon/hub - T1.4 POST /carts/:id/complete, RBAC, 409 details, cost-hi
         ).json(),
       );
       const authHdr = { ...hdr, authorization: `Bearer ${login.token}` };
+
+      const shiftPerf2 = await hub.app.inject({
+        method: 'POST',
+        url: '/shifts/open',
+        headers: authHdr,
+        payload: {
+          clientRequestId: '01950000-0000-7000-8000-1500000000b1',
+          openingCash: '0',
+        },
+      });
+      expect(shiftPerf2.statusCode).toBe(201);
 
       const samplesMs: number[] = [];
       let expectedDrawerTotal = 0n;

@@ -247,6 +247,7 @@ Bu loyihaning eng xavfli qismi. Spetsifikatsiyadan chetlanish faqat Claude tasdi
 
 **Konfliktlar:** manfiy qoldiq, rad etilgan hodisa, partiyadan ortiqcha chiqim. Savdo bekor qilinmaydi, egasi panelida ko'rsatiladi.
 - **Yagona yozuvchi qoidasi (`stock_moves`, `batches`):** zaxira harakatlari va partiyalar faqat o'sha do'kon hub'ida yaratiladi (bitta do'kon — bitta yozuvchi); bulut tomonida majburlash F2 da qo'llanadi.
+- **Yopiq smenaga sinxron INSERT (`sales`, `returns`, `cash_moves`):** lokal `BEFORE INSERT` triggerlar yopiq smenaga yangi mahalliy yozuvni bloklaydi, lekin F2 da boshqa qurilmadan yoki kechikib sinxron bilan kelgan qatorlarni bloklamasligi kerak (triggerlar F2 sinxron rejimini o'tkazib yuboradi, yopilgan smena/`day_close` eskirgan deb belgilanadi va ziddiyat ko'rsatiladi).
 
 **Bootstrap:** snapshot va `position`. Tenant filtri majburiy. Filtri yo'q jadval xato beradi.
 

@@ -79,6 +79,7 @@ function toSaleDto(sale: StoredSaleRecord): SaleDto {
     completedByUserId: sale.completedByUserId,
     customerId: sale.customerId,
     shiftId: sale.shiftId,
+    shiftCashierSessionId: sale.shiftCashierSessionId,
     clientRequestId: sale.clientRequestId,
     status: sale.status,
     subtotalGross: sale.subtotalGross.toString(),

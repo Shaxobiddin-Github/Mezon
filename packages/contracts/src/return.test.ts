@@ -122,6 +122,8 @@ describe('@mezon/contracts - void, return, and report schemas', () => {
       storeId: UUID_2,
       deviceId: UUID_3,
       saleId: UUID_4,
+      shiftId: null,
+      shiftCashierSessionId: null,
       processedByUserId: UUID_5,
       overrideApprovedByUserId: null,
       overrideApprovedAtMs: null,

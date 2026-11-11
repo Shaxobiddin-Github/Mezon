@@ -22,6 +22,7 @@ import {
   assertCustomerMigrationsComplete,
   assertReturnAndViewMigrationsComplete,
   assertSaleMigrationsComplete,
+  assertShiftMigrationsComplete,
   assertSqliteTriggersMigrationsComplete,
   assertStockMigrationsComplete,
   assertSupplierMigrationsComplete,
@@ -31,6 +32,7 @@ import {
   buildCustomerSearchFtsSql,
   buildSaleMonotoneTriggersSql,
   buildSalesLinesViewSql,
+  buildShiftTriggersSql,
   buildSqliteImmutabilityTriggersSql,
   buildStockMonotoneTriggersSql,
   buildSupplierSearchFtsSql,
@@ -73,6 +75,12 @@ import {
   returns,
   saleLines,
   sales,
+  shiftCashierSessions,
+  shiftClosureCashiers,
+  shiftClosureMethodTotals,
+  shiftClosures,
+  shifts,
+  dayCloses,
   sqliteBigint,
   sqliteBoolean,
   sqliteInt,
@@ -163,6 +171,12 @@ describe('@mezon/db-local - Schema foundation, registry, pragmas, and bigint saf
       ['supplier_return_lines', 'FACT'],
       ['supplier_ledger', 'FACT'],
       ['local_supplier_balances', 'LOCAL'],
+      ['shifts', 'MONOTONE'],
+      ['shift_cashier_sessions', 'MONOTONE'],
+      ['shift_closures', 'FACT'],
+      ['shift_closure_method_totals', 'FACT'],
+      ['shift_closure_cashiers', 'FACT'],
+      ['day_closes', 'FACT'],
     ]);
     expect(() =>
       validateSqliteSchemaRegistry(
@@ -209,6 +223,12 @@ describe('@mezon/db-local - Schema foundation, registry, pragmas, and bigint saf
           supplierReturnLines,
           supplierLedger,
           localSupplierBalances,
+          shifts,
+          shiftCashierSessions,
+          shiftClosures,
+          shiftClosureMethodTotals,
+          shiftClosureCashiers,
+          dayCloses,
         },
         localSchemaRegistry,
       ),
@@ -386,7 +406,7 @@ describe('@mezon/db-local - Schema foundation, registry, pragmas, and bigint saf
       const migCountRow = conn.sqlite
         .prepare('SELECT COUNT(*) as cnt FROM __drizzle_migrations')
         .get() as { cnt: bigint };
-      expect(migCountRow.cnt).toBe(11n);
+      expect(migCountRow.cnt).toBe(12n);
     } finally {
       conn.close();
     }
@@ -858,6 +878,27 @@ describe('@mezon/db-local - Schema foundation, registry, pragmas, and bigint saf
     expect(() => assertSupplierMigrationsComplete(missingConfirmIdxDir)).toThrowError(
       /uidx_receiving_cost_confirms_line/,
     );
+
+    // T1.9 shift triggers, partial unique indexes & v_sales_lines shift column checks
+    const shiftIdx1 =
+      'CREATE UNIQUE INDEX "uidx_shifts_one_open_per_device" ON "shifts" ("organization_id","store_id","device_id") WHERE "shifts"."status" = \'open\';';
+    const shiftIdx2 =
+      'CREATE UNIQUE INDEX "uidx_shift_cashier_one_active" ON "shift_cashier_sessions" ("shift_id") WHERE "shift_cashier_sessions"."status" = \'active\';';
+    const okShiftDir = makeMigDir();
+    fs.writeFileSync(
+      path.join(okShiftDir, '0011.sql'),
+      `${buildShiftTriggersSql().join('\n')}\n${shiftIdx1}\n${shiftIdx2}\n${buildSalesLinesViewSql().join('\n')}`,
+    );
+    expect(() => assertShiftMigrationsComplete(okShiftDir)).not.toThrow();
+
+    const missingShiftGuardDir = makeMigDir();
+    fs.writeFileSync(
+      path.join(missingShiftGuardDir, '0011.sql'),
+      `${shiftIdx1}\n${shiftIdx2}\n${buildSalesLinesViewSql().join('\n')}`,
+    );
+    expect(() => assertShiftMigrationsComplete(missingShiftGuardDir)).toThrowError(
+      /trg_shifts|shifts/,
+    );
   });
 
   it('cleanly upgrades a pre-populated 0003 database to 0004 without losing products or FTS triggers', () => {
@@ -1294,6 +1335,106 @@ describe('@mezon/db-local - Schema foundation, registry, pragmas, and bigint saf
         .prepare('SELECT "id", "cash_move_id" FROM "customer_ledger" WHERE "id" = ?')
         .get(ledgerId) as { readonly id: string; readonly cash_move_id: string | null } | undefined;
       expect(clRow).toEqual({ id: ledgerId, cash_move_id: cashMoveId });
+    } finally {
+      conn.close();
+    }
+  });
+
+  it('cleanly upgrades a pre-populated 0010 database to 0011 preserving data, defaults & FKs', () => {
+    const migDir = getDefaultLocalMigrationsFolder();
+    const partialMigDir = path.join(os.tmpdir(), `mezon-mig-0010-${Date.now()}-${Math.random()}`);
+    fs.mkdirSync(path.join(partialMigDir, 'meta'), { recursive: true });
+    tempDirs.push(partialMigDir);
+
+    const journal = JSON.parse(
+      fs.readFileSync(path.join(migDir, 'meta', '_journal.json'), 'utf8'),
+    ) as {
+      readonly version: string;
+      readonly dialect: string;
+      entries: Array<{ readonly idx: number; readonly tag: string }>;
+    };
+    const entries10 = journal.entries.filter((e) => e.idx <= 10);
+    for (const entry of entries10) {
+      fs.copyFileSync(
+        path.join(migDir, `${entry.tag}.sql`),
+        path.join(partialMigDir, `${entry.tag}.sql`),
+      );
+    }
+    fs.writeFileSync(
+      path.join(partialMigDir, 'meta', '_journal.json'),
+      JSON.stringify({ ...journal, entries: entries10 }, null, 2),
+    );
+
+    const dbPath = makeTempDbPath('upgrade-0010-to-0011.db');
+    const conn = openLocalSqliteDatabase(dbPath);
+    try {
+      migrateLocalDatabase(conn.db, partialMigDir);
+
+      const devId = '01950000-0000-7000-8000-000000000201';
+      const orgId = '01950000-0000-7000-8000-000000000211';
+      const storeId = '01950000-0000-7000-8000-000000000212';
+      const userId = '01950000-0000-7000-8000-000000000213';
+      const cashMoveId = '01950000-0000-7000-8000-000000000215';
+      const hlc58 = serializeHlc(
+        createHlcTimestamp(unixMsFromBigInt(1_760_000_000_000n), 0, parseUuidV7(devId)),
+      );
+
+      conn.sqlite
+        .prepare(
+          `INSERT INTO "local_device_state" ("id", "organization_id", "created_at_ms", "updated_at_ms", "device_id", "last_device_seq", "last_receipt_seq", "last_return_seq", "last_receiving_seq", "last_supplier_return_seq", "last_hlc", "last_uuid_ms")
+           VALUES (?, ?, 1760000000000, 1760000000000, ?, 5, 2, 1, 1, 0, ?, 1760000000000)`,
+        )
+        .run('01950000-0000-7000-8000-000000000210', orgId, devId, hlc58);
+      conn.sqlite
+        .prepare(
+          `INSERT INTO "local_hub_config" ("id", "organization_id", "created_at_ms", "updated_at_ms", "store_id", "device_id", "singleton_guard", "setup_completed_at_ms")
+           VALUES (?, ?, 1760000000000, 1760000000000, ?, ?, 1, 1760000000000)`,
+        )
+        .run('01950000-0000-7000-8000-000000000220', orgId, storeId, devId);
+      conn.sqlite
+        .prepare(
+          `INSERT INTO "users" ("id", "organization_id", "device_id", "hlc", "created_at_ms", "updated_at_ms", "deleted_at_ms", "username", "full_name", "role", "is_active")
+           VALUES (?, ?, ?, ?, 1760000000000, 1760000000000, NULL, 'cashier1', 'Cashier One', 'cashier', 1)`,
+        )
+        .run(userId, orgId, devId, hlc58);
+      conn.sqlite
+        .prepare(
+          `INSERT INTO "cash_moves" ("id", "organization_id", "store_id", "device_id", "hlc", "created_at_ms", "shift_id", "type", "amount_delta", "source_type", "source_id", "payment_id", "reason", "created_by_user_id")
+           VALUES (?, ?, ?, ?, ?, 1760000000000, NULL, 'cash_in', 75000, 'manual', ?, NULL, 'Legacy in', ?)`,
+        )
+        .run(cashMoveId, orgId, storeId, devId, hlc58, userId, userId);
+
+      migrateLocalDatabase(conn.db, migDir);
+      expect(conn.sqlite.pragma('foreign_key_check')).toEqual([]);
+
+      const devRow = conn.sqlite
+        .prepare(
+          'SELECT "last_shift_seq", "last_device_seq" FROM "local_device_state" WHERE "device_id" = ?',
+        )
+        .get(devId) as { readonly last_shift_seq: bigint; readonly last_device_seq: bigint };
+      expect(devRow).toEqual({ last_shift_seq: 0n, last_device_seq: 5n });
+
+      const hubCfg = conn.sqlite
+        .prepare(
+          'SELECT "max_cash_discrepancy_without_override" FROM "local_hub_config" WHERE "singleton_guard" = 1',
+        )
+        .get() as { readonly max_cash_discrepancy_without_override: bigint };
+      expect(hubCfg.max_cash_discrepancy_without_override).toBe(1_000_000n);
+
+      const moveRow = conn.sqlite
+        .prepare(
+          'SELECT "id", "shift_cashier_session_id", "expense_category" FROM "cash_moves" WHERE "id" = ?',
+        )
+        .get(cashMoveId) as {
+        readonly id: string;
+        readonly shift_cashier_session_id: string | null;
+        readonly expense_category: string | null;
+      };
+      expect(moveRow).toEqual({
+        id: cashMoveId,
+        shift_cashier_session_id: null,
+        expense_category: null,
+      });
     } finally {
       conn.close();
     }

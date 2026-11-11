@@ -78,6 +78,13 @@
       "when": 1794363504636,
       "tag": "0010_suppliers_receiving",
       "breakpoints": true
+    },
+    {
+      "idx": 11,
+      "version": "6",
+      "when": 1794366922740,
+      "tag": "0011_shifts_day_close",
+      "breakpoints": true
     }
   ]
 }

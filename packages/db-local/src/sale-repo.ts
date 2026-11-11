@@ -42,6 +42,11 @@ import {
 import { advanceReceiptSeqSync } from './device-state.js';
 import { cashMoves, localCarts, payments, saleLines, sales } from './schema/index.js';
 import {
+  getActiveShiftDrawerBalanceSync,
+  getActiveStoreCashBalanceSync,
+  requireOpenShiftSessionSync,
+} from './shift-repo.js';
+import {
   type StockMoveWarningRecord,
   type StockPoolPrefetchTarget,
   applyOutboundStockMoveSync,
@@ -139,6 +144,7 @@ export interface StoredSaleRecord {
   readonly completedByUserId: UuidV7;
   readonly customerId: UuidV7 | null;
   readonly shiftId: UuidV7 | null;
+  readonly shiftCashierSessionId: UuidV7 | null;
   readonly clientRequestId: UuidV7;
   readonly status: 'completed';
   readonly subtotalGross: Money;
@@ -271,6 +277,7 @@ function toStoredSale(
     completedByUserId: row.completedByUserId,
     customerId: row.customerId,
     shiftId: row.shiftId,
+    shiftCashierSessionId: row.shiftCashierSessionId,
     clientRequestId: row.clientRequestId,
     status: 'completed',
     subtotalGross: row.subtotalGross,
@@ -296,10 +303,11 @@ function toStoredSale(
 }
 
 /**
- * Computes exact cash drawer balance for a specific terminal (`deviceId`) strictly from the
- * append-only `cash_moves` ledger (`SUM(amount_delta)`).
+ * Historical cumulative cash ledger sum for a terminal (`cash_moves` only).
+ * WARNING (T1.9 X1): NEVER use this for active drawer cash sufficiency or current drawer balance;
+ * active drawer cash (`openingCash + shift cash moves`) comes from `getActiveShiftDrawerBalanceSync`.
  */
-export function getCashDrawerBalanceSync(
+export function getHistoricalCashMovesTotalSync(
   db: BetterSQLite3Database,
   params: {
     readonly organizationId: UuidV7;
@@ -327,9 +335,10 @@ export function getCashDrawerBalanceSync(
 }
 
 /**
- * Computes total cash ledger balance across all terminals in a store (`SUM(amount_delta)`).
+ * Historical cumulative cash ledger sum across a store (`cash_moves` only).
+ * WARNING (T1.9 X1): Use `getActiveStoreCashBalanceSync` for active store drawer cash.
  */
-export function getStoreCashBalanceSync(
+export function getHistoricalStoreCashMovesTotalSync(
   db: BetterSQLite3Database,
   params: {
     readonly organizationId: UuidV7;
@@ -378,7 +387,7 @@ export class SqliteSaleStore {
     const targetDeviceId = deviceId !== undefined ? parseUuidV7(deviceId) : ctx.uow.deviceId;
     return runConnectionReadOnly(this.connection, () =>
       Promise.resolve(
-        getCashDrawerBalanceSync(this.connection.db, {
+        getActiveShiftDrawerBalanceSync(this.connection.db, this.connection.sqlite, {
           organizationId: ctx.organizationId,
           storeId: ctx.storeId,
           deviceId: targetDeviceId,
@@ -391,7 +400,7 @@ export class SqliteSaleStore {
     const ctx = this.requireContext();
     return runConnectionReadOnly(this.connection, () =>
       Promise.resolve(
-        getStoreCashBalanceSync(this.connection.db, {
+        getActiveStoreCashBalanceSync(this.connection.db, this.connection.sqlite, {
           organizationId: ctx.organizationId,
           storeId: ctx.storeId,
         }),
@@ -489,7 +498,7 @@ export class SqliteSaleStore {
         });
       }
 
-      // 2) Ensure cart exists in tenant/store and is strictly in 'open' status
+      // 2) Ensure cart exists in tenant/store and is strictly in 'open' status, then require open shift + cashier session (X2)
       const cartRow = requireCartRowInDbSync(session.db, ctx.organizationId, ctx.storeId, cartId);
       if (cartRow.status !== 'open') {
         throw new DomainError(
@@ -497,6 +506,13 @@ export class SqliteSaleStore {
           `Cart "${cartId}" is "${cartRow.status}", not "open"`,
         );
       }
+
+      const activeShift = requireOpenShiftSessionSync(session.db, {
+        organizationId: ctx.organizationId,
+        storeId: ctx.storeId,
+        deviceId: ctx.uow.deviceId,
+        actorUserId,
+      });
 
       const rawLines = readCartLineRowsInDbSync(session.db, cartId);
       if (rawLines.length === 0) {
@@ -709,7 +725,8 @@ export class SqliteSaleStore {
           cashierUserId: cartRow.cashierUserId,
           completedByUserId: actorUserId,
           customerId,
-          shiftId: null,
+          shiftId: activeShift.shift.id,
+          shiftCashierSessionId: activeShift.activeSession.id,
           clientRequestId,
           requestHash: incomingRequestHash,
           subtotalGross: detail.subtotalGross,
@@ -831,12 +848,14 @@ export class SqliteSaleStore {
             organizationId: ctx.organizationId,
             storeId: ctx.storeId,
             values: {
-              shiftId: null,
+              shiftId: activeShift.shift.id,
+              shiftCashierSessionId: activeShift.activeSession.id,
               type: 'sale_cash_in',
               amountDelta: item.tenderedAmount,
               sourceType: 'sale',
               sourceId: saleId,
               paymentId: paymentWrite.entityId,
+              expenseCategory: null,
               reason: `Sale receipt ${receiptCode} cash in`,
               createdByUserId: actorUserId,
             },
@@ -849,12 +868,14 @@ export class SqliteSaleStore {
               organizationId: ctx.organizationId,
               storeId: ctx.storeId,
               values: {
-                shiftId: null,
+                shiftId: activeShift.shift.id,
+                shiftCashierSessionId: activeShift.activeSession.id,
                 type: 'sale_change_out',
                 amountDelta: negateMoney(item.changeAmount),
                 sourceType: 'sale',
                 sourceId: saleId,
                 paymentId: paymentWrite.entityId,
+                expenseCategory: null,
                 reason: `Sale receipt ${receiptCode} change out`,
                 createdByUserId: actorUserId,
               },

@@ -153,6 +153,17 @@ describe('@mezon/hub - T1.7 Customers, Ledger, FIFO Overdue, RBAC & PII-Free Aud
       let mgrLogin = await loginAs('mgr17', mgrPin);
       let cashLogin = await loginAs('cash17', cashierPin);
 
+      const shiftOpen17 = await hub.app.inject({
+        method: 'POST',
+        url: '/shifts/open',
+        headers: authHeaders(cashLogin.token),
+        payload: {
+          clientRequestId: '01950000-0000-7000-8000-1700000000a1',
+          openingCash: '0',
+        },
+      });
+      expect(shiftOpen17.statusCode).toBe(201);
+
       // Seed catalog + stock
       const prodRes = await hub.app.inject({
         method: 'POST',

@@ -49,6 +49,9 @@ export const localDeviceState = localSchemaRegistry.defineTable(
     lastSupplierReturnSeq: sqliteBigint('last_supplier_return_seq')
       .notNull()
       .default(sql`0`),
+    lastShiftSeq: sqliteBigint('last_shift_seq')
+      .notNull()
+      .default(sql`0`),
     lastHlc: sqliteHlc('last_hlc').notNull(),
     lastUuidMs: sqliteUnixMs('last_uuid_ms').notNull(),
   }),
@@ -59,6 +62,7 @@ export const localDeviceState = localSchemaRegistry.defineTable(
     check('chk_local_device_state_return_nonneg', sql`${self.lastReturnSeq} >= 0`),
     check('chk_local_device_state_receiving_nonneg', sql`${self.lastReceivingSeq} >= 0`),
     check('chk_local_device_state_sup_return_nonneg', sql`${self.lastSupplierReturnSeq} >= 0`),
+    check('chk_local_device_state_shift_nonneg', sql`${self.lastShiftSeq} >= 0`),
   ],
 );
 
@@ -164,6 +168,13 @@ export const localHubConfig = localSchemaRegistry.defineTable(
     storeTimezone: text('store_timezone').notNull().default('Asia/Tashkent'),
     defaultCustomerDueDays: sqliteInt('default_customer_due_days').default(14),
     defaultSupplierDueDays: sqliteInt('default_supplier_due_days').default(14),
+    /**
+     * Configurable cash discrepancy threshold above which closing/handoff/reclose requires
+     * supervisor PIN override. Defaults to 10,000.00 UZS (`1_000_000` tiyin).
+     */
+    maxCashDiscrepancyWithoutOverride: sqliteMoney('max_cash_discrepancy_without_override')
+      .notNull()
+      .default(sql`1000000`),
   }),
   (self) => [
     uniqueIndex('uidx_local_hub_config_singleton').on(self.singletonGuard),
@@ -188,6 +199,10 @@ export const localHubConfig = localSchemaRegistry.defineTable(
     check(
       'chk_local_hub_config_sup_due_days',
       sql`${self.defaultSupplierDueDays} IS NULL OR (${self.defaultSupplierDueDays} >= 1 AND ${self.defaultSupplierDueDays} <= 3650)`,
+    ),
+    check(
+      'chk_local_hub_config_max_cash_disc',
+      sql`${self.maxCashDiscrepancyWithoutOverride} >= 0`,
     ),
   ],
 );
@@ -956,6 +971,7 @@ export const sales = localSchemaRegistry.defineTable(
       .references(() => users.id),
     customerId: sqliteUuidV7('customer_id'),
     shiftId: sqliteUuidV7('shift_id'),
+    shiftCashierSessionId: sqliteUuidV7('shift_cashier_session_id'),
     clientRequestId: sqliteUuidV7('client_request_id').notNull(),
     requestHash: text('request_hash').notNull(),
     subtotalGross: sqliteMoney('subtotal_gross').notNull(),
@@ -996,6 +1012,8 @@ export const sales = localSchemaRegistry.defineTable(
       .where(sql`${self.voidClientRequestId} IS NOT NULL`),
     index('idx_sales_store_created').on(self.organizationId, self.storeId, self.createdAtMs),
     index('idx_sales_store_cart').on(self.organizationId, self.storeId, self.sourceCartId),
+    index('idx_sales_shift_created').on(self.shiftId, self.createdAtMs),
+    index('idx_sales_session').on(self.shiftCashierSessionId),
     check('chk_sales_receipt_no_pos', sql`${self.receiptNo} >= 1`),
     check('chk_sales_receipt_code_nonempty', sql`length(trim(${self.receiptCode})) >= 1`),
     check('chk_sales_request_hash_nonempty', sql`length(trim(${self.requestHash})) >= 6`),
@@ -1153,11 +1171,13 @@ export const cashMoves = localSchemaRegistry.defineTable(
   (common) => ({
     ...common,
     shiftId: sqliteUuidV7('shift_id'),
+    shiftCashierSessionId: sqliteUuidV7('shift_cashier_session_id'),
     type: text('type').notNull(),
     amountDelta: sqliteMoney('amount_delta').notNull(),
     sourceType: text('source_type').notNull(),
     sourceId: sqliteUuidV7('source_id').notNull(),
     paymentId: sqliteUuidV7('payment_id').references(() => payments.id),
+    expenseCategory: text('expense_category'),
     reason: text('reason'),
     createdByUserId: sqliteUuidV7('created_by_user_id')
       .notNull()
@@ -1177,6 +1197,7 @@ export const cashMoves = localSchemaRegistry.defineTable(
       self.shiftId,
       self.createdAtMs,
     ),
+    index('idx_cash_moves_session').on(self.shiftCashierSessionId),
     index('idx_cash_moves_source').on(self.sourceType, self.sourceId),
     check(
       'chk_cash_moves_type',
@@ -1204,6 +1225,8 @@ export const returns = localSchemaRegistry.defineTable(
     saleId: sqliteUuidV7('sale_id')
       .notNull()
       .references(() => sales.id),
+    shiftId: sqliteUuidV7('shift_id'),
+    shiftCashierSessionId: sqliteUuidV7('shift_cashier_session_id'),
     returnNo: sqliteBigint('return_no').notNull(),
     returnCode: text('return_code').notNull(),
     processedByUserId: sqliteUuidV7('processed_by_user_id')
@@ -1234,6 +1257,8 @@ export const returns = localSchemaRegistry.defineTable(
     uniqueIndex('uidx_returns_org_client_request').on(self.organizationId, self.clientRequestId),
     index('idx_returns_store_sale').on(self.organizationId, self.storeId, self.saleId),
     index('idx_returns_store_created').on(self.organizationId, self.storeId, self.createdAtMs),
+    index('idx_returns_shift_created').on(self.shiftId, self.createdAtMs),
+    index('idx_returns_session').on(self.shiftCashierSessionId),
     check('chk_returns_return_no_pos', sql`${self.returnNo} >= 1`),
     check('chk_returns_code_nonempty', sql`length(trim(${self.returnCode})) >= 1`),
     check('chk_returns_reason_nonempty', sql`length(trim(${self.reason})) >= 1`),
@@ -2054,5 +2079,339 @@ export const localSupplierBalances = localSchemaRegistry.defineTable(
     ),
     check('chk_local_supplier_balances_accrued_nonneg', sql`${self.totalDebtAccrued} >= 0`),
     check('chk_local_supplier_balances_credited_nonneg', sql`${self.totalCredited} >= 0`),
+  ],
+);
+
+/**
+ * Store terminal cash shifts (`MONOTONE`, store-scoped, T1.9).
+ * One-way irreversible lifecycle: `open` -> `closed` (`closed_at_ms` set once).
+ * Enforce DB-level partial uniqueness (`uidx_shifts_one_open_per_device`) so a terminal
+ * can have at most one open shift at any time.
+ */
+export const shifts = localSchemaRegistry.defineTable(
+  {
+    name: 'shifts',
+    tableClass: 'MONOTONE',
+    tenantScope: 'store',
+    monotoneColumns: ['closed_at_ms'],
+  },
+  (common) => ({
+    ...common,
+    shiftNo: sqliteBigint('shift_no').notNull(),
+    shiftCode: text('shift_code').notNull(),
+    status: text('status').notNull(),
+    openedByUserId: sqliteUuidV7('opened_by_user_id')
+      .notNull()
+      .references(() => users.id),
+    closedByUserId: sqliteUuidV7('closed_by_user_id').references(() => users.id),
+    openingCash: sqliteMoney('opening_cash').notNull(),
+    previousCloseCash: sqliteMoney('previous_close_cash'),
+    openingDiscrepancy: sqliteMoney('opening_discrepancy')
+      .notNull()
+      .default(sql`0`),
+    openingDiscrepancyReason: text('opening_discrepancy_reason'),
+    openingNote: text('opening_note'),
+    closingNote: text('closing_note'),
+    openedAtMs: sqliteUnixMs('opened_at_ms').notNull(),
+    closedAtMs: sqliteUnixMs('closed_at_ms'),
+    openClientRequestId: sqliteUuidV7('open_client_request_id').notNull(),
+    openRequestHash: text('open_request_hash').notNull(),
+    closeClientRequestId: sqliteUuidV7('close_client_request_id'),
+    closeRequestHash: text('close_request_hash'),
+  }),
+  (self) => [
+    uniqueIndex('uidx_shifts_org_device_no').on(self.organizationId, self.deviceId, self.shiftNo),
+    uniqueIndex('uidx_shifts_one_open_per_device')
+      .on(self.organizationId, self.storeId, self.deviceId)
+      .where(sql`${self.status} = 'open'`),
+    uniqueIndex('uidx_shifts_org_open_req').on(self.organizationId, self.openClientRequestId),
+    uniqueIndex('uidx_shifts_org_close_req')
+      .on(self.organizationId, self.closeClientRequestId)
+      .where(sql`${self.closeClientRequestId} IS NOT NULL`),
+    index('idx_shifts_store_closed').on(
+      self.organizationId,
+      self.storeId,
+      self.status,
+      self.closedAtMs,
+    ),
+    index('idx_shifts_store_opened').on(
+      self.organizationId,
+      self.storeId,
+      self.status,
+      self.openedAtMs,
+    ),
+    check('chk_shifts_no_pos', sql`${self.shiftNo} >= 1`),
+    check('chk_shifts_code_nonempty', sql`length(trim(${self.shiftCode})) >= 1`),
+    check('chk_shifts_status', sql`${self.status} IN ('open', 'closed')`),
+    check(
+      'chk_shifts_opening_nonneg',
+      sql`${self.openingCash} >= 0 AND (${self.previousCloseCash} IS NULL OR ${self.previousCloseCash} >= 0)`,
+    ),
+    check('chk_shifts_open_req_hash', sql`length(trim(${self.openRequestHash})) >= 6`),
+    check(
+      'chk_shifts_open_closed_pair',
+      sql`(${self.status} = 'open' AND ${self.closedAtMs} IS NULL AND ${self.closedByUserId} IS NULL AND ${self.closeClientRequestId} IS NULL AND ${self.closeRequestHash} IS NULL) OR (${self.status} = 'closed' AND ${self.closedAtMs} IS NOT NULL AND ${self.closedByUserId} IS NOT NULL AND ${self.closeClientRequestId} IS NOT NULL AND ${self.closeRequestHash} IS NOT NULL AND length(trim(${self.closeRequestHash})) >= 6 AND ${self.closedAtMs} >= ${self.openedAtMs})`,
+    ),
+  ],
+);
+
+/**
+ * Per-cashier accountability windows inside a single shift (`MONOTONE`, store-scoped, T1.9 X2).
+ * Sales, returns, and cash_moves stamp `shift_cashier_session_id` rather than inferring cashier
+ * responsibility from `created_by_user_id`.
+ */
+export const shiftCashierSessions = localSchemaRegistry.defineTable(
+  {
+    name: 'shift_cashier_sessions',
+    tableClass: 'MONOTONE',
+    tenantScope: 'store',
+    monotoneColumns: ['ended_at_ms'],
+  },
+  (common) => ({
+    ...common,
+    shiftId: sqliteUuidV7('shift_id')
+      .notNull()
+      .references(() => shifts.id),
+    sessionSeq: sqliteInt('session_seq').notNull(),
+    cashierUserId: sqliteUuidV7('cashier_user_id')
+      .notNull()
+      .references(() => users.id),
+    status: text('status').notNull(),
+    openingFloat: sqliteMoney('opening_float').notNull(),
+    expectedCash: sqliteMoney('expected_cash'),
+    countedCash: sqliteMoney('counted_cash'),
+    discrepancy: sqliteMoney('discrepancy'),
+    discrepancyReason: text('discrepancy_reason'),
+    denominationsJson: text('denominations_json'),
+    overrideApprovedByUserId: sqliteUuidV7('override_approved_by_user_id').references(
+      () => users.id,
+    ),
+    handedOffByUserId: sqliteUuidV7('handed_off_by_user_id').references(() => users.id),
+    note: text('note'),
+    startedAtMs: sqliteUnixMs('started_at_ms').notNull(),
+    endedAtMs: sqliteUnixMs('ended_at_ms'),
+    handoffClientRequestId: sqliteUuidV7('handoff_client_request_id'),
+    handoffRequestHash: text('handoff_request_hash'),
+  }),
+  (self) => [
+    uniqueIndex('uidx_shift_cashier_sessions_shift_seq').on(self.shiftId, self.sessionSeq),
+    uniqueIndex('uidx_shift_cashier_one_active')
+      .on(self.shiftId)
+      .where(sql`${self.status} = 'active'`),
+    uniqueIndex('uidx_shift_cashier_handoff_req')
+      .on(self.organizationId, self.handoffClientRequestId)
+      .where(sql`${self.handoffClientRequestId} IS NOT NULL`),
+    index('idx_shift_cashier_sessions_shift').on(self.shiftId, self.sessionSeq),
+    check('chk_shift_cashier_seq_pos', sql`${self.sessionSeq} >= 1`),
+    check('chk_shift_cashier_status', sql`${self.status} IN ('active', 'closed')`),
+    check('chk_shift_cashier_float_nonneg', sql`${self.openingFloat} >= 0`),
+    check(
+      'chk_shift_cashier_closed_fields',
+      sql`(${self.status} = 'active' AND ${self.expectedCash} IS NULL AND ${self.countedCash} IS NULL AND ${self.discrepancy} IS NULL AND ${self.endedAtMs} IS NULL) OR (${self.status} = 'closed' AND ${self.expectedCash} IS NOT NULL AND ${self.countedCash} IS NOT NULL AND ${self.countedCash} >= 0 AND ${self.discrepancy} IS NOT NULL AND ${self.endedAtMs} IS NOT NULL AND ${self.endedAtMs} >= ${self.startedAtMs})`,
+    ),
+    check(
+      'chk_shift_cashier_handoff_req_pair',
+      sql`(${self.handoffClientRequestId} IS NULL AND ${self.handoffRequestHash} IS NULL) OR (${self.handoffClientRequestId} IS NOT NULL AND ${self.handoffRequestHash} IS NOT NULL AND length(trim(${self.handoffRequestHash})) >= 6)`,
+    ),
+  ],
+);
+
+/**
+ * Append-only immutable Z/shift closure snapshots (`FACT`, store-scoped, T1.9).
+ * Initial close writes `closure_seq = 1, is_reclose = 0`.
+ * Reclose appends `closure_seq = N + 1, is_reclose = 1` with mandatory reason — history is NEVER overwritten.
+ */
+export const shiftClosures = localSchemaRegistry.defineTable(
+  {
+    name: 'shift_closures',
+    tableClass: 'FACT',
+    tenantScope: 'store',
+  },
+  (common) => ({
+    ...common,
+    shiftId: sqliteUuidV7('shift_id')
+      .notNull()
+      .references(() => shifts.id),
+    closureSeq: sqliteInt('closure_seq').notNull(),
+    isReclose: sqliteBoolean('is_reclose').notNull().default(false),
+    reason: text('reason'),
+    closedByUserId: sqliteUuidV7('closed_by_user_id')
+      .notNull()
+      .references(() => users.id),
+    overrideApprovedByUserId: sqliteUuidV7('override_approved_by_user_id').references(
+      () => users.id,
+    ),
+    clientRequestId: sqliteUuidV7('client_request_id').notNull(),
+    requestHash: text('request_hash').notNull(),
+    expectedCash: sqliteMoney('expected_cash').notNull(),
+    countedCash: sqliteMoney('counted_cash').notNull(),
+    discrepancy: sqliteMoney('discrepancy').notNull(),
+    denominationsJson: text('denominations_json'),
+    salesCount: sqliteInt('sales_count').notNull(),
+    returnsCount: sqliteInt('returns_count').notNull(),
+    voidsCount: sqliteInt('voids_count').notNull(),
+    grossSalesTotal: sqliteMoney('gross_sales_total').notNull(),
+    returnsTotal: sqliteMoney('returns_total').notNull(),
+    netSalesTotal: sqliteMoney('net_sales_total').notNull(),
+  }),
+  (self) => [
+    uniqueIndex('uidx_shift_closures_shift_seq').on(self.shiftId, self.closureSeq),
+    uniqueIndex('uidx_shift_closures_org_req').on(self.organizationId, self.clientRequestId),
+    index('idx_shift_closures_shift_seq').on(self.shiftId, self.closureSeq),
+    check('chk_shift_closures_seq_pos', sql`${self.closureSeq} >= 1`),
+    check('chk_shift_closures_reclose_bool', sql`${self.isReclose} IN (0, 1)`),
+    check(
+      'chk_shift_closures_reclose_reason',
+      sql`${self.isReclose} = 0 OR (${self.reason} IS NOT NULL AND length(trim(${self.reason})) >= 1)`,
+    ),
+    check('chk_shift_closures_req_hash', sql`length(trim(${self.requestHash})) >= 6`),
+    check(
+      'chk_shift_closures_money_nonneg',
+      sql`${self.countedCash} >= 0 AND ${self.grossSalesTotal} >= 0 AND ${self.returnsTotal} >= 0`,
+    ),
+    check(
+      'chk_shift_closures_counts_nonneg',
+      sql`${self.salesCount} >= 0 AND ${self.returnsCount} >= 0 AND ${self.voidsCount} >= 0`,
+    ),
+  ],
+);
+
+/**
+ * Append-only payment-method breakdown child rows of `shift_closures` (`FACT`, store-scoped, T1.9).
+ * Computed strictly from `payments` / `return_payments` (`amount`, never subtracting change twice) + `debt`.
+ */
+export const shiftClosureMethodTotals = localSchemaRegistry.defineTable(
+  {
+    name: 'shift_closure_method_totals',
+    tableClass: 'FACT',
+    tenantScope: 'store',
+  },
+  (common) => ({
+    ...common,
+    shiftClosureId: sqliteUuidV7('shift_closure_id')
+      .notNull()
+      .references(() => shiftClosures.id),
+    method: text('method').notNull(),
+    salesAmount: sqliteMoney('sales_amount').notNull(),
+    returnsAmount: sqliteMoney('returns_amount').notNull(),
+    netAmount: sqliteMoney('net_amount').notNull(),
+  }),
+  (self) => [
+    uniqueIndex('uidx_shift_closure_methods').on(self.shiftClosureId, self.method),
+    check(
+      'chk_shift_closure_methods_enum',
+      sql`${self.method} IN ('cash', 'card', 'uzqr', 'payme', 'click', 'uzum', 'social_card', 'other', 'debt')`,
+    ),
+    check(
+      'chk_shift_closure_methods_nonneg',
+      sql`${self.salesAmount} >= 0 AND ${self.returnsAmount} >= 0`,
+    ),
+  ],
+);
+
+/**
+ * Append-only per-cashier-session accountability snapshot rows of `shift_closures` (`FACT`, store-scoped, T1.9 X2).
+ */
+export const shiftClosureCashiers = localSchemaRegistry.defineTable(
+  {
+    name: 'shift_closure_cashiers',
+    tableClass: 'FACT',
+    tenantScope: 'store',
+  },
+  (common) => ({
+    ...common,
+    shiftClosureId: sqliteUuidV7('shift_closure_id')
+      .notNull()
+      .references(() => shiftClosures.id),
+    sessionId: sqliteUuidV7('session_id')
+      .notNull()
+      .references(() => shiftCashierSessions.id),
+    cashierUserId: sqliteUuidV7('cashier_user_id')
+      .notNull()
+      .references(() => users.id),
+    sessionSeq: sqliteInt('session_seq').notNull(),
+    openingFloat: sqliteMoney('opening_float').notNull(),
+    expectedCash: sqliteMoney('expected_cash').notNull(),
+    countedCash: sqliteMoney('counted_cash').notNull(),
+    discrepancy: sqliteMoney('discrepancy').notNull(),
+    salesCount: sqliteInt('sales_count').notNull(),
+    returnsCount: sqliteInt('returns_count').notNull(),
+    salesTotal: sqliteMoney('sales_total').notNull(),
+    returnsTotal: sqliteMoney('returns_total').notNull(),
+    cashInTotal: sqliteMoney('cash_in_total').notNull(),
+    cashOutTotal: sqliteMoney('cash_out_total').notNull(),
+  }),
+  (self) => [
+    uniqueIndex('uidx_shift_closure_cashiers_sess').on(self.shiftClosureId, self.sessionId),
+    check(
+      'chk_shift_closure_cashiers_nonneg',
+      sql`${self.sessionSeq} >= 1 AND ${self.openingFloat} >= 0 AND ${self.countedCash} >= 0 AND ${self.salesCount} >= 0 AND ${self.returnsCount} >= 0 AND ${self.salesTotal} >= 0 AND ${self.returnsTotal} >= 0 AND ${self.cashInTotal} >= 0 AND ${self.cashOutTotal} >= 0`,
+    ),
+  ],
+);
+
+/**
+ * Append-only store-wide business day Z-close snapshots (`FACT`, store-scoped, T1.9 X4).
+ * Re-closing after a shift reclose appends `close_seq = N + 1` while older snapshots remain intact
+ * (`isStale` computed dynamically against latest `shift_closures` IDs vs `included_closure_ids_json`).
+ */
+export const dayCloses = localSchemaRegistry.defineTable(
+  {
+    name: 'day_closes',
+    tableClass: 'FACT',
+    tenantScope: 'store',
+  },
+  (common) => ({
+    ...common,
+    businessDate: text('business_date').notNull(),
+    closeSeq: sqliteInt('close_seq').notNull(),
+    closeCode: text('close_code').notNull(),
+    closedByUserId: sqliteUuidV7('closed_by_user_id')
+      .notNull()
+      .references(() => users.id),
+    clientRequestId: sqliteUuidV7('client_request_id').notNull(),
+    requestHash: text('request_hash').notNull(),
+    note: text('note'),
+    shiftsCount: sqliteInt('shifts_count').notNull(),
+    salesCount: sqliteInt('sales_count').notNull(),
+    returnsCount: sqliteInt('returns_count').notNull(),
+    voidsCount: sqliteInt('voids_count').notNull(),
+    grossSalesTotal: sqliteMoney('gross_sales_total').notNull(),
+    returnsTotal: sqliteMoney('returns_total').notNull(),
+    netSalesTotal: sqliteMoney('net_sales_total').notNull(),
+    expectedCashTotal: sqliteMoney('expected_cash_total').notNull(),
+    countedCashTotal: sqliteMoney('counted_cash_total').notNull(),
+    discrepancyTotal: sqliteMoney('discrepancy_total').notNull(),
+    methodTotalsJson: text('method_totals_json').notNull(),
+    includedClosureIdsJson: text('included_closure_ids_json').notNull(),
+    fiscalStatus: text('fiscal_status').notNull().default('not_fiscalized'),
+    fiscalReportNo: text('fiscal_report_no'),
+  }),
+  (self) => [
+    uniqueIndex('uidx_day_closes_store_date_seq').on(
+      self.organizationId,
+      self.storeId,
+      self.businessDate,
+      self.closeSeq,
+    ),
+    uniqueIndex('uidx_day_closes_org_req').on(self.organizationId, self.clientRequestId),
+    index('idx_day_closes_store_date').on(
+      self.organizationId,
+      self.storeId,
+      self.businessDate,
+      self.closeSeq,
+    ),
+    check('chk_day_closes_seq_pos', sql`${self.closeSeq} >= 1`),
+    check('chk_day_closes_date_len', sql`length(${self.businessDate}) = 10`),
+    check('chk_day_closes_code_nonempty', sql`length(trim(${self.closeCode})) >= 1`),
+    check('chk_day_closes_req_hash', sql`length(trim(${self.requestHash})) >= 6`),
+    check(
+      'chk_day_closes_fiscal_status',
+      sql`${self.fiscalStatus} IN ('not_fiscalized', 'pending', 'fiscalized')`,
+    ),
+    check(
+      'chk_day_closes_nonneg',
+      sql`${self.shiftsCount} >= 0 AND ${self.salesCount} >= 0 AND ${self.returnsCount} >= 0 AND ${self.voidsCount} >= 0 AND ${self.grossSalesTotal} >= 0 AND ${self.returnsTotal} >= 0 AND ${self.countedCashTotal} >= 0`,
+    ),
   ],
 );

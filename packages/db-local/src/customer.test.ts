@@ -28,10 +28,11 @@ import {
   createSqliteHubAuthStore,
   createSqliteReturnStore,
   createSqliteSaleStore,
+  createSqliteShiftStore,
   createSqliteStockStore,
   customerLedger,
   formatOutboxRecordForDebug,
-  getCashDrawerBalanceSync,
+  getActiveShiftDrawerBalanceSync,
   listAllOutboxRecordsSync,
   localCustomerBalances,
   migrateLocalDatabase,
@@ -129,6 +130,12 @@ async function setupCustomerEnv(options?: {
   const saleStore = createSqliteSaleStore({ connection, getRuntimeContext: getStoreCtx });
   const returnStore = createSqliteReturnStore({ connection, getRuntimeContext: getStoreCtx });
   const customerStore = createSqliteCustomerStore({ connection, getRuntimeContext: getStoreCtx });
+  const shiftStore = createSqliteShiftStore({ connection, getRuntimeContext: getStoreCtx });
+  const initialShift = await shiftStore.openShift({
+    actorUserId: cashier.id,
+    clientRequestId: makeUuidFromIndex(0x00aa, 999999),
+    openingCash: ZERO_MONEY,
+  });
 
   let reqSeq = 1;
   const nextUuid = () => {
@@ -148,6 +155,8 @@ async function setupCustomerEnv(options?: {
     saleStore,
     returnStore,
     customerStore,
+    shiftStore,
+    initialShiftId: initialShift.shift.id,
     ownerId: setup.owner.id,
     managerId: manager.id,
     cashierId: cashier.id,
@@ -261,7 +270,7 @@ describe('@mezon/db-local - T1.7 Customer Profile, Ledger, FIFO, D1-D4 & Benchma
       expect(paid.cashMove?.type).toBe('debt_payment_in');
       expect(
         moneyToTiyin(
-          getCashDrawerBalanceSync(env.connection.db, {
+          getActiveShiftDrawerBalanceSync(env.connection.db, env.connection.sqlite, {
             organizationId: env.organizationId,
             storeId: env.storeId,
             deviceId: env.deviceId,
@@ -837,7 +846,7 @@ describe('@mezon/db-local - T1.7 Customer Profile, Ledger, FIFO, D1-D4 & Benchma
         const nowMs = env.clock.now();
         expect(
           moneyToTiyin(
-            getCashDrawerBalanceSync(env.connection.db, {
+            getActiveShiftDrawerBalanceSync(env.connection.db, env.connection.sqlite, {
               organizationId: env.organizationId,
               storeId: env.storeId,
               deviceId: env.deviceId,

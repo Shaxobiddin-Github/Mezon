@@ -11,6 +11,7 @@ import {
   type LedgerEntryForFifo,
   type Money,
   type PaymentMethod,
+  type ShiftExpenseCategory,
   type UnixMs,
   type UuidV7,
   ZERO_MONEY,
@@ -49,6 +50,7 @@ import {
   localCustomerBalances,
   localHubConfig,
 } from './schema/index.js';
+import { requireOpenShiftSessionSync } from './shift-repo.js';
 import { resolveIntlDateKey } from './timezone.js';
 import {
   type SqliteUnitOfWork,
@@ -64,11 +66,13 @@ export interface StoredCashMoveRecord {
   readonly storeId: UuidV7;
   readonly deviceId: UuidV7;
   readonly shiftId: UuidV7 | null;
+  readonly shiftCashierSessionId: UuidV7 | null;
   readonly type: CashMoveType;
   readonly amountDelta: Money;
   readonly sourceType: string;
   readonly sourceId: UuidV7;
   readonly paymentId: UuidV7 | null;
+  readonly expenseCategory: ShiftExpenseCategory | null;
   readonly reason: string | null;
   readonly createdByUserId: UuidV7;
   readonly createdAtMs: UnixMs;
@@ -518,11 +522,13 @@ export function toStoredCashMove(row: typeof cashMoves.$inferSelect): StoredCash
     storeId: row.storeId,
     deviceId: row.deviceId,
     shiftId: row.shiftId,
+    shiftCashierSessionId: row.shiftCashierSessionId,
     type: row.type as StoredCashMoveRecord['type'],
     amountDelta: row.amountDelta,
     sourceType: row.sourceType,
     sourceId: row.sourceId,
     paymentId: row.paymentId,
+    expenseCategory: (row.expenseCategory as ShiftExpenseCategory | null) ?? null,
     reason: row.reason,
     createdByUserId: row.createdByUserId,
     createdAtMs: row.createdAtMs,
@@ -1572,16 +1578,24 @@ export class SqliteCustomerStore {
 
       let cashMoveRecord: StoredCashMoveRecord | null = null;
       if (method === 'cash') {
+        const activeShift = requireOpenShiftSessionSync(session.db, {
+          organizationId: ctx.organizationId,
+          storeId: ctx.storeId,
+          deviceId: session.deviceId,
+          actorUserId: validActorId,
+        });
         const cashWrite = insertFact(session, cashMoves, {
           organizationId: ctx.organizationId,
           storeId: ctx.storeId,
           values: {
-            shiftId: null,
+            shiftId: activeShift.shift.id,
+            shiftCashierSessionId: activeShift.activeSession.id,
             type: 'debt_payment_in',
             amountDelta: input.amount,
             sourceType: 'debt_payment',
             sourceId: cust.id,
             paymentId: null,
+            expenseCategory: null,
             reason: reasonOpt ?? 'Customer debt payment',
             createdByUserId: validActorId,
           },
