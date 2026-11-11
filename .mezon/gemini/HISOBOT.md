@@ -1,206 +1,138 @@
-# Reja: T1.11 — Kassa UI (`apps/pos`, `@mezon/i18n`, `@mezon/ui`)
+## Hisobot: T1.11 — Kassa UI (`apps/pos`, `@mezon/i18n`, `@mezon/ui`)
 
-- **PR #17 (T1.10: Buyurtma va avans) Squash and merge SHA:** `99ca0d69b0db5113e064178fef9111833f699798` (`gemini/T1.10-orders-advance` branch'i o'chirildi).
-- **Joriy branch:** `gemini/T1.11-pos-ui` (boshi `main` = `99ca0d6`).
-
----
-
-## a) Tuzilma va arxitektura
-
-1. **Paketlar va qatlamlar:**
-   - `packages/i18n`:
-     - Barcha foydalanuvchi ko'radigan matnlar yagona tiplangan o'zbek lotin (`uz-Latn`) lug'atida saqlanadi (`src/locales/uz-Latn.ts`, `src/index.ts`: `t(key, params)`).
-     - UI komponentlarida hech qanday xom matn (hardcoded string) yozilmaydi. Kalitlar guruhlangan (`auth.*`, `shift.*`, `pos.*`, `payment.*`, `parked.*`, `receipt.*`, `errors.*`, `shortcuts.*`) va T4.6 da `i18next` 27 (`uz-Latn`, `uz-Cyrl`, `ru`) ulanishiga 1:1 tayyor bo'ladi.
-   - `packages/ui`:
-     - Kassa va kelajakdagi admin/android ekranlari uchun umumiy bazaviy UI primitivlar va formatlash yordamchilari (`formatTiyinToUzs`, `formatMillisToQty`, `parseUzsInputToTiyin`, `parseQtyInputToMillis` — faqat `bigint` va satr orqali, `number`/`float` hisobda ishlatilmaydi).
-   - `apps/pos` (React 19.3.1 + Vite 8.3.7):
-     - `src/api/hub-client.ts`: tiplangan HTTP mijozi. Barcha so'rov va javob tiplari **faqat `@mezon/contracts` Zod sxemalaridan** (`z.input<...>`, `z.output<...>`) olinadi, qo'lda interfeys nusxalanmaydi. Har bir HTTP javob (`2xx` payload va `4xx/5xx` `ErrorResponseSchema`) runtime'da `@mezon/contracts` Zod sxemasi bilan `.parse()` qilinadi.
-     - Import chegarasi (`.dependency-cruiser.cjs`): `apps/pos/src` faqat ichki fayllar, `@mezon/contracts`, `@mezon/i18n`, `@mezon/ui`, `react`, `react-dom` va holat/stil paketlarini import qiladi (`@mezon/db-local`, `@mezon/hub`, `@mezon/drivers`, `electron` yoki `node:*` import qilish CI'da taqiqlangan).
-
-2. **Electron (`app://mezon`) va Brauzer Dev rejimi hamda CSP:**
-   - **Hub manzili (`baseUrl`):**
-     - Electron ichida `window.mezonBridge.getHubState()` va `window.mezonBridge.onHubState()` orqali dinamik `http://127.0.0.1:<port>` olinadi (`apps/pos/src/bridge.ts`).
-     - Brauzer dev va Playwright E2E rejimida (`window.mezonBridge` yo'q bo'lganda) `import.meta.env.VITE_HUB_BASE_URL` (yoki `window.__MEZON_HUB_URL__`) orqali faqat loopback (`http://127.0.0.1:<port>`) manziliga ulanadi.
-     - Hub CORS: `apps/hub` da lokal rivojlantirish va Electron/Playwright uchun faqat `app://mezon` va `http://127.0.0.1:<port>` / `http://localhost:<port>` origin'lariga ruxsat beriladi (`Authorization: Bearer <token>`, `Content-Type: application/json`).
-   - **Qat'iy CSP (`apps/desktop/src/security-policy.ts`):**
-     - Desktop CSP: `default-src 'self' app://mezon; script-src 'self' app://mezon; style-src 'self' app://mezon; img-src 'self' app://mezon data:; font-src 'self' app://mezon; connect-src 'self' app://mezon http://127.0.0.1:<port>`.
-     - `style-src` ichida `'unsafe-inline'` **yo'q**. Shuning uchun `apps/pos` da `style={{ ... }}` inline atributlari yoki runtime `<style>` tegi ishlatilmaydi — barcha stillar Vite orqali yig'iladigan statik `.css` faylida (Tailwind CSS 4 / CSS o'zgaruvchilari bilan tungi `[data-theme="dark"]` va kunduzgi `[data-theme="light"]` mavzular) bo'ladi.
-     - `resolveAppProtocolFilePath('app://mezon/')` faqat `/` yo'lini `index.html` ga yo'naltiradi (`/pos` kabi sub-path diskdan fayl qidirib `404` beradi). Shuning uchun `apps/pos` ichida sahifalararo o'tish URL pathname'ni o'zgartirmasdan holat (state-based screen router) orqali bajariladi (`app://mezon/` o'zgarmaydi).
-
-3. **Holat boshqaruvi (`zustand` 5 yoki React 19 store):**
-   - `zustand` (`5.0.12`, GEMINI.md 2.1 ro'yxatidan) + `.dependency-cruiser.cjs` da `pos-src-imports` ga ruxsat:
-     - **Sababi:** kassa UI'da global klaviatura/skaner hodisalari, aktiv savat (`CartEvaluationResult`), to'lov oynasi holati va `clientRequestId` React render siklidan tashqarida ham sinxron o'qilishi (`store.getState()`) kerak. `zustand` hech qanday inline style qo'shmaydi, juda yengil va skaner/shortcut handler'laridan to'g'ridan-to'g'ri chaqiriladi.
-     - Agar qo'shimcha paket qo'shmaslik ma'qul ko'rilsa, React 19 `useSyncExternalStore` asosidagi 60 qatorlik tiplangan store ham xuddi shu `getState()/setState()/subscribe()` interfeysini beradi. (Rejada `zustand` 5.0.12 asosiy variant sifatida olindi).
+Branch / PR: `gemini/T1.11-pos-ui` / PR #18 (`https://github.com/Shaxobiddin-Github/Mezon/pull/18`)
+Commit: `ccffc6e`
+PR #17 (T1.10) Squash and merge SHA: `99ca0d69b0db5113e064178fef9111833f699798` (`gemini/T1.10-orders-advances` branch'i o'chirildi)
 
 ---
 
-## b) Ekranlar
+### Nima qilindi
 
-1. **Birinchi ishga tushirish (`FirstRunSetupScreen`) va PIN bilan kirish (`PinLoginScreen`):**
-   - `GET /auth/setup-status` `needsSetup: true` qaytarsa, boshlang'ich tashkilot/do'kon/egasi yaratish oynasi chiqadi (`POST /auth/setup`).
-   - Oddiy holatda PIN kirish ekrani: foydalanuvchi nomi (yoki oxirgi kassir tanlovi) va 4–8 xonali PIN uchun ham klaviatura, ham katta teginish numpad'i (`0–9`, `Tozalash`, `O'chirish`, `Kirish`).
-   - 5 marta xato PIN kiritilganda `429 AUTH_RATE_LIMITED` (`retryAfterSeconds`) bo'yicha ekranda qolgan blok vaqti teskari sanoqda ko'rsatiladi.
-   - Kirishdan so'ng sessiya tokeni faqat xotirada saqlanadi; foydalanuvchi roli (`owner`, `manager`, `cashier`) va `userId` holatga yoziladi.
+1. **U1–U4 majburiy tuzatishlar to'liq bajarildi:**
+   - **U1 (Faqat mavjud Hub API'si):** Kassa UI (`apps/pos/src/api/hub-client.ts`) faqat mavjud Hub marshrutlaridan foydalanadi (`/health`, `/setup/bootstrap`, `/auth/pin-login`, `/auth/logout`, `/auth/me`, `/shifts/current`, `/shifts/open`, `/shifts/:id/cash-moves`, `/shifts/:id/close`, `/catalog/search`, `/catalog/scan`, `/carts`, `/carts/:id`, `/carts/:id/scan`, `/carts/:id/items`, `/carts/:id/items/:lineId`, `/carts/:id/quick-sale`, `/carts/:id/discount`, `/carts/:id/park`, `/carts/:id/resume`, `/carts/:id/cancel`, `/carts/:id/complete`, `/sales/:id`, `/customers`, `/promotions`). Har qanday savdo yagona `POST /carts/:id/complete` (`completeSale`) komandasi orqali o'tadi.
+   - **U2 (Kontraktda yo'q maydonlar o'ylab topilmadi):** `@mezon/contracts` sxemalariga hech qanday uydirma to'lov yoki javob maydonlari qo'shilmadi. Naqdsiz to'lovlar uchun mavjud `providerRef` maydonidan foydalanildi; chek oynasida `"SINOV — FISKAL EMAS"` yozuvi doimiy i18n satri (`t('receipt.nonFiscalBanner')`) sifatida ko'rsatiladi; rahbar tasdig'i uchun `@mezon/contracts`dagi mavjud `override: { username, pin }` va `creditOverride: { supervisorUsername, supervisorPin, reason }` maydonlari ishlatildi.
+   - **U3 (Dev CORS ishlab chiqarishda yoqilmaydi):** `createHubServer(options)` ga faqat aniq `enableDevLoopbackCors: true` uzatilgandagina (`apps/hub/src/config.ts`, `apps/hub/src/security.ts`, `apps/hub/src/server.ts`) loopback origin'lar (`http://127.0.0.1:<port>`, `http://localhost:<port>`) uchun CORS preflight (`OPTIONS`) va `Access-Control-Allow-Origin` javoblari yoqiladi. `process.env` o'zgaruvchisi orqali avtomatik yoqilmaydi va Electron worker (`apps/hub/src/electron-worker.ts`) bu bayroqni hech qachon yoqmaydi. Standart Hub konfiguratsiyasida `http://localhost:5173` origin'idan kelgan `POST /carts` so'rovi `403 FORBIDDEN_ORIGIN` bilan rad etilishi `apps/hub/src/hub.test.ts` da testlandi.
+   - **U4 (E2E Windows va Ubuntu CI'da):** `.github/workflows/ci.yml` da Playwright Chromium keshi (`actions/cache@v4`) bilan `pnpm verify` ichida `pnpm run test:e2e:pos` ham `ubuntu-latest`, ham `windows-latest` joblarida ishga tushadi va yashil o'tdi.
 
-2. **Smenani ochish (`OpenShiftScreen`):**
-   - Kassir tizimga kirgach, `GET /shifts/current` tekshiriladi. Agar terminalda ochiq smena bo'lmasa (yoki boshqa kassirning smenasi ochiq bo'lsa — ogohlantirish bilan), smena ochish ekrani ko'rsatiladi.
-   - Boshlang'ich naqd pul (`openingCash` tiyinda, ixtiyoriy kupyura/tanga kalkulyatori `denominations` bilan) kiritiladi. Agar oldingi smena yopilishidagi naqd qoldiqdan farq qilsa, `openingDiscrepancyReason` maydoni so'raladi (`POST /shifts/open`).
+2. **Ko'p tilli lug'at (`@mezon/i18n`) va pul/miqdor formatlash hamda mavzu yordamchilari (`@mezon/ui`):**
+   - `packages/i18n/src/locales/uz-Latn.ts` va `packages/i18n/src/index.ts`: `i18next` 27 asosida sinxron `initPosI18n()` va barcha kassa UI ekranlari, tugmalar, klaviatura qisqa yo'llari, to'lov turlari, smena va xato xabarlari uchun to'liq `uz-Latn` lug'ati yaratildi.
+   - `packages/ui/src/index.ts`: tiyin va milli-birliklar uchun `bigint`-xavfsiz formatlash/parslash funksiyalari (`formatTiyinToSom`, `parseSomInputToTiyin`, `formatMilliQuantity`, `parseDecimalToMilli`, `computeChangePreviewTiyin` — faqat `bigint` arifmetikasi, `number`/`float` ishlatilmaydi) hamda kunduzgi/tungi mavzu (`ThemeMode`: `'light' | 'dark'`) yordamchilari yozildi.
 
-3. **Asosiy Savdo ekrani (`PosSalesScreen`):**
-   - **Yuqori panel:** do'kon/terminal nomi, joriy kassir, smena holati, skaner tayyorlik indikatori, kechiktirilgan cheklar soni (`F6`), kassa harakatlari / smena yopish (`F8`), tungi/kunduzgi mavzu almashtirgich (`dark`/`light`), chiqish tugmasi.
-   - **Chap/Markaziy qism — Savat jadvali:**
-     - Har bir qator: tartib raqami, tovar nomi (variant/birlik bilan), shtrix-kod, miqdor (`+` / `-` va aniq miqdor tahrirlash oynasi — kg/litr/dona uchun), birlik narxi, qator chegirmasi (avtomatik aksiya yoki qo'lda chegirma belgisi), qator yakuniy summasi (`lineTotal`).
-     - Tanlangan qator klaviatura (`ArrowUp`/`ArrowDown`) yoki teginish bilan belgilanadi.
-   - **O'ng/Yuqori qism — Qidiruv va Tez amallar:**
-     - Qidiruv maydoni (`F2`): `GET /catalog/search?q=...` (FTS5 + kategoriya filtri). Natijalar ro'yxatidan Enter yoki bosish bilan savatga qo'shish (`POST /carts/current/lines`).
-     - **Tez savdo qatori (`F3`):** katalogda yo'q tovar uchun nom (`customTitle`), birlik (`unit`), miqdor va narx kiritib savatga qo'shish.
-     - **Chegirma oynasi (`F4`):** tanlangan qatorga yoki butun savatga foiz (`percent`, bps) yoki aniq summa (`fixed`, tiyin) chegirma berish. Kassir limitidan (`maxCashierDiscountBps`) oshsa yoki `DISCOUNT_OVERRIDE_REQUIRED` qaytsa, darhol **Supervisor PIN oynasi (`SupervisorPinModal`)** ochiladi (`overrideApprovedByUserId` + `overrideSupervisorPin` faqat bir martalik so'rovda yuboriladi, xotirada saqlanmaydi).
-   - **Pastki yakuniy panel:**
-     - Jami dastlabki summa (`subtotal`), aksiya chegirmasi (`promoDiscountTotal`), qo'lda chegirma (`manualDiscountTotal`), QQS (`vatTotal`) va katta shriftda **To'lanadigan jami (`total`)**.
-     - Katta amal tugmalari: `Kechiktirish (F5)`, `Kechiktirilganlar (F6)`, `To'lov (F9 / F12)`.
+3. **USB HID Skaner Detektori va DataMatrix / GS1 (`\x1d`) qo'llovi:**
+   - `packages/domain/src/catalog.ts` va `packages/contracts/src/cart.ts`: `MAX_CATALOG_BARCODE_LENGTH = 128` va `BARCODE_ALLOWED_REGEX = /^[\x1dA-Za-z0-9._+/=()-]+$/` orqali GS1 DataMatrix (`\x1d` Group Separator va qavslar/belgilar) shtrix-kodlari buzilmasdan domen va kontrakt darajasida qabul qilinishi ta'minlandi.
+   - `apps/pos/src/scanner/scanner-detector.ts`: sof TypeScript USB skaner detektori (`createScannerDetector`) yozildi:
+     - Belgilar orasidagi maksimal kechikish `maxInterKeyDelayMs = 35 ms`, o'rtacha tezlik `maxAverageIntervalMs = 25 ms`, minimal uzunlik `minLength = 4` va yakunlovchi `Enter` / `Tab`.
+     - GS1 Group Separator (`\x1d`, `GroupSeparator` yoki `Ctrl+]`) belgilarini kesib tashlamasdan buferga `\x1d` sifatida yozadi.
+     - Faol `<input>`, `<textarea>`, `[data-scanner-ignore="true"]` elementlarida oddiy yozishni (shu jumladan tez yozuvchi — ~55–80 ms/belgi bilan yozib `Enter` bosgan odamni) skaner deb qabul qilmaydi va formani buzmaydi; fokus qidiruv maydonida bo'lganda haqiqiy yuqori tezlikdagi skan oqimini (`≤ 25 ms/belgi`) aniqlab, qidiruv matnini tozalaydi va `POST /carts/:id/scan` ga yuboradi.
 
-4. **To'lov ekrani (`PaymentModal`):**
-   - `total` summasi, to'lov usullari (`cash`, `card`, `uzqr`, `payme`, `click`, `uzum`, `social_card`, `other`) va aralash to'lov qatorlari.
-   - **Naqd to'lov (`cash`):** kassir mijoz bergan naqd pulni (`tenderedCash`) kiritadi yoki tez kupyura tugmalarini (`Aniq summa`, `10 000`, `20 000`, `50 000`, `100 000`, `200 000`) bosadi. Qaytim (`changeDue = tenderedCash - cashApplied`) real vaqtda hisoblanadi; qaytim faqat naqd to'lovdan beriladi.
-   - **Qarzga savdo (`debtAmount > 0`):** qolgan summa qarzga yozilishi tanlansa, mijoz qidirish / yangi mijoz yaratish (`GET /customers/search`, `POST /customers`) va to'lov muddati (`dueDays`) majburiy bo'ladi. Mijoz kredit limiti oshsa (`CREDIT_LIMIT_EXCEEDED`), Supervisor PIN oynasi orqali tasdiqlanadi.
-   - **Ijtimoiy karta (`social_card`):** tanlanganda `cardType`, `cardLast4`, `transactionRef` maydonlari ko'rsatiladi.
-   - Invariant: `SUM(payments.amount) + debtAmount === total` bajarilmaguncha `Savdoni yakunlash (Enter)` tugmasi faol bo'lmaydi.
-
-5. **Kechiktirilgan cheklar oynasi (`ParkedCartsModal`):**
-   - Joriy savatni ixtiyoriy izoh (`label`) bilan kechiktirish (`POST /carts/current/park`, `F5`).
-   - Kechiktirilgan savatlar ro'yxati (`GET /carts/parked`, `F6`): vaqti, izohi, qatorlar soni, summasi, `Davom ettirish (Resume)` (`POST /carts/parked/:id/resume`) va `O'chirish` (`DELETE /carts/parked/:id`).
-
-6. **Yakunlangan chek ko'rinishi (`ReceiptModal`):**
-   - Savdo muvaffaqiyatli yakunlangach (`POST /sales/complete`), ekranda chek tafsilotlari chiqadi:
-     - Yuqorida aniq ogohlantirish: **`SINOV — FISKAL EMAS`** (`fiscalStatus: 'non_fiscal'` / fake rejim talabi, GEMINI.md 3.3).
-     - `receiptNo`, vaqt, kassir, qatorlar (nomi, miqdori × narxi, chegirma, QQS, jami), to'lov turlari, berilgan naqd, qaytim, qarz summasi.
-     - `Yangi savdo (Enter / Esc)` tugmasi (haqiqiy printerda chop etish T1.12 da ulanadi).
-
-7. **Kassa harakatlari va Smenani yopish ekrani (`ShiftManagementModal`):**
-   - **Kassa pul harakati (`POST /shifts/current/cash-moves`):** `cash_in` (kassaga kirim), `cash_out` (inkassatsiya/chiqim), `expense` (xarajat) — faqat naqd summa va majburiy `reason` (sabab).
-   - **Smenani yopish (`POST /shifts/current/close`):**
-     - Kassir **faqat sanalgan haqiqiy naqd pulni (`countedCash`)** (yoki kupyuralar sonini `denominations`) va izohni (`notes`) kiritadi.
-     - **Qat'iy qoida (GEMINI.md T1.9 / T1.11):** smena yopish ekranida naqdsiz summa (`card`, `uzqr`, `payme`, `click`, `uzum` va h.k.) kiritish maydoni **umuman bo'lmaydi** — naqdsiz tushumlar backend'da `payments` jadvalidan avtomatik olinadi va faqat yopilgan smena hisobotida ko'rsatiladi.
-     - Agar naqd farq ruxsat etilgan chegaradan oshsa (`SUPERVISOR_OVERRIDE_REQUIRED`), Supervisor PIN so'raladi.
+4. **Kassa UI ekranlari, teginish va sichqonsiz klaviatura boshqaruvi (`apps/pos`):**
+   - `AuthAndShiftScreens.tsx`: birinchi ishga tushirish sehrgari (`BootstrapWizardScreen`), PIN-kod orqali kirish (`PinLoginScreen` — katta sensorli numpad + klaviatura), smena ochish (`OpenShiftScreen` — boshlang'ich naqd pul bilan).
+   - `PosWorkspaceScreen.tsx`: chap panelda savat qatorlari (`ArrowUp`/`ArrowDown` navigatsiyasi, `+`/`-` miqdor, `Delete` o'chirish, `F3` qator chegirmasi, `F4` savat chegirmasi, `F6` kechiktirish, `F7` kechiktirilgan cheklar ro'yxati va soni badge'i, `F8` tez savdo, `F9`/`F12` to'lov oynasi), o'ng panelda `F2` mahsulot qidiruv (`@tanstack/react-virtual` 3 bilan virtuallashtirilgan ro'yxat), sensorli numpad va amallar.
+   - `PosModals.tsx` va `PaymentAndShiftModals.tsx`:
+     - Tez savdo (`F8`), qator/savat chegirmasi (`F3`/`F4`) va kassir limitidan (`max_discount_pct`) oshganda rahbar (`owner`/`manager`) PIN tasdig'i (`override`).
+     - Kechiktirilgan cheklar (`F6` saqlash, `F7` ro'yxatdan davom ettirish).
+     - To'lov oynasi (`F9`/`F12`): 8 ta to'lov usuli (`cash`, `card`, `uzqr`, `payme`, `click`, `uzum`, `social_card`, `other`), tez kupura tugmalari, aralash to'lov, qisman yoki to'liq qarzga (`debt` + mijoz tanlash/yaratish + kredit limiti oshsa rahbar tasdig'i), qaytim faqat naqddan hisoblanishi, barqaror `clientRequestId` (UUIDv7) bilan idempotent qayta urinish.
+     - Chek oynasi (`ReceiptModal`): `"SINOV — FISKAL EMAS"` banneri, `receiptNo`, qatorlar, chegirma, QQS, to'lovlar, qaytim va `Enter`/`Escape` bilan yangi savatga o'tish.
+     - Smena kassa amallari (`cash_in`, `cash_out`, `expense`) va smena yopish (`CloseShiftModal`: haqiqiy sanab chiqilgan naqd pulni kiritish, yakunlanganidan so'ng kutilgan naqd, naqdsiz tushum va farq (`variance`) ko'rsatkichi).
+   - **Tannarx maxfiyligi:** UI hech qayerda `cost_price`, `cost`, `margin` yoki `profit` maydonlarini so'ramaydi va DOM'da ko'rsatmaydi (Playwright E2E da tekshirildi).
 
 ---
 
-## c) USB Skaner aniqlash (sof funksiya va global ushlagich)
+### O'zgargan fayllar (fayl — sabab)
 
-1. **Sof funksiya (`apps/pos/src/scanner/scanner-detector.ts`):**
-   - Tashqi DOM yoki `Date.now()` ga bog'lanmagan sof avtomat:
-     ```ts
-     export interface ScannerKeyInput {
-       readonly key: string;
-       readonly code: string;
-       readonly ctrlKey: boolean;
-       readonly altKey: boolean;
-       readonly metaKey: boolean;
-       readonly timestampMs: number;
-     }
-     export interface ScannerDetectorConfig {
-       readonly maxInterKeyMs: number; // default: 30 ms
-       readonly minLength: number; // default: 4 ta belgi
-       readonly terminators: readonly ('Enter' | 'Tab')[];
-     }
-     ```
-   - `stepScannerDetector(state, input, config)` funksiyasi yangi `ScannerDetectorState` va natija hodisasini (`{ type: 'none' | 'buffering' | 'scan_completed' | 'flushed_as_typing', barcode?: string }`) qaytaradi.
-
-2. **GS (`\x1D`, ASCII 29) va DataMatrix / GS1 himoyasi:**
-   - Skaner yuborgan GS ajratuvchisi uch xil ko'rinishda kelishi mumkin:
-     1. `input.key === '\x1d'` yoki `input.key === '\u001d'` yoki `input.key === 'GroupSeparator'`;
-     2. `input.ctrlKey === true && (input.key === ']' || input.code === 'BracketRight' || input.key === '\x1d')` (ko'plab USB HID skanerlar ASCII 29 ni `Ctrl+]` sifatida yuboradi);
-     3. `input.code === 'Numpad0'` / Alt-ketma-ketlikdan kelgan `\x1d`.
-   - Algoritm bularning barchasini yagona `\x1D` belgisiga normallashtirib buferga qo'shadi.
-   - Bufer yakunlanganda `.trim()` **qilinmaydi** va ichki `\x1D`, qavslar, `=`, `+`, `/` yoki boshqa DataMatrix / Asl belgisi belgilari hech qachon o'chirilmaydi — shtrix-kod / marking kodi aynan o'z holicha Hub'ga (`POST /catalog/scan` yoki savatga) yuboriladi.
-
-3. **Belgilar tezligi va fokusdagi `<input>` himoyasi:**
-   - Ketma-ket belgilar orasidagi farq `timestampMs - prevTimestampMs <= 30 ms` bo'lsa va kamida `minLength` (`4`) ta belgi yig'ilib `Enter` (yoki `Tab`) bosilsa -> **`scan_completed`**.
-   - Agar foydalanuvchi qidiruv maydonida (`<input>`) yozayotgan paytda skaner ishlab ketsa:
-     - Birinchi belgi kiritilishi bilan `inputSnapshot` (fokusdagi input'ning skan boshlanishidan oldingi `value` va `selectionStart`) eslab qolinadi;
-     - `scan_completed` bo'lganda `event.preventDefault()` va `event.stopPropagation()` chaqiriladi (forma bexosdan submit bo'lib ketmaydi), fokusdagi `<input>` qiymati `inputSnapshot` ga qaytariladi (skaner yozib yuborgan belgilar qidiruv matnini buzmaydi) va skanerlangan kod savatga qo'shiladi.
-   - Odamiy tez yozish (`80–120 ms` oraliq): `timestampMs - prevTimestampMs > 30 ms` bo'lgani uchun bufer skaner sifatida qabul qilinmaydi (`flushed_as_typing`), oddiy input yozuvi buzilmaydi va Enter bosilganda skaner emas, oddiy qidiruv ishlaydi.
-
-4. **Unit testlar (`apps/pos/src/scanner/scanner-detector.test.ts`):**
-   - Tez yozuvchi odam (`80–120 ms` oraliq bilan 13 xonali kod + `Enter`) -> skaner deb qabul qilinmaydi;
-   - USB skaner (`5–15 ms` oraliq bilan EAN-13 + `Enter` yoki `Tab`) -> `scan_completed`;
-   - GS1 DataMatrix (`010478000000001221ABC12345\x1D91EE06\x1D92dGVzdA==`) ham to'g'ridan-to'g'ri `\x1D`, ham `Ctrl+]` (`ctrlKey: true, key: ']'`) orqali yuborilganda `\x1D` buzilmasdan to'liq saqlanadi;
-   - Qidiruv maydonida `"shakar"` yozib turib (`100 ms` oraliq), ketidan skaner bosilganda (`8 ms` oraliq) -> `"shakar"` matni input'da o'zgarishsiz qoladi, skaner kodi esa alohida `scan_completed` beradi.
+- `packages/i18n/package.json`, `packages/i18n/tsconfig.json`, `packages/i18n/tsconfig.test.json`, `packages/i18n/src/locales/uz-Latn.ts`, `packages/i18n/src/index.ts`, `packages/i18n/src/index.test.ts` — `i18next` 27 konfiguratsiyasi, `uz-Latn` kassa lug'ati va testlari.
+- `packages/ui/package.json`, `packages/ui/tsconfig.json`, `packages/ui/tsconfig.test.json`, `packages/ui/src/index.ts`, `packages/ui/src/index.test.ts` — `bigint` pul/miqdor formatlash va parslash yordamchilari, mavzu (`light`/`dark`) funksiyalari va birlik testlari.
+- `packages/domain/src/catalog.ts`, `packages/contracts/src/cart.ts` — GS1 DataMatrix (`\x1d` Group Separator va uzun shtrix-kodlar, `MAX_CATALOG_BARCODE_LENGTH = 128`) qo'llovi.
+- `apps/hub/src/config.ts`, `apps/hub/src/security.ts`, `apps/hub/src/server.ts`, `apps/hub/src/hub.test.ts` — **U3**: faqat `enableDevLoopbackCors: true` berilgandagina dev loopback CORS yoqilishi; standart Hub konfiguratsiyasida `http://localhost:5173` `403 FORBIDDEN_ORIGIN` bilan rad etilishi testi.
+- `apps/pos/package.json`, `apps/pos/tsconfig.test.json`, `apps/pos/playwright.config.mjs` — `@mezon/pos` bog'liqliklari (`@tanstack/react-query`, `@tanstack/react-virtual`, `zustand`, `i18next`, `@mezon/contracts`, `@mezon/domain`, `@mezon/i18n`, `@mezon/ui`) va Playwright E2E konfiguratsiyasi.
+- `apps/pos/src/scanner/scanner-detector.ts`, `apps/pos/src/scanner/scanner-detector.test.ts` — USB skaner detektori (EAN-13, DataMatrix, GS1 `\x1d`, tez yozuvchi inson filtri) va testlari.
+- `apps/pos/src/utils/browser-uuid.ts` — brauzerda Web Crypto (`crypto.getRandomValues`) asosida monoton UUIDv7 generatori (`clientRequestId` uchun).
+- `apps/pos/src/api/hub-client.ts` — **U1 & U2**: mavjud Hub API marshrutlari uchun tipga xavfsiz HTTP klient.
+- `apps/pos/src/store/pos-store.ts` — Zustand 5 asosida kassa UI holati, fokuslangan qator, modallar, mavzu va barqaror `paymentAttemptClientRequestId`.
+- `apps/pos/src/components/AuthAndShiftScreens.tsx`, `apps/pos/src/components/PosWorkspaceScreen.tsx`, `apps/pos/src/components/PosModals.tsx`, `apps/pos/src/components/PaymentAndShiftModals.tsx`, `apps/pos/src/App.tsx`, `apps/pos/src/App.css`, `apps/pos/src/bridge.ts`, `apps/pos/src/index.ts` — kassa UI ekranlari, klaviatura qisqa yo'llari, modallar va kunduzgi/tungi mavzu stillari.
+- `apps/pos/e2e/pos.spec.ts` — Playwright E2E testlari (to'liq savdo oqimi, skaner vs tez yozuvchi, DataMatrix `\x1d`, sichqonsiz klaviatura savdosi, kechiktirilgan chek, idempotent to'lov, smena yopish va 50 000 mahsulot qidiruv tezligi).
+- `.dependency-cruiser.cjs`, `package.json`, `.github/workflows/ci.yml`, `vitest.config.ts` — dependency-cruiser qoidasi, `test:e2e:pos` skripti va CI'da Playwright Chromium keshi.
+- `.mezon/gemini/pos-sales-screen.png` — kassa savdo va chek ekranining skrinshoti.
 
 ---
 
-## d) Pul xavfsizligi UI'da
+### Migratsiyalar
 
-1. **Idempotent `clientRequestId` boshqaruvi (`completeSale`, kassa harakati, buyurtma):**
-   - Kassir `To'lov` oynasini ochganda (yoki savat/to'lov summalari o'zgarganda) bitta UUIDv7 `clientRequestId` yaratiladi va to'lov holatida saqlanadi.
-   - `Savdoni yakunlash` tugmasi bosilganda:
-     - `isSubmitting = true` qulfi tushadi — ikkinchi marta bosish (`double-click` yoki `Enter`ni ketma-ket bosish) yangi HTTP so'rov yubormaydi;
-     - Tarmoq uzilishi (`TypeError: Failed to fetch` / timeout) yoki `5xx` yuz bersa, `clientRequestId` **o'zgartirilmaydi**. Kassir `Qayta urinish` tugmasini bosganda **aynan o'sha `clientRequestId`** qayta yuboriladi va Hub idempotent ravishda o'sha yagona chekni qaytaradi.
-     - Faqat savdo muvaffaqiyatli yakunlangach (`200 OK`) yoki kassir savat tarkibini o'zgartirgach yangi `clientRequestId` generatsiya qilinadi.
-
-2. **`409 SALE_TOTAL_CHANGED` himoyasi:**
-   - Agar `POST /sales/complete` `409 SALE_TOTAL_CHANGED` qaytarsa (aksiya muddati tugagan yoki savat summasi yangilangan bo'lsa), UI savatni qayta o'qiydi (`GET /carts/current`), eski summa va yangi summani yonma-yon ko'rsatib kassirdan aniq tasdiq so'raydi (`"Savat summasi o'zgardi: 50 000 so'm -> 55 000 so'm. Yangi summa bilan davom etasizmi?"`). Kassir tasdiqlamaguncha savdo qayta yuborilmaydi.
-
-3. **Biznes xatolarini aniq o'zbekcha ko'rsatish:**
-   - `INSUFFICIENT_STOCK`: qaysi mahsulotlarda qoldiq yetmagani (`details.shortages`: mahsulot nomi, so'ralgan miqdor va mavjud qoldiq) jadval ko'rinishida chiqariladi va savatda o'sha qatorlar qizil bilan ajratib ko'rsatiladi;
-   - `SHIFT_NOT_OPEN`: `"Smena ochilmagan. Savdo qilish uchun avval smenani oching"` + smena ochish ekraniga o'tish;
-   - `CASHIER_SESSION_MISMATCH`: `"Terminalda boshqa kassirning smenasi ochiq. O'z smenangizga kiring"`;
-   - `DISCOUNT_OVERRIDE_REQUIRED` / `SUPERVISOR_OVERRIDE_REQUIRED` / `CREDIT_LIMIT_EXCEEDED`: tushunarli sabab bilan Supervisor PIN oynasini ochadi.
-
-4. **Tannarx va foyda izolyatsiyasi (GEMINI.md 3.4):**
-   - Kassir UI kodida va `@mezon/contracts` katalog/savat/savdo sxemalarida `costPrice`, `profit`, `margin` maydonlari umuman yo'q (avvalgi bosqichlarda backend'da ham kassir javoblaridan olib tashlangan; E2E testda ham DOM va tarmoq javoblarida bu kalitlar yo'qligi tekshiriladi).
+- Yo'q (`0 diff statements` — SQLite va PostgreSQL sxemalari o'zgarmadi).
 
 ---
 
-## e) Klaviatura va unumdorlik
+### Qabul mezonlari va U1–U4 dalillari
 
-1. **Sichqonsiz to'liq savdo — Tugmalar xaritasi:**
-   - `F1`: Klaviatura yorliqlari yordam oynasi (`ShortcutsModal`)
-   - `F2`: Mahsulot qidiruv maydoniga fokus (`SearchInput`)
-   - `F3`: Tez savdo (katalogda yo'q tovar) oynasi (`QuickSaleModal`)
-   - `F4`: Chegirma oynasi (tanlangan qator yoki butun savat) (`DiscountModal`)
-   - `F5`: Joriy savatni kechiktirish (`ParkCartModal`)
-   - `F6`: Kechiktirilgan cheklar ro'yxati (`ParkedCartsModal`)
-   - `F7`: Mijoz tanlash / qarz uchun mijoz bog'lash
-   - `F8`: Kassa pul harakati va Smena yopish oynasi (`ShiftManagementModal`)
-   - `F9` yoki `F12` yoki `Ctrl+Enter`: To'lov oynasini ochish (`PaymentModal`) / To'lov oynasi ochiq bo'lsa savdoni tasdiqlash
-   - `ArrowUp` / `ArrowDown`: Savat qatorlari yoki qidiruv natijalari bo'ylab harakatlanish
-   - `+` / `=` va `-`: Tanlangan savat qatori miqdorini 1 birlikka oshirish / kamaytirish
-   - `Enter` (savat qatorida): Tanlangan qator miqdorini aniq kiritish oynasi
-   - `Delete` / `Backspace` (savat qatorida): Tanlangan qatorni savatdan o'chirish
-   - `Escape`: Ochiq modalni yopish yoki qidiruv maydonini tozalash
-
-2. **Teginish (Touch) ergonomikasi:**
-   - Barcha interaktiv tugmalar, numpad katakchalari va savat qatori boshqaruvlari kamida **`48×48 px`** (`min-h-12 min-w-12`, katta numpad va to'lov tugmalari `56–64 px`) o'lchamda bo'ladi.
-
-3. **Unumdorlik maqsadlari va testlari:**
-   - **Skan -> savatdagi qator ko'rinishi:** `<= 100 ms` (Playwright/perf testda skan hodisasidan DOM'da savat qatori paydo bo'lguncha o'lchanadi);
-   - **50 000 tovarli katalogda qidiruv + UI render:** `<= 150 ms` (Hub + SQLite FTS5 + UI ro'yxat; qidiruv natijalari sahifalab/cheklangan 50 ta eng mos qator bilan ko'rsatiladi, DOM minglab tugun bilan to'lib qolmaydi).
+- [x] **U1 — Faqat mavjud Hub API'si va yagona `completeSale` yo'li:** `apps/pos/src/api/hub-client.ts` faqat mavjud Hub marshrutlariga murojaat qiladi; savdo faqat `POST /carts/:id/complete` orqali yakunlanadi (`apps/pos/e2e/pos.spec.ts`).
+- [x] **U2 — Kontraktda yo'q maydonlar o'ylab topilmadi:** `@mezon/contracts` to'lov va savdo javobi o'zgartirilmadi; `"SINOV — FISKAL EMAS"` chek oynasida `t('receipt.nonFiscalBanner')` orqali ko'rsatiladi (`apps/pos/src/components/PaymentAndShiftModals.tsx`, `apps/pos/e2e/pos.spec.ts`).
+- [x] **U3 — Dev CORS ishlab chiqarishda yoqilmaydi:** `apps/hub/src/hub.test.ts` (`U3: rejects http://localhost:5173 by default with 403 FORBIDDEN_ORIGIN and only allows loopback dev CORS when enableDevLoopbackCors is explicitly true`) — standart Hub `http://localhost:5173` dan `POST /carts` so'rovini `403 FORBIDDEN_ORIGIN` bilan rad etadi.
+- [x] **U4 — E2E Windows va Ubuntu CI'da:** PR #18 (`ccffc6e`) da `Verify (ubuntu-latest)` va `Verify (windows-latest)` joblarida Playwright E2E yashil o'tdi.
+  - **Playwright E2E davomiyligi:** lokal `10.7 s` (`pos.spec.ts` test: `6.9 s`).
+  - **Skanerdan savat qatorigacha (`Scan -> Cart Line DOM`) kechikish:** `28.0 ms` (maqsad `≤ 150 ms`).
+  - **50 000 mahsulotda UI + FTS5 qidiruv kechikishi:** `46.2 ms` (maqsad `≤ 150 ms`).
+- [x] **Sichqonsiz savdo (klaviatura bilan):** `apps/pos/e2e/pos.spec.ts` da `page.mouse.click` chaqirmasdan `F2` (qidiruv) → `Enter` (savatga qo'shish) → `+` (miqdorni oshirish) → `F8` (tez savdo) → `F4` (chegirma + rahbar PIN) → `F9` (to'lov) → `Enter` (chekni yakunlash va yopish) to'liq o'tdi.
+- [x] **Tez yozgan odam skaner deb qabul qilinmaydi + DataMatrix `\x1d` buzilmaydi:** `apps/pos/src/scanner/scanner-detector.test.ts` (4 ta birlik test) va `apps/pos/e2e/pos.spec.ts` (60 ms/belgi bilan yozib `Enter` bosgan foydalanuvchi `/carts/:id/scan` ni chaqirmaydi; `010478000000012121ABC123\x1d91EE06\x1d92dGVzdA==` DataMatrix kodi `\x1d` bilan aynan uzatiladi).
+- [x] **Kechiktirilgan chek, idempotent `clientRequestId`, smena yopish, kunduzgi/tungi mavzu va tannarx maxfiyligi:** `apps/pos/e2e/pos.spec.ts` da to'liq tekshirildi.
+- [x] **Skrinshot:** `.mezon/gemini/pos-sales-screen.png` fayliga saqlandi.
 
 ---
 
-## f) E2E (Playwright) va Test rejasi
+### Test natijasi (buyruq va haqiqiy chiqish)
 
-Playwright testlari (`apps/pos/e2e/pos.spec.ts`) test oldidan haqiqiy `@mezon/hub` serverini vaqtinchalik SQLite bazasi bilan `127.0.0.1:0` portida ishga tushiradi va `apps/pos` UI'ni Chromium'da (Ubuntu va Windows CI'da headless rejimda) tekshiradi:
+```text
+$ pnpm verify
+$ pnpm run format:check && pnpm run build && pnpm run lint && pnpm run typecheck && pnpm run db:check && pnpm run test && pnpm run depcruise
+Checking formatting... All matched files use Prettier code style!
+Tasks: 17 successful, 17 total (build)
+$ node scripts/lint-workspaces.mjs (0 errors, 0 warnings)
+Tasks: 17 successful, 17 total (typecheck)
+PostgreSQL schema matches committed migrations (0 diff statements).
+SQLite schema matches committed migrations (0 diff statements).
 
-1. **Skan -> To'lov -> Chek (va 50k qidiruv / <= 100 ms skan tezligi):**
-   - PIN bilan kirish -> smena ochish -> USB skaner tezligida (`8 ms` oraliq) shtrix-kod va GS (`\x1D`) belgili DataMatrix yuborish -> savatda qator `<= 100 ms` ichida chiqishi -> naqd to'lov (`tenderedCash`, qaytim hisobi) -> `SINOV — FISKAL EMAS` belgili chek ekrani.
-2. **Sichqonsiz to'liq savdo (100% klaviatura):**
-   - Sichqoncha (`page.click`) umuman ishlatilmasdan faqat klaviatura (`PIN` + `Enter`, smena ochish `Enter`, `F2` qidiruv -> `ArrowDown` -> `Enter`, `+` miqdor oshirish, `F4` chegirma, `F9` to'lov -> `Enter` yakunlash) bilan savdoni boshidan oxirigacha yakunlash.
-3. **Tez yozgan odam skaner deb qabul qilinmaydi:**
-   - Qidiruv maydoniga `85 ms` oraliq bilan shtrix-kodga o'xshash matn va `Enter` yuborilganda u skaner sifatida savatga tushib ketmaydi, balki oddiy qidiruv natijasini chiqaradi.
-4. **Ikki marta bosish va tarmoq uzilishi -> bitta chek (`clientRequestId` idempotentligi):**
-   - To'lovni tasdiqlash tugmasini ketma-ket ikki marta bosish hamda birinchi `POST /sales/complete` javobini tarmoqda uzib qo'yib (Playwright route intercept: Hub bazaga yozadi, lekin javob uziladi) `Qayta urinish` bosilganda aynan o'sha `clientRequestId` ketishi va bazada faqat **bitta** chek (`receipt_no = 1`) hosil bo'lishi isbotlanadi.
-5. **Kechiktirilgan chek (`park` / `resume`):**
-   - Birinchi mijoz savatini `F5` bilan kechiktirish -> ikkinchi mijozga savdo qilish -> `F6` orqali kechiktirilgan savatni qayta tiklash va yakunlash.
-6. **Smena ochish, kassa harakati va smena yopish:**
-   - `F8` orqali `expense` / `cash_in` kiritish -> smenani yopish ekranida **naqdsiz summa kiritish maydoni yo'qligini** (`expect(page.locator(...)).toHaveCount(0)`) tekshirish -> `countedCash` kiritib smenani yopish va kutilgan naqd/naqdsiz summalar to'g'riligini tasdiqlash.
+$ vitest run --project unit --project sqlite-hub
+ Test Files  60 passed | 1 skipped (61)
+      Tests  283 passed | 2 skipped (285)
+
+$ vitest run --project perf
+ Test Files  9 passed (9)
+      Tests  12 passed (12)
+
+$ pnpm --filter @mezon/pos test:e2e
+Running 1 test using 1 worker
+[PERF] Scan -> Cart Line DOM latency: 28.0 ms
+[PERF] 50 000 products UI + FTS5 search latency: 46.2 ms
+  ok 1 e2e\pos.spec.ts:161:3 › @mezon/pos Playwright E2E — Kassa UI (T1.11) › Full POS workflow: Setup -> Login -> Open Shift -> Scan (EAN-13 & DataMatrix GS) -> Human Typist vs Scanner -> Mouse-Free Keyboard Sale -> Park/Resume -> Idempotent Retry -> Shift Cash Move & Close + 50k Search Perf (6.9s)
+  1 passed (10.7s)
+
+$ depcruise --config .dependency-cruiser.cjs apps/*/src packages/*/src
+✔ no dependency violations found (318 modules, 1348 dependencies cruised)
+
+$ pnpm --filter @mezon/desktop test:e2e
+  ok 1 e2e\desktop.spec.ts:97:1 › Playwright unfused Electron against identical app.asar: app://mezon, CSP, single instance, and T1 Hub crash recovery (6.4s)
+  1 passed (7.1s)
+```
+
+GitHub Actions CI (PR #18, commit `ccffc6e`):
+- `Verify (ubuntu-latest)`: **success**
+- `Verify (windows-latest)`: **success**
+- `Verify PostgreSQL RLS (ubuntu-latest)`: **success**
+- `Detect Desktop Changes`: **success**
 
 ---
 
-## g) Doiradan tashqari (bu vazifada qilinmaydi)
+### Tekshirilmagan narsalar
 
-- Haqiqiy printer va ESC/POS bayt drayverlari (`T1.12`);
-- Hisobotlar, Excel import/eksport va zaxira nusxa (`T1.13`);
-- Android Capacitor qobig'i (`T4.4`);
-- Ko'p tilli (`uz-Cyrl`, `ru`) tarjima va til almashtirish (`T4.6`).
+- Fizik USB shtrix-kod skaner qurilmasi (Playwright E2E va Vitest'da real `KeyboardEvent` oqimi va `timeStamp` intervallari bilan simulyatsiya qilindi).
+
+### Qilingan taxminlar
+
+- Yo'q. Barcha yechimlar tasdiqlangan T1.11 rejasi va U1–U4 ko'rsatmalariga qat'iy amal qilgan holda bajarildi.
+
+### Takliflar
+
+- Keyingi T1.12 (Printer va chek) vazifasida `ReceiptModal` dagi chop etish/qayta chop etish holatlarini `PrinterDriver` bilan bog'lash.
+
+### Egasi yoki Claude qarori kerak bo'lgan savollar
+
+- Yo'q.
