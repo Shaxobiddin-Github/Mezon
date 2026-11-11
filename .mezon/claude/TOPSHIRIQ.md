@@ -1,102 +1,53 @@
-# Claude topshirig'i: T1.11 QABUL → T1.12 rejasi
+# Claude topshirig'i: T1.12 rejasi — TUZATISHLAR BILAN TASDIQLANDI
 
-## 1. T1.11 xulosasi: QABUL (kod `ccffc6e`)
+**Merge tekshiruvi:** T1.11 merge'i tekshirildi. `main` = `d805653`, kod `3d810a3` bilan bir xil.
 
-Claude tekshirdi:
+Reja juda puxta. Quyidagilar tasdiqlandi:
 
-- **Toza nusxada `pnpm verify` yashil:** 285 + 12 perf test va Playwright E2E. Docker bilan `pg-rls` ham o'tdi.
-- **GitHub CI yashil:** ubuntu, windows, PG RLS.
-- **API yo'llari:** UI chaqiradigan 24 ta yo'l Hub marshrutlari bilan solishtirildi, hammasi mavjud. Savdo faqat `POST /carts/:id/complete` orqali o'tadi.
-- **Skrinshot:** savdo va chek oynasi ishlaydi, "SINOV — FISKAL EMAS" ko'rinadi.
-- **Nishonli mutatsiya:** 4 tadan 2 tasi ushlandi:
-  - skaner oraliq chegarasi (30 ms → 150 ms);
-  - dev CORS bayrog'i (bayroqsiz yoqilsa).
-
-### Test qarzi va mayda tuzatishlar
-
-T1.12 PR'ining birinchi alohida commit'i: `T1.11 test qarzi: skaner chegaralari, diagnostika paneli, E2E skrinshot yo'li`.
-
-1. **Skaner, minimal uzunlik.** `keyCount >= minLength && buffer.length >= minLength` sharti olib tashlanganda testlar yiqilmadi.
-   - Test: 2–3 belgi juda tez (≤ 10 ms) va Enter kelsa, bu skan **emas**.
-   - Masalan, klaviatura "rollover"i yoki tez bosilgan `+` va Enter.
-2. **Skaner, Enter kechikishi.** Tugatuvchigacha bo'lgan oraliq tekshiruvi (`gapToTerminator <= maxInterKeyMs`) olib tashlanganda testlar yiqilmadi.
-   - Test: 13 belgi tez keladi, lekin Enter 500 ms dan keyin bosiladi. Bu skan **emas**: odam tez yozib, keyin o'ylab Enter bosgan.
-   - Har ikki test mutatsiya bilan isbotlansin.
-3. **Diagnostika paneli kassirga ko'rinmasin.** Skrinshotdagi savdo ekranining tepasida T0.7 dan qolgan texnik qator bor: "Hub holati ready, http://127.0.0.1:…, Qayta ishga tushishlar, /health javobi, Sozlash kerakmi: false", hamda "Tekshiruvni yangilash" tugmasi.
-   - Bu kassir uchun emas. Alohida "Diagnostika" oynasiga ko'chir (masalan `Ctrl+Shift+D` yoki sozlamalar ichida, faqat `owner`/`manager` uchun).
-   - Savdo ekranida kassir, smena, mavzu, `F1` va chiqish qolsin.
-4. **E2E skrinshoti git'dagi faylni o'zgartirmasin.** Hozir `pnpm verify` har safar `.mezon/gemini/pos-sales-screen.png` ni qayta yozadi va ish nusxasini "o'zgargan" holatga keltiradi.
-   - Skrinshot `apps/pos/test-results/` (`.gitignore` da) ga yozilsin.
-   - `.mezon/` ga faqat hisobot uchun qo'lda qo'yiladi.
-
-## 2. Merge
-
-1. `git pull --ff-only`.
-2. PR boshi Claude'ning shu topshiriq commit'i bo'lsin, CI yashil bo'lsin.
-3. `T1.11: Kassa UI` nomi bilan Squash and merge qil, SHA'ni yoz, branch'ni o'chir.
-4. `main`dan `gemini/T1.12-printer` branch'ini och.
-
-## 3. T1.12 — Printer va chek: avval REJA
-
-Kod yozma. Rejani `.mezon/gemini/HISOBOT.md` ga yoz, `[gemini-reja] T1.12` bilan commit qil va push qil, so'ng `node .mezon/kutish.mjs` bilan kut.
-
-GEMINI.md T1.12 talablari:
-
-- `PrinterDriver`: Windows uchun koffi orqali `winspool.drv` RAW; tarmoq uchun TCP 9100;
-- real printerda sinov natijasi hisobotda;
-- ESC/POS, 58 va 80 mm;
-- pul yashigi;
-- kod sahifasi yoki transliteratsiya siyosati;
-- printersiz rejim.
-
-Mezonlar:
-
-- bayt snapshot testlari;
+- test qarzi commit'i;
+- drayverlar Hub (`utilityProcess`) ichida, renderer printerga tegmaydi;
+- sof ESC/POS kodlovchi va layout (32/48 ustun), `Null`, `Fake`, `WindowsRaw` (koffi, mock bindings bilan test), `Network` (TCP, timeout);
+- chek, qaytarish cheki va smena hisobotining tarkibi;
+- `translit` (standart), `cp866`, `cp1251` va jadval;
 - printer xatosi savdoni buzmaydi;
-- qayta chop etish belgilanadi.
+- `local_receipt_prints` va `local_cash_drawer_events` (LOCAL);
+- NUSXA raqamlash;
+- pul yashigi: avtomatik va qo'lda, override va audit bilan;
+- sozlamalar, API, UI va testlar;
+- "real printerda tekshirilmagan" eslatmasi.
 
-Rejada quyidagilar aniq bo'lsin:
+Quyidagi tuzatishlar bilan `gemini/T1.12-printer` branch'ida kodni yoz.
 
-### a) Qatlamlar
+## Majburiy tuzatishlar
 
-- **ESC/POS kodlovchi:** sof funksiya, `packages/drivers` yoki alohida paket. Chek ma'lumoti (`StoredSaleRecord` → `ReceiptDocument`) baytlarga aylanadi. Bayt snapshot testlari bilan.
-- **Drayverlar:**
-  - `WindowsRawPrinterDriver` (koffi + `winspool.drv`: `OpenPrinter`/`StartDocPrinter`/`WritePrinter`);
-  - `NetworkPrinterDriver` (TCP 9100, timeout bilan);
-  - `NullPrinterDriver` (printersiz rejim);
-  - `FakePrinterDriver` (testlar uchun).
-- **Qayerda ishlaydi:** Electron main yoki hub utilityProcess? Renderer'dan to'g'ridan-to'g'ri **emas** (xavfsizlik). IPC yoki Hub endpoint orqali. Qaror qil.
+### P1. Chop etish so'rovi idempotent bo'lsin
 
-### b) Chek tarkibi
+"Qayta chop etish" tugmasi ikki marta bosilsa yoki tarmoq uzilib qayta yuborilsa, ikki nusxa qog'ozga chiqadi va audit buziladi.
 
-- **Ma'lumotlar:** do'kon nomi, chek kodi, sana va vaqt (`store_timezone`), kassir, qatorlar (nomi, miqdor × narx, chegirma, QQS stavkasi), jami, QQS jami, to'lovlar, qaytim, qarz.
-- **"SINOV — FISKAL EMAS"** belgisi F3 gacha majburiy.
-- **58 va 80 mm** kengliklari, uzun nomlarni o'rash, ustunlarni tekislash.
-- **Qaytarish cheki** (T1.6) va **smena yopilish hisoboti** (T1.9) ham chop etilsin.
+- `POST /sales/:id/print`, `/returns/:id/print`, `/shifts/:id/print-close-report` va `/printer/cash-drawer/open` `clientRequestId` qabul qilsin.
+- Bir xil ID bilan qayta kelsa, **printerga qayta yuborilmasin**. Avvalgi natija qaytarilsin.
+- UI bir urinish uchun bitta ID ishlatsin (T1.11 qoidasi).
+- **Test:** bir xil ID bilan ikki so'rov → `FakePrinterDriver` ga bitta bufer, bitta audit yozuvi.
 
-### c) Kod sahifasi va o'zbek harflari
+### P2. Tarmoq printeri manzili cheklangan bo'lsin
 
-- Oʻ, gʻ, ʼ va kirill harflari ko'p printerlarda yo'q.
-- **Siyosat:** printerda mos kod sahifasi bo'lsa (CP866 yoki CP1251) uni ishlat; bo'lmasa transliteratsiya qil (`oʻ` → `o'` va hokazo). Qaror va jadval rejada bo'lsin.
-- Snapshot testlari ikkala yo'lni qamrab olsin.
+`printer_host` ga istalgan manzil yozilsa, Hub tashqi serverlarga TCP orqali chek ma'lumotlarini yuborishi mumkin.
 
-### d) Xatolar va qayta chop etish
+- Faqat lokal tarmoq manzillari ruxsat etilsin: RFC 1918 (`10/8`, `172.16/12`, `192.168/16`), link-local va loopback.
+- Hostname bo'lsa: DNS natijasi ham shu oraliqda bo'lishi shart, yoki faqat IP qabul qilinsin. Qaror qil.
+- Port `1..65535`.
+- **Test:** `8.8.8.8:9100` va `example.com` rad etiladi (`400 VALIDATION_ERROR`).
 
-- Printer xatosi (o'chiq, qog'oz tugagan, timeout) **savdoni buzmaydi**: chek bazada saqlanadi, UI ogohlantiradi va "qayta chop etish" taklif qiladi.
-- **Qayta chop etish:** chekda "NUSXA" belgisi bo'ladi. Har bir chop etish urinishi audit yozuviga tushadi: `receipt_prints` (FACT yoki LOCAL, qaror qil) — kim, qachon, nechanchi nusxa, natija.
-- **Pul yashigi:** naqd to'lovda avtomatik ochiladi, ESC/POS impulsi bilan. Qo'lda ochish ruxsat bilan va audit bilan.
+### P3. Avtomatik chop etish keyingi savdoni to'smasin
 
-### e) Sozlamalar va UI
+- Printer timeout'i (3 s gacha) kassirni kutib qoldirmasin. Chek oynasi darhol yopiladigan bo'lsin, chop etish holati esa fon rejimida kelsin.
+- **E2E:** printer javob bermaganda ham keyingi savdoni darhol boshlash mumkin.
 
-- Printer tanlash (Windows printerlari ro'yxati yoki IP:port), kenglik, kod sahifasi, avtomatik chop etish yoqish/o'chirish, sinov cheki.
-- `owner`/`manager` uchun.
+## Bajarish tartibi
 
-### f) Real printerda sinov
-
-Egasida printer bo'lmasligi mumkin. Hisobotda "real printerda tekshirilmagan" deb aniq yoz. Real sinov F1 yakunidagi bir kunlik simulyatsiyada qilinadi.
-
-### g) Doiradan tashqari
-
-- Fiskal chek va QR (F3).
-- Android printeri (T4.4).
-- Har terminalning o'z printeri (T4.3).
+1. Birinchi commit: T1.11 test qarzi va mayda tuzatishlar, mutatsiya dalillari bilan.
+2. T1.12 kodi.
+3. Lokal `pnpm verify` yashil.
+4. Commit qil, push qil va PR och. CI yashil bo'lsin. `packages/drivers` o'zgargani uchun desktop installer job ham ishlaydi, u ham yashil bo'lsin.
+5. Hisobot: P1–P3 dalillari, 58 va 80 mm chek matnining namunasi (`textPreview`), real printer eslatmasi. `[gemini-hisobot] T1.12` bilan commit qil va push qil.
+6. `node .mezon/kutish.mjs` ni ishga tushir. Merge qilma.
