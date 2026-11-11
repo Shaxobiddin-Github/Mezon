@@ -85,6 +85,13 @@
       "when": 1794366922740,
       "tag": "0011_shifts_day_close",
       "breakpoints": true
+    },
+    {
+      "idx": 12,
+      "version": "6",
+      "when": 1794373589078,
+      "tag": "0012_orders_advance",
+      "breakpoints": true
     }
   ]
 }

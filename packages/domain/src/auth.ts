@@ -34,7 +34,10 @@ export type HubPermission =
   | 'shifts:close'
   | 'shifts:reclose'
   | 'shifts:cash_move'
-  | 'day_close:execute';
+  | 'day_close:execute'
+  | 'orders:read'
+  | 'orders:write'
+  | 'orders:cancel';
 
 const ROLE_PERMISSION_TABLE: Readonly<Record<UserRole, ReadonlySet<HubPermission>>> = {
   owner: new Set<HubPermission>([
@@ -69,6 +72,9 @@ const ROLE_PERMISSION_TABLE: Readonly<Record<UserRole, ReadonlySet<HubPermission
     'shifts:reclose',
     'shifts:cash_move',
     'day_close:execute',
+    'orders:read',
+    'orders:write',
+    'orders:cancel',
   ]),
   manager: new Set<HubPermission>([
     'auth:self',
@@ -99,6 +105,9 @@ const ROLE_PERMISSION_TABLE: Readonly<Record<UserRole, ReadonlySet<HubPermission
     'shifts:reclose',
     'shifts:cash_move',
     'day_close:execute',
+    'orders:read',
+    'orders:write',
+    'orders:cancel',
   ]),
   cashier: new Set<HubPermission>([
     'auth:self',
@@ -112,6 +121,8 @@ const ROLE_PERMISSION_TABLE: Readonly<Record<UserRole, ReadonlySet<HubPermission
     'shifts:read',
     'shifts:open',
     'shifts:close',
+    'orders:read',
+    'orders:write',
   ]),
 };
 

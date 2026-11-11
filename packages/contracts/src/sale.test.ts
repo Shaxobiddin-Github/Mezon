@@ -173,6 +173,7 @@ describe('@mezon/contracts - T1.5 mixed payments, bounds, cash_moves & cost/fisc
       storeId: UID(3),
       deviceId: UID(4),
       sourceCartId: UID(5),
+      sourceOrderId: null,
       cashierUserId: UID(6),
       completedByUserId: UID(7),
       customerId: null,
@@ -217,6 +218,15 @@ describe('@mezon/contracts - T1.5 mixed payments, bounds, cash_moves & cost/fisc
     });
     expect(parsed.sale.receiptCode).toBe('0002-000001');
     expect(parsed.sale.completedByUserId).toBe(UID(7));
+
+    // Rejects 'advance' method in normal POS completeSale
+    expect(() =>
+      CompleteSaleRequestSchema.parse({
+        clientRequestId: UID(1),
+        expectedTotal: '150000',
+        payments: [{ method: 'advance', amount: '150000' }],
+      }),
+    ).toThrow();
 
     // No fiscalStatus / fiscalReceiptNo on sales in F1
     expect(() => SaleDtoSchema.parse({ ...baseSale, fiscalStatus: 'pending' })).toThrow();

@@ -7,8 +7,9 @@ import {
   DEFAULT_STORE_TIMEZONE,
   DomainError,
   type Money,
-  PAYMENT_METHODS,
   type PaymentMethod,
+  SALE_PAYMENT_METHODS,
+  type SalePaymentMethod,
   type ShiftCashMoveType,
   type ShiftExpenseCategory,
   type ShiftStatus,
@@ -36,6 +37,7 @@ import {
   negateMoney,
   normalizeMandatoryReason,
   parsePaymentMethod,
+  parseSalePaymentMethod,
   parseShiftCashMoveType,
   parseShiftExpenseCategory,
   parseUuidV7,
@@ -123,7 +125,7 @@ export interface StoredShiftRecord {
 }
 
 export interface StoredShiftClosureMethodTotalRecord {
-  readonly method: PaymentMethod | 'debt';
+  readonly method: SalePaymentMethod | 'debt';
   readonly salesAmount: Money;
   readonly returnsAmount: Money;
   readonly netAmount: Money;
@@ -165,6 +167,9 @@ export interface StoredShiftClosureRecord {
   readonly grossSalesTotal: Money;
   readonly returnsTotal: Money;
   readonly netSalesTotal: Money;
+  readonly orderAdvanceCashTotal: Money;
+  readonly orderAdvanceNonCashTotal: Money;
+  readonly orderAdvanceRefundTotal: Money;
   readonly createdAtMs: UnixMs;
   readonly methodTotals: readonly StoredShiftClosureMethodTotalRecord[];
   readonly cashiers: readonly StoredShiftClosureCashierRecord[];
@@ -546,7 +551,7 @@ function loadClosureDetailsSync(
     methodByKey.set(m.method, m);
   }
   const orderedMethods: StoredShiftClosureMethodTotalRecord[] = [
-    ...PAYMENT_METHODS,
+    ...SALE_PAYMENT_METHODS,
     'debt' as const,
   ].map((methodKey) => {
     const found = methodByKey.get(methodKey);
@@ -600,6 +605,9 @@ function loadClosureDetailsSync(
     grossSalesTotal: closureRow.grossSalesTotal,
     returnsTotal: closureRow.returnsTotal,
     netSalesTotal: closureRow.netSalesTotal,
+    orderAdvanceCashTotal: closureRow.orderAdvanceCashTotal,
+    orderAdvanceNonCashTotal: closureRow.orderAdvanceNonCashTotal,
+    orderAdvanceRefundTotal: closureRow.orderAdvanceRefundTotal,
     createdAtMs: closureRow.createdAtMs,
     methodTotals: orderedMethods,
     cashiers: cashierRows.map((c) => ({
@@ -723,7 +731,7 @@ function toStoredDayCloseRecord(
     countedCashTotal: row.countedCashTotal,
     discrepancyTotal: row.discrepancyTotal,
     methodTotals: parsedMethods.map((m) => ({
-      method: m.method === 'debt' ? 'debt' : parsePaymentMethod(m.method),
+      method: m.method === 'debt' ? 'debt' : parseSalePaymentMethod(m.method),
       salesAmount: moneyFromTiyin(BigInt(m.salesAmount)),
       returnsAmount: moneyFromTiyin(BigInt(m.returnsAmount)),
       netAmount: moneyFromTiyin(BigInt(m.netAmount)),
@@ -1040,13 +1048,13 @@ function computeShiftSummaryViaSqlSync(params: {
      WHERE s.organization_id = ? AND s.store_id = ? AND s.shift_id = ? AND s.voided_at_ms IS NULL`,
   );
 
-  const methodSalesTiyin = new Map<PaymentMethod, bigint>();
+  const methodSalesTiyin = new Map<SalePaymentMethod, bigint>();
   for (const r of salePayStmt.iterate(
     params.shift.organizationId,
     params.shift.storeId,
     params.shift.id,
   )) {
-    const method = parsePaymentMethod(r.method);
+    const method = parseSalePaymentMethod(r.method);
     methodSalesTiyin.set(method, (methodSalesTiyin.get(method) ?? 0n) + toBigIntStrict(r.amount));
   }
 
@@ -1106,6 +1114,36 @@ function computeShiftSummaryViaSqlSync(params: {
     );
   }
 
+  // 6) Order advances & refunds in this shift (obligation totals; never sales revenue)
+  const ordAdvStmt = params.sqlite.prepare<
+    [string, string, string],
+    { readonly kind: string; readonly method: string; readonly amount: unknown }
+  >(
+    `SELECT kind, method, amount
+     FROM order_payments
+     WHERE organization_id = ? AND store_id = ? AND shift_id = ?`,
+  );
+
+  let orderAdvanceCashTiyin = 0n;
+  let orderAdvanceNonCashTiyin = 0n;
+  let orderAdvanceRefundTiyin = 0n;
+  for (const r of ordAdvStmt.iterate(
+    params.shift.organizationId,
+    params.shift.storeId,
+    params.shift.id,
+  )) {
+    const amt = toBigIntStrict(r.amount);
+    if (r.kind === 'advance') {
+      if (parsePaymentMethod(r.method) === 'cash') {
+        orderAdvanceCashTiyin += amt;
+      } else {
+        orderAdvanceNonCashTiyin += amt;
+      }
+    } else {
+      orderAdvanceRefundTiyin += amt;
+    }
+  }
+
   return computeShiftClosureFromAggregates({
     openingCash: params.shift.openingCash,
     finalCountedCash: params.finalCountedCash,
@@ -1125,6 +1163,9 @@ function computeShiftSummaryViaSqlSync(params: {
     returnsTiyin,
     debtSalesTiyin,
     returnDebtOffsetTiyin,
+    orderAdvanceCashTiyin,
+    orderAdvanceNonCashTiyin,
+    orderAdvanceRefundTiyin,
     methodSalesTiyin,
     methodReturnsTiyin,
     sessionBuckets,
@@ -1901,6 +1942,9 @@ export class SqliteShiftStore {
           grossSalesTotal: summary.grossSalesTotal,
           returnsTotal: summary.returnsTotal,
           netSalesTotal: summary.netSalesTotal,
+          orderAdvanceCashTotal: summary.orderAdvanceCashTotal,
+          orderAdvanceNonCashTotal: summary.orderAdvanceNonCashTotal,
+          orderAdvanceRefundTotal: summary.orderAdvanceRefundTotal,
         },
         eventType: 'shift_closure.created',
         schemaVersion: 1,
@@ -2117,6 +2161,9 @@ export class SqliteShiftStore {
           grossSalesTotal: summary.grossSalesTotal,
           returnsTotal: summary.returnsTotal,
           netSalesTotal: summary.netSalesTotal,
+          orderAdvanceCashTotal: summary.orderAdvanceCashTotal,
+          orderAdvanceNonCashTotal: summary.orderAdvanceNonCashTotal,
+          orderAdvanceRefundTotal: summary.orderAdvanceRefundTotal,
         },
         eventType: 'shift_closure.reclosed',
         schemaVersion: 1,
@@ -2480,7 +2527,7 @@ export class SqliteShiftStore {
       }
 
       const methodTotalsJson = JSON.stringify(
-        [...PAYMENT_METHODS, 'debt' as const].map((methodKey) => {
+        [...SALE_PAYMENT_METHODS, 'debt' as const].map((methodKey) => {
           const sAmt = aggSalesByMethod.get(methodKey) ?? 0n;
           const rAmt = aggReturnsByMethod.get(methodKey) ?? 0n;
           return {

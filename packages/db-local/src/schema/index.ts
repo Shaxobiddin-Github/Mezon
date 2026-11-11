@@ -52,6 +52,9 @@ export const localDeviceState = localSchemaRegistry.defineTable(
     lastShiftSeq: sqliteBigint('last_shift_seq')
       .notNull()
       .default(sql`0`),
+    lastOrderSeq: sqliteBigint('last_order_seq')
+      .notNull()
+      .default(sql`0`),
     lastHlc: sqliteHlc('last_hlc').notNull(),
     lastUuidMs: sqliteUnixMs('last_uuid_ms').notNull(),
   }),
@@ -63,6 +66,7 @@ export const localDeviceState = localSchemaRegistry.defineTable(
     check('chk_local_device_state_receiving_nonneg', sql`${self.lastReceivingSeq} >= 0`),
     check('chk_local_device_state_sup_return_nonneg', sql`${self.lastSupplierReturnSeq} >= 0`),
     check('chk_local_device_state_shift_nonneg', sql`${self.lastShiftSeq} >= 0`),
+    check('chk_local_device_state_order_nonneg', sql`${self.lastOrderSeq} >= 0`),
   ],
 );
 
@@ -963,6 +967,7 @@ export const sales = localSchemaRegistry.defineTable(
     receiptNo: sqliteBigint('receipt_no').notNull(),
     receiptCode: text('receipt_code').notNull(),
     sourceCartId: sqliteUuidV7('source_cart_id'),
+    sourceOrderId: sqliteUuidV7('source_order_id'),
     cashierUserId: sqliteUuidV7('cashier_user_id')
       .notNull()
       .references(() => users.id),
@@ -1012,6 +1017,7 @@ export const sales = localSchemaRegistry.defineTable(
       .where(sql`${self.voidClientRequestId} IS NOT NULL`),
     index('idx_sales_store_created').on(self.organizationId, self.storeId, self.createdAtMs),
     index('idx_sales_store_cart').on(self.organizationId, self.storeId, self.sourceCartId),
+    index('idx_sales_store_order').on(self.organizationId, self.storeId, self.sourceOrderId),
     index('idx_sales_shift_created').on(self.shiftId, self.createdAtMs),
     index('idx_sales_session').on(self.shiftCashierSessionId),
     check('chk_sales_receipt_no_pos', sql`${self.receiptNo} >= 1`),
@@ -1147,7 +1153,7 @@ export const payments = localSchemaRegistry.defineTable(
     index('idx_payments_store_created').on(self.organizationId, self.storeId, self.createdAtMs),
     check(
       'chk_payments_method',
-      sql`${self.method} IN ('cash', 'card', 'uzqr', 'payme', 'click', 'uzum', 'social_card', 'other')`,
+      sql`${self.method} IN ('cash', 'card', 'uzqr', 'payme', 'click', 'uzum', 'social_card', 'other', 'advance')`,
     ),
     check('chk_payments_nonneg', sql`${self.amount} > 0 AND ${self.changeAmount} >= 0`),
     check(
@@ -1201,11 +1207,11 @@ export const cashMoves = localSchemaRegistry.defineTable(
     index('idx_cash_moves_source').on(self.sourceType, self.sourceId),
     check(
       'chk_cash_moves_type',
-      sql`${self.type} IN ('sale_cash_in', 'debt_payment_in', 'cash_in', 'sale_change_out', 'refund_cash_out', 'supplier_payment_out', 'cash_out', 'encashment')`,
+      sql`${self.type} IN ('sale_cash_in', 'debt_payment_in', 'cash_in', 'advance_cash_in', 'sale_change_out', 'refund_cash_out', 'supplier_payment_out', 'cash_out', 'encashment', 'advance_change_out', 'advance_refund_out')`,
     ),
     check(
       'chk_cash_moves_amount_sign',
-      sql`(${self.type} IN ('sale_cash_in', 'debt_payment_in', 'cash_in') AND ${self.amountDelta} > 0) OR (${self.type} IN ('sale_change_out', 'refund_cash_out', 'supplier_payment_out', 'cash_out', 'encashment') AND ${self.amountDelta} < 0)`,
+      sql`(${self.type} IN ('sale_cash_in', 'debt_payment_in', 'cash_in', 'advance_cash_in') AND ${self.amountDelta} > 0) OR (${self.type} IN ('sale_change_out', 'refund_cash_out', 'supplier_payment_out', 'cash_out', 'encashment', 'advance_change_out', 'advance_refund_out') AND ${self.amountDelta} < 0)`,
     ),
     check('chk_cash_moves_source_type', sql`length(trim(${self.sourceType})) >= 1`),
   ],
@@ -2253,6 +2259,15 @@ export const shiftClosures = localSchemaRegistry.defineTable(
     grossSalesTotal: sqliteMoney('gross_sales_total').notNull(),
     returnsTotal: sqliteMoney('returns_total').notNull(),
     netSalesTotal: sqliteMoney('net_sales_total').notNull(),
+    orderAdvanceCashTotal: sqliteMoney('order_advance_cash_total')
+      .notNull()
+      .default(sql`0`),
+    orderAdvanceNonCashTotal: sqliteMoney('order_advance_non_cash_total')
+      .notNull()
+      .default(sql`0`),
+    orderAdvanceRefundTotal: sqliteMoney('order_advance_refund_total')
+      .notNull()
+      .default(sql`0`),
   }),
   (self) => [
     uniqueIndex('uidx_shift_closures_shift_seq').on(self.shiftId, self.closureSeq),
@@ -2267,7 +2282,7 @@ export const shiftClosures = localSchemaRegistry.defineTable(
     check('chk_shift_closures_req_hash', sql`length(trim(${self.requestHash})) >= 6`),
     check(
       'chk_shift_closures_money_nonneg',
-      sql`${self.countedCash} >= 0 AND ${self.grossSalesTotal} >= 0 AND ${self.returnsTotal} >= 0`,
+      sql`${self.countedCash} >= 0 AND ${self.grossSalesTotal} >= 0 AND ${self.returnsTotal} >= 0 AND ${self.orderAdvanceCashTotal} >= 0 AND ${self.orderAdvanceNonCashTotal} >= 0 AND ${self.orderAdvanceRefundTotal} >= 0`,
     ),
     check(
       'chk_shift_closures_counts_nonneg',
@@ -2300,7 +2315,7 @@ export const shiftClosureMethodTotals = localSchemaRegistry.defineTable(
     uniqueIndex('uidx_shift_closure_methods').on(self.shiftClosureId, self.method),
     check(
       'chk_shift_closure_methods_enum',
-      sql`${self.method} IN ('cash', 'card', 'uzqr', 'payme', 'click', 'uzum', 'social_card', 'other', 'debt')`,
+      sql`${self.method} IN ('cash', 'card', 'uzqr', 'payme', 'click', 'uzum', 'social_card', 'other', 'advance', 'debt')`,
     ),
     check(
       'chk_shift_closure_methods_nonneg',
@@ -2412,6 +2427,276 @@ export const dayCloses = localSchemaRegistry.defineTable(
     check(
       'chk_day_closes_nonneg',
       sql`${self.shiftsCount} >= 0 AND ${self.salesCount} >= 0 AND ${self.returnsCount} >= 0 AND ${self.voidsCount} >= 0 AND ${self.grossSalesTotal} >= 0 AND ${self.returnsTotal} >= 0 AND ${self.countedCashTotal} >= 0`,
+    ),
+  ],
+);
+
+/**
+ * Customer orders (`MONOTONE`, store-scoped, T1.10).
+ * Prices, promotions, discounts, and VAT are evaluated ONCE at creation (O3) and frozen.
+ * Unidirectional status machine (`draft -> confirmed|cancelled`, `confirmed|ready -> delivered|cancelled`,
+ * terminal states `delivered` & `cancelled` locked via SQLite triggers).
+ */
+export const orders = localSchemaRegistry.defineTable(
+  {
+    name: 'orders',
+    tableClass: 'MONOTONE',
+    tenantScope: 'store',
+    monotoneColumns: ['status', 'delivered_at_ms', 'cancelled_at_ms'],
+  },
+  (common) => ({
+    ...common,
+    originDeviceId: sqliteUuidV7('origin_device_id').notNull(),
+    orderNo: sqliteBigint('order_no').notNull(),
+    orderCode: text('order_code').notNull(),
+    status: text('status').notNull(),
+    customerId: sqliteUuidV7('customer_id').references(() => customers.id),
+    customerName: text('customer_name').notNull(),
+    customerPhoneNormalized: text('customer_phone_normalized'),
+    dueAtMs: sqliteUnixMs('due_at_ms'),
+    note: text('note'),
+    subtotalGross: sqliteMoney('subtotal_gross').notNull(),
+    totalPromoDiscount: sqliteMoney('total_promo_discount').notNull(),
+    subtotalAfterPromo: sqliteMoney('subtotal_after_promo').notNull(),
+    manualDiscountMode: text('manual_discount_mode').notNull(),
+    manualDiscountValue: sqliteBigint('manual_discount_value').notNull(),
+    manualDiscountReason: text('manual_discount_reason'),
+    orderDiscountAmount: sqliteMoney('order_discount_amount').notNull(),
+    totalAmount: sqliteMoney('total_amount').notNull(),
+    totalNetExVat: sqliteMoney('total_net_ex_vat').notNull(),
+    totalVat: sqliteMoney('total_vat').notNull(),
+    overrideApprovedByUserId: sqliteUuidV7('override_approved_by_user_id').references(
+      () => users.id,
+    ),
+    overrideApprovedAmount: sqliteMoney('override_approved_amount'),
+    createdByUserId: sqliteUuidV7('created_by_user_id')
+      .notNull()
+      .references(() => users.id),
+    confirmedAtMs: sqliteUnixMs('confirmed_at_ms'),
+    readyAtMs: sqliteUnixMs('ready_at_ms'),
+    deliveredAtMs: sqliteUnixMs('delivered_at_ms'),
+    deliveredSaleId: sqliteUuidV7('delivered_sale_id').references(() => sales.id),
+    cancelledAtMs: sqliteUnixMs('cancelled_at_ms'),
+    cancelledByUserId: sqliteUuidV7('cancelled_by_user_id').references(() => users.id),
+    cancelReason: text('cancel_reason'),
+    createClientRequestId: sqliteUuidV7('create_client_request_id').notNull(),
+    createRequestHash: text('create_request_hash').notNull(),
+    confirmClientRequestId: sqliteUuidV7('confirm_client_request_id'),
+    confirmRequestHash: text('confirm_request_hash'),
+    readyClientRequestId: sqliteUuidV7('ready_client_request_id'),
+    readyRequestHash: text('ready_request_hash'),
+    deliverClientRequestId: sqliteUuidV7('deliver_client_request_id'),
+    deliverRequestHash: text('deliver_request_hash'),
+    cancelClientRequestId: sqliteUuidV7('cancel_client_request_id'),
+    cancelRequestHash: text('cancel_request_hash'),
+  }),
+  (self) => [
+    uniqueIndex('uidx_orders_org_origin_device_no').on(
+      self.organizationId,
+      self.originDeviceId,
+      self.orderNo,
+    ),
+    uniqueIndex('uidx_orders_org_create_req').on(self.organizationId, self.createClientRequestId),
+    uniqueIndex('uidx_orders_org_confirm_req')
+      .on(self.organizationId, self.confirmClientRequestId)
+      .where(sql`${self.confirmClientRequestId} IS NOT NULL`),
+    uniqueIndex('uidx_orders_org_ready_req')
+      .on(self.organizationId, self.readyClientRequestId)
+      .where(sql`${self.readyClientRequestId} IS NOT NULL`),
+    uniqueIndex('uidx_orders_org_deliver_req')
+      .on(self.organizationId, self.deliverClientRequestId)
+      .where(sql`${self.deliverClientRequestId} IS NOT NULL`),
+    uniqueIndex('uidx_orders_org_cancel_req')
+      .on(self.organizationId, self.cancelClientRequestId)
+      .where(sql`${self.cancelClientRequestId} IS NOT NULL`),
+    index('idx_orders_store_status_created').on(
+      self.organizationId,
+      self.storeId,
+      self.status,
+      self.createdAtMs,
+    ),
+    index('idx_orders_store_customer').on(
+      self.organizationId,
+      self.storeId,
+      self.customerId,
+      self.createdAtMs,
+    ),
+    check('chk_orders_no_pos', sql`${self.orderNo} >= 1`),
+    check('chk_orders_code_nonempty', sql`length(trim(${self.orderCode})) >= 1`),
+    check(
+      'chk_orders_status',
+      sql`${self.status} IN ('draft', 'confirmed', 'ready', 'delivered', 'cancelled')`,
+    ),
+    check('chk_orders_cust_name_nonempty', sql`length(trim(${self.customerName})) >= 1`),
+    check('chk_orders_create_req_hash', sql`length(trim(${self.createRequestHash})) >= 6`),
+    check('chk_orders_disc_mode', sql`${self.manualDiscountMode} IN ('none', 'percent', 'amount')`),
+    check(
+      'chk_orders_disc_val',
+      sql`(${self.manualDiscountMode} = 'none' AND ${self.manualDiscountValue} = 0) OR (${self.manualDiscountMode} = 'percent' AND ${self.manualDiscountValue} BETWEEN 1 AND 10000) OR (${self.manualDiscountMode} = 'amount' AND ${self.manualDiscountValue} > 0)`,
+    ),
+    check(
+      'chk_orders_money_nonneg',
+      sql`${self.subtotalGross} >= 0 AND ${self.totalPromoDiscount} >= 0 AND ${self.subtotalAfterPromo} >= 0 AND ${self.orderDiscountAmount} >= 0 AND ${self.totalAmount} >= 0 AND ${self.totalNetExVat} >= 0 AND ${self.totalVat} >= 0`,
+    ),
+    check(
+      'chk_orders_totals_balance',
+      sql`${self.totalNetExVat} + ${self.totalVat} = ${self.totalAmount}`,
+    ),
+    check(
+      'chk_orders_override_pair',
+      sql`(${self.overrideApprovedByUserId} IS NULL AND ${self.overrideApprovedAmount} IS NULL) OR (${self.overrideApprovedByUserId} IS NOT NULL AND ${self.overrideApprovedAmount} >= 0)`,
+    ),
+    check(
+      'chk_orders_delivered_pair',
+      sql`(${self.status} <> 'delivered' AND ${self.deliveredAtMs} IS NULL AND ${self.deliveredSaleId} IS NULL) OR (${self.status} = 'delivered' AND ${self.deliveredAtMs} IS NOT NULL AND ${self.deliveredSaleId} IS NOT NULL)`,
+    ),
+    check(
+      'chk_orders_cancelled_pair',
+      sql`(${self.status} <> 'cancelled' AND ${self.cancelledAtMs} IS NULL AND ${self.cancelledByUserId} IS NULL AND ${self.cancelReason} IS NULL) OR (${self.status} = 'cancelled' AND ${self.cancelledAtMs} IS NOT NULL AND ${self.cancelledByUserId} IS NOT NULL AND ${self.cancelReason} IS NOT NULL AND length(trim(${self.cancelReason})) >= 1)`,
+    ),
+  ],
+);
+
+/**
+ * Immutable evaluated order line snapshots (`FACT`, store-scoped, T1.10).
+ * Captures O3 evaluation results once at creation so `deliverOrder` reuses them verbatim (O2).
+ */
+export const orderLines = localSchemaRegistry.defineTable(
+  {
+    name: 'order_lines',
+    tableClass: 'FACT',
+    tenantScope: 'store',
+  },
+  (common) => ({
+    ...common,
+    orderId: sqliteUuidV7('order_id')
+      .notNull()
+      .references(() => orders.id),
+    sortOrder: sqliteInt('sort_order').notNull(),
+    lineKind: text('line_kind').notNull(),
+    productId: sqliteUuidV7('product_id').references(() => products.id),
+    variantId: sqliteUuidV7('variant_id').references(() => productVariants.id),
+    categoryIdSnapshot: sqliteUuidV7('category_id_snapshot'),
+    itemName: text('item_name').notNull(),
+    unit: text('unit').notNull(),
+    qty: sqliteQuantity('qty').notNull(),
+    unitPriceSnapshot: sqliteMoney('unit_price_snapshot').notNull(),
+    appliedPromotionId: sqliteUuidV7('applied_promotion_id'),
+    appliedPromotionName: text('applied_promotion_name'),
+    freeUnits: sqliteBigint('free_units')
+      .notNull()
+      .default(sql`0`),
+    grossTotal: sqliteMoney('gross_total').notNull(),
+    promoDiscount: sqliteMoney('promo_discount').notNull(),
+    subtotalAfterPromo: sqliteMoney('subtotal_after_promo').notNull(),
+    allocatedOrderDiscount: sqliteMoney('allocated_order_discount').notNull(),
+    finalTotal: sqliteMoney('final_total').notNull(),
+    vatRateBpSnapshot: sqliteInt('vat_rate_bp_snapshot').notNull(),
+    netExVat: sqliteMoney('net_ex_vat').notNull(),
+    vatTotal: sqliteMoney('vat_total').notNull(),
+    mxikSnapshot: text('mxik_snapshot'),
+    packageCodeSnapshot: text('package_code_snapshot'),
+  }),
+  (self) => [
+    uniqueIndex('uidx_order_lines_order_sort').on(self.orderId, self.sortOrder),
+    index('idx_order_lines_store_order').on(self.organizationId, self.storeId, self.orderId),
+    check('chk_order_lines_sort_nonneg', sql`${self.sortOrder} >= 0`),
+    check('chk_order_lines_kind', sql`${self.lineKind} IN ('catalog', 'quick_sale')`),
+    check(
+      'chk_order_lines_kind_product',
+      sql`(${self.lineKind} = 'catalog' AND ${self.productId} IS NOT NULL) OR (${self.lineKind} = 'quick_sale' AND ${self.productId} IS NULL AND ${self.variantId} IS NULL)`,
+    ),
+    check('chk_order_lines_name_nonempty', sql`length(trim(${self.itemName})) >= 1`),
+    check(
+      'chk_order_lines_unit',
+      sql`${self.unit} IN ('dona', 'kg', 'g', 'litr', 'metr', 'm2', 'qadoq')`,
+    ),
+    check('chk_order_lines_qty_pos', sql`${self.qty} > 0`),
+    check(
+      'chk_order_lines_unit_int',
+      sql`${self.unit} NOT IN ('dona', 'qadoq') OR (${self.qty} % 1000) = 0`,
+    ),
+    check(
+      'chk_order_lines_money_nonneg',
+      sql`${self.unitPriceSnapshot} >= 0 AND ${self.freeUnits} >= 0 AND ${self.grossTotal} >= 0 AND ${self.promoDiscount} >= 0 AND ${self.subtotalAfterPromo} >= 0 AND ${self.allocatedOrderDiscount} >= 0 AND ${self.finalTotal} >= 0 AND ${self.netExVat} >= 0 AND ${self.vatTotal} >= 0`,
+    ),
+    check(
+      'chk_order_lines_vat_bp',
+      sql`${self.vatRateBpSnapshot} >= 0 AND ${self.vatRateBpSnapshot} <= 10000`,
+    ),
+    check(
+      'chk_order_lines_arithmetic',
+      sql`${self.subtotalAfterPromo} = ${self.grossTotal} - ${self.promoDiscount} AND ${self.finalTotal} = ${self.subtotalAfterPromo} - ${self.allocatedOrderDiscount} AND ${self.netExVat} + ${self.vatTotal} = ${self.finalTotal}`,
+    ),
+  ],
+);
+
+/**
+ * Append-only customer order advance ledger (`FACT`, store-scoped, T1.10).
+ * Every advance intake (`kind = 'advance'`) and advance refund (`kind = 'advance_refund'`) binds
+ * to the active shift & cashier session; does NOT enter sales revenue (`v_sales_lines`) until
+ * delivery settles `'advance'` inside `completeSale`.
+ */
+export const orderPayments = localSchemaRegistry.defineTable(
+  {
+    name: 'order_payments',
+    tableClass: 'FACT',
+    tenantScope: 'store',
+  },
+  (common) => ({
+    ...common,
+    orderId: sqliteUuidV7('order_id')
+      .notNull()
+      .references(() => orders.id),
+    shiftId: sqliteUuidV7('shift_id')
+      .notNull()
+      .references(() => shifts.id),
+    shiftCashierSessionId: sqliteUuidV7('shift_cashier_session_id')
+      .notNull()
+      .references(() => shiftCashierSessions.id),
+    kind: text('kind').notNull(),
+    method: text('method').notNull(),
+    amount: sqliteMoney('amount').notNull(),
+    tenderedAmount: sqliteMoney('tendered_amount'),
+    changeAmount: sqliteMoney('change_amount')
+      .notNull()
+      .default(sql`0`),
+    providerRef: text('provider_ref'),
+    reason: text('reason'),
+    createdByUserId: sqliteUuidV7('created_by_user_id')
+      .notNull()
+      .references(() => users.id),
+    overrideApprovedByUserId: sqliteUuidV7('override_approved_by_user_id').references(
+      () => users.id,
+    ),
+    seq: sqliteInt('seq').notNull().default(0),
+    clientRequestId: sqliteUuidV7('client_request_id').notNull(),
+    requestHash: text('request_hash').notNull(),
+  }),
+  (self) => [
+    uniqueIndex('uidx_order_payments_org_req_seq').on(
+      self.organizationId,
+      self.clientRequestId,
+      self.seq,
+    ),
+    index('idx_order_payments_order').on(self.orderId, self.createdAtMs, self.id),
+    index('idx_order_payments_shift').on(self.shiftId, self.createdAtMs, self.id),
+    index('idx_order_payments_store_kind').on(self.organizationId, self.storeId, self.kind),
+    check('chk_order_payments_seq_nonneg', sql`${self.seq} >= 0`),
+    check('chk_order_payments_kind', sql`${self.kind} IN ('advance', 'advance_refund')`),
+    check(
+      'chk_order_payments_method',
+      sql`${self.method} IN ('cash', 'card', 'uzqr', 'payme', 'click', 'uzum', 'social_card', 'other')`,
+    ),
+    check('chk_order_payments_amt_pos', sql`${self.amount} > 0 AND ${self.changeAmount} >= 0`),
+    check('chk_order_payments_req_hash', sql`length(trim(${self.requestHash})) >= 6`),
+    check(
+      'chk_order_payments_cash_pair',
+      sql`(${self.kind} = 'advance' AND ${self.method} = 'cash' AND ${self.tenderedAmount} IS NOT NULL AND ${self.tenderedAmount} >= ${self.amount} AND ${self.tenderedAmount} - ${self.changeAmount} = ${self.amount}) OR ((${self.kind} <> 'advance' OR ${self.method} <> 'cash') AND ${self.tenderedAmount} IS NULL AND ${self.changeAmount} = 0)`,
+    ),
+    check(
+      'chk_order_payments_refund_reason',
+      sql`${self.kind} <> 'advance_refund' OR (${self.reason} IS NOT NULL AND length(trim(${self.reason})) >= 1)`,
     ),
   ],
 );

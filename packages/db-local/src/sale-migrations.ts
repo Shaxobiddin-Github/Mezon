@@ -43,6 +43,7 @@ export function buildSaleMonotoneTriggersSql(): string[] {
       '  NEW."receipt_no" IS NOT OLD."receipt_no" OR',
       '  NEW."receipt_code" IS NOT OLD."receipt_code" OR',
       '  NEW."source_cart_id" IS NOT OLD."source_cart_id" OR',
+      '  NEW."source_order_id" IS NOT OLD."source_order_id" OR',
       '  NEW."cashier_user_id" IS NOT OLD."cashier_user_id" OR',
       '  NEW."completed_by_user_id" IS NOT OLD."completed_by_user_id" OR',
       '  NEW."customer_id" IS NOT OLD."customer_id" OR',

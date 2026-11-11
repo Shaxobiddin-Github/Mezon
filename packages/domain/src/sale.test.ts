@@ -9,16 +9,19 @@ import {
   MAX_PROVIDER_REF_LENGTH,
   type NonCashPaymentMethod,
   PAYMENT_METHODS,
+  SALE_PAYMENT_METHODS,
   type SalePaymentInput,
   ZERO_MONEY,
   canonicalizeCompleteSaleRequest,
   formatReceiptCode,
   isCashMoveInflow,
   isCashMoveType,
+  isSalePaymentMethod,
   moneyFromTiyin,
   moneyToTiyin,
   normalizePaymentProviderRef,
   parsePaymentMethod,
+  parseSalePaymentMethod,
   parseUuidV7,
   resolveSalePayments,
   validateCashSalePayment,
@@ -55,12 +58,19 @@ describe('@mezon/domain - sale payments, mixed methods, debt, cash_moves & invar
       'sale_cash_in',
       'debt_payment_in',
       'cash_in',
+      'advance_cash_in',
       'sale_change_out',
       'refund_cash_out',
       'supplier_payment_out',
       'cash_out',
       'encashment',
+      'advance_change_out',
+      'advance_refund_out',
     ]);
+    expect(SALE_PAYMENT_METHODS).toEqual([...PAYMENT_METHODS, 'advance']);
+    expect(isSalePaymentMethod('advance')).toBe(true);
+    expect(parseSalePaymentMethod('advance')).toBe('advance');
+    expect(() => parsePaymentMethod('advance')).toThrow(DomainError);
 
     expect(normalizePaymentProviderRef(undefined)).toBeNull();
     expect(normalizePaymentProviderRef(null)).toBeNull();
@@ -495,5 +505,53 @@ describe('@mezon/domain - sale payments, mixed methods, debt, cash_moves & invar
       ),
       { numRuns: 500 },
     );
+  });
+
+  it('rejects advance payments by default and allows a single advance row only when allowAdvancePayment is true', () => {
+    expect(() =>
+      resolveSalePayments({
+        totalFinal: moneyFromTiyin(100_000n),
+        debtAmount: ZERO_MONEY,
+        customerId: null,
+        payments: [{ method: 'advance', amount: moneyFromTiyin(100_000n) }],
+      }),
+    ).toThrow(DomainError);
+
+    expect(() =>
+      validateSalePaymentsInvariant({
+        totalFinal: moneyFromTiyin(100_000n),
+        debtAmount: ZERO_MONEY,
+        customerId: null,
+        payments: [
+          {
+            method: 'advance',
+            amount: moneyFromTiyin(100_000n),
+            tenderedAmount: null,
+            changeAmount: ZERO_MONEY,
+          },
+        ],
+      }),
+    ).toThrow(DomainError);
+
+    const allowed = resolveSalePayments({
+      totalFinal: moneyFromTiyin(100_000n),
+      debtAmount: ZERO_MONEY,
+      customerId: null,
+      allowAdvancePayment: true,
+      payments: [
+        { method: 'advance', amount: moneyFromTiyin(40_000n) },
+        { method: 'cash', tenderedAmount: moneyFromTiyin(100_000n) },
+      ],
+    });
+    expect(() =>
+      validateSalePaymentsInvariant({
+        totalFinal: moneyFromTiyin(100_000n),
+        debtAmount: ZERO_MONEY,
+        customerId: null,
+        allowAdvancePayment: true,
+        payments: allowed.payments,
+      }),
+    ).not.toThrow();
+    expect(allowed.changeAmount).toBe(moneyFromTiyin(40_000n));
   });
 });

@@ -25,10 +25,13 @@ import {
   normalizeMandatoryReason,
   parsePaymentMethod,
   parseProductUnit,
+  parseSalePaymentMethod,
   parseUuidV7,
   quantityFromMilli,
   quantityToMilli,
+  resolveOrderReturnEffectivePaidByMethod,
   resolveReturnPayments,
+  summarizeOrderPayments,
 } from '@mezon/domain';
 import { and, asc, eq, lt } from 'drizzle-orm';
 import type { BetterSQLite3Database } from 'drizzle-orm/better-sqlite3';
@@ -44,6 +47,7 @@ import { getActiveShiftDrawerBalanceSync, requireOpenShiftSessionSync } from './
 import {
   cashMoves,
   localHubConfig,
+  orderPayments,
   payments,
   products,
   returnLines,
@@ -279,6 +283,7 @@ function toStoredVoidedSale(
     storeId: row.storeId,
     deviceId: row.deviceId,
     sourceCartId: row.sourceCartId,
+    sourceOrderId: row.sourceOrderId,
     cashierUserId: row.cashierUserId,
     completedByUserId: row.completedByUserId,
     customerId: row.customerId,
@@ -583,6 +588,12 @@ export class SqliteReturnStore {
       }
       if (saleRow.voidedAtMs !== null) {
         throw new DomainError('SALE_ALREADY_VOIDED', `Sale "${validSaleId}" is already voided`);
+      }
+      if (saleRow.sourceOrderId !== null) {
+        throw new DomainError(
+          'ORDER_SALE_USE_RETURN',
+          `Delivered order receipt "${validSaleId}" cannot be voided; create a return instead`,
+        );
       }
 
       if (saleRow.shiftId !== activeShift.shift.id) {
@@ -1068,12 +1079,43 @@ export class SqliteReturnStore {
       }
 
       // 5) Validate per-method refund limits (`payments.amount` - prior returned), T1.7 hook, & drawer cash
-      const originalPaidByMethod = createEmptyPaymentMethodMap();
-      for (const p of salePaymentRows) {
-        const m = parsePaymentMethod(p.method);
-        originalPaidByMethod[m] = moneyFromTiyin(
-          moneyToTiyin(originalPaidByMethod[m]) + moneyToTiyin(p.amount),
+      let originalPaidByMethod = createEmptyPaymentMethodMap();
+      if (saleRow.sourceOrderId !== null) {
+        // O1 / T1.6: Expand 'advance' row in delivered order sale payments into real order_payments methods.
+        const ordPayRows = session.db
+          .select()
+          .from(orderPayments)
+          .where(
+            and(
+              eq(orderPayments.organizationId, ctx.organizationId),
+              eq(orderPayments.storeId, ctx.storeId),
+              eq(orderPayments.orderId, saleRow.sourceOrderId),
+            ),
+          )
+          .orderBy(asc(orderPayments.createdAtMs), asc(orderPayments.id))
+          .all();
+        const advSummary = summarizeOrderPayments(
+          ordPayRows.map((op) => ({
+            kind: op.kind as 'advance' | 'advance_refund',
+            method: parsePaymentMethod(op.method),
+            amount: op.amount,
+          })),
         );
+        originalPaidByMethod = resolveOrderReturnEffectivePaidByMethod({
+          salePayments: salePaymentRows.map((p) => ({
+            method: parseSalePaymentMethod(p.method),
+            amount: p.amount,
+          })),
+          netAdvanceByMethod: advSummary.netAdvanceByMethod,
+          netAdvanceTotal: advSummary.netAdvance,
+        });
+      } else {
+        for (const p of salePaymentRows) {
+          const m = parsePaymentMethod(p.method);
+          originalPaidByMethod[m] = moneyFromTiyin(
+            moneyToTiyin(originalPaidByMethod[m]) + moneyToTiyin(p.amount),
+          );
+        }
       }
 
       const priorReturnPaymentRows = session.db

@@ -1,14 +1,16 @@
 import { createHash } from 'node:crypto';
 import {
   type CartLineKind,
+  type DeliverSalePaymentInput,
   DomainError,
   MAX_MONEY_TIYIN,
   type ManualDiscountMode,
   type Money,
-  type PaymentMethod,
+  type NegativeStockPolicy,
   type ProductUnit,
   type Quantity,
   type SalePaymentInput,
+  type SalePaymentMethod,
   type UnixMs,
   type UuidV7,
   ZERO_MONEY,
@@ -20,6 +22,7 @@ import {
   negateMoney,
   parseNegativeStockPolicy,
   parseProductUnit,
+  parseSalePaymentMethod,
   parseUuidV7,
   quantityFromMilli,
   quantityToMilli,
@@ -40,8 +43,17 @@ import {
   recordSaleDebtInTxSync,
 } from './customer-repo.js';
 import { advanceReceiptSeqSync } from './device-state.js';
-import { cashMoves, localCarts, payments, saleLines, sales } from './schema/index.js';
 import {
+  cashMoves,
+  localCarts,
+  payments,
+  products,
+  productVariants,
+  saleLines,
+  sales,
+} from './schema/index.js';
+import {
+  type ActiveShiftSessionContext,
   getActiveShiftDrawerBalanceSync,
   getActiveStoreCashBalanceSync,
   requireOpenShiftSessionSync,
@@ -53,7 +65,11 @@ import {
   prefetchMutablePoolStatesSync,
   stockPoolKey,
 } from './stock-repo.js';
-import { type SqliteUnitOfWork, runConnectionReadOnly } from './uow.js';
+import {
+  type SqliteUnitOfWork,
+  type SqliteUnitOfWorkSession,
+  runConnectionReadOnly,
+} from './uow.js';
 import { insertFact, insertMonotone } from './writers.js';
 
 export interface SaleRuntimeContext {
@@ -122,7 +138,7 @@ export interface StoredSaleLineRecord {
 
 export interface StoredSalePaymentRecord {
   readonly id: UuidV7;
-  readonly method: PaymentMethod;
+  readonly method: SalePaymentMethod;
   readonly amount: Money;
   readonly tenderedAmount: Money | null;
   readonly changeAmount: Money;
@@ -140,6 +156,7 @@ export interface StoredSaleRecord {
   readonly storeId: UuidV7;
   readonly deviceId: UuidV7;
   readonly sourceCartId: UuidV7 | null;
+  readonly sourceOrderId: UuidV7 | null;
   readonly cashierUserId: UuidV7;
   readonly completedByUserId: UuidV7;
   readonly customerId: UuidV7 | null;
@@ -251,7 +268,7 @@ export function toStoredSaleLine(row: typeof saleLines.$inferSelect): StoredSale
 export function toStoredSalePayment(row: typeof payments.$inferSelect): StoredSalePaymentRecord {
   return {
     id: row.id,
-    method: row.method as PaymentMethod,
+    method: parseSalePaymentMethod(row.method),
     amount: row.amount,
     tenderedAmount: row.tenderedAmount,
     changeAmount: row.changeAmount,
@@ -260,7 +277,7 @@ export function toStoredSalePayment(row: typeof payments.$inferSelect): StoredSa
   };
 }
 
-function toStoredSale(
+export function toStoredSale(
   row: typeof sales.$inferSelect,
   lineRows: readonly (typeof saleLines.$inferSelect)[],
   paymentRows: readonly (typeof payments.$inferSelect)[],
@@ -273,6 +290,7 @@ function toStoredSale(
     storeId: row.storeId,
     deviceId: row.deviceId,
     sourceCartId: row.sourceCartId,
+    sourceOrderId: row.sourceOrderId,
     cashierUserId: row.cashierUserId,
     completedByUserId: row.completedByUserId,
     customerId: row.customerId,
@@ -363,6 +381,468 @@ export function getHistoricalStoreCashMovesTotalSync(
   return moneyFromTiyin(totalTiyin);
 }
 
+export interface SaleCoreEvaluatedLine {
+  readonly id: UuidV7;
+  readonly sortOrder: number;
+  readonly lineKind: CartLineKind;
+  readonly productId: UuidV7 | null;
+  readonly variantId: UuidV7 | null;
+  readonly categoryIdSnapshot: UuidV7 | null;
+  readonly name: string;
+  readonly unit: ProductUnit;
+  readonly qty: Quantity;
+  readonly unitPriceSnapshot: Money;
+  readonly appliedPromotionId: UuidV7 | null;
+  readonly appliedPromotionName: string | null;
+  readonly freeUnits: number;
+  readonly grossTotal: Money;
+  readonly promoDiscount: Money;
+  readonly subtotalAfterPromo: Money;
+  readonly allocatedOrderDiscount: Money;
+  readonly finalTotal: Money;
+  readonly vatRateBpSnapshot: number;
+  readonly netExVat: Money;
+  readonly vatTotal: Money;
+  readonly mxikSnapshot: string | null;
+  readonly packageCodeSnapshot: string | null;
+}
+
+export interface CompleteSaleCoreInTxInput {
+  readonly organizationId: UuidV7;
+  readonly storeId: UuidV7;
+  readonly deviceId: UuidV7;
+  readonly nowMs: UnixMs;
+  readonly activeShift: ActiveShiftSessionContext;
+  readonly sourceCartId: UuidV7 | null;
+  readonly sourceOrderId: UuidV7 | null;
+  readonly cashierUserId: UuidV7;
+  readonly actorUserId: UuidV7;
+  readonly clientRequestId: UuidV7;
+  readonly requestHash: string;
+  readonly expectedTotal: Money;
+  readonly debtAmount: Money;
+  readonly customerId: UuidV7 | null;
+  readonly dueDays: number | null | undefined;
+  readonly creditOverrideApprovedByUserId: UuidV7 | null;
+  readonly payments: readonly DeliverSalePaymentInput[];
+  readonly allowAdvancePayment: boolean;
+  readonly negativeStockPolicy: NegativeStockPolicy;
+  readonly productsById: ReadonlyMap<UuidV7, typeof products.$inferSelect>;
+  readonly variantsById: ReadonlyMap<UuidV7, typeof productVariants.$inferSelect>;
+  readonly evaluated: {
+    readonly subtotalGross: Money;
+    readonly totalPromoDiscount: Money;
+    readonly subtotalAfterPromo: Money;
+    readonly manualDiscountMode: ManualDiscountMode;
+    readonly manualDiscountValue: bigint;
+    readonly manualDiscountReason: string | null;
+    readonly effectiveOrderDiscount: Money;
+    readonly totalFinal: Money;
+    readonly totalNetExVat: Money;
+    readonly totalVat: Money;
+    readonly totalFreeUnits: number;
+    readonly exceedsCashierLimit: boolean;
+    readonly discountAuthorized: boolean;
+    readonly discountOverrideRequired: boolean;
+    readonly overrideApprovedByUserId: UuidV7 | null;
+    readonly overrideApprovedAmount: Money | null;
+    readonly overrideApprovedAtMs: UnixMs | null;
+    readonly lines: readonly SaleCoreEvaluatedLine[];
+  };
+}
+
+export interface CompleteSaleCoreInTxOutcome {
+  readonly sale: StoredSaleRecord;
+  readonly warnings: readonly StockMoveWarningRecord[];
+}
+
+/**
+ * Shared atomic receipt completion core (`GEMINI.md` 3.1.9 & 3.1.10).
+ * Used identically by POS `completeSale` (re-evaluated cart) and order `deliverOrder`
+ * (O2 frozen order snapshot + `'advance'` payment without double `cash_moves` recording).
+ */
+export function completeSaleCoreInTxSync(
+  session: SqliteUnitOfWorkSession,
+  input: CompleteSaleCoreInTxInput,
+): CompleteSaleCoreInTxOutcome {
+  const { evaluated } = input;
+  const expectedTiyin = moneyToTiyin(input.expectedTotal);
+  if (expectedTiyin < 0n || expectedTiyin > MAX_MONEY_TIYIN) {
+    throw new DomainError(
+      'VALIDATION_ERROR',
+      `expectedTotal must be between 0 and ${MAX_MONEY_TIYIN.toString()} tiyin`,
+    );
+  }
+  const actualTiyin = moneyToTiyin(evaluated.totalFinal);
+  if (actualTiyin !== expectedTiyin) {
+    throw new DomainError(
+      'SALE_TOTAL_CHANGED',
+      `Sale total changed from ${expectedTiyin.toString()} to ${actualTiyin.toString()}`,
+      {
+        details: {
+          expectedTotal: expectedTiyin.toString(),
+          actualTotal: actualTiyin.toString(),
+          subtotalGross: moneyToTiyin(evaluated.subtotalGross).toString(),
+          totalPromoDiscount: moneyToTiyin(evaluated.totalPromoDiscount).toString(),
+          effectiveOrderDiscount: moneyToTiyin(evaluated.effectiveOrderDiscount).toString(),
+        },
+      },
+    );
+  }
+
+  assertCartDiscountAuthorized({
+    lines: [],
+    subtotalGross: evaluated.subtotalGross,
+    totalPromoDiscount: evaluated.totalPromoDiscount,
+    subtotalAfterPromo: evaluated.subtotalAfterPromo,
+    requestedOrderDiscount: evaluated.effectiveOrderDiscount,
+    effectiveOrderDiscount: evaluated.effectiveOrderDiscount,
+    totalFinal: evaluated.totalFinal,
+    totalNetExVat: evaluated.totalNetExVat,
+    totalVat: evaluated.totalVat,
+    totalFreeUnits: BigInt(evaluated.totalFreeUnits),
+    exceedsCashierLimit: evaluated.exceedsCashierLimit,
+    discountAuthorized: evaluated.discountAuthorized,
+    discountOverrideRequired: evaluated.discountOverrideRequired,
+  });
+
+  // T1.7 customer registry & debt validation + mixed payment resolution + strict invariant check
+  const debtTiyin = moneyToTiyin(input.debtAmount);
+  if (debtTiyin < 0n || debtTiyin > MAX_MONEY_TIYIN) {
+    throw new DomainError(
+      'VALIDATION_ERROR',
+      `debtAmount must be between 0 and ${MAX_MONEY_TIYIN.toString()} tiyin`,
+    );
+  }
+  if (debtTiyin > 0n && input.customerId === null) {
+    throw new DomainError('CUSTOMER_REQUIRED', 'Partial or full debt requires an active customer');
+  }
+
+  const resolvedPayments = resolveSalePayments({
+    totalFinal: evaluated.totalFinal,
+    debtAmount: input.debtAmount,
+    customerId: input.customerId,
+    allowAdvancePayment: input.allowAdvancePayment,
+    payments: input.payments,
+  });
+  validateSalePaymentsInvariant({
+    totalFinal: evaluated.totalFinal,
+    debtAmount: input.debtAmount,
+    customerId: input.customerId,
+    allowAdvancePayment: input.allowAdvancePayment,
+    payments: resolvedPayments.payments,
+  });
+
+  const customerSalePrep =
+    input.customerId !== null
+      ? prepareCustomerForSaleInTxSync(session, {
+          organizationId: input.organizationId,
+          customerId: input.customerId,
+          debtAmount: input.debtAmount,
+          dueDays: input.dueDays,
+          creditOverrideApprovedByUserId: input.creditOverrideApprovedByUserId,
+          saleCreatedAtMs: input.nowMs,
+        })
+      : null;
+
+  // F3 HOOK POINT (`packages/rules`, PF-246 compliance):
+  // Evaluate signed legal rule bundle here (banned MXIK cash block, mixed receipt cash ban,
+  // 25M UZS limit, prescription/expiry checks) AFTER server totals & payment invariants pass and
+  // BEFORE allocating `receipt_no` or modifying inventory/sales/payments/cash_moves.
+
+  // Validate catalog integrity & batch-prefetch full mutable pool states via stock-repo's single loader
+  const trackedTargets: StockPoolPrefetchTarget[] = [];
+
+  for (const line of evaluated.lines) {
+    if (line.lineKind !== 'catalog' || line.productId === null) {
+      continue;
+    }
+    const prod = input.productsById.get(line.productId);
+    if (!prod) {
+      throw new DomainError(
+        'PRODUCT_NOT_FOUND',
+        `Catalog product "${line.productId}" is missing or deleted`,
+      );
+    }
+    if (line.variantId !== null) {
+      const variant = input.variantsById.get(line.variantId);
+      if (!variant || variant.productId !== prod.id) {
+        throw new DomainError(
+          'VARIANT_NOT_FOUND',
+          `Variant "${line.variantId}" is missing or deleted`,
+        );
+      }
+    }
+    if (!prod.unlimited) {
+      trackedTargets.push({
+        productId: prod.id,
+        variantId: line.variantId,
+        trackBatches: Boolean(prod.trackBatches),
+      });
+    }
+  }
+
+  const sessionPoolCache = prefetchMutablePoolStatesSync(session, {
+    organizationId: input.organizationId,
+    storeId: input.storeId,
+    targets: trackedTargets,
+  });
+
+  // Cumulative check in 'block' mode so ALL short lines (including duplicate-product lines) fail clearly
+  if (input.negativeStockPolicy === 'block' && sessionPoolCache.size > 0) {
+    const remainingAvailableMilli = new Map<string, bigint>();
+    for (const [key, state] of sessionPoolCache.entries()) {
+      const onHand = quantityToMilli(state.qtyOnHand);
+      remainingAvailableMilli.set(key, onHand > 0n ? onHand : 0n);
+    }
+
+    const insufficientLines: {
+      readonly cartLineId: string;
+      readonly productId: string;
+      readonly variantId: string | null;
+      readonly itemName: string;
+      readonly requestedQty: string;
+      readonly availableQty: string;
+      readonly deficitQty: string;
+    }[] = [];
+
+    for (const line of evaluated.lines) {
+      if (line.lineKind !== 'catalog' || line.productId === null) {
+        continue;
+      }
+      const prod = input.productsById.get(line.productId);
+      if (!prod || prod.unlimited) {
+        continue;
+      }
+      const key = stockPoolKey(prod.id, line.variantId);
+      const avail = remainingAvailableMilli.get(key) ?? 0n;
+      const need = quantityToMilli(line.qty);
+      if (avail < need) {
+        insufficientLines.push({
+          cartLineId: line.id,
+          productId: prod.id,
+          variantId: line.variantId,
+          itemName: line.name,
+          requestedQty: need.toString(),
+          availableQty: avail.toString(),
+          deficitQty: (need - avail).toString(),
+        });
+        remainingAvailableMilli.set(key, 0n);
+      } else {
+        remainingAvailableMilli.set(key, avail - need);
+      }
+    }
+
+    if (insufficientLines.length > 0) {
+      throw new DomainError(
+        'INSUFFICIENT_STOCK',
+        `Insufficient stock for ${insufficientLines.length} cart line(s)`,
+        { details: { insufficientLines } },
+      );
+    }
+  }
+
+  // Allocate gapless device receipt_no inside same transaction (auto-rolled back on abort)
+  const receiptNo = advanceReceiptSeqSync(session.internalGetSqlite(), {
+    deviceId: input.deviceId,
+    updatedAtMs: input.nowMs,
+  });
+  const receiptCode = formatReceiptCode(input.deviceId, receiptNo);
+
+  // Insert `sales` (MONOTONE) first so `sale_lines`, `payments`, and `cash_moves` reference valid saleId
+  const saleWrite = insertMonotone(session, sales, {
+    organizationId: input.organizationId,
+    storeId: input.storeId,
+    values: {
+      receiptNo,
+      receiptCode,
+      sourceCartId: input.sourceCartId,
+      sourceOrderId: input.sourceOrderId,
+      cashierUserId: input.cashierUserId,
+      completedByUserId: input.actorUserId,
+      customerId: input.customerId,
+      shiftId: input.activeShift.shift.id,
+      shiftCashierSessionId: input.activeShift.activeSession.id,
+      clientRequestId: input.clientRequestId,
+      requestHash: input.requestHash,
+      subtotalGross: evaluated.subtotalGross,
+      totalPromoDiscount: evaluated.totalPromoDiscount,
+      subtotalAfterPromo: evaluated.subtotalAfterPromo,
+      manualDiscountMode: evaluated.manualDiscountMode,
+      manualDiscountValue: evaluated.manualDiscountValue,
+      manualDiscountReason: evaluated.manualDiscountReason,
+      orderDiscountAmount: evaluated.effectiveOrderDiscount,
+      totalFinal: evaluated.totalFinal,
+      totalNetExVat: evaluated.totalNetExVat,
+      totalVat: evaluated.totalVat,
+      totalPaid: resolvedPayments.totalPaid,
+      debtAmount: resolvedPayments.debtAmount,
+      changeAmount: resolvedPayments.changeAmount,
+      overrideApprovedByUserId: evaluated.overrideApprovedByUserId,
+      overrideApprovedAmount: evaluated.overrideApprovedAmount,
+      overrideApprovedAtMs: evaluated.overrideApprovedAtMs,
+      voidedAtMs: null,
+      voidedByUserId: null,
+      voidReason: null,
+      voidClientRequestId: null,
+      voidRequestHash: null,
+    },
+    eventType: 'sale.completed',
+    schemaVersion: 1,
+  });
+  const saleId = saleWrite.entityId;
+
+  // Deduct stock (for tracked catalog lines) and insert immutable `sale_lines` (`FACT`)
+  const allWarnings: StockMoveWarningRecord[] = [];
+  const insertedLines: (typeof saleLines.$inferSelect)[] = [];
+
+  for (const line of evaluated.lines) {
+    let lineCostTiyin = 0n;
+
+    if (line.lineKind === 'catalog' && line.productId !== null) {
+      const prod = input.productsById.get(line.productId)!;
+      if (!prod.unlimited) {
+        const stockOut = applyOutboundStockMoveSync(session, {
+          organizationId: input.organizationId,
+          storeId: input.storeId,
+          productId: prod.id,
+          variantId: line.variantId,
+          reason: 'sale',
+          needQty: line.qty,
+          overridePolicy: input.negativeStockPolicy,
+          sourceType: 'sale',
+          sourceId: saleId,
+          note: `Sale receipt ${receiptCode}`,
+          actorUserId: input.actorUserId,
+          prefetchedProduct: prod,
+          sessionPoolCache,
+        });
+        for (const m of stockOut.moves) {
+          lineCostTiyin += -moneyToTiyin(m.costValueDelta);
+        }
+        allWarnings.push(...stockOut.warnings);
+      }
+    }
+
+    const lineWrite = insertFact(session, saleLines, {
+      organizationId: input.organizationId,
+      storeId: input.storeId,
+      values: {
+        saleId,
+        sortOrder: line.sortOrder,
+        lineKind: line.lineKind,
+        productId: line.productId,
+        variantId: line.variantId,
+        categoryIdSnapshot: line.categoryIdSnapshot,
+        itemName: line.name,
+        unit: line.unit,
+        qty: line.qty,
+        unitPriceSnapshot: line.unitPriceSnapshot,
+        appliedPromotionId: line.appliedPromotionId,
+        appliedPromotionName: line.appliedPromotionName,
+        freeUnits: BigInt(line.freeUnits),
+        grossTotal: line.grossTotal,
+        promoDiscount: line.promoDiscount,
+        subtotalAfterPromo: line.subtotalAfterPromo,
+        allocatedOrderDiscount: line.allocatedOrderDiscount,
+        finalTotal: line.finalTotal,
+        vatRateBpSnapshot: line.vatRateBpSnapshot,
+        netExVat: line.netExVat,
+        vatTotal: line.vatTotal,
+        mxikSnapshot: line.mxikSnapshot,
+        packageCodeSnapshot: line.packageCodeSnapshot,
+        costValue: moneyFromTiyin(lineCostTiyin),
+      },
+      eventType: 'sale_line.created',
+      schemaVersion: 1,
+    });
+    insertedLines.push(lineWrite.row);
+  }
+
+  // Insert immutable `payments` (`FACT`) & atomic `cash_moves` (`FACT`) — `'advance'` NEVER emits `cash_moves`
+  const insertedPayments: (typeof payments.$inferSelect)[] = [];
+  for (const item of resolvedPayments.payments) {
+    const paymentWrite = insertFact(session, payments, {
+      organizationId: input.organizationId,
+      storeId: input.storeId,
+      values: {
+        saleId,
+        method: item.method,
+        amount: item.amount,
+        tenderedAmount: item.tenderedAmount,
+        changeAmount: item.changeAmount,
+        providerRef: item.providerRef,
+        providerMetaJson: null,
+      },
+      eventType: 'payment.created',
+      schemaVersion: 1,
+    });
+    insertedPayments.push(paymentWrite.row);
+
+    if (item.method === 'cash' && item.tenderedAmount !== null) {
+      insertFact(session, cashMoves, {
+        organizationId: input.organizationId,
+        storeId: input.storeId,
+        values: {
+          shiftId: input.activeShift.shift.id,
+          shiftCashierSessionId: input.activeShift.activeSession.id,
+          type: 'sale_cash_in',
+          amountDelta: item.tenderedAmount,
+          sourceType: 'sale',
+          sourceId: saleId,
+          paymentId: paymentWrite.entityId,
+          expenseCategory: null,
+          reason: `Sale receipt ${receiptCode} cash in`,
+          createdByUserId: input.actorUserId,
+        },
+        eventType: 'cash_move.created',
+        schemaVersion: 1,
+      });
+
+      if (moneyToTiyin(item.changeAmount) > 0n) {
+        insertFact(session, cashMoves, {
+          organizationId: input.organizationId,
+          storeId: input.storeId,
+          values: {
+            shiftId: input.activeShift.shift.id,
+            shiftCashierSessionId: input.activeShift.activeSession.id,
+            type: 'sale_change_out',
+            amountDelta: negateMoney(item.changeAmount),
+            sourceType: 'sale',
+            sourceId: saleId,
+            paymentId: paymentWrite.entityId,
+            expenseCategory: null,
+            reason: `Sale receipt ${receiptCode} change out`,
+            createdByUserId: input.actorUserId,
+          },
+          eventType: 'cash_move.created',
+          schemaVersion: 1,
+        });
+      }
+    }
+  }
+
+  // Record `sale_debt` in `customer_ledger` (`FACT`) & update `local_customer_balances` in the same tx
+  if (customerSalePrep !== null && input.customerId !== null && debtTiyin > 0n) {
+    recordSaleDebtInTxSync(session, {
+      organizationId: input.organizationId,
+      storeId: input.storeId,
+      customerId: input.customerId,
+      saleId,
+      debtAmount: resolvedPayments.debtAmount,
+      dueAtMs: customerSalePrep.dueAtMs,
+      actorUserId: input.actorUserId,
+      overrideApprovedByUserId: input.creditOverrideApprovedByUserId,
+      nowMs: saleWrite.row.createdAtMs,
+    });
+  }
+
+  return {
+    sale: toStoredSale(saleWrite.row, insertedLines, insertedPayments),
+    warnings: allWarnings,
+  };
+}
+
 export class SqliteSaleStore {
   private readonly connection: LocalSqliteConnection;
   private readonly getRuntimeContext: () => SaleRuntimeContext | null;
@@ -430,7 +910,7 @@ export class SqliteSaleStore {
       input.customerId !== undefined && input.customerId !== null
         ? parseUuidV7(input.customerId)
         : null;
-    const dueDays = input.dueDays ?? null;
+    const dueDays = input.dueDays;
     const creditOverrideApprovedByUserId =
       input.creditOverrideApprovedByUserId !== undefined &&
       input.creditOverrideApprovedByUserId !== null
@@ -519,7 +999,7 @@ export class SqliteSaleStore {
         throw new DomainError('CART_EMPTY', 'Cannot complete sale for an empty cart');
       }
 
-      // 3) Server-side recomputation at current clock time + price/promo/override checks
+      // 3) Server-side recomputation at current clock time & shared completion core
       const nowMs = session.nowUnixMs();
       const { detail, hubConfig, productsById, variantsById } = evaluateCartRowInDbSync({
         db: session.db,
@@ -529,387 +1009,60 @@ export class SqliteSaleStore {
         nowMs,
       });
 
-      const expectedTiyin = moneyToTiyin(input.expectedTotal);
-      if (expectedTiyin < 0n || expectedTiyin > MAX_MONEY_TIYIN) {
-        throw new DomainError(
-          'VALIDATION_ERROR',
-          `expectedTotal must be between 0 and ${MAX_MONEY_TIYIN.toString()} tiyin`,
-        );
-      }
-      const actualTiyin = moneyToTiyin(detail.totalFinal);
-      if (actualTiyin !== expectedTiyin) {
-        throw new DomainError(
-          'SALE_TOTAL_CHANGED',
-          `Sale total changed from ${expectedTiyin.toString()} to ${actualTiyin.toString()}`,
-          {
-            details: {
-              expectedTotal: expectedTiyin.toString(),
-              actualTotal: actualTiyin.toString(),
-              subtotalGross: moneyToTiyin(detail.subtotalGross).toString(),
-              totalPromoDiscount: moneyToTiyin(detail.totalPromoDiscount).toString(),
-              effectiveOrderDiscount: moneyToTiyin(detail.effectiveOrderDiscount).toString(),
-            },
-          },
-        );
-      }
-
-      assertCartDiscountAuthorized({
-        lines: [],
-        subtotalGross: detail.subtotalGross,
-        totalPromoDiscount: detail.totalPromoDiscount,
-        subtotalAfterPromo: detail.subtotalAfterPromo,
-        requestedOrderDiscount: detail.requestedOrderDiscount,
-        effectiveOrderDiscount: detail.effectiveOrderDiscount,
-        totalFinal: detail.totalFinal,
-        totalNetExVat: detail.totalNetExVat,
-        totalVat: detail.totalVat,
-        totalFreeUnits: BigInt(detail.totalFreeUnits),
-        exceedsCashierLimit: detail.exceedsCashierLimit,
-        discountAuthorized: detail.discountAuthorized,
-        discountOverrideRequired: detail.discountOverrideRequired,
-      });
-
-      // 4) T1.7 customer registry & debt validation + mixed payment resolution + strict invariant check
-      const debtTiyin = moneyToTiyin(debtAmount);
-      if (debtTiyin < 0n || debtTiyin > MAX_MONEY_TIYIN) {
-        throw new DomainError(
-          'VALIDATION_ERROR',
-          `debtAmount must be between 0 and ${MAX_MONEY_TIYIN.toString()} tiyin`,
-        );
-      }
-      if (debtTiyin > 0n && customerId === null) {
-        throw new DomainError(
-          'CUSTOMER_REQUIRED',
-          'Partial or full debt requires an active customer',
-        );
-      }
-
-      const resolvedPayments = resolveSalePayments({
-        totalFinal: detail.totalFinal,
-        debtAmount,
-        customerId,
-        payments: input.payments,
-      });
-      validateSalePaymentsInvariant({
-        totalFinal: detail.totalFinal,
-        debtAmount,
-        customerId,
-        payments: resolvedPayments.payments,
-      });
-
-      const customerSalePrep =
-        customerId !== null
-          ? prepareCustomerForSaleInTxSync(session, {
-              organizationId: ctx.organizationId,
-              customerId,
-              debtAmount,
-              dueDays: input.dueDays,
-              creditOverrideApprovedByUserId,
-              saleCreatedAtMs: session.nowUnixMs(),
-            })
-          : null;
-
-      // F3 HOOK POINT (`packages/rules`, PF-246 compliance):
-      // Evaluate signed legal rule bundle here (banned MXIK cash block, mixed receipt cash ban,
-      // 25M UZS limit, prescription/expiry checks) AFTER server totals & payment invariants pass and
-      // BEFORE allocating `receipt_no` or modifying inventory/sales/payments/cash_moves.
-
-      // 5) Validate catalog integrity & batch-prefetch full mutable pool states via stock-repo's single loader
       const negativeStockPolicy = parseNegativeStockPolicy(hubConfig.negativeStockPolicy);
-      const trackedTargets: StockPoolPrefetchTarget[] = [];
-
-      for (const line of detail.lines) {
-        if (line.lineKind !== 'catalog' || line.productId === null) {
-          continue;
-        }
-        const prod = productsById.get(line.productId);
-        if (!prod) {
-          throw new DomainError(
-            'PRODUCT_NOT_FOUND',
-            `Catalog product "${line.productId}" is missing or deleted`,
-          );
-        }
-        if (line.variantId !== null) {
-          const variant = variantsById.get(line.variantId);
-          if (!variant || variant.productId !== prod.id) {
-            throw new DomainError(
-              'VARIANT_NOT_FOUND',
-              `Variant "${line.variantId}" is missing or deleted`,
-            );
-          }
-        }
-        if (!prod.unlimited) {
-          trackedTargets.push({
-            productId: prod.id,
-            variantId: line.variantId,
-            trackBatches: Boolean(prod.trackBatches),
-          });
-        }
-      }
-
-      const sessionPoolCache = prefetchMutablePoolStatesSync(session, {
+      const { sale, warnings } = completeSaleCoreInTxSync(session, {
         organizationId: ctx.organizationId,
         storeId: ctx.storeId,
-        targets: trackedTargets,
-      });
-
-      // Cumulative check in 'block' mode so ALL short lines (including duplicate-product lines) fail clearly
-      if (negativeStockPolicy === 'block' && sessionPoolCache.size > 0) {
-        const remainingAvailableMilli = new Map<string, bigint>();
-        for (const [key, state] of sessionPoolCache.entries()) {
-          const onHand = quantityToMilli(state.qtyOnHand);
-          remainingAvailableMilli.set(key, onHand > 0n ? onHand : 0n);
-        }
-
-        const insufficientLines: {
-          readonly cartLineId: string;
-          readonly productId: string;
-          readonly variantId: string | null;
-          readonly itemName: string;
-          readonly requestedQty: string;
-          readonly availableQty: string;
-          readonly deficitQty: string;
-        }[] = [];
-
-        for (const line of detail.lines) {
-          if (line.lineKind !== 'catalog' || line.productId === null) {
-            continue;
-          }
-          const prod = productsById.get(line.productId);
-          if (!prod || prod.unlimited) {
-            continue;
-          }
-          const key = stockPoolKey(prod.id, line.variantId);
-          const avail = remainingAvailableMilli.get(key) ?? 0n;
-          const need = quantityToMilli(line.qty);
-          if (avail < need) {
-            insufficientLines.push({
-              cartLineId: line.id,
-              productId: prod.id,
-              variantId: line.variantId,
-              itemName: line.name,
-              requestedQty: need.toString(),
-              availableQty: avail.toString(),
-              deficitQty: (need - avail).toString(),
-            });
-            remainingAvailableMilli.set(key, 0n);
-          } else {
-            remainingAvailableMilli.set(key, avail - need);
-          }
-        }
-
-        if (insufficientLines.length > 0) {
-          throw new DomainError(
-            'INSUFFICIENT_STOCK',
-            `Insufficient stock for ${insufficientLines.length} cart line(s)`,
-            { details: { insufficientLines } },
-          );
-        }
-      }
-
-      // 6) Allocate gapless device receipt_no inside same transaction (auto-rolled back on abort)
-      const receiptNo = advanceReceiptSeqSync(session.internalGetSqlite(), {
         deviceId: ctx.uow.deviceId,
-        updatedAtMs: nowMs,
-      });
-      const receiptCode = formatReceiptCode(ctx.uow.deviceId, receiptNo);
-
-      // 7) Insert `sales` (MONOTONE) first so `sale_lines`, `payments`, and `cash_moves` reference valid saleId
-      const saleWrite = insertMonotone(session, sales, {
-        organizationId: ctx.organizationId,
-        storeId: ctx.storeId,
-        values: {
-          receiptNo,
-          receiptCode,
-          sourceCartId: cartId,
-          cashierUserId: cartRow.cashierUserId,
-          completedByUserId: actorUserId,
-          customerId,
-          shiftId: activeShift.shift.id,
-          shiftCashierSessionId: activeShift.activeSession.id,
-          clientRequestId,
-          requestHash: incomingRequestHash,
+        nowMs,
+        activeShift,
+        sourceCartId: cartId,
+        sourceOrderId: null,
+        cashierUserId: cartRow.cashierUserId,
+        actorUserId,
+        clientRequestId,
+        requestHash: incomingRequestHash,
+        expectedTotal: input.expectedTotal,
+        debtAmount,
+        customerId,
+        dueDays,
+        creditOverrideApprovedByUserId,
+        payments: input.payments,
+        allowAdvancePayment: false,
+        negativeStockPolicy,
+        productsById,
+        variantsById,
+        evaluated: {
           subtotalGross: detail.subtotalGross,
           totalPromoDiscount: detail.totalPromoDiscount,
           subtotalAfterPromo: detail.subtotalAfterPromo,
           manualDiscountMode: detail.manualDiscountMode,
           manualDiscountValue: detail.manualDiscountValue,
           manualDiscountReason: detail.manualDiscountReason,
-          orderDiscountAmount: detail.effectiveOrderDiscount,
+          effectiveOrderDiscount: detail.effectiveOrderDiscount,
           totalFinal: detail.totalFinal,
           totalNetExVat: detail.totalNetExVat,
           totalVat: detail.totalVat,
-          totalPaid: resolvedPayments.totalPaid,
-          debtAmount: resolvedPayments.debtAmount,
-          changeAmount: resolvedPayments.changeAmount,
+          totalFreeUnits: detail.totalFreeUnits,
+          exceedsCashierLimit: detail.exceedsCashierLimit,
+          discountAuthorized: detail.discountAuthorized,
+          discountOverrideRequired: detail.discountOverrideRequired,
           overrideApprovedByUserId: detail.overrideApprovedByUserId,
           overrideApprovedAmount: detail.overrideApprovedAmount,
           overrideApprovedAtMs: detail.overrideApprovedAtMs,
-          voidedAtMs: null,
-          voidedByUserId: null,
-          voidReason: null,
-          voidClientRequestId: null,
-          voidRequestHash: null,
+          lines: detail.lines,
         },
-        eventType: 'sale.completed',
-        schemaVersion: 1,
       });
-      const saleId = saleWrite.entityId;
 
-      // 8) Deduct stock (for tracked catalog lines) and insert immutable `sale_lines` (`FACT`)
-      const allWarnings: StockMoveWarningRecord[] = [];
-      const insertedLines: (typeof saleLines.$inferSelect)[] = [];
-
-      for (const line of detail.lines) {
-        let lineCostTiyin = 0n;
-
-        if (line.lineKind === 'catalog' && line.productId !== null) {
-          const prod = productsById.get(line.productId)!;
-          if (!prod.unlimited) {
-            const stockOut = applyOutboundStockMoveSync(session, {
-              organizationId: ctx.organizationId,
-              storeId: ctx.storeId,
-              productId: prod.id,
-              variantId: line.variantId,
-              reason: 'sale',
-              needQty: line.qty,
-              overridePolicy: negativeStockPolicy,
-              sourceType: 'sale',
-              sourceId: saleId,
-              note: `Sale receipt ${receiptCode}`,
-              actorUserId,
-              prefetchedProduct: prod,
-              sessionPoolCache,
-            });
-            for (const m of stockOut.moves) {
-              lineCostTiyin += -moneyToTiyin(m.costValueDelta);
-            }
-            allWarnings.push(...stockOut.warnings);
-          }
-        }
-
-        const lineWrite = insertFact(session, saleLines, {
-          organizationId: ctx.organizationId,
-          storeId: ctx.storeId,
-          values: {
-            saleId,
-            sortOrder: line.sortOrder,
-            lineKind: line.lineKind,
-            productId: line.productId,
-            variantId: line.variantId,
-            categoryIdSnapshot: line.categoryIdSnapshot,
-            itemName: line.name,
-            unit: line.unit,
-            qty: line.qty,
-            unitPriceSnapshot: line.unitPriceSnapshot,
-            appliedPromotionId: line.appliedPromotionId,
-            appliedPromotionName: line.appliedPromotionName,
-            freeUnits: BigInt(line.freeUnits),
-            grossTotal: line.grossTotal,
-            promoDiscount: line.promoDiscount,
-            subtotalAfterPromo: line.subtotalAfterPromo,
-            allocatedOrderDiscount: line.allocatedOrderDiscount,
-            finalTotal: line.finalTotal,
-            vatRateBpSnapshot: line.vatRateBpSnapshot,
-            netExVat: line.netExVat,
-            vatTotal: line.vatTotal,
-            mxikSnapshot: line.mxikSnapshot,
-            packageCodeSnapshot: line.packageCodeSnapshot,
-            costValue: moneyFromTiyin(lineCostTiyin),
-          },
-          eventType: 'sale_line.created',
-          schemaVersion: 1,
-        });
-        insertedLines.push(lineWrite.row);
-      }
-
-      // 9) Insert immutable `payments` (`FACT`) & atomic `cash_moves` (`FACT`) in the same transaction
-      const insertedPayments: (typeof payments.$inferSelect)[] = [];
-      for (const item of resolvedPayments.payments) {
-        const paymentWrite = insertFact(session, payments, {
-          organizationId: ctx.organizationId,
-          storeId: ctx.storeId,
-          values: {
-            saleId,
-            method: item.method,
-            amount: item.amount,
-            tenderedAmount: item.tenderedAmount,
-            changeAmount: item.changeAmount,
-            providerRef: item.providerRef,
-            providerMetaJson: null,
-          },
-          eventType: 'payment.created',
-          schemaVersion: 1,
-        });
-        insertedPayments.push(paymentWrite.row);
-
-        if (item.method === 'cash' && item.tenderedAmount !== null) {
-          insertFact(session, cashMoves, {
-            organizationId: ctx.organizationId,
-            storeId: ctx.storeId,
-            values: {
-              shiftId: activeShift.shift.id,
-              shiftCashierSessionId: activeShift.activeSession.id,
-              type: 'sale_cash_in',
-              amountDelta: item.tenderedAmount,
-              sourceType: 'sale',
-              sourceId: saleId,
-              paymentId: paymentWrite.entityId,
-              expenseCategory: null,
-              reason: `Sale receipt ${receiptCode} cash in`,
-              createdByUserId: actorUserId,
-            },
-            eventType: 'cash_move.created',
-            schemaVersion: 1,
-          });
-
-          if (moneyToTiyin(item.changeAmount) > 0n) {
-            insertFact(session, cashMoves, {
-              organizationId: ctx.organizationId,
-              storeId: ctx.storeId,
-              values: {
-                shiftId: activeShift.shift.id,
-                shiftCashierSessionId: activeShift.activeSession.id,
-                type: 'sale_change_out',
-                amountDelta: negateMoney(item.changeAmount),
-                sourceType: 'sale',
-                sourceId: saleId,
-                paymentId: paymentWrite.entityId,
-                expenseCategory: null,
-                reason: `Sale receipt ${receiptCode} change out`,
-                createdByUserId: actorUserId,
-              },
-              eventType: 'cash_move.created',
-              schemaVersion: 1,
-            });
-          }
-        }
-      }
-
-      // 9b) Record `sale_debt` in `customer_ledger` (`FACT`) & update `local_customer_balances` in the same tx
-      if (customerSalePrep !== null && customerId !== null && debtTiyin > 0n) {
-        recordSaleDebtInTxSync(session, {
-          organizationId: ctx.organizationId,
-          storeId: ctx.storeId,
-          customerId,
-          saleId,
-          debtAmount: resolvedPayments.debtAmount,
-          dueAtMs: customerSalePrep.dueAtMs,
-          actorUserId,
-          overrideApprovedByUserId: creditOverrideApprovedByUserId,
-          nowMs: saleWrite.row.createdAtMs,
-        });
-      }
-
-      // 10) Mark cart `'completed'` inside the same transaction so subsequent conflicting requests get CART_NOT_OPEN
+      // Mark cart `'completed'` inside the same transaction so subsequent conflicting requests get CART_NOT_OPEN
       session.db
         .update(localCarts)
         .set({
           status: 'completed',
           parkedAtMs: null,
-          completedSaleId: saleId,
+          completedSaleId: sale.id,
           completedAtMs: nowMs,
-          completionWarningsJson: serializeWarnings(allWarnings),
+          completionWarningsJson: serializeWarnings(warnings),
           updatedAtMs: nowMs,
         })
         .where(eq(localCarts.id, cartId))
@@ -919,8 +1072,8 @@ export class SqliteSaleStore {
       this.testHooks?.onBeforeCommit?.();
 
       return Promise.resolve({
-        sale: toStoredSale(saleWrite.row, insertedLines, insertedPayments),
-        warnings: allWarnings,
+        sale,
+        warnings,
         idempotentReplay: false,
       });
     });

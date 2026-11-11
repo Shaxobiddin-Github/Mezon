@@ -1,9 +1,10 @@
 import {
-  MAX_CUSTOMER_DUE_DAYS,
   CASH_MOVE_TYPES,
+  MAX_CUSTOMER_DUE_DAYS,
   MAX_MONEY_TIYIN,
   MAX_PROVIDER_REF_LENGTH,
   PAYMENT_METHODS,
+  SALE_PAYMENT_METHODS,
   SHIFT_EXPENSE_CATEGORIES,
 } from '@mezon/domain';
 import { z } from 'zod';
@@ -17,6 +18,8 @@ import { ProductUnitSchema } from './catalog.js';
 import { SignedBigIntStringSchema } from './stock.js';
 
 export const PaymentMethodSchema = z.enum(PAYMENT_METHODS);
+
+export const SalePaymentMethodSchema = z.enum(SALE_PAYMENT_METHODS);
 
 export const NonCashPaymentMethodSchema = z.enum([
   'card',
@@ -135,7 +138,7 @@ export type SaleLineDto = z.infer<typeof SaleLineDtoSchema>;
 
 export const SalePaymentDtoSchema = z.strictObject({
   id: UuidV7Schema,
-  method: PaymentMethodSchema,
+  method: SalePaymentMethodSchema,
   amount: BigIntStringSchema,
   tenderedAmount: BigIntStringSchema.nullable(),
   changeAmount: BigIntStringSchema,
@@ -171,6 +174,7 @@ export const SaleDtoSchema = z.strictObject({
   storeId: UuidV7Schema,
   deviceId: UuidV7Schema,
   sourceCartId: UuidV7Schema.nullable(),
+  sourceOrderId: UuidV7Schema.nullable(),
   cashierUserId: UuidV7Schema,
   completedByUserId: UuidV7Schema,
   customerId: UuidV7Schema.nullable(),

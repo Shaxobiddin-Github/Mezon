@@ -334,4 +334,94 @@ describe('@mezon/domain - T1.9 Shifts, Discrepancy, Cashiers & Closure Math', ()
       { numRuns: 300 },
     );
   });
+
+  it('tracks order advances separately from sales revenue and includes advance in methodTotals', () => {
+    const result = computeShiftClosureTotals({
+      openingCash: moneyFromTiyin(100_000n),
+      finalCountedCash: moneyFromTiyin(135_000n),
+      cashierSessions: [
+        {
+          sessionId: SESS1,
+          cashierUserId: U_CASH1,
+          sessionSeq: 1,
+          openingFloat: moneyFromTiyin(100_000n),
+          isClosed: false,
+          countedCash: null,
+        },
+      ],
+      cashMoves: [
+        {
+          id: parseUuidV7('01950000-0000-7000-8000-000000005001'),
+          shiftCashierSessionId: SESS1,
+          type: 'advance_cash_in',
+          amountDelta: moneyFromTiyin(60_000n),
+        },
+        {
+          id: parseUuidV7('01950000-0000-7000-8000-000000005002'),
+          shiftCashierSessionId: SESS1,
+          type: 'advance_change_out',
+          amountDelta: moneyFromTiyin(-10_000n),
+        },
+        {
+          id: parseUuidV7('01950000-0000-7000-8000-000000005003'),
+          shiftCashierSessionId: SESS1,
+          type: 'advance_refund_out',
+          amountDelta: moneyFromTiyin(-15_000n),
+        },
+      ],
+      sales: [
+        {
+          id: parseUuidV7('01950000-0000-7000-8000-000000006001'),
+          shiftCashierSessionId: SESS1,
+          totalFinal: moneyFromTiyin(80_000n),
+          debtAmount: moneyFromTiyin(0n),
+          isVoided: false,
+        },
+      ],
+      returns: [],
+      payments: [
+        {
+          shiftCashierSessionId: SESS1,
+          method: 'advance',
+          amount: moneyFromTiyin(50_000n),
+        },
+        {
+          shiftCashierSessionId: SESS1,
+          method: 'card',
+          amount: moneyFromTiyin(30_000n),
+        },
+      ],
+      returnPayments: [],
+      orderPayments: [
+        {
+          shiftCashierSessionId: SESS1,
+          kind: 'advance',
+          method: 'cash',
+          amount: moneyFromTiyin(50_000n),
+        },
+        {
+          shiftCashierSessionId: SESS1,
+          kind: 'advance',
+          method: 'card',
+          amount: moneyFromTiyin(25_000n),
+        },
+        {
+          shiftCashierSessionId: SESS1,
+          kind: 'advance_refund',
+          method: 'cash',
+          amount: moneyFromTiyin(15_000n),
+        },
+      ],
+    });
+
+    expect(result.expectedCash).toBe(moneyFromTiyin(135_000n));
+    expect(result.discrepancyTiyin).toBe(0n);
+    expect(result.grossSalesTotal).toBe(moneyFromTiyin(80_000n));
+    expect(result.orderAdvanceCashTotal).toBe(moneyFromTiyin(50_000n));
+    expect(result.orderAdvanceNonCashTotal).toBe(moneyFromTiyin(25_000n));
+    expect(result.orderAdvanceRefundTotal).toBe(moneyFromTiyin(15_000n));
+    expect(result.methodTotals.find((m) => m.method === 'advance')?.salesAmount).toBe(
+      moneyFromTiyin(50_000n),
+    );
+  });
 });

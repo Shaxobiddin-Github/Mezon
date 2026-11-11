@@ -192,6 +192,7 @@ export const VoidedSaleDtoSchema = z.strictObject({
   storeId: UuidV7Schema,
   deviceId: UuidV7Schema,
   sourceCartId: UuidV7Schema.nullable(),
+  sourceOrderId: UuidV7Schema.nullable(),
   cashierUserId: UuidV7Schema,
   completedByUserId: UuidV7Schema,
   customerId: UuidV7Schema.nullable(),
