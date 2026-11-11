@@ -20,6 +20,7 @@ import {
   SqliteSchemaRegistry,
   assertCatalogSearchMigrationsComplete,
   assertCustomerMigrationsComplete,
+  assertOrderMigrationsComplete,
   assertReturnAndViewMigrationsComplete,
   assertSaleMigrationsComplete,
   assertShiftMigrationsComplete,
@@ -30,6 +31,7 @@ import {
   buildAllSqliteTriggersSql,
   buildCatalogSearchFtsSql,
   buildCustomerSearchFtsSql,
+  buildOrderTriggersSql,
   buildSaleMonotoneTriggersSql,
   buildSalesLinesViewSql,
   buildShiftTriggersSql,
@@ -63,6 +65,9 @@ import {
   localSupplierBalances,
   migrateLocalDatabase,
   openLocalSqliteDatabase,
+  orderLines,
+  orderPayments,
+  orders,
   payments,
   priceChanges,
   productBarcodes,
@@ -177,6 +182,9 @@ describe('@mezon/db-local - Schema foundation, registry, pragmas, and bigint saf
       ['shift_closure_method_totals', 'FACT'],
       ['shift_closure_cashiers', 'FACT'],
       ['day_closes', 'FACT'],
+      ['orders', 'MONOTONE'],
+      ['order_lines', 'FACT'],
+      ['order_payments', 'FACT'],
     ]);
     expect(() =>
       validateSqliteSchemaRegistry(
@@ -229,10 +237,16 @@ describe('@mezon/db-local - Schema foundation, registry, pragmas, and bigint saf
           shiftClosureMethodTotals,
           shiftClosureCashiers,
           dayCloses,
+          orders,
+          orderLines,
+          orderPayments,
         },
         localSchemaRegistry,
       ),
     ).not.toThrow();
+
+    expect(buildOrderTriggersSql().length).toBeGreaterThanOrEqual(4);
+    expect(() => assertOrderMigrationsComplete(getDefaultLocalMigrationsFolder())).not.toThrow();
   });
 
   it('registers all four classes (FACT/ATTR/MONOTONE/LOCAL) and enforces exact common columns', () => {
@@ -406,7 +420,7 @@ describe('@mezon/db-local - Schema foundation, registry, pragmas, and bigint saf
       const migCountRow = conn.sqlite
         .prepare('SELECT COUNT(*) as cnt FROM __drizzle_migrations')
         .get() as { cnt: bigint };
-      expect(migCountRow.cnt).toBe(12n);
+      expect(migCountRow.cnt).toBe(13n);
     } finally {
       conn.close();
     }
@@ -1435,6 +1449,182 @@ describe('@mezon/db-local - Schema foundation, registry, pragmas, and bigint saf
         shift_cashier_session_id: null,
         expense_category: null,
       });
+    } finally {
+      conn.close();
+    }
+  });
+
+  it('cleanly upgrades a pre-populated 0011 database (payments, cash_moves, ledgers, shift_closures) to 0012 under foreign_keys=ON', () => {
+    const migDir = getDefaultLocalMigrationsFolder();
+    const partialMigDir = path.join(os.tmpdir(), `mezon-mig-0011-${Date.now()}-${Math.random()}`);
+    fs.mkdirSync(path.join(partialMigDir, 'meta'), { recursive: true });
+    tempDirs.push(partialMigDir);
+
+    const journal = JSON.parse(
+      fs.readFileSync(path.join(migDir, 'meta', '_journal.json'), 'utf8'),
+    ) as {
+      readonly version: string;
+      readonly dialect: string;
+      entries: Array<{ readonly idx: number; readonly tag: string }>;
+    };
+    const entries11 = journal.entries.filter((e) => e.idx <= 11);
+    for (const entry of entries11) {
+      fs.copyFileSync(
+        path.join(migDir, `${entry.tag}.sql`),
+        path.join(partialMigDir, `${entry.tag}.sql`),
+      );
+    }
+    fs.writeFileSync(
+      path.join(partialMigDir, 'meta', '_journal.json'),
+      JSON.stringify({ ...journal, entries: entries11 }, null, 2),
+    );
+
+    const dbPath = makeTempDbPath('upgrade-0011-to-0012.db');
+    const conn = openLocalSqliteDatabase(dbPath);
+    try {
+      migrateLocalDatabase(conn.db, partialMigDir);
+
+      const devId = '01950000-0000-7000-8000-000000000301';
+      const orgId = '01950000-0000-7000-8000-000000000311';
+      const storeId = '01950000-0000-7000-8000-000000000312';
+      const userId = '01950000-0000-7000-8000-000000000313';
+      const custId = '01950000-0000-7000-8000-000000000314';
+      const saleId = '01950000-0000-7000-8000-000000000315';
+      const payId = '01950000-0000-7000-8000-000000000316';
+      const cmId = '01950000-0000-7000-8000-000000000317';
+      const clId = '01950000-0000-7000-8000-000000000318';
+      const shiftId = '01950000-0000-7000-8000-000000000319';
+      const sessId = '01950000-0000-7000-8000-000000000320';
+      const closureId = '01950000-0000-7000-8000-000000000321';
+      const closureMethodId = '01950000-0000-7000-8000-000000000322';
+      const closureCashierId = '01950000-0000-7000-8000-000000000323';
+      const hlc58 = serializeHlc(
+        createHlcTimestamp(unixMsFromBigInt(1_760_000_000_000n), 0, parseUuidV7(devId)),
+      );
+
+      conn.sqlite
+        .prepare(
+          `INSERT INTO "local_device_state" ("id", "organization_id", "created_at_ms", "updated_at_ms", "device_id", "last_device_seq", "last_receipt_seq", "last_return_seq", "last_receiving_seq", "last_supplier_return_seq", "last_shift_seq", "last_hlc", "last_uuid_ms")
+           VALUES (?, ?, 1760000000000, 1760000000000, ?, 9, 1, 0, 0, 0, 1, ?, 1760000000000)`,
+        )
+        .run('01950000-0000-7000-8000-000000000310', orgId, devId, hlc58);
+      conn.sqlite
+        .prepare(
+          `INSERT INTO "users" ("id", "organization_id", "device_id", "hlc", "created_at_ms", "updated_at_ms", "deleted_at_ms", "username", "full_name", "role", "is_active")
+           VALUES (?, ?, ?, ?, 1760000000000, 1760000000000, NULL, 'owner11', 'Owner Eleven', 'owner', 1)`,
+        )
+        .run(userId, orgId, devId, hlc58);
+      conn.sqlite
+        .prepare(
+          `INSERT INTO "customers" ("id", "organization_id", "device_id", "hlc", "created_at_ms", "updated_at_ms", "deleted_at_ms", "full_name", "name_search", "phone_normalized", "phone_digits", "credit_limit", "is_active", "note")
+           VALUES (?, ?, ?, ?, 1760000000000, 1760000000000, NULL, 'Cust 11', 'cust 11', NULL, NULL, NULL, 1, NULL)`,
+        )
+        .run(custId, orgId, devId, hlc58);
+      conn.sqlite
+        .prepare(
+          `INSERT INTO "shifts" ("id", "organization_id", "store_id", "device_id", "hlc", "created_at_ms", "updated_at_ms", "shift_no", "shift_code", "status", "opened_by_user_id", "closed_by_user_id", "opening_cash", "opening_discrepancy", "opened_at_ms", "closed_at_ms", "open_client_request_id", "open_request_hash", "close_client_request_id", "close_request_hash")
+           VALUES (?, ?, ?, ?, ?, 1760000000000, 1760000000000, 1, 'SHF-0301-000001', 'open', ?, NULL, 0, 0, 1760000000000, NULL, ?, 'hashopen1', NULL, NULL)`,
+        )
+        .run(shiftId, orgId, storeId, devId, hlc58, userId, devId);
+      conn.sqlite
+        .prepare(
+          `INSERT INTO "shift_cashier_sessions" ("id", "organization_id", "store_id", "device_id", "hlc", "created_at_ms", "updated_at_ms", "shift_id", "session_seq", "cashier_user_id", "status", "opening_float", "expected_cash", "counted_cash", "discrepancy", "started_at_ms", "ended_at_ms")
+           VALUES (?, ?, ?, ?, ?, 1760000000000, 1760000001000, ?, 1, ?, 'closed', 0, 10000, 10000, 0, 1760000000000, 1760000001000)`,
+        )
+        .run(sessId, orgId, storeId, devId, hlc58, shiftId, userId);
+      conn.sqlite
+        .prepare(
+          `INSERT INTO "sales" ("id", "organization_id", "store_id", "device_id", "hlc", "created_at_ms", "updated_at_ms", "receipt_no", "receipt_code", "source_cart_id", "cashier_user_id", "completed_by_user_id", "customer_id", "shift_id", "shift_cashier_session_id", "client_request_id", "request_hash", "subtotal_gross", "total_promo_discount", "subtotal_after_promo", "manual_discount_mode", "manual_discount_value", "manual_discount_reason", "order_discount_amount", "total_final", "total_net_ex_vat", "total_vat", "total_paid", "debt_amount", "change_amount")
+           VALUES (?, ?, ?, ?, ?, 1760000000500, 1760000000500, 1, '0301-000001', NULL, ?, ?, ?, ?, ?, ?, 'hashsale1', 10000, 0, 10000, 'none', 0, NULL, 0, 10000, 10000, 0, 10000, 0, 0)`,
+        )
+        .run(saleId, orgId, storeId, devId, hlc58, userId, userId, custId, shiftId, sessId, saleId);
+      conn.sqlite
+        .prepare(
+          `INSERT INTO "payments" ("id", "organization_id", "store_id", "device_id", "hlc", "created_at_ms", "sale_id", "method", "amount", "tendered_amount", "change_amount")
+           VALUES (?, ?, ?, ?, ?, 1760000000500, ?, 'cash', 10000, 10000, 0)`,
+        )
+        .run(payId, orgId, storeId, devId, hlc58, saleId);
+      conn.sqlite
+        .prepare(
+          `INSERT INTO "cash_moves" ("id", "organization_id", "store_id", "device_id", "hlc", "created_at_ms", "shift_id", "shift_cashier_session_id", "type", "amount_delta", "source_type", "source_id", "payment_id", "expense_category", "reason", "created_by_user_id")
+           VALUES (?, ?, ?, ?, ?, 1760000000500, ?, ?, 'sale_cash_in', 10000, 'sale', ?, ?, NULL, 'Sale 1', ?)`,
+        )
+        .run(cmId, orgId, storeId, devId, hlc58, shiftId, sessId, saleId, payId, userId);
+      conn.sqlite
+        .prepare(
+          `UPDATE "shifts" SET "status" = 'closed', "closed_by_user_id" = ?, "closed_at_ms" = 1760000001000, "close_client_request_id" = ?, "close_request_hash" = 'hashclose1', "updated_at_ms" = 1760000001000 WHERE "id" = ?`,
+        )
+        .run(userId, saleId, shiftId);
+      conn.sqlite
+        .prepare(
+          `INSERT INTO "customer_ledger" ("id", "organization_id", "store_id", "device_id", "hlc", "created_at_ms", "customer_id", "entry_type", "amount_delta", "source_type", "source_id", "sale_id", "payment_method", "cash_move_id", "reason", "created_by_user_id")
+           VALUES (?, ?, ?, ?, ?, 1760000000600, ?, 'debt_payment', -5000, 'debt_payment', ?, NULL, 'cash', ?, 'Paid', ?)`,
+        )
+        .run(clId, orgId, storeId, devId, hlc58, custId, clId, cmId, userId);
+      conn.sqlite
+        .prepare(
+          `INSERT INTO "shift_closures" ("id", "organization_id", "store_id", "device_id", "hlc", "created_at_ms", "shift_id", "closure_seq", "is_reclose", "closed_by_user_id", "client_request_id", "request_hash", "expected_cash", "counted_cash", "discrepancy", "sales_count", "returns_count", "voids_count", "gross_sales_total", "returns_total", "net_sales_total")
+           VALUES (?, ?, ?, ?, ?, 1760000001000, ?, 1, 0, ?, ?, 'hashcls1', 10000, 10000, 0, 1, 0, 0, 10000, 0, 10000)`,
+        )
+        .run(closureId, orgId, storeId, devId, hlc58, shiftId, userId, closureId);
+      conn.sqlite
+        .prepare(
+          `INSERT INTO "shift_closure_method_totals" ("id", "organization_id", "store_id", "device_id", "hlc", "created_at_ms", "shift_closure_id", "method", "sales_amount", "returns_amount", "net_amount")
+           VALUES (?, ?, ?, ?, ?, 1760000001000, ?, 'cash', 10000, 0, 10000)`,
+        )
+        .run(closureMethodId, orgId, storeId, devId, hlc58, closureId);
+      conn.sqlite
+        .prepare(
+          `INSERT INTO "shift_closure_cashiers" ("id", "organization_id", "store_id", "device_id", "hlc", "created_at_ms", "shift_closure_id", "session_id", "cashier_user_id", "session_seq", "opening_float", "expected_cash", "counted_cash", "discrepancy", "sales_count", "returns_count", "sales_total", "returns_total", "cash_in_total", "cash_out_total")
+           VALUES (?, ?, ?, ?, ?, 1760000001000, ?, ?, ?, 1, 0, 10000, 10000, 0, 1, 0, 10000, 0, 10000, 0)`,
+        )
+        .run(closureCashierId, orgId, storeId, devId, hlc58, closureId, sessId, userId);
+
+      migrateLocalDatabase(conn.db, migDir);
+      expect(conn.sqlite.pragma('foreign_key_check')).toEqual([]);
+
+      const devState = conn.sqlite
+        .prepare(
+          'SELECT "last_order_seq", "last_shift_seq" FROM "local_device_state" WHERE "device_id" = ?',
+        )
+        .get(devId) as { readonly last_order_seq: bigint; readonly last_shift_seq: bigint };
+      expect(devState).toEqual({ last_order_seq: 0n, last_shift_seq: 1n });
+
+      const closureRow = conn.sqlite
+        .prepare(
+          'SELECT "order_advance_cash_total", "order_advance_non_cash_total", "order_advance_refund_total" FROM "shift_closures" WHERE "id" = ?',
+        )
+        .get(closureId) as {
+        readonly order_advance_cash_total: bigint;
+        readonly order_advance_non_cash_total: bigint;
+        readonly order_advance_refund_total: bigint;
+      };
+      expect(closureRow).toEqual({
+        order_advance_cash_total: 0n,
+        order_advance_non_cash_total: 0n,
+        order_advance_refund_total: 0n,
+      });
+
+      const saleRow = conn.sqlite
+        .prepare('SELECT "source_order_id" FROM "sales" WHERE "id" = ?')
+        .get(saleId) as { readonly source_order_id: string | null };
+      expect(saleRow.source_order_id).toBeNull();
+
+      // Re-created FACT triggers must still block UPDATE/DELETE on rebuilt tables
+      expect(() =>
+        conn.sqlite.prepare('UPDATE "payments" SET "amount" = 999 WHERE "id" = ?').run(payId),
+      ).toThrowError(/FACT table "payments"/);
+      expect(() =>
+        conn.sqlite.prepare('DELETE FROM "cash_moves" WHERE "id" = ?').run(cmId),
+      ).toThrowError(/FACT table "cash_moves"/);
+      expect(() =>
+        conn.sqlite
+          .prepare('UPDATE "shift_closures" SET "counted_cash" = 0 WHERE "id" = ?')
+          .run(closureId),
+      ).toThrowError(/FACT table "shift_closures"/);
+      expect(() =>
+        conn.sqlite.prepare('DELETE FROM "customer_ledger" WHERE "id" = ?').run(clId),
+      ).toThrowError(/FACT table "customer_ledger"/);
     } finally {
       conn.close();
     }

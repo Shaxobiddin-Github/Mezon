@@ -507,6 +507,21 @@ describe('@mezon/hub - T1.9 Shifts, Cashier Sessions, X1-X4, RBAC, Supervisor PI
       expect(dc1Res.statusCode).toBe(201);
       expect(CloseBusinessDayResponseSchema.parse(dc1Res.json()).dayClose.isStale).toBe(false);
 
+      // T1.9 test debt: calling POST /shifts/:id/close with a NEW clientRequestId on an already-closed shift returns 409 SHIFT_ALREADY_CLOSED
+      const closeClosedRes = await hub.app.inject({
+        method: 'POST',
+        url: `/shifts/${opened.shift.id}/close`,
+        headers: authHeaders(ownerLogin.token),
+        payload: {
+          clientRequestId: reqUuid(),
+          countedCash: '150000',
+        },
+      });
+      expect(closeClosedRes.statusCode).toBe(409);
+      expect(ApiErrorEnvelopeSchema.parse(closeClosedRes.json()).error.code).toBe(
+        'SHIFT_ALREADY_CLOSED',
+      );
+
       const reclose1Res = await hub.app.inject({
         method: 'POST',
         url: `/shifts/${opened.shift.id}/reclose`,

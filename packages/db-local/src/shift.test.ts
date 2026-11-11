@@ -30,9 +30,12 @@ import {
   createSqliteUnitOfWork,
   getActiveShiftDrawerBalanceSync,
   getActiveStoreCashBalanceSync,
+  listAllOutboxRecordsSync,
   localSchemaRegistry,
   migrateLocalDatabase,
   openLocalSqliteDatabase,
+  shiftCashierSessions,
+  shiftClosures,
 } from './index.js';
 
 const FAST_TEST_HASHER: PinHasher = {
@@ -1622,5 +1625,54 @@ describe('@mezon/db-local - T1.9 Shifts, Cashier Sessions, Cash Moves, Reclose &
       0n,
     );
     expect(sumSessionsDisc).toBe(moneyToTiyin(closed.closure.discrepancy));
+  });
+
+  it('T1.9 test qarzi: calling closeShift with a new clientRequestId on an already-closed shift returns SHIFT_ALREADY_CLOSED (0 DB writes) while recloseShift appends closureSeq = 2', async () => {
+    const env = await setupShiftEnv({ seed: 929 });
+    const opened = await env.shiftStore.openShift({
+      actorUserId: env.cashierAId,
+      clientRequestId: env.nextUuid(),
+      openingCash: moneyFromTiyin(50_000n),
+    });
+
+    const closed1 = await env.shiftStore.closeShift({
+      shiftId: opened.shift.id,
+      actorUserId: env.cashierAId,
+      clientRequestId: env.nextUuid(),
+      countedCash: moneyFromTiyin(50_000n),
+    });
+    expect(closed1.closure.closureSeq).toBe(1);
+
+    const closuresBefore = env.connection.db.select().from(shiftClosures).all().length;
+    const sessionsBefore = env.connection.db.select().from(shiftCashierSessions).all().length;
+    const outboxBefore = listAllOutboxRecordsSync(env.connection.db).length;
+
+    // New clientRequestId calling closeShift on closed shift MUST reject with SHIFT_ALREADY_CLOSED (not SQLite trigger error) & write 0 rows
+    await expect(
+      env.shiftStore.closeShift({
+        shiftId: opened.shift.id,
+        actorUserId: env.managerId,
+        clientRequestId: env.nextUuid(),
+        countedCash: moneyFromTiyin(50_000n),
+      }),
+    ).rejects.toMatchObject({ code: 'SHIFT_ALREADY_CLOSED' });
+
+    expect(env.connection.db.select().from(shiftClosures).all()).toHaveLength(closuresBefore);
+    expect(env.connection.db.select().from(shiftCashierSessions).all()).toHaveLength(
+      sessionsBefore,
+    );
+    expect(listAllOutboxRecordsSync(env.connection.db)).toHaveLength(outboxBefore);
+
+    // Proper path is recloseShift -> succeeds and appends closureSeq = 2
+    const reclosed = await env.shiftStore.recloseShift({
+      shiftId: opened.shift.id,
+      actorUserId: env.managerId,
+      clientRequestId: env.nextUuid(),
+      countedCash: moneyFromTiyin(52_000n),
+      reason: 'Found extra 2,000 tiyin in drawer tray',
+    });
+    expect(reclosed.closure.closureSeq).toBe(2);
+    expect(reclosed.closure.isReclose).toBe(true);
+    expect(env.connection.db.select().from(shiftClosures).all()).toHaveLength(closuresBefore + 1);
   });
 });

@@ -10,7 +10,12 @@ import {
   moneyToTiyin,
 } from './money.js';
 import { normalizeMandatoryReason } from './return.js';
-import { type CashMoveType, type PaymentMethod, PAYMENT_METHODS } from './sale.js';
+import {
+  type CashMoveType,
+  type PaymentMethod,
+  SALE_PAYMENT_METHODS,
+  type SalePaymentMethod,
+} from './sale.js';
 import type { UuidV7 } from './uuidv7.js';
 
 export const SHIFT_STATUSES = ['open', 'closed'] as const;
@@ -72,13 +77,20 @@ export interface ShiftReturnForSummary {
 
 export interface ShiftPaymentForSummary {
   readonly shiftCashierSessionId: UuidV7 | null;
-  readonly method: PaymentMethod;
+  readonly method: SalePaymentMethod;
   /** Net sale payment amount applied (`payments.amount`). NEVER subtract `change_amount` (X3). */
   readonly amount: Money;
 }
 
 export interface ShiftReturnPaymentForSummary {
   readonly shiftCashierSessionId: UuidV7 | null;
+  readonly method: PaymentMethod;
+  readonly amount: Money;
+}
+
+export interface ShiftOrderPaymentForSummary {
+  readonly shiftCashierSessionId: UuidV7 | null;
+  readonly kind: 'advance' | 'advance_refund';
   readonly method: PaymentMethod;
   readonly amount: Money;
 }
@@ -93,7 +105,7 @@ export interface ShiftCashierSessionInput {
 }
 
 export interface ComputedMethodTotal {
-  readonly method: PaymentMethod | 'debt';
+  readonly method: SalePaymentMethod | 'debt';
   readonly salesAmount: Money;
   readonly returnsAmount: Money;
   readonly netAmount: Money;
@@ -125,6 +137,9 @@ export interface ComputedShiftClosureSummary {
   readonly grossSalesTotal: Money;
   readonly returnsTotal: Money;
   readonly netSalesTotal: Money;
+  readonly orderAdvanceCashTotal: Money;
+  readonly orderAdvanceNonCashTotal: Money;
+  readonly orderAdvanceRefundTotal: Money;
   readonly methodTotals: readonly ComputedMethodTotal[];
   readonly cashiers: readonly ComputedCashierSessionSummary[];
 }
@@ -425,7 +440,10 @@ export interface ShiftClosureAggregatedBuckets {
   readonly returnsTiyin: bigint;
   readonly debtSalesTiyin: bigint;
   readonly returnDebtOffsetTiyin: bigint;
-  readonly methodSalesTiyin: ReadonlyMap<PaymentMethod, bigint>;
+  readonly orderAdvanceCashTiyin?: bigint;
+  readonly orderAdvanceNonCashTiyin?: bigint;
+  readonly orderAdvanceRefundTiyin?: bigint;
+  readonly methodSalesTiyin: ReadonlyMap<SalePaymentMethod, bigint>;
   readonly methodReturnsTiyin: ReadonlyMap<PaymentMethod, bigint>;
   readonly sessionBuckets: ReadonlyMap<UuidV7, ShiftSessionAggregates>;
 }
@@ -450,11 +468,15 @@ export function computeShiftClosureFromAggregates(
   const orderedSessions = [...params.cashierSessions].sort((a, b) => a.sessionSeq - b.sessionSeq);
   const lastIdx = orderedSessions.length - 1;
 
-  const allMethods: ReadonlyArray<PaymentMethod | 'debt'> = [...PAYMENT_METHODS, 'debt'];
+  const allMethods: ReadonlyArray<SalePaymentMethod | 'debt'> = [...SALE_PAYMENT_METHODS, 'debt'];
   const methodTotals: ComputedMethodTotal[] = allMethods.map((m) => {
     const sAmt = m === 'debt' ? params.debtSalesTiyin : (params.methodSalesTiyin.get(m) ?? 0n);
     const rAmt =
-      m === 'debt' ? params.returnDebtOffsetTiyin : (params.methodReturnsTiyin.get(m) ?? 0n);
+      m === 'debt'
+        ? params.returnDebtOffsetTiyin
+        : m === 'advance'
+          ? 0n
+          : (params.methodReturnsTiyin.get(m) ?? 0n);
     return {
       method: m,
       salesAmount: moneyFromTiyin(sAmt),
@@ -504,6 +526,9 @@ export function computeShiftClosureFromAggregates(
     grossSalesTotal: moneyFromTiyin(params.grossSalesTiyin),
     returnsTotal: moneyFromTiyin(params.returnsTiyin),
     netSalesTotal: moneyFromTiyin(params.grossSalesTiyin - params.returnsTiyin),
+    orderAdvanceCashTotal: moneyFromTiyin(params.orderAdvanceCashTiyin ?? 0n),
+    orderAdvanceNonCashTotal: moneyFromTiyin(params.orderAdvanceNonCashTiyin ?? 0n),
+    orderAdvanceRefundTotal: moneyFromTiyin(params.orderAdvanceRefundTiyin ?? 0n),
     methodTotals,
     cashiers,
   };
@@ -526,6 +551,7 @@ export function computeShiftClosureTotals(params: {
   readonly returns: readonly ShiftReturnForSummary[];
   readonly payments: readonly ShiftPaymentForSummary[];
   readonly returnPayments: readonly ShiftReturnPaymentForSummary[];
+  readonly orderPayments?: readonly ShiftOrderPaymentForSummary[];
 }): ComputedShiftClosureSummary {
   if (params.cashierSessions.length === 0) {
     throw new DomainError('VALIDATION_ERROR', 'Shift has no cashier sessions');
@@ -607,7 +633,7 @@ export function computeShiftClosureTotals(params: {
     b.returnsTotalTiyin += amt;
   }
 
-  const methodSalesTiyin = new Map<PaymentMethod, bigint>();
+  const methodSalesTiyin = new Map<SalePaymentMethod, bigint>();
   const methodReturnsTiyin = new Map<PaymentMethod, bigint>();
   for (const p of params.payments) {
     methodSalesTiyin.set(p.method, (methodSalesTiyin.get(p.method) ?? 0n) + moneyToTiyin(p.amount));
@@ -617,6 +643,22 @@ export function computeShiftClosureTotals(params: {
       rp.method,
       (methodReturnsTiyin.get(rp.method) ?? 0n) + moneyToTiyin(rp.amount),
     );
+  }
+
+  let orderAdvanceCashTiyin = 0n;
+  let orderAdvanceNonCashTiyin = 0n;
+  let orderAdvanceRefundTiyin = 0n;
+  for (const op of params.orderPayments ?? []) {
+    const amt = moneyToTiyin(op.amount);
+    if (op.kind === 'advance') {
+      if (op.method === 'cash') {
+        orderAdvanceCashTiyin += amt;
+      } else {
+        orderAdvanceNonCashTiyin += amt;
+      }
+    } else {
+      orderAdvanceRefundTiyin += amt;
+    }
   }
 
   return computeShiftClosureFromAggregates({
@@ -631,6 +673,9 @@ export function computeShiftClosureTotals(params: {
     returnsTiyin,
     debtSalesTiyin,
     returnDebtOffsetTiyin,
+    orderAdvanceCashTiyin,
+    orderAdvanceNonCashTiyin,
+    orderAdvanceRefundTiyin,
     methodSalesTiyin,
     methodReturnsTiyin,
     sessionBuckets,

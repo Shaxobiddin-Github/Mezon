@@ -54,6 +54,8 @@ export {
   readSupplierReturnSeqSync,
   advanceShiftSeqSync,
   readShiftSeqSync,
+  advanceOrderSeqSync,
+  readOrderSeqSync,
   SqliteDeviceStateRepository,
 } from './device-state.js';
 
@@ -142,6 +144,9 @@ export {
   shiftClosureMethodTotals,
   shiftClosureCashiers,
   dayCloses,
+  orders,
+  orderLines,
+  orderPayments,
 } from './schema/index.js';
 
 export {
@@ -175,6 +180,8 @@ export {
 } from './sale-migrations.js';
 
 export { buildShiftTriggersSql, assertShiftMigrationsComplete } from './shift-migrations.js';
+
+export { buildOrderTriggersSql, assertOrderMigrationsComplete } from './order-migrations.js';
 
 export {
   type HubConfigSnapshot,
@@ -259,11 +266,18 @@ export {
   type SaleStoreTestHooks,
   type CreateSqliteSaleStoreOptions,
   type CompleteSaleInput,
+  type SaleCoreEvaluatedLine,
+  type CompleteSaleCoreInTxInput,
+  type CompleteSaleCoreInTxOutcome,
   type StoredSaleLineRecord,
   type StoredSalePaymentRecord,
   type StoredCashMoveRecord,
   type StoredSaleRecord,
   type CompleteSaleOutcome,
+  completeSaleCoreInTxSync,
+  toStoredSale,
+  toStoredSaleLine,
+  toStoredSalePayment,
   getHistoricalCashMovesTotalSync,
   getHistoricalStoreCashMovesTotalSync,
   SqliteSaleStore,
@@ -388,3 +402,26 @@ export {
   SqliteSupplierStore,
   createSqliteSupplierStore,
 } from './supplier-repo.js';
+
+export {
+  type OrderRuntimeContext,
+  type OrderStoreTestHooks,
+  type CreateSqliteOrderStoreOptions,
+  type CreateOrderLineInput,
+  type CreateOrderInput,
+  type OrderTransitionInput,
+  type RecordOrderAdvanceInput,
+  type RefundOrderAdvanceInput,
+  type DeliverOrderInput,
+  type CancelOrderInput,
+  type ListOrdersQueryInput,
+  type StoredOrderLineRecord,
+  type StoredOrderPaymentRecord,
+  type StoredOrderRecord,
+  type OrderActionOutcome,
+  type DeliverOrderOutcome,
+  type ListOrdersOutcome,
+  type OpenAdvancesOutcome,
+  SqliteOrderStore,
+  createSqliteOrderStore,
+} from './order-repo.js';

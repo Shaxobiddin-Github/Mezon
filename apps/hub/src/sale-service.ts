@@ -66,7 +66,7 @@ export function toSalePaymentDto(payment: StoredSalePaymentRecord): SalePaymentD
   };
 }
 
-function toSaleDto(sale: StoredSaleRecord): SaleDto {
+export function toSaleDto(sale: StoredSaleRecord): SaleDto {
   return {
     id: sale.id,
     receiptNo: sale.receiptNo.toString(),
@@ -75,6 +75,7 @@ function toSaleDto(sale: StoredSaleRecord): SaleDto {
     storeId: sale.storeId,
     deviceId: sale.deviceId,
     sourceCartId: sale.sourceCartId,
+    sourceOrderId: sale.sourceOrderId,
     cashierUserId: sale.cashierUserId,
     completedByUserId: sale.completedByUserId,
     customerId: sale.customerId,
@@ -106,7 +107,7 @@ function toSaleDto(sale: StoredSaleRecord): SaleDto {
   };
 }
 
-function toWarningDto(warning: StockMoveWarningRecord): SaleNegativeStockWarningDto {
+export function toWarningDto(warning: StockMoveWarningRecord): SaleNegativeStockWarningDto {
   return {
     code: warning.code,
     productId: warning.productId,

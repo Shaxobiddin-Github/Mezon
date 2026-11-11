@@ -234,7 +234,7 @@ function toStoredPromotion(row: typeof promotions.$inferSelect): StoredPromotion
   };
 }
 
-function toPromotionRule(row: StoredPromotionRecord): PromotionRule {
+export function toPromotionRule(row: StoredPromotionRecord): PromotionRule {
   return {
     id: row.id,
     storeId: row.storeId,
@@ -265,7 +265,7 @@ export interface StoredHubCartConfigRow {
   readonly quickSaleDefaultVatRateBp: number | null;
 }
 
-function toDiscountSettings(row: StoredHubCartConfigRow): StoredCartDiscountSettings {
+export function toDiscountSettings(row: StoredHubCartConfigRow): StoredCartDiscountSettings {
   const percentUnlimited = Boolean(row.cashierDiscountPercentUnlimited);
   const amountUnlimited = Boolean(row.cashierDiscountAmountUnlimited);
   return {

@@ -101,6 +101,9 @@ function toShiftClosureDto(closure: StoredShiftClosureRecord): ShiftClosureDto {
     grossSalesTotal: closure.grossSalesTotal.toString(),
     returnsTotal: closure.returnsTotal.toString(),
     netSalesTotal: closure.netSalesTotal.toString(),
+    orderAdvanceCashTotal: closure.orderAdvanceCashTotal.toString(),
+    orderAdvanceNonCashTotal: closure.orderAdvanceNonCashTotal.toString(),
+    orderAdvanceRefundTotal: closure.orderAdvanceRefundTotal.toString(),
     createdAtMs: closure.createdAtMs.toString(),
     methodTotals: closure.methodTotals.map((m) => ({
       method: m.method,

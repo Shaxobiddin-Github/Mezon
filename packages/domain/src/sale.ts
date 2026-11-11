@@ -13,16 +13,26 @@ export const PAYMENT_METHODS = [
   'other',
 ] as const;
 
+export const SALE_PAYMENT_METHODS = [...PAYMENT_METHODS, 'advance'] as const;
+
 export type PaymentMethod = (typeof PAYMENT_METHODS)[number];
 export type NonCashPaymentMethod = Exclude<PaymentMethod, 'cash'>;
+export type SalePaymentMethod = (typeof SALE_PAYMENT_METHODS)[number];
 
-export const CASH_MOVE_INFLOW_TYPES = ['sale_cash_in', 'debt_payment_in', 'cash_in'] as const;
+export const CASH_MOVE_INFLOW_TYPES = [
+  'sale_cash_in',
+  'debt_payment_in',
+  'cash_in',
+  'advance_cash_in',
+] as const;
 export const CASH_MOVE_OUTFLOW_TYPES = [
   'sale_change_out',
   'refund_cash_out',
   'supplier_payment_out',
   'cash_out',
   'encashment',
+  'advance_change_out',
+  'advance_refund_out',
 ] as const;
 export const CASH_MOVE_TYPES = [...CASH_MOVE_INFLOW_TYPES, ...CASH_MOVE_OUTFLOW_TYPES] as const;
 
@@ -51,8 +61,16 @@ export type SalePaymentInput =
       readonly providerRef?: string | null;
     };
 
+export interface AdvanceSalePaymentInput {
+  readonly method: 'advance';
+  readonly amount: Money;
+  readonly providerRef?: null;
+}
+
+export type DeliverSalePaymentInput = SalePaymentInput | AdvanceSalePaymentInput;
+
 export interface ResolvedSalePaymentItem {
-  readonly method: PaymentMethod;
+  readonly method: SalePaymentMethod;
   readonly amount: Money;
   readonly tenderedAmount: Money | null;
   readonly changeAmount: Money;
@@ -69,7 +87,7 @@ export interface ResolvedSalePayments {
 }
 
 export interface SalePaymentInvariantItem {
-  readonly method: PaymentMethod;
+  readonly method: SalePaymentMethod;
   readonly amount: Money;
   readonly tenderedAmount: Money | null;
   readonly changeAmount: Money;
@@ -79,6 +97,7 @@ export interface SalePaymentInvariantParams {
   readonly totalFinal: Money;
   readonly debtAmount: Money;
   readonly customerId?: UuidV7 | null;
+  readonly allowAdvancePayment?: boolean;
   readonly payments: readonly SalePaymentInvariantItem[];
 }
 
@@ -89,6 +108,17 @@ export function isPaymentMethod(value: unknown): value is PaymentMethod {
 export function parsePaymentMethod(value: unknown): PaymentMethod {
   if (!isPaymentMethod(value)) {
     throw new DomainError('VALIDATION_ERROR', `Invalid payment method: "${String(value)}"`);
+  }
+  return value;
+}
+
+export function isSalePaymentMethod(value: unknown): value is SalePaymentMethod {
+  return typeof value === 'string' && (SALE_PAYMENT_METHODS as readonly string[]).includes(value);
+}
+
+export function parseSalePaymentMethod(value: unknown): SalePaymentMethod {
+  if (!isSalePaymentMethod(value)) {
+    throw new DomainError('VALIDATION_ERROR', `Invalid sale payment method: "${String(value)}"`);
   }
   return value;
 }
@@ -205,7 +235,8 @@ export function resolveSalePayments(params: {
   readonly totalFinal: Money;
   readonly debtAmount: Money;
   readonly customerId: UuidV7 | null;
-  readonly payments: readonly SalePaymentInput[];
+  readonly allowAdvancePayment?: boolean;
+  readonly payments: readonly DeliverSalePaymentInput[];
 }): ResolvedSalePayments {
   const totalTiyin = moneyToTiyin(params.totalFinal);
   const debtTiyin = moneyToTiyin(params.debtAmount);
@@ -218,10 +249,15 @@ export function resolveSalePayments(params: {
   }
 
   let cashCount = 0;
+  let advanceCount = 0;
   let nonCashTotalTiyin = 0n;
 
   for (const row of params.payments) {
-    parsePaymentMethod(row.method);
+    if (params.allowAdvancePayment) {
+      parseSalePaymentMethod(row.method);
+    } else {
+      parsePaymentMethod(row.method);
+    }
     if (row.method === 'cash') {
       cashCount += 1;
       if (cashCount > 1) {
@@ -234,6 +270,19 @@ export function resolveSalePayments(params: {
       if (row.amount !== undefined) {
         assertBoundedPositive(moneyToTiyin(row.amount), 'cash.amount');
       }
+    } else if (row.method === 'advance') {
+      advanceCount += 1;
+      if (advanceCount > 1) {
+        throw new DomainError(
+          'VALIDATION_ERROR',
+          'At most one advance payment row is allowed per sale',
+        );
+      }
+      assertBoundedPositive(moneyToTiyin(row.amount), 'advance.amount');
+      if (normalizePaymentProviderRef(row.providerRef) !== null) {
+        throw new DomainError('VALIDATION_ERROR', 'advance payment must not include providerRef');
+      }
+      nonCashTotalTiyin += moneyToTiyin(row.amount);
     } else {
       assertBoundedPositive(moneyToTiyin(row.amount), `${row.method}.amount`);
       normalizePaymentProviderRef(row.providerRef);
@@ -272,7 +321,7 @@ export function resolveSalePayments(params: {
         amount: row.amount,
         tenderedAmount: null,
         changeAmount: ZERO_MONEY,
-        providerRef: normalizePaymentProviderRef(row.providerRef),
+        providerRef: row.method === 'advance' ? null : normalizePaymentProviderRef(row.providerRef),
       });
       sumPaidTiyin += amountTiyin;
     }
@@ -293,6 +342,7 @@ export function resolveSalePayments(params: {
  * - All persisted amounts/change fit signed 64-bit SQL integers (`<= MAX_MONEY_TIYIN`).
  * - Zero and negative payment rows are rejected (`amount > 0`, `tendered > 0`).
  * - At most one `'cash'` row; non-cash rows carry `tenderedAmount = null` and `changeAmount = 0`.
+ * - `'advance'` method is permitted exclusively when `allowAdvancePayment: true` (order delivery).
  * - Non-cash total + debt cannot exceed `totalFinal` (change comes solely from cash).
  * - `debtAmount > 0` requires `customerId !== null` (`CUSTOMER_REQUIRED`).
  * - `SUM(payments.amount) + debtAmount === totalFinal` (vacuously true when `totalFinal === 0` and `payments === []`).
@@ -311,11 +361,16 @@ export function validateSalePaymentsInvariant(params: SalePaymentInvariantParams
   }
 
   let cashCount = 0;
+  let advanceCount = 0;
   let sumPaidTiyin = 0n;
   let nonCashTotalTiyin = 0n;
 
   for (const p of params.payments) {
-    parsePaymentMethod(p.method);
+    if (params.allowAdvancePayment) {
+      parseSalePaymentMethod(p.method);
+    } else {
+      parsePaymentMethod(p.method);
+    }
     const amt = moneyToTiyin(p.amount);
     const chg = moneyToTiyin(p.changeAmount);
     assertBoundedPositive(amt, `${p.method}.amount`);
@@ -341,6 +396,15 @@ export function validateSalePaymentsInvariant(params: SalePaymentInvariantParams
         );
       }
     } else {
+      if (p.method === 'advance') {
+        advanceCount += 1;
+        if (advanceCount > 1) {
+          throw new DomainError(
+            'VALIDATION_ERROR',
+            'At most one advance payment row is allowed per sale',
+          );
+        }
+      }
       if (p.tenderedAmount !== null) {
         throw new DomainError(
           'VALIDATION_ERROR',

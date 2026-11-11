@@ -14,8 +14,8 @@ import { PositiveBigIntStringSchema } from './cart.js';
 import {
   BoundedMoneyStringSchema,
   CashMoveDtoSchema,
-  PaymentMethodSchema,
   PositiveBoundedMoneyStringSchema,
+  SalePaymentMethodSchema,
 } from './sale.js';
 import { SignedBigIntStringSchema } from './stock.js';
 
@@ -218,7 +218,7 @@ export const ShiftDtoSchema = z.strictObject({
 });
 export type ShiftDto = z.infer<typeof ShiftDtoSchema>;
 
-export const ShiftClosureMethodSchema = z.union([PaymentMethodSchema, z.literal('debt')]);
+export const ShiftClosureMethodSchema = z.union([SalePaymentMethodSchema, z.literal('debt')]);
 
 export const ShiftClosureMethodTotalDtoSchema = z.strictObject({
   method: ShiftClosureMethodSchema,
@@ -265,6 +265,9 @@ export const ShiftClosureDtoSchema = z.strictObject({
   grossSalesTotal: BigIntStringSchema,
   returnsTotal: BigIntStringSchema,
   netSalesTotal: BigIntStringSchema,
+  orderAdvanceCashTotal: BigIntStringSchema,
+  orderAdvanceNonCashTotal: BigIntStringSchema,
+  orderAdvanceRefundTotal: BigIntStringSchema,
   createdAtMs: BigIntStringSchema,
   methodTotals: z.array(ShiftClosureMethodTotalDtoSchema),
   cashiers: z.array(ShiftClosureCashierDtoSchema),

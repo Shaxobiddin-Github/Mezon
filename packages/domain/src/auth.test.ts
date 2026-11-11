@@ -115,6 +115,16 @@ describe('@mezon/domain - auth rules, RBAC, and PIN security policy', () => {
     expect(roleHasPermission('cashier', 'shifts:reclose')).toBe(false);
     expect(roleHasPermission('cashier', 'shifts:cash_move')).toBe(false);
     expect(roleHasPermission('cashier', 'day_close:execute')).toBe(false);
+    expect(roleHasPermission('cashier', 'orders:read')).toBe(true);
+    expect(roleHasPermission('cashier', 'orders:write')).toBe(true);
+    expect(roleHasPermission('cashier', 'orders:cancel')).toBe(false);
+
+    expect(roleHasPermission('owner', 'orders:read')).toBe(true);
+    expect(roleHasPermission('owner', 'orders:write')).toBe(true);
+    expect(roleHasPermission('owner', 'orders:cancel')).toBe(true);
+    expect(roleHasPermission('manager', 'orders:read')).toBe(true);
+    expect(roleHasPermission('manager', 'orders:write')).toBe(true);
+    expect(roleHasPermission('manager', 'orders:cancel')).toBe(true);
   });
 
   it('validates 6-12 digit PINs and rejects trivial or leaking error messages', () => {

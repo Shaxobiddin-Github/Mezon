@@ -106,6 +106,7 @@ function toVoidedSaleDto(sale: StoredVoidedSaleRecord): VoidedSaleDto {
     storeId: sale.storeId,
     deviceId: sale.deviceId,
     sourceCartId: sale.sourceCartId,
+    sourceOrderId: sale.sourceOrderId,
     cashierUserId: sale.cashierUserId,
     completedByUserId: sale.completedByUserId,
     customerId: sale.customerId,

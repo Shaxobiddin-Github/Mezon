@@ -1,88 +1,106 @@
-# Claude topshirig'i: T1.9 QABUL → T1.10 rejasi
+# Claude topshirig'i: T1.10 QABUL → T1.11 rejasi
 
-## 1. T1.9 xulosasi: QABUL (kod `4542f69`)
+## 0. Ish tartibidagi o'zgarish (egasining qarori, 2026-11-11)
 
-Claude tekshirdi:
+- **Repo public qilindi.** GitHub Actions yana bepul ishlaydi. "To'rtala CI job yashil" sharti **qayta kuchga kirdi**. Vaqtinchalik CI'siz qoida bekor qilindi.
+- **Docker o'rnatildi.** Claude endi `pg-rls` testlarini ham lokal o'tkazadi.
+- **Tekshiruv tartibi:** har vazifada Claude toza nusxada verify va xavfli joylarga nishonli mutatsiya o'tkazadi. Chuqur audit (mustaqil model va keng mutatsiya) har **bosqich oxirida**: F1 yakunida, T1.13 dan keyin.
+- **Public repo:** maxfiy kalit, token, `.env` yoki shaxsiy ma'lumot hech qachon commit qilinmasin. GEMINI.md 3-bo'lim baribir taqiqlaydi, endi bu yanada muhim.
 
-- **Toza nusxada lokal `pnpm verify` yashil:** `unit` + `sqlite-hub` 258 test, `perf` 10 test (ketma-ket), sxema diff 0, depcruise toza. `db-cloud` va `desktop` ga tegilmagan.
-- **B1 tuzatildi.** Claude'ning mustaqil modeli (260 qadam: 33 smena, 17 kassir almashuvi, 63 savdo, 25 qaytarish, void, kassa harakatlari, 11 qayta yopish) endi haqiqiy quti qoldig'i bilan to'liq mos. Tekshirilgan qiymatlar:
-  - `drawerCashBalance` = aktiv sessiya `openingFloat` + sessiya harakatlari;
-  - smena `expectedCash` = `opening` + barcha harakatlar;
-  - usullar bo'yicha summalar;
-  - sessiyalarning kutilgan naqdi;
-  - `CASHIER_SESSION_MISMATCH`, `SHIFT_ALREADY_CLOSED` (yopiq smena cheki void qilinmaydi), `SHIFT_NOT_OPEN`.
-- **Mutatsiya:** 9 tadan 8 tasi ushlandi. Ushlanganlar: kassir egaligi, farq sababi, supervisor chegarasi, naqd yetarliligi, `DAY_HAS_OPEN_SHIFTS`, `isStale`, void smena tekshiruvi, `strictObject`.
+## 1. T1.10 xulosasi: QABUL (kod `9152a74`)
 
-### Test qarzi
+- **Toza nusxada `pnpm verify` yashil:** 278 + 12 perf test. Docker bilan `pg-rls` ham o'tdi, birorta test skip qilinmadi.
+- **GitHub CI yashil:** `Verify` (ubuntu, windows), `Verify PostgreSQL RLS`; desktop job reja bo'yicha skip.
+- **Nishonli mutatsiya:** 3 tadan 3 tasi ushlandi:
+  - `'advance'` to'lovi `cash_moves` ga tushsa, ya'ni kassa ikki marta sanalsa;
+  - avans chegarasi `netAdvance <= total`;
+  - oddiy POS savdosida `'advance'` usuli ruxsatsiz.
+- O1–O4 va 225 qadamli model testi hisobotdagidek.
 
-T1.10 PR'ining birinchi alohida commit'i: `T1.9 test qarzi: yopiq smenani qayta yopish`.
-
-- `closeShift` dagi `if (shiftRow.status !== 'open')` olib tashlanganda testlar yiqilmadi.
-- Test: yopilgan smenaga **yangi** `clientRequestId` bilan `closeShift` chaqirilsa, `409 SHIFT_ALREADY_CLOSED` qaytadi (SQLite xatosi yoki 500 emas). Hech qanday yozuv qo'shilmaydi.
-- To'g'ri yo'l `recloseShift` ekani ham testda ko'rinsin.
-- Mutatsiya bilan isbotla.
+Test qarzi yo'q.
 
 ## 2. Merge
 
-CI limiti tiklanguncha egasining qoidasi amal qiladi.
-
 1. `git pull --ff-only`.
-2. PR boshi Claude'ning shu topshiriq commit'i bo'lsin.
-3. `T1.9: Smena va kun yakuni` nomi bilan Squash and merge qil, SHA'ni yoz, branch'ni o'chir.
-4. `main`dan `gemini/T1.10-orders-advance` branch'ini och.
+2. PR boshi Claude'ning shu topshiriq commit'i bo'lsin, CI yashil bo'lsin.
+3. `T1.10: Buyurtma va avans` nomi bilan Squash and merge qil, SHA'ni yoz, branch'ni o'chir.
+4. `main`dan `gemini/T1.11-pos-ui` branch'ini och.
 
-## 3. T1.10 — Buyurtma va avans: avval REJA
+## 3. T1.11 — Kassa UI: avval REJA
 
-Kod yozma. Rejani `.mezon/gemini/HISOBOT.md` ga yoz, `[gemini-reja] T1.10` bilan commit qil va push qil, so'ng `node .mezon/kutish.mjs` bilan kut.
+Kod yozma. Rejani `.mezon/gemini/HISOBOT.md` ga yoz, `[gemini-reja] T1.11` bilan commit qil va push qil, so'ng `node .mezon/kutish.mjs` bilan kut.
 
-GEMINI.md T1.10 talablari:
+GEMINI.md T1.11 talablari:
 
-- holatlar;
-- avans `cash_move` ga tushadi;
-- tushum faqat topshirilganda;
-- katalogda yo'q tovar qatori.
+- teginish va klaviatura bilan ishlash;
+- USB skanerni aniqlash: belgilar tezligi, Enter va forma; DataMatrix va GS belgisi buzilmasin;
+- mahsulot qidiruvi;
+- to'lov ekrani;
+- kechiktirilgan chek;
+- tungi va kunduzgi mavzu.
 
-Mezonlar:
+Mezonlar (Playwright E2E):
 
-- avans olingan va ishlatilgan kunlarda kassa to'g'ri;
-- tushum bir marta.
+- skan → to'lov → chek;
+- sichqonsiz savdo;
+- tez yozgan odam skaner deb qabul qilinmaydi.
 
 Rejada quyidagilar aniq bo'lsin:
 
-### a) Buyurtma va holatlar
+### a) Tuzilma
 
-- **Holatlar:** masalan `draft` → `confirmed` → `ready` → `delivered`, yoki `cancelled`. Jadval sinfi va o'tishlar bir tomonlama bo'lsin.
-- **Qatorlar:** katalog tovari yoki katalogda yo'q tovar (nomi, birlik, narx, MXIK ixtiyoriy). Narx buyurtma paytida qotiriladimi yoki topshirishda qayta hisoblanadimi? Qaror qil.
-- **Mijoz:** majburiymi? T1.7 `customers` bilan bog'lanish.
+- **Joyi:** `apps/pos` (React 19 + Vite).
+- **Hub bilan aloqa:** tiplangan API mijozi. Tiplar `@mezon/contracts` Zod sxemalaridan olinsin, qo'lda nusxalanmasin. Javoblar ham Zod bilan tekshiriladi.
+- **Electron'da yuklanish:** `app://mezon` protokoli, CSP. Brauzerda dev rejim.
+- **Matnlar:** hammasi bitta `i18n` lug'atidan (T4.6 ga tayyor). Hozir o'zbek lotin.
+- **Holat boshqaruvi:** tanlangan kutubxona va sababi.
 
-### b) Avans
+### b) Ekranlar
 
-- **Avans olish:** naqd bo'lsa `cash_moves` ga yangi kirim turi, ochiq smena va sessiyaga. Naqdsiz bo'lsa to'lov qaydi.
-- **Avans tushum emas, majburiyat.** `v_sales_lines` va smenaning savdo summalariga tushmasin, smena yopilishida alohida qator bo'lib ko'rinsin.
-- **Avans qaytarish** (buyurtma bekor qilinsa): kassadan chiqim, naqd yetarliligi tekshiruvi, usul cheklovi (T1.6 qoidasi).
+- PIN bilan kirish.
+- Smenani ochish (ochiq smena bo'lmasa).
+- **Savdo:** savat, qidiruv, skan, miqdor, chegirma, supervisor PIN oynasi.
+- **To'lov:** aralash to'lov, berilgan naqd va qaytim; qarz bo'lsa mijoz tanlash.
+- **Kechiktirilgan cheklar:** park va resume.
+- **Chek ko'rinishi:** chop etish T1.12 da.
+- **Kassa harakatlari va smenani yopish ekrani:** naqdsiz summa maydoni bo'lmaydi.
 
-### c) Topshirish = savdo
+### c) Skaner aniqlash (eng nozik qism)
 
-- Topshirishda `completeSale` orqali haqiqiy chek yoziladi. T1.4 ning yagona yo'li buzilmasin: alohida savdo yo'li yaratilmasin.
-- Avans to'lovning bir qismi sifatida hisobga olinadi. Bunda yangi to'lov usuli (masalan `advance`) kerak bo'ladi, u naqd qutiga **qayta** tushmasligi kerak. Qolgan qism odatdagi usullar bilan.
-- **Tushum bir marta (mezon):** savdo kunida tushum to'liq summa bilan, avans kunida 0.
-- **Avans summadan ko'p bo'lsa:** qaytim yoki qolgan avansni qaytarish qoidasi.
-- **Ombor** topshirishda chiqadi, buyurtmada emas. Kerak bo'lsa zaxirani band qilish (rezerv) bo'ladimi? Hozircha tavsiya: rezerv yo'q, hujjatlashtir.
+- **Algoritm:** belgilar orasidagi vaqt (masalan ≤ 30 ms), minimal uzunlik, tugatuvchi Enter (yoki Tab). Kursor qaysi maydonda bo'lishidan qat'i nazar, skan savatga tushadi va yozilayotgan matnni buzmaydi.
+- **GS (`\x1D`) va DataMatrix:** belgilar o'chirilmaydi va almashtirilmaydi. Marking kodi butunligicha hub'ga yetadi. Ba'zi skanerlar GS ni `Ctrl+]` yoki boshqa kod bilan yuboradi: qanday ishlanishini yoz.
+- **Sof funksiya:** algoritm sof funksiya bo'lsin, vaqt belgilari kirish sifatida beriladi.
+- **Unit testlar:** tez yozuvchi (masalan 80–120 ms oraliq) skaner deb qabul qilinmaydi; skaner (5–15 ms) qabul qilinadi; GS saqlanadi; aralash holatlar.
 
-### d) Kassa va hisobotlar
+### d) Pul xavfsizligi UI'da
 
-- **Model testi (kamida 200 qadam):** avans olish, avans qaytarish, topshirish, bekor qilish, turli smenalar va kunlar. Har smena yopilishida kassa (naqd harakatlari) va tushum (faqat topshirilganda) mustaqil model bilan teng bo'lsin.
-- Avans olingan smena va topshirilgan smena boshqa-boshqa bo'lishi ham testlansin.
-- Topshirilgan chekni qaytarish (T1.6) avansli savdoda to'g'ri ishlasin: avans qismi qaysi usul bilan qaytariladi? Qaror qil.
+- **Bitta to'lov urinishi uchun bitta `clientRequestId`.** Tarmoq xatosi va qayta urinishda **o'sha ID** qayta yuboriladi. Muvaffaqiyatdan keyin yangisi. Ikki marta bosish va tarmoq uzilishi bitta chek beradi: E2E bilan isbotla.
+- **`409 SALE_TOTAL_CHANGED`:** yangi summani ko'rsatish va kassirdan tasdiq olish.
+- **Boshqa xatolar:** `INSUFFICIENT_STOCK` (qaysi qatorlar), `SHIFT_NOT_OPEN`, `CASHIER_SESSION_MISMATCH` tushunarli o'zbekcha xabar bilan.
+- **Tannarx va foyda:** kassir UI'sida umuman yo'q. Javoblarda ham kelmaydi.
 
-### e) Idempotentlik, RBAC va unumdorlik
+### e) Klaviatura va unumdorlik
 
-- Barcha amallar `clientRequestId` + `request_hash` bilan.
-- RBAC: kassir buyurtma va avansni qabul qiladi. Bekor qilish va avansni qaytarish supervisor bilan. Qaror qil.
-- Sotuvchi ekranida tannarx yo'q.
+- **Tugmalar xaritasi:** sichqonsiz to'liq savdo, masalan F-tugmalar. Ro'yxatini yoz.
+- **Teginish:** katta tugmalar, minimal o'lcham.
+- **Tezlik:** skan → qator ko'rinishi ≤ 100 ms; 50 000 tovarli katalogda qidiruv natijasi ≤ 150 ms (hub bilan birga).
 
-### f) Doiradan tashqari
+### f) E2E (Playwright)
 
-- Yetkazib berish va kuryer (F6).
-- Onlayn buyurtma (F6).
-- Fiskal (F3).
+Hub test rejimida, haqiqiy SQLite bilan:
+
+- skan → to'lov → chek;
+- sichqonsiz savdo;
+- tez yozuvchi;
+- ikki marta bosish va tarmoq uzilishi;
+- park/resume;
+- smena ochish va yopish.
+
+Windows CI'da ham ishlasin.
+
+### g) Doiradan tashqari
+
+- Printer (T1.12).
+- Hisobotlar va Excel (T1.13).
+- Android (T4.4).
+- Ko'p til (T4.6).
