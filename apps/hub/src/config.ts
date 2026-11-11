@@ -5,6 +5,7 @@ export interface ResolvedHubSecurityConfig {
   readonly host: typeof DEFAULT_HUB_HOST;
   readonly port: number;
   readonly allowedOrigins: ReadonlySet<string>;
+  readonly enableDevLoopbackCors: boolean;
 }
 
 const ALLOWED_ORIGIN_PROTOCOLS = new Set(['http:', 'https:', 'app:']);
@@ -32,6 +33,7 @@ export function resolveHubSecurityConfig(options?: {
   readonly host?: string;
   readonly port?: number;
   readonly allowedOrigins?: readonly string[];
+  readonly enableDevLoopbackCors?: boolean;
 }): ResolvedHubSecurityConfig {
   const host = options?.host ?? DEFAULT_HUB_HOST;
   if (host !== DEFAULT_HUB_HOST) {
@@ -54,5 +56,6 @@ export function resolveHubSecurityConfig(options?: {
     host: DEFAULT_HUB_HOST,
     port,
     allowedOrigins: normalizedOrigins,
+    enableDevLoopbackCors: options?.enableDevLoopbackCors === true,
   };
 }

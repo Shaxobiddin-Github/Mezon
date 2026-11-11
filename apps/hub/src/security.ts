@@ -67,29 +67,48 @@ function assertValidHostHeader(
   }
 }
 
-function isAllowlistedDesktopAppOrigin(
+function isLoopbackHttpOrigin(origin: string): boolean {
+  try {
+    const parsed = new URL(origin);
+    return (
+      parsed.protocol === 'http:' &&
+      (parsed.hostname === '127.0.0.1' || parsed.hostname === 'localhost') &&
+      parsed.port !== ''
+    );
+  } catch {
+    return false;
+  }
+}
+
+function resolveCorsAllowlistedOrigin(
   rawOrigin: string | string[] | undefined,
-  allowedOrigins: ReadonlySet<string>,
+  config: ResolvedHubSecurityConfig,
 ): string | null {
   if (typeof rawOrigin !== 'string') {
     return null;
   }
   const normalized = rawOrigin.trim();
-  if (!normalized.startsWith('app://') || !allowedOrigins.has(normalized)) {
+  if (!config.allowedOrigins.has(normalized)) {
     return null;
   }
-  return normalized;
+  if (normalized.startsWith('app://')) {
+    return normalized;
+  }
+  if (config.enableDevLoopbackCors && isLoopbackHttpOrigin(normalized)) {
+    return normalized;
+  }
+  return null;
 }
 
 function assertAllowedBrowserOrigin(
   request: FastifyRequest,
-  allowedOrigins: ReadonlySet<string>,
+  config: ResolvedHubSecurityConfig,
 ): string | null {
-  const desktopAppOrigin = isAllowlistedDesktopAppOrigin(request.headers.origin, allowedOrigins);
+  const corsOrigin = resolveCorsAllowlistedOrigin(request.headers.origin, config);
 
   const secFetchSite = request.headers['sec-fetch-site'];
   if (
-    desktopAppOrigin === null &&
+    corsOrigin === null &&
     typeof secFetchSite === 'string' &&
     secFetchSite.trim().toLowerCase() === 'cross-site'
   ) {
@@ -97,7 +116,8 @@ function assertAllowedBrowserOrigin(
   }
 
   // Strictly close browser CORS preflight unless the request comes from an allowlisted Electron app:// origin
-  if (request.method.toUpperCase() === 'OPTIONS' && desktopAppOrigin === null) {
+  // (or an explicitly allowlisted loopback http origin when enableDevLoopbackCors is enabled in dev/test).
+  if (request.method.toUpperCase() === 'OPTIONS' && corsOrigin === null) {
     throw new DomainError('FORBIDDEN_ORIGIN', 'CORS preflight requests are not allowed');
   }
 
@@ -113,12 +133,12 @@ function assertAllowedBrowserOrigin(
   if (
     normalizedOrigin === '' ||
     normalizedOrigin === 'null' ||
-    !allowedOrigins.has(normalizedOrigin)
+    !config.allowedOrigins.has(normalizedOrigin)
   ) {
     throw new DomainError('FORBIDDEN_ORIGIN', 'Origin is not allowed');
   }
 
-  return desktopAppOrigin;
+  return corsOrigin;
 }
 
 export function registerHubSecurityHooks(
@@ -136,9 +156,9 @@ export function registerHubSecurityHooks(
       throw err;
     }
 
-    let desktopAppOrigin: string | null = null;
+    let corsOrigin: string | null = null;
     try {
-      desktopAppOrigin = assertAllowedBrowserOrigin(request, config.allowedOrigins);
+      corsOrigin = assertAllowedBrowserOrigin(request, config);
     } catch (err) {
       if (err instanceof DomainError) {
         return sendSecurityError(reply, 403, err);
@@ -146,10 +166,10 @@ export function registerHubSecurityHooks(
       throw err;
     }
 
-    if (desktopAppOrigin !== null && request.method.toUpperCase() === 'OPTIONS') {
+    if (corsOrigin !== null && request.method.toUpperCase() === 'OPTIONS') {
       return reply
         .code(204)
-        .header('access-control-allow-origin', desktopAppOrigin)
+        .header('access-control-allow-origin', corsOrigin)
         .header('access-control-expose-headers', 'Retry-After')
         .header('vary', 'Origin')
         .header('access-control-allow-methods', 'GET, POST, PUT, PATCH, DELETE')
@@ -160,15 +180,12 @@ export function registerHubSecurityHooks(
   });
 
   app.addHook('onSend', async (request, reply, payload) => {
-    const desktopAppOrigin = isAllowlistedDesktopAppOrigin(
-      request.headers.origin,
-      config.allowedOrigins,
-    );
+    const corsOrigin = resolveCorsAllowlistedOrigin(request.headers.origin, config);
     reply.removeHeader('set-cookie');
     reply.removeHeader('access-control-allow-credentials');
 
-    if (desktopAppOrigin !== null) {
-      reply.header('access-control-allow-origin', desktopAppOrigin);
+    if (corsOrigin !== null) {
+      reply.header('access-control-allow-origin', corsOrigin);
       reply.header('access-control-expose-headers', 'Retry-After');
       reply.header('vary', 'Origin');
     } else {

@@ -262,7 +262,7 @@ export const AddCartLineRequestSchema = z.discriminatedUnion('kind', [
   }),
   z.strictObject({
     kind: z.literal('scan'),
-    barcode: z.string().trim().min(1, 'Barcode is required').max(64),
+    barcode: z.string().trim().min(1, 'Barcode is required').max(128),
     qty: PositiveBigIntStringSchema.default('1000'),
   }),
   z.strictObject({

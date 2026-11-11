@@ -18,15 +18,21 @@ export interface HealthPayload {
 declare global {
   interface Window {
     mezonBridge?: MezonBridge;
+    __MEZON_HUB_URL__?: string;
   }
 }
 
-export function buildHubHealthUrl(baseUrl: string): string {
+export function normalizeLoopbackHubBaseUrl(baseUrl: string): string {
   const parsed = new URL(baseUrl);
-  if (parsed.protocol !== 'http:' || parsed.hostname !== '127.0.0.1') {
+  if (parsed.protocol !== 'http:' || parsed.hostname !== '127.0.0.1' || parsed.port === '') {
     throw new Error(`Invalid hub baseUrl: ${baseUrl}`);
   }
-  return new URL('/health', parsed).toString();
+  return `http://127.0.0.1:${parsed.port}`;
+}
+
+export function buildHubHealthUrl(baseUrl: string): string {
+  const canonical = normalizeLoopbackHubBaseUrl(baseUrl);
+  return new URL('/health', canonical).toString();
 }
 
 export function parseHealthPayload(raw: unknown): HealthPayload {

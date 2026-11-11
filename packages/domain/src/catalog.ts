@@ -12,14 +12,14 @@ export type BarcodeFormat = (typeof BARCODE_FORMATS)[number];
 
 export const MAX_CATALOG_NAME_LENGTH = 200;
 export const MAX_CATALOG_SKU_LENGTH = 64;
-export const MAX_CATALOG_BARCODE_LENGTH = 64;
+export const MAX_CATALOG_BARCODE_LENGTH = 128;
 export const MAX_FISCAL_CODE_LENGTH = 32;
 export const MAX_PRICE_CHANGE_REASON_LENGTH = 250;
 export const MAX_CATALOG_SEARCH_TOKENS = 16;
 export const MAX_VARIANT_ATTRIBUTE_KEYS = 20;
 
 const CONTROL_CHAR_REGEX = /[\u0000-\u001f\u007f]/;
-const BARCODE_ALLOWED_REGEX = /^[A-Za-z0-9._-]+$/;
+const BARCODE_ALLOWED_REGEX = /^[\x1dA-Za-z0-9._+/=()-]+$/;
 const DIGITS_ONLY_REGEX = /^\d+$/;
 const FISCAL_CODE_ALLOWED_REGEX = /^[A-Za-z0-9._/-]+$/;
 
@@ -403,7 +403,7 @@ export function normalizeBarcodeInput(raw: string): string {
   ) {
     throw new DomainError(
       'INVALID_BARCODE',
-      `Barcode must be 1–${String(MAX_CATALOG_BARCODE_LENGTH)} characters from [A-Za-z0-9._-]`,
+      `Barcode must be 1–${String(MAX_CATALOG_BARCODE_LENGTH)} characters from [A-Za-z0-9._+/=()-\\x1d]`,
     );
   }
   return cleaned;
