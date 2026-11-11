@@ -1,54 +1,88 @@
-# Claude topshirig'i: T1.9 — QAYTA ISHLASH (R1)
+# Claude topshirig'i: T1.9 QABUL → T1.10 rejasi
 
-Kod `9ac15e7` tekshirildi.
+## 1. T1.9 xulosasi: QABUL (kod `4542f69`)
 
-**Yaxshi tomonlari:**
+Claude tekshirdi:
 
-- **Mustaqil model, 260 qadam:**
-  - amallar: 33 smena, 17 kassir almashuvi, 63 savdo (qaytimli naqd va aralash), 25 qaytarish, void, `cash_in`/`cash_out`/inkassatsiya, 11 qayta yopish;
-  - har yopilishda usullar bo'yicha savdo va qaytarish summalari, oxirgi sessiyaning kutilgan naqdi, `expectedCash` va `discrepancy` model bilan tiyinigacha teng;
-  - `CASHIER_SESSION_MISMATCH` (6), yopiq smena chekini void qilish (`SHIFT_ALREADY_CLOSED`, 12), yopiq smenaga yozish va smenasiz savdo (`SHIFT_NOT_OPEN`) to'g'ri rad etiladi;
-  - X3 to'g'ri: qaytim ikki marta ayirilmaydi.
-- **Bitta pul xatosi bor.**
+- **Toza nusxada lokal `pnpm verify` yashil:** `unit` + `sqlite-hub` 258 test, `perf` 10 test (ketma-ket), sxema diff 0, depcruise toza. `db-cloud` va `desktop` ga tegilmagan.
+- **B1 tuzatildi.** Claude'ning mustaqil modeli (260 qadam: 33 smena, 17 kassir almashuvi, 63 savdo, 25 qaytarish, void, kassa harakatlari, 11 qayta yopish) endi haqiqiy quti qoldig'i bilan to'liq mos. Tekshirilgan qiymatlar:
+  - `drawerCashBalance` = aktiv sessiya `openingFloat` + sessiya harakatlari;
+  - smena `expectedCash` = `opening` + barcha harakatlar;
+  - usullar bo'yicha summalar;
+  - sessiyalarning kutilgan naqdi;
+  - `CASHIER_SESSION_MISMATCH`, `SHIFT_ALREADY_CLOSED` (yopiq smena cheki void qilinmaydi), `SHIFT_NOT_OPEN`.
+- **Mutatsiya:** 9 tadan 8 tasi ushlandi. Ushlanganlar: kassir egaligi, farq sababi, supervisor chegarasi, naqd yetarliligi, `DAY_HAS_OPEN_SHIFTS`, `isStale`, void smena tekshiruvi, `strictObject`.
 
-## B1. Kassir almashgandan keyin kassada haqiqatda bor pul noto'g'ri hisoblanadi
+### Test qarzi
 
-**Holat:**
+T1.10 PR'ining birinchi alohida commit'i: `T1.9 test qarzi: yopiq smenani qayta yopish`.
 
-- Kassir A almashishda `countedCash = 8 473` kiritdi, kutilgan summa `8 573` edi (kamomad −100).
-- Qutida jismonan 8 473 qoldi. B sessiyasining `openingFloat` i ham 8 473.
-- Lekin `getCurrentShift().drawerCashBalance` va `getTerminalCashBalance()` **8 573** qaytaradi (`opening + SUM(cash_moves)`).
-- Naqd yetarliligi tekshiruvlari ham shu sonni ishlatadi. Natijada qutida yo'q 100 tiyinni qaytarish yoki inkassatsiya qilishga ruxsat beriladi. X1 maqsadi aynan shuni oldini olish edi.
+- `closeShift` dagi `if (shiftRow.status !== 'open')` olib tashlanganda testlar yiqilmadi.
+- Test: yopilgan smenaga **yangi** `clientRequestId` bilan `closeShift` chaqirilsa, `409 SHIFT_ALREADY_CLOSED` qaytadi (SQLite xatosi yoki 500 emas). Hech qanday yozuv qo'shilmaydi.
+- To'g'ri yo'l `recloseShift` ekani ham testda ko'rinsin.
+- Mutatsiya bilan isbotla.
 
-**Talab:**
+## 2. Merge
 
-1. **Mavjud naqd** (barcha chiqim tekshiruvlari, `drawerCashBalance`, `getTerminalCashBalance()`) = **aktiv sessiyaning `openingFloat` i + shu sessiyadagi `cash_moves` yig'indisi** (`shift_cashier_session_id` bo'yicha).
-2. **Smena darajasidagi `expectedCash`** (yopilish snapshot'i) `opening + SUM(cash_moves)` bo'lib qolishi mumkin. Shunda smena farqi = barcha sessiya farqlari yig'indisi. Bu munosabatni izohda yoz va testla.
-3. **Test:**
-   - almashishda −100 kamomad → B sessiyasida `drawerCashBalance` = 8 473 + B harakatlari;
-   - 8 474 naqd qaytarish yoki inkassatsiya `INSUFFICIENT_CASH_IN_DRAWER`, 8 473 esa o'tadi;
-   - smena yopilganda smena farqi = sessiya farqlari yig'indisi.
-4. **Mutatsiya dalili:** eski formula qaytarilsa, test yiqiladi.
+CI limiti tiklanguncha egasining qoidasi amal qiladi.
 
-## B2. Unumdorlik testlari parallel yuklamada beqaror
+1. `git pull --ff-only`.
+2. PR boshi Claude'ning shu topshiriq commit'i bo'lsin.
+3. `T1.9: Smena va kun yakuni` nomi bilan Squash and merge qil, SHA'ni yoz, branch'ni o'chir.
+4. `main`dan `gemini/T1.10-orders-advance` branch'ini och.
 
-Claude'ning toza nusxasida to'liq `pnpm verify` ikki test bilan yiqildi:
+## 3. T1.10 — Buyurtma va avans: avval REJA
 
-- `catalog.test.ts` skan/FTS: 56 ms > 50;
-- `supplier.test.ts` 100 qatorli kirim: 544 ms > 500.
+Kod yozma. Rejani `.mezon/gemini/HISOBOT.md` ga yoz, `[gemini-reja] T1.10` bilan commit qil va push qil, so'ng `node .mezon/kutish.mjs` bilan kut.
 
-Alohida ishga tushirilganda ikkalasi ham o'tadi. Sabab: boshqa test fayllari bilan parallel yuklama.
+GEMINI.md T1.10 talablari:
 
-**Talab:**
+- holatlar;
+- avans `cash_move` ga tushadi;
+- tushum faqat topshirilganda;
+- katalogda yo'q tovar qatori.
 
-- Barcha `PERF` testlarini alohida vitest loyihasiga ajrat (`fileParallelism: false`, ketma-ket).
-- `pnpm verify` ularni boshqa testlardan keyin, yolg'iz ishga tushirsin.
-- Chegaralar (50 ms, 300 ms, 500 ms) **o'zgarmaydi**.
+Mezonlar:
 
-## Bajarish tartibi
+- avans olingan va ishlatilgan kunlarda kassa to'g'ri;
+- tushum bir marta.
 
-1. B1 va B2 ni tuzat. Yangi commit qil, amend qilma.
-2. Lokal `pnpm verify` yashil.
-3. Push qil.
-4. Hisobot: B1 testi va mutatsiya dalili, B2 tuzilmasi. `[gemini-hisobot] T1.9 R1` bilan commit qil va push qil.
-5. `node .mezon/kutish.mjs` ni ishga tushir. Merge qilma.
+Rejada quyidagilar aniq bo'lsin:
+
+### a) Buyurtma va holatlar
+
+- **Holatlar:** masalan `draft` → `confirmed` → `ready` → `delivered`, yoki `cancelled`. Jadval sinfi va o'tishlar bir tomonlama bo'lsin.
+- **Qatorlar:** katalog tovari yoki katalogda yo'q tovar (nomi, birlik, narx, MXIK ixtiyoriy). Narx buyurtma paytida qotiriladimi yoki topshirishda qayta hisoblanadimi? Qaror qil.
+- **Mijoz:** majburiymi? T1.7 `customers` bilan bog'lanish.
+
+### b) Avans
+
+- **Avans olish:** naqd bo'lsa `cash_moves` ga yangi kirim turi, ochiq smena va sessiyaga. Naqdsiz bo'lsa to'lov qaydi.
+- **Avans tushum emas, majburiyat.** `v_sales_lines` va smenaning savdo summalariga tushmasin, smena yopilishida alohida qator bo'lib ko'rinsin.
+- **Avans qaytarish** (buyurtma bekor qilinsa): kassadan chiqim, naqd yetarliligi tekshiruvi, usul cheklovi (T1.6 qoidasi).
+
+### c) Topshirish = savdo
+
+- Topshirishda `completeSale` orqali haqiqiy chek yoziladi. T1.4 ning yagona yo'li buzilmasin: alohida savdo yo'li yaratilmasin.
+- Avans to'lovning bir qismi sifatida hisobga olinadi. Bunda yangi to'lov usuli (masalan `advance`) kerak bo'ladi, u naqd qutiga **qayta** tushmasligi kerak. Qolgan qism odatdagi usullar bilan.
+- **Tushum bir marta (mezon):** savdo kunida tushum to'liq summa bilan, avans kunida 0.
+- **Avans summadan ko'p bo'lsa:** qaytim yoki qolgan avansni qaytarish qoidasi.
+- **Ombor** topshirishda chiqadi, buyurtmada emas. Kerak bo'lsa zaxirani band qilish (rezerv) bo'ladimi? Hozircha tavsiya: rezerv yo'q, hujjatlashtir.
+
+### d) Kassa va hisobotlar
+
+- **Model testi (kamida 200 qadam):** avans olish, avans qaytarish, topshirish, bekor qilish, turli smenalar va kunlar. Har smena yopilishida kassa (naqd harakatlari) va tushum (faqat topshirilganda) mustaqil model bilan teng bo'lsin.
+- Avans olingan smena va topshirilgan smena boshqa-boshqa bo'lishi ham testlansin.
+- Topshirilgan chekni qaytarish (T1.6) avansli savdoda to'g'ri ishlasin: avans qismi qaysi usul bilan qaytariladi? Qaror qil.
+
+### e) Idempotentlik, RBAC va unumdorlik
+
+- Barcha amallar `clientRequestId` + `request_hash` bilan.
+- RBAC: kassir buyurtma va avansni qabul qiladi. Bekor qilish va avansni qaytarish supervisor bilan. Qaror qil.
+- Sotuvchi ekranida tannarx yo'q.
+
+### f) Doiradan tashqari
+
+- Yetkazib berish va kuryer (F6).
+- Onlayn buyurtma (F6).
+- Fiskal (F3).
