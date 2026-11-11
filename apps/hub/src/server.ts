@@ -49,6 +49,12 @@ export interface CreateHubServerOptions {
   readonly host?: string;
   readonly port?: number;
   readonly allowedOrigins?: readonly string[];
+  /**
+   * Dev/test-only option (`U3` / `C1`): enables browser CORS headers (`Access-Control-Allow-*` & `OPTIONS` preflight)
+   * strictly for loopback `http://127.0.0.1:<port>` / `http://localhost:<port>` origins listed in `allowedOrigins`.
+   * Never read from `process.env`; never passed by Electron worker in production.
+   */
+  readonly enableDevLoopbackCors?: boolean;
   readonly logLevel?: LevelWithSilent;
   readonly logStream?: DestinationStream;
   readonly clock?: Clock;
@@ -95,6 +101,7 @@ export async function createHubServer(options: CreateHubServerOptions): Promise<
     host: options.host,
     port: options.port,
     allowedOrigins: options.allowedOrigins,
+    enableDevLoopbackCors: options.enableDevLoopbackCors,
   });
 
   const clock = options.clock ?? new SystemClock();

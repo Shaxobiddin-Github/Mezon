@@ -29,10 +29,11 @@ export default defineConfig({
           environment: 'node',
           include: ['packages/db-local/**/*.test.ts', 'apps/hub/**/*.test.ts'],
           exclude: ['**/*.perf.test.ts', '**/node_modules/**', '**/dist/**'],
+          maxWorkers: 4,
           testTimeout: 30_000,
           hookTimeout: 30_000,
           sequence: {
-            groupOrder: 0,
+            groupOrder: 1,
           },
         },
       },
@@ -48,7 +49,7 @@ export default defineConfig({
           testTimeout: 60_000,
           hookTimeout: 30_000,
           sequence: {
-            groupOrder: 1,
+            groupOrder: 2,
           },
         },
       },

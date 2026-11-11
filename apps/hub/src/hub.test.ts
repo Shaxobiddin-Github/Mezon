@@ -175,6 +175,74 @@ describe('@mezon/hub - HTTP security, Argon2id PIN auth, setup wizard, RBAC, and
       expect(allowedOriginRes.headers['access-control-allow-origin']).toBeUndefined();
       expect(allowedOriginRes.headers['set-cookie']).toBeUndefined();
 
+      // U3: Default Hub config (without allowedOrigins) strictly rejects http://localhost:5173
+      const defaultOriginHub = await createHubServer({
+        dbPath: makeDbPath('default-origin-security.db'),
+        port: TEST_PORT,
+        logLevel: 'silent',
+        pinHasher: makeFastTestHasher(),
+      });
+      try {
+        const defaultOriginGet = await defaultOriginHub.app.inject({
+          method: 'GET',
+          url: '/health',
+          headers: loopHeaders({ origin: 'http://localhost:5173' }),
+        });
+        expect(defaultOriginGet.statusCode).toBe(403);
+        expect(ApiErrorEnvelopeSchema.parse(defaultOriginGet.json()).error.code).toBe(
+          'FORBIDDEN_ORIGIN',
+        );
+
+        const defaultOriginOptions = await defaultOriginHub.app.inject({
+          method: 'OPTIONS',
+          url: '/auth/login',
+          headers: loopHeaders({
+            origin: 'http://localhost:5173',
+            'access-control-request-method': 'POST',
+          }),
+        });
+        expect(defaultOriginOptions.statusCode).toBe(403);
+        expect(defaultOriginOptions.headers['access-control-allow-origin']).toBeUndefined();
+      } finally {
+        await defaultOriginHub.close();
+      }
+
+      // U3: When enableDevLoopbackCors: true is explicitly passed in dev/test, only allowlisted loopback http origins receive CORS headers
+      const devCorsHub = await createHubServer({
+        dbPath: makeDbPath('dev-cors-security.db'),
+        port: TEST_PORT,
+        allowedOrigins: ['http://127.0.0.1:5173'],
+        enableDevLoopbackCors: true,
+        logLevel: 'silent',
+        pinHasher: makeFastTestHasher(),
+      });
+      try {
+        const devOptions = await devCorsHub.app.inject({
+          method: 'OPTIONS',
+          url: '/auth/login',
+          headers: loopHeaders({
+            origin: 'http://127.0.0.1:5173',
+            'access-control-request-method': 'POST',
+          }),
+        });
+        expect(devOptions.statusCode).toBe(204);
+        expect(devOptions.headers['access-control-allow-origin']).toBe('http://127.0.0.1:5173');
+
+        // Unlisted localhost:5173 is still rejected 403 even when enableDevLoopbackCors: true
+        const unlistedDevOptions = await devCorsHub.app.inject({
+          method: 'OPTIONS',
+          url: '/auth/login',
+          headers: loopHeaders({
+            origin: 'http://localhost:5173',
+            'access-control-request-method': 'POST',
+          }),
+        });
+        expect(unlistedDevOptions.statusCode).toBe(403);
+        expect(unlistedDevOptions.headers['access-control-allow-origin']).toBeUndefined();
+      } finally {
+        await devCorsHub.close();
+      }
+
       // Cookie header is ignored; protected endpoint requires Bearer header
       const cookieOnly = await hub.app.inject({
         method: 'GET',

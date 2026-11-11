@@ -163,7 +163,7 @@ module.exports = {
     {
       name: 'pos-src-imports',
       comment:
-        'apps/pos browser UI source files can only import internal files, contracts, i18n, ui, react, and react-dom (no node builtins, electron, db-local, db-cloud, drivers, or hub)',
+        'apps/pos browser UI source files can only import internal files, domain, contracts, i18n, ui, react, react-dom, zod, and zustand (no node builtins, electron, db-local, db-cloud, drivers, or hub)',
       severity: 'error',
       from: {
         path: '^apps/pos/src/',
@@ -171,7 +171,31 @@ module.exports = {
       },
       to: {
         pathNot:
-          '^(apps/pos/src/|packages/(contracts|i18n|ui)/|node_modules/(\\.pnpm/)?(react|react-dom)@)',
+          '^(apps/pos/src/|packages/(domain|contracts|i18n|ui)/|node_modules/(\\.pnpm/)?(react|react-dom|zod|zustand)@)',
+      },
+    },
+    {
+      name: 'ui-src-imports',
+      comment: 'packages/ui source files can only import internal files and packages/domain',
+      severity: 'error',
+      from: {
+        path: '^packages/ui/src/',
+        pathNot: '\\.test\\.ts$',
+      },
+      to: {
+        pathNot: '^(packages/ui/src/|packages/domain/)',
+      },
+    },
+    {
+      name: 'i18n-src-imports',
+      comment: 'packages/i18n source files can only import internal files',
+      severity: 'error',
+      from: {
+        path: '^packages/i18n/src/',
+        pathNot: '\\.test\\.ts$',
+      },
+      to: {
+        pathNot: '^packages/i18n/src/',
       },
     },
     {
