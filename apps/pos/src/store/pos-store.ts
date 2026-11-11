@@ -27,7 +27,8 @@ export type PosModal =
   | 'payment'
   | 'receipt'
   | 'shortcuts'
-  | 'edit_qty';
+  | 'edit_qty'
+  | 'diagnostics';
 
 export interface InsufficientStockLineDetail {
   readonly cartLineId: string;

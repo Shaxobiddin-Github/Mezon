@@ -231,4 +231,105 @@ describe('@mezon/pos scanner-detector pure state machine (T1.11 c)', () => {
     expect(res.completedScans).toEqual([barcode]);
     expect(res.simulatedInputText).toBe('shakar');
   });
+
+  it('rejects short bursts (< minLength, e.g. 2 or 3 fast keys + Enter from keyboard rollover or quick "+1" Enter) as non-scans', () => {
+    const events2Chars: ScannerKeyInput[] = [
+      {
+        key: '+',
+        code: 'Equal',
+        ctrlKey: false,
+        altKey: false,
+        metaKey: false,
+        timestampMs: 1_000,
+      },
+      {
+        key: '1',
+        code: 'Digit1',
+        ctrlKey: false,
+        altKey: false,
+        metaKey: false,
+        timestampMs: 1_005,
+      },
+      {
+        key: 'Enter',
+        code: 'Enter',
+        ctrlKey: false,
+        altKey: false,
+        metaKey: false,
+        timestampMs: 1_010,
+      },
+    ];
+    const res2 = feedSequence(events2Chars);
+    expect(res2.completedScans).toEqual([]);
+    expect(res2.simulatedInputText).toBe('+1');
+
+    const events3Chars: ScannerKeyInput[] = [
+      {
+        key: '1',
+        code: 'Digit1',
+        ctrlKey: false,
+        altKey: false,
+        metaKey: false,
+        timestampMs: 2_000,
+      },
+      {
+        key: '2',
+        code: 'Digit2',
+        ctrlKey: false,
+        altKey: false,
+        metaKey: false,
+        timestampMs: 2_004,
+      },
+      {
+        key: '3',
+        code: 'Digit3',
+        ctrlKey: false,
+        altKey: false,
+        metaKey: false,
+        timestampMs: 2_008,
+      },
+      {
+        key: 'Enter',
+        code: 'Enter',
+        ctrlKey: false,
+        altKey: false,
+        metaKey: false,
+        timestampMs: 2_012,
+      },
+    ];
+    const res3 = feedSequence(events3Chars);
+    expect(res3.completedScans).toEqual([]);
+    expect(res3.simulatedInputText).toBe('123');
+  });
+
+  it('rejects fast 13-character burst when terminator Enter is delayed (> maxInterKeyMs, e.g. 500 ms later)', () => {
+    const barcode = '4780012345671';
+    const events: ScannerKeyInput[] = [];
+    let t = 5_000;
+    for (const ch of barcode) {
+      events.push({
+        key: ch,
+        code: `Digit${ch}`,
+        ctrlKey: false,
+        altKey: false,
+        metaKey: false,
+        timestampMs: t,
+      });
+      t += 7; // fast 7ms burst across all 13 digits
+    }
+    // Wait 500ms before pressing Enter (human paused to think before hitting Enter)
+    t += 500;
+    events.push({
+      key: 'Enter',
+      code: 'Enter',
+      ctrlKey: false,
+      altKey: false,
+      metaKey: false,
+      timestampMs: t,
+    });
+
+    const res = feedSequence(events);
+    expect(res.completedScans).toEqual([]);
+    expect(res.simulatedInputText).toBe(barcode);
+  });
 });
