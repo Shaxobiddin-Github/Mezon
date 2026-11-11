@@ -1,175 +1,146 @@
-## Hisobot: T1.7
+## Reja: T1.8 — Ta'minotchi, kirim hujjati, tannarx, `supplier_ledger` va to'lovlar
 
-Branch / PR: `gemini/T1.7-customer-ledger` / https://github.com/Shaxobiddin-Github/Mezon/pull/14  
-Commit: `fc172c645c16f822a1a0ef454b4aa215b457f9ba` (1-commit: T1.6 test qarzi) + `8f29f348c032cf6aaf94882ddb51e50909167410` (T1.7 kod)
+### 0. T1.7 merge, Egasining qarori va `ci.yml` 1-commit
 
----
-
-### Nima qilindi
-
-1. **T1.6 test qarzi (`fc172c645c16f822a1a0ef454b4aa215b457f9ba` — alohida commit):**
-   - `voidSale` o'rtacha tannarxli (`lastUnitCost !== avgCost` ikki xil kirimdan keyin) va FIFO partiyali ombor qoldiqlarining barcha 6 maydonini asl holatiga aniq tiklashi testlandi (`packages/db-local/src/return.test.ts`). Mutatsiya isboti: `packages/domain/src/stock.ts` dagi `applyReplayStockMove` dan `move.reason !== 'return' &&` olib tashlanganda test `lastUnitCost` (`10000n` vs `30000n`) farqi bilan yiqildi.
-   - Yarim tiyin (`10 * 500 / 2000 = 2.5`) kumulyativ `HalfAwayFromZero` yaxlitlash testi qo'shildi (`packages/domain/src/return.test.ts`, `packages/db-local/src/return.test.ts`). Mutatsiya isboti: `packages/domain/src/return.ts` dagi `divideRoundHalfAwayFromZero` oddiy `/` ga almashtirilganda testlar `1n` vs `2n` bilan yiqildi.
-
-2. **T1.7 Domen va qoidalar (`packages/domain`):**
-   - `auth.ts`: `customers:read`, `customers:write`, `debt:pay` (`owner`/`manager`/`cashier`), hamda `debt:manage` (faqat `owner`/`manager`).
-   - `errors.ts`: `CUSTOMER_NOT_FOUND`, `CUSTOMER_PHONE_ALREADY_EXISTS`, `CUSTOMER_INACTIVE`, `CUSTOMER_HAS_OPEN_DEBT`, `CREDIT_LIMIT_EXCEEDED`, `OPENING_BALANCE_ALREADY_EXISTS`, `OVERPAYMENT_NOT_ALLOWED`, `RETURN_DEBT_OFFSET_EXCEEDED`, `SALE_DEBT_HAS_PAYMENTS`.
-   - `customer.ts`:
-     - Telefon normallashtirish (`normalizeCustomerPhone`): mahalliy O'zbekiston shakllari (`90 123-45-67`, `998...`) -> `+998XXXXXXXXX` va umumiy E.164 (`+[1-9]\d{7,14}`, masalan `+7...`, `+992...`) xato xabarlarida xom raqamni chiqarmasdan qabul qilinadi.
-     - Nom qidiruvini `normalizeCatalogSearchText` orqali qayta ishlatish (kirill-lotin).
-     - `computeDebtDueAtMs`, `computeOverdueDaysAt` (`Asia/Tashkent` va istalgan IANA `storeTimezone` kesish nuqtasi).
-     - **D1 (`computeNextCustomerBalance`):** Barcha ledger yozish yo'llari (`opening_balance`, `sale_debt`, `debt_payment`, `return_offset`, `sale_void`, `adjustment`) ishlatadigan yagona domen qo'riqchisi (`balance >= 0`).
-     - **D2 + D3 (`allocateCustomerLedgerFifo`):** `(hlc ASC, id ASC)` bo'yicha bir o'tishli `O(N)` deterministik FIFO taqsimot. Musbat `adjustment` o'z `hlc` o'rnida mustaqil majburiyat bo'lib turadi (`dueAtMs = null`, faqat aniq `dueDays` berilganda muddat olinadi); manfiy `adjustment` eng eski ochiq majburiyatni FIFO bilan yopadi.
-     - **D5:** F2 ko'p do'konli oflayn sinxronizatsiya chegaralari (`CREDIT_LIMIT_EXCEEDED_SYNC`, `DUPLICATE_OPENING_BALANCE`, `OVERPAYMENT_CONFLICT`) JSDoc hujjatida (`customer.ts` va `db-local/src/schema/index.ts`) qayd etildi.
-   - `return.ts`: `resolveReturnPayments` dan T1.7 placeholder olib tashlandi va haqiqiy `remainingSaleDebt` hamda `paidTowardDebtByMethod` tekshiruvlari ulandi.
-
-3. **PII redaksiyasi va kontraktlar (`packages/drivers`, `packages/contracts`):**
-   - `packages/drivers/src/node/redact.ts`: `DEFAULT_LOG_REDACT_PATHS` ga `phone`, `phoneNormalized`, `phoneDigits`, `fullName`, `nameSearch`, `customerName`, `customerPhone`, `customerNote` (`*.`, `*.*.`) qo'shildi.
-   - `packages/contracts/src/customer.ts` va `sale.ts`: Qat'iy Zod DTO'lar (tannarx/foyda maydonlarisiz, `ZodError` da PII sizmasdan) va `CompleteSaleRequestSchema` da ixtiyoriy `dueDays`, `creditOverride`.
-
-4. **Lokal SQLite sxema, migratsiya, repozitoriy va T1.5/T1.6 ilgaklari (`packages/db-local`):**
-   - `0009_customer_ledger.sql`: `local_hub_config.default_customer_due_days` (default `14`), `customers` (`ATTR`, `organization`), `customer_ledger` (`FACT`, `store`), `local_customer_balances` (`LOCAL`, `organization`), `customers_fts` (FTS5 `content=` siz), partial UNIQUE (`uidx_customers_org_phone_active`, `uidx_customer_ledger_opening_balance`), `BEFORE DELETE/UPDATE` triggerlari.
-   - `customer-migrations.ts` + `scripts/check-migrations.mjs`: `customers_fts`, `customer_ledger`/`customers` triggerlari va `uidx_customer_ledger_opening_balance` `db:check` da tekshiriladi (`index.test.ts` da ijobiy/manfiy testlar bilan).
-   - `outbox.ts`: `redactOutboxPayloadForDebug` va `formatOutboxRecordForDebug`.
-   - `customer-repo.ts`: `SqliteCustomerStore` (CRUD, tombstone qarz himoyasi, FTS5/telefon qidiruvi, SQL Window Function bilan tarix, `cash_moves` `debt_payment_in`, `rebuildCustomerBalances`, `rebuildCustomerSearchIndex`) va `completeSale`/`createReturn`/`voidSale` bilan bitta tranzaksiyada ishlovchi ilgaklar.
-
-5. **Hub HTTP API va RBAC (`apps/hub`):**
-   - `customer-service.ts`, `customer-routes.ts` (`GET /customers`, `GET /customers/overdue`, `GET /customers/:id`, `GET /customers/:id/ledger`, `POST /customers`, `PATCH /customers/:id`, `DELETE /customers/:id`, `POST /customers/:id/opening-balance`, `POST /customers/:id/payments`, `POST /customers/:id/adjustments`).
-   - `sale-service.ts`: `creditOverride` uchun `authService.verifySupervisorPin` (T0.6 blokirovkasi bilan).
-   - `error-handler.ts`: barcha 9 ta yangi `DomainErrorCode` uchun HTTP statuslar (`404` / `409`).
+- **PR #14 Squash and merge:** Egasi ruxsati bilan (kod `8f29f34` barcha 4 CI jobdan yashil o'tgan, keyingi `8cc7542` va `e99d8be` faqat `.mezon/` fayllari bo'lgan, Claude `QABUL` bergan) `T1.7: Mijoz qarz daftari` nomi bilan merge qilindi — Merge commit SHA: **`fdd1b80396f1fc07f1ee6a63ccf61de6a7575d3c`**.
+- **Branchlar:** `gemini/T1.7-customer-ledger` lokal va masofadan o'chirildi; `main` (`fdd1b80`) dan `gemini/T1.8-suppliers-receiving` branch'i ochildi.
+- **Vaqtinchalik CI siyosati (egasi qarori):** GitHub Actions bepul limiti 20 kun ichida tiklanguncha qabul sharti = lokal `pnpm verify` + Claude'ning `QABUL`i (`packages/db-cloud` va `apps/desktop` PR'lari limit tiklanguncha merge qilinmaydi).
+- **1-commit (`68b2db5` — bajarildi):** Egasining ko'rsatmasiga binoan `.github/workflows/ci.yml` tejamkor qilindi:
+  - `push` faqat `main` branch uchun;
+  - `push` va `pull_request` da `paths-ignore: ['.mezon/**', '**/*.md']`;
+  - `desktop` (`Build & E2E Desktop Installer (windows-latest)`) faqat `main` push'da yoki `detect-changes` (`ubuntu-latest`) GitHub PR API orqali `apps/desktop/**` yoxud `packages/drivers/**` o'zgarganini aniqlaganda ishlaydi.
 
 ---
 
-### O'zgargan fayllar
+### 1. Reja tasdiqlangandan keyingi 1-kod commit'i — T1.7 test qarzi
 
-**T1.6 test qarzi commit'i (`fc172c6`):**
-- `packages/domain/src/return.test.ts` — yarim tiyin kumulyativ `HalfAwayFromZero` yaxlitlash testi.
-- `packages/db-local/src/return.test.ts` — `voidSale` da ikki tannarxli `lastUnitCost != avg` tiklanish va yarim tiyin DB testi.
+Reja tasdiqlangach, T1.8 kodidan oldin **alohida commit** qilinadi (`T1.7 test qarzi: nofaol mijoz, PII redaksiya, test vaqt chegarasi`):
 
-**T1.7 commit'i (`8f29f34` — 41 fayl):**
-- `packages/domain/src/errors.ts` — T1.7 xato kodlari.
-- `packages/domain/src/auth.ts` — `customers:read/write`, `debt:pay/manage` huquqlari.
-- `packages/domain/src/auth.test.ts` — rol x huquq matritsasi testlari.
-- `packages/domain/src/return.ts` — sana kalendar yordamchilarini eksport qilish va `resolveReturnPayments` qarz qoldig'i bilan qayta ulash.
-- `packages/domain/src/return.test.ts` — qaytarish qarz cheklovi testlarini yangilash.
-- `packages/domain/src/sale.ts` — `canonicalizeCompleteSaleRequest` da ixtiyoriy `dueDays`.
-- `packages/domain/src/customer.ts` — yangi domen moduli (telefon, D1, D2/D3 FIFO, kechikish, D5 izohi, hashlar).
-- `packages/domain/src/customer.test.ts` — birlik va 300-run `fast-check` property testlar.
-- `packages/domain/src/index.ts` — mijoz eksportlari.
-- `packages/drivers/src/node/redact.ts` — Pino PII redaktsiya yo'llari.
-- `packages/contracts/src/sale.ts` — `CompleteSaleRequestSchema` da `dueDays` va `creditOverride`.
-- `packages/contracts/src/customer.ts` — yangi Zod DTO sxemalari.
-- `packages/contracts/src/customer.test.ts` — kontraktdagi PII/QQS/DTO testlari.
-- `packages/contracts/src/index.ts` — mijoz kontrakti eksportlari.
-- `packages/db-local/src/schema/index.ts` — `local_hub_config`, `customers`, `customer_ledger`, `local_customer_balances` sxemalari + D5 izohi.
-- `packages/db-local/drizzle/0009_customer_ledger.sql` — yangi SQLite migratsiyasi.
-- `packages/db-local/drizzle/meta/0009_snapshot.json`, `_journal.json` — Drizzle migratsiya metama'lumoti.
-- `packages/db-local/src/catalog-search-schema.ts` — umumiy FTS5 parametrli shabloni (duplikatsiyasiz).
-- `packages/db-local/src/customer-migrations.ts` — migratsiya trigger va partial UNIQUE invariant tekshiruvi.
-- `packages/db-local/scripts/check-migrations.mjs` — `assertCustomerMigrationsComplete` ulanishi.
-- `packages/db-local/src/timezone.ts` — umumiy `resolveIntlDateKey` yordamchisi.
-- `packages/db-local/src/uow.ts` — `SqliteUnitOfWork.nowUnixMs()`.
-- `packages/db-local/src/outbox.ts` — `redactOutboxPayloadForDebug` / `formatOutboxRecordForDebug`.
-- `packages/db-local/src/customer-repo.ts` — `SqliteCustomerStore` va tranzaksiya ilgaklari.
-- `packages/db-local/src/sale-repo.ts` — `completeSale` ga mijoz, kredit limiti, `dueDays` va `sale_debt` yozishni ulash.
-- `packages/db-local/src/return-repo.ts` — `createReturn` (`return_offset`) va `voidSale` (`SALE_DEBT_HAS_PAYMENTS` / teskari yozuv) ulash.
-- `packages/db-local/src/index.ts` — `customer-repo` va `customer-migrations` eksportlari.
-- `packages/db-local/src/index.test.ts` — migratsiya soni (`10n`) va `assertCustomerMigrationsComplete` testlari.
-- `packages/db-local/src/sale.test.ts` — noma'lum `customerId` -> `CUSTOMER_NOT_FOUND`.
-- `packages/db-local/src/customer.test.ts` — CRUD, PII, D1–D4, 60-qadam model testi, 5k va 10k/100k benchmarklar.
-- `apps/hub/src/error-handler.ts` — 9 ta yangi `DomainErrorCode` HTTP status xaritalari.
-- `apps/hub/src/sale-service.ts` — `creditOverride` supervisor PIN va `dueDays` uzatish.
-- `apps/hub/src/cart-routes.ts` — `sale.completed` PII-siz log maydonlari.
-- `apps/hub/src/customer-service.ts` — allow-list DTO xizmat qatlami.
-- `apps/hub/src/customer-routes.ts` — `/customers*` HTTP marshrutlari, RBAC va PII-siz loglar.
-- `apps/hub/src/routes.ts` — `registerCustomerRoutes` ulanishi.
-- `apps/hub/src/server.ts` — `customerStore`, `customerService` va `HubSaleService` ga `authService` uzatish.
-- `apps/hub/src/index.ts` — `HubCustomerService` eksporti.
-- `apps/hub/src/sale.test.ts` — noma'lum `customerId` `404 CUSTOMER_NOT_FOUND` testi.
-- `apps/hub/src/customer.test.ts` — to'liq HTTP E2E RBAC, lockout, PII/tannarx sizmasligi, qaytarish/void testi.
+1. **Nofaol mijoz (`packages/db-local/src/customer.test.ts` + mutatsiya isboti):**
+   - `isActive = false` mijozga qarzli (`debtAmount > 0`) va qarzsiz (`customerId != null`) savdo `completeSale` da `409 CUSTOMER_INACTIVE` bilan rad etiladi (0 DB yozuv). Qarz to'lovi (`recordDebtPayment`) esa muvaffaqiyatli qabul qilinadi.
+   - Mutatsiya: `packages/db-local/src/customer-repo.ts` dagi `if (!customer.isActive)` olib tashlanganda test yiqilishi isbotlanadi.
+2. **PII redaksiya sikli (`packages/drivers/src/index.test.ts`):**
+   - `DEFAULT_LOG_REDACT_PATHS` (`packages/drivers/src/node/redact.ts`) dagi `customerNote` ning `*.*.customerNote` yo'li ham tekshiriladi va barcha PII kalitlari (`phone`, `phoneNormalized`, `phoneDigits`, `fullName`, `nameSearch`, `customerName`, `customerPhone`, `customerNote`) sikl orqali haqiqiy Pino loggerda 3 ta darajada (`{ [k]: v }`, `{ nested: { [k]: v } }`, `{ req: { body: { [k]: v } } }`) `[Redacted]` bo'lishi tekshiriladi. Mutatsiya: ro'yxatdan istalgan kalit olib tashlanganda test yiqiladi.
+3. **Beqaror test vaqt chegarasi (`vitest.config.ts`):**
+   - `vitest.config.ts` da `test.projects` orqali og'ir SQLite/HTTP testlari bor `packages/db-local` va `apps/hub` uchun `testTimeout: 30_000` (va `hookTimeout: 30_000`) o'rnatiladi; uzoq model/benchmark testlar o'z aniq timeout'ini (`30_000` / `60_000`) saqlaydi. Unumdorlik chegaralari (`<= 300 ms`, `<= 100 ms`, `<= 20 ms`) o'zgarmaydi.
 
 ---
 
-### Migratsiyalar
+### 2. Rejalashtirilgan arxitektura va fayllar (T1.8)
 
-- `packages/db-local/drizzle/0009_customer_ledger.sql` (`db:check`: `SQLite schema matches committed migrations (0 diff statements)`).
-  - `local_hub_config` qayta qurishda `0008` bazadan ko'chirish `SELECT` dagi `default_customer_due_days` qiymati `14` ga tuzatildi (aksi holda mavjud bazani yangilashda ustun yo'q xatosi chiqar edi).
-
----
-
-### D1–D5 dalillari va majburiy ko'rsatkichlar
-
-- **D1 (Balans hech qachon manfiy emas + mutatsiya isboti):**
-  - Barcha ledger yo'llari `packages/domain/src/customer.ts` dagi yagona `computeNextCustomerBalance` funksiyasidan o'tadi hamda `local_customer_balances` ustida `CHECK (balance >= 0)` SQL himoyasi bor.
-  - Model test (`packages/db-local/src/customer.test.ts`, **60 ta tasodifiy ko'p-mijozli qadam**, har qadamda `balance >= 0n`, SQL `SUM(amount_delta)`, `local_customer_balances` va mustaqil FIFO model tengligi + oxirida `rebuildCustomerBalances` tekshiriladi) + domen property testi (`packages/domain/src/customer.test.ts`, **300 ta `fast-check` run**).
-  - **D1 Mutatsiya isboti (bajarildi va asl holatga qaytarildi):** `computeNextCustomerBalance` dagi `debt_payment`, `adjustment` va yakuniy `next < 0n` qo'riqchisi vaqtincha olib tashlanganda:
-    - `packages/domain/src/customer.test.ts` (`D1: computeNextCustomerBalance blocks negative balance...`): yiqildi (`expected [Function] to throw an error`);
-    - `packages/db-local/src/customer.test.ts` (`D1 + D2 + D3 model test: 60 seeded random...` va boundary testi): yiqildi (`expected SqliteError: CHECK constraint failed ... to match object { code: 'OVERPAYMENT_NOT_ALLOWED' }`).
-- **D2 (FIFO tartibi `hlc` bo'yicha):**
-  - `allocateCustomerLedgerFifo` faqat `(hlc ASC, id ASC)` bo'yicha saralaydi.
-  - `packages/db-local/src/customer.test.ts` (`D2 + D3: enforces HLC FIFO ordering even under out-of-order DB insertion...`): teskari `id`, teskari `created_at_ms` va teskari SQL kiritish tartibida ham natija bir xilligi testlandi.
-- **D3 (Musbat/manfiy `adjustment` qoidalari):**
-  - Musbat `adjustment` o'z `hlc` joyida mustaqil majburiyat yaratadi; `due_at_ms` odatiy holatda `NULL` (kechikish qo'zg'atmaydi, faqat aniq `dueDays` berilganda muddat olinadi) va FIFO to'lov navbatida qatnashadi. Manfiy `adjustment` FIFO bilan eng eski majburiyatni yopadi (`fifoWaivedTotal`). Kod izohi `packages/domain/src/customer.ts` va model testda tasdiqlandi.
-- **D4 (1 mijozda 5 000 ledger yozuvi benchmarki <= 100 ms):**
-  - Yakuniy `pnpm verify` dagi natija (`packages/db-local/src/customer.test.ts`):
-    `[PERF T1.7 D4] 5,000 entries (1 customer): getCustomerDetail=16.29 ms | createReturn=43.02 ms` (ikkisi ham `<= 100 ms`).
-- **10 000 mijoz + 100 000 ledger qatori benchmarki <= 100 ms:**
-  - Yakuniy `pnpm verify` dagi natija:
-    `[PERF T1.7 10k/100k] seedMs=10436.7 | ftsMs=1.15 | phoneMs=5.39 | balanceMs=0.65 | overdueMs=23.99` (barchasi `<= 100 ms`).
-- **D5 (F2 uchun ma'lum chegaralar hujjati):**
-  - `packages/domain/src/customer.ts` (`computeNextCustomerBalance` JSDoc) va `packages/db-local/src/schema/index.ts` da `CREDIT_LIMIT_EXCEEDED_SYNC`, `DUPLICATE_OPENING_BALANCE`, `OVERPAYMENT_CONFLICT` aniqlash va `apps/admin` da ko'rsatish qoidalari hujjatlashtirildi.
+- **`@mezon/domain`:**
+  - `auth.ts`: `suppliers:read`, `suppliers:write`, `receiving:read`, `receiving:write`, `supplier_debt:pay`, `supplier_debt:manage` — **barchasi faqat `owner` va `manager`** uchun (`cashier` da birortasi yo'q).
+  - `errors.ts`: `SUPPLIER_NOT_FOUND` (404), `SUPPLIER_TIN_ALREADY_EXISTS` (409), `SUPPLIER_PHONE_ALREADY_EXISTS` (409), `SUPPLIER_INACTIVE` (409), `SUPPLIER_HAS_OPEN_BALANCE` (409), `RECEIVING_NOT_FOUND` (404), `RECEIVING_NOT_DRAFT` (409), `RECEIVING_EMPTY` (400), `RECEIVING_LINE_NOT_FOUND` (404), `RECEIVING_LINE_COST_UNKNOWN` (409), `RECEIVING_LINE_COST_ALREADY_CONFIRMED` (409), `SUPPLIER_RETURN_NOT_FOUND` (404), `SUPPLIER_RETURN_QTY_EXCEEDED` (409), `SUPPLIER_RETURN_BATCH_DEPLETED` (409).
+  - `sale.ts`: `CASH_MOVE_OUTFLOW_TYPES` ga `'supplier_payment_out'` qo'shiladi (`CASH_MOVE_TYPES` ga kiradi).
+  - `stock.ts`:
+    - `STOCK_MOVE_REASONS` & `OUTBOUND_STOCK_REASONS` ga `'supplier_return'`, `STOCK_SOURCE_TYPES` ga `'supplier_return'` va `'receiving'`/`'purchase'` ulanishi.
+    - `applyReplayStockMove`: `isUnknownCostPurchase` belgilanganda (`cost_unknown = 1`) `state.lastUnitCost` ni `0n` ga tushirib buzmaydi va `UNKNOWN_COST_SURPLUS` konfliktini qo'shadi.
+    - Yangi sof funksiya `applyStockCostConfirmation(state, confirmation)`: noma'lum narx tasdiqlanganda qolgan zaxiraga (`Q_rem`) mutanosib qiymat qo'shadi (`shareOnHand`) va allaqachon sotilgan/defitsit yopgan qismni `costVarianceValue` ga o'tkazib, T1.2 balans tenglamasini (`ledgerInCost + confirmedCost === ledgerOutCost + totalValue - provisionalDeficitValue + costVarianceValue`) tiyinigacha saqlaydi.
+  - `supplier.ts` (yangi): STIR (9 raqam) va telefon normalizatsiyasi (`normalizeCustomerPhone` qayta ishlatiladi), nom qidiruvini `normalizeCatalogSearchText` bilan qayta ishlatish, HLC tartibidagi ikki tomonlama FIFO + avans taqsimlovchi `allocateSupplierLedgerFifo`, kechikish hisobi (`computeDebtDueAtMs` / `computeOverdueDaysAt` qayta ishlatiladi), kanonik idempotentlik hash funksiyalari, F2 sinxron chegaralari izohi.
+- **`@mezon/drivers` (`src/node/redact.ts`):**
+  - `DEFAULT_LOG_REDACT_PATHS` ga `supplierName`, `contactPerson`, `supplierPhone`, `supplierNote`, `tin` (va `*.` / `*.*.` shakllari) qo'shiladi; PII sikl testi bilan qamraladi.
+- **`@mezon/contracts` (`supplier.ts` — yangi):**
+  - Ta'minotchi CRUD, kirim qoralamasi (`POST/PATCH/POST /receivings/:id/post`, `POST /receivings/:id/cancel`), narx tasdiqlash (`POST /receivings/:id/lines/:lineId/confirm-cost`), ta'minotchi qarzi tarixi/to'lov/tuzatish (`opening-balance`, `payments`, `adjustments`), ta'minotchiga qaytarish (`POST /receivings/:id/returns`) uchun qat'iy Zod DTO'lar.
+- **`@mezon/db-local` (`0010_suppliers_receiving.sql`, `supplier-repo.ts`, `supplier-migrations.ts`, `stock-repo.ts`):**
+  - `applyInboundInsideSessionSync` (va uning prefetch yordamchisi) `stock-repo.ts` dan ichki funksiya sifatida eksport qilinadi; `rebuildStockProjections()` esa `stock_moves` + `receiving_cost_confirmations` ni `(hlc, id)` bo'yicha birga qayta o'ynaydi.
+  - `outbox.ts` `formatOutboxRecordForDebug`: `suppliers` PII maydonlarini ham redaksiya qiladi.
+- **`apps/hub` (`supplier-service.ts`, `supplier-routes.ts`, `error-handler.ts`, `routes.ts`, `server.ts`):**
+  - Barcha marshrutlarda `owner`/`manager` RBAC (`cashier` -> `403 AUTH_FORBIDDEN`), PII va tannarx logga chiqmaydi (`supplierId`/`receivingId`/`entryId`/`amount` faqat kerakli ruxsatli logda).
 
 ---
 
-### Qabul mezonlari
+### 3. Batafsil loyiha qarorlari (`a`–`i`)
 
-- [x] `T1.6` test qarzi alohida 1-commitda (`fc172c6`) mutatsiya isbotlari bilan yopildi.
-- [x] `customers` (`ATTR`, `organization`), E.164 + O'zbekiston telefon normallashtirish, faol mijoz uchun partial UNIQUE, FTS5 + telefon qidiruvi (`ftsMs=1.15`, `phoneMs=5.39`).
-- [x] PII himoyasi: Pino redaksiya, `ZodError`/`DomainError` da xom PII yo'q, `formatOutboxRecordForDebug`, `apps/hub` da haqiqiy Pino oqimi va xato javoblarida PII sizmasligi isbotlandi.
-- [x] `customer_ledger` (`FACT`, `store`), `opening_balance` partial UNIQUE (`uidx_customer_ledger_opening_balance`), `local_customer_balances` (`LOCAL`) + `rebuildCustomerBalances`.
-- [x] Kredit limiti va supervisor PIN override (`creditOverride`, T0.6 5-urinish lockout bilan), D1 (`balance >= 0` + mutatsiya), D2 (`hlc, id`), D3 (`adjustment`), D4 (`16.29 ms` / `43.02 ms`), D5 (F2 izohi).
-- [x] `createReturn` (`return_offset`) va `voidSale` (`SALE_DEBT_HAS_PAYMENTS`) hamda SQL Window Function tarixi.
-- [x] `pnpm verify` va barcha 4 ta GitHub CI job (`pull_request` va `push` workflowlarida) yashil.
+#### a) Ta'minotchi (`suppliers`, `ATTR`, `organization`)
+
+- **Jadval:** `suppliers` (`ATTR`, `tenantScope: 'organization'`).
+- **Ustunlar:** `name` (`1..200`), `name_search` (`normalizeCatalogSearchText`), `tin` (`TEXT`, nullable, kiritilsa qat'iy **9 ta raqam** `/^\d{9}$/`), `phone_normalized` (`+998...` yoki umumiy E.164 `+[1-9]\d{7,14}`, nullable), `phone_digits`, `contact_person`, `note`, `default_due_days` (`1..3650`, nullable -> `local_hub_config.default_supplier_due_days` default `14`), `is_active`.
+- **STIR va Telefon UNIQUE qarori:**
+  - Ikkalasi uchun ham faol yozuvlarda **partial UNIQUE indeks**:
+    - `uidx_suppliers_org_tin_active ON suppliers(organization_id, tin) WHERE deleted_at_ms IS NULL AND tin IS NOT NULL` (`409 SUPPLIER_TIN_ALREADY_EXISTS`);
+    - `uidx_suppliers_org_phone_active ON suppliers(organization_id, phone_normalized) WHERE deleted_at_ms IS NULL AND phone_normalized IS NOT NULL` (`409 SUPPLIER_PHONE_ALREADY_EXISTS`).
+  - *Sabab:* Bitta ta'minotchi ikki marta ochilib qarzdorlik/avans bo'linib ketishini bazaviy darajada oldini oladi; tombstone arxivlangandan keyin qayta ochish mumkin.
+- **FTS5 qidiruv va PII:** `suppliers_fts` (`buildEntityFtsSearchSql` qayta ishlatiladi); Pino, Zod/Domain xatolari va outbox debug'da PII chiqmaydi.
+- **Arxivlash (`tombstoneAttr`):** `supplierBalance !== 0n` (ochiq qarz **yoki** ochiq avans bor) bo'lsa `409 SUPPLIER_HAS_OPEN_BALANCE` bilan rad etiladi. `balance === 0n` da `tombstoneAttr` bilan arxivlanadi (`BEFORE DELETE` trigger saqlanadi).
+
+#### b) Kirim hujjati (`draft -> posted / cancelled`)
+
+- **Jadvallar va sinf tanlovi:**
+  - **Qoralama (`LOCAL`):** `local_receiving_drafts` + `local_receiving_draft_lines` (`tableClass: 'LOCAL'`, `store` scope). Holat: `'draft' | 'posted' | 'cancelled'`. Faqat `'draft'` holatda sarlavha va qatorlar qo'shiladi/tahrirlanadi/o'chiriladi; `cancel` -> `'cancelled'` qiladi. Qoralama sinxronlanmaydi (T1.3 `local_carts` bilan bir xil yondashuv — tahrir shovqini outbox'ga chiqmaydi).
+  - **Joylangan hujjat (`FACT`):** `goods_receivings` + `goods_receiving_lines` (`tableClass: 'FACT'`, `store` scope). SQLite `BEFORE UPDATE` / `BEFORE DELETE` triggerlari joylangan hujjatni 100% o'zgarmas qiladi (`id = draft.id`). `local_device_state.last_receiving_seq` orqali bo'shliqsiz `receiving_no` (`RCV-...`) beriladi.
+  - **Joylashdan keyingi xatolarni tuzatish:** Joylangan hujjat tahrirlanmaydi. Miqdor xatosi / tovar qaytarish uchun -> **`supplier_returns` (`FACT`)** (`f` band); noma'lum narxni aniqlash uchun -> **`receiving_cost_confirmations` (`FACT`)** (`c` band); summaviy ma'muriy tuzatish uchun -> `supplier_ledger` da **`adjustment`** (`owner`/`manager` + `reason`).
+- **Qatorlar:**
+  - `productId`, `variantId`, `qty` (`sqliteQuantity > 0`), `costUnknown` (`0 | 1`), `totalCostValue` (**jami qator tannarxi**, `sqliteMoney >= 0`, `costUnknown = 1` da `0` saqlanadi — kasrli kg'da yaxlitlash xatosi bo'lmasligi uchun birlik emas jami kiritiladi; `unitCostPreview` faqat ko'rsatish uchun), `batchNumber` (nullable), `expiryDateMs` (nullable positive Unix ms).
+  - `product.trackBatches === false` bo'lsa `batchNumber` / `expiryDateMs` berilishi `400 VALIDATION_ERROR` bilan rad etiladi. `trackBatches === true` da ikkisi ixtiyoriy/nullable (T1.2 `recordInboundMove` bilan mos) va to'g'ridan-to'g'ri `batches` (`supplierId` bilan) ga o'tadi.
+- **Atomiklik va T1.2 qayta ishlatish:**
+  - `postReceiving` bitta `uow.execute` tranzaksiyada: `goods_receivings`, `goods_receiving_lines`, **har qator uchun `applyInboundInsideSessionSync(..., { reason: 'purchase', sourceType: 'purchase', sourceId: receiving.id, supplierId, isUnknownCost })`**, ma'lum narxli jami `> 0n` bo'lsa `supplier_ledger` (`receiving_debt`) + `local_supplier_balances`, hamda barcha outbox yozuvlarini yozadi.
+- **Differensial test (T1.5 B1 usuli):**
+  - `postReceiving` dan keyin barcha tovarlarning `local_stock_balances` (6 maydon) va `local_batch_balances` holati huddi o'sha qatorlarni `stockStore.recordInboundMove` bilan ketma-ket kiritgandagi natija bilan tengligi testlanadi.
+
+#### c) Tannarx noma'lum (`costUnknown = true` -> narxni tasdiqlash)
+
+- **Joylash paytida:**
+  - `costUnknown = true` qator `applyInboundInsideSessionSync` ga `totalCostValue = 0n, isUnknownCost = true` bilan kiradi: ombor qoldig'i darhol ortadi, `batches.initial_cost_value = 0`, `batches.supplier_id = supplierId`.
+  - `applyReplayStockMove`: `isUnknownCost` harakat `lastUnitCost` ni `0n` ga **buzmaydi** va `local_stock_conflicts` ga `UNKNOWN_COST_SURPLUS` yozadi.
+  - `supplier_ledger` ga bu qator uchun **qarz yozilmaydi** (faqat `costUnknown = false` qatorlar summasi bo'yicha qarz yoziladi).
+- **Keyin narx tasdiqlanganda (`receiving_cost_confirmations`, `FACT`):**
+  - Alohida `confirmReceivingLineCost` buyrug'i (`POST /receivings/:id/lines/:lineId/confirm-cost`, faqat `owner`/`manager`, `clientRequestId` + `requestHash` idempotent, bitta qatorga faqat bir marta `uidx_receiving_cost_confirms_line`!).
+  - Bitta tranzaksiyada:
+    1. `receiving_cost_confirmations` (`FACT`) yoziladi (`confirmedTotalCost > 0n` yoki `>= 0n`, `reason`, `dueDays`).
+    2. `confirmedTotalCost > 0n` bo'lsa `supplier_ledger` ga `receiving_debt` (`+confirmedTotalCost`, `sourceType = 'receiving_cost_confirm'`, `dueAtMs` tasdiqlash vaqtidan `dueDays` bilan) yoziladi + `local_supplier_balances` yangilanadi.
+    3. `applyStockCostConfirmation` orqali ombor qayta baholanadi: batch/pulda qolgan sotilmagan `Q_rem` qismga mutanosib `shareOnHand` qiymat qo'shiladi (`totalValue` va `batch.remainingValue`), allaqachon sotilgan/defitsitga ketgan `confirmedTotalCost - shareOnHand` esa `costVarianceValue` ga yoziladi, `lastUnitCost` yangilanadi va tegishli `UNKNOWN_COST_SURPLUS` konflikt `resolvedAtMs = nowMs` bilan yopiladi.
+    4. `rebuildStockProjections()` `stock_moves` + `receiving_cost_confirmations` ni `(hlc, id)` tartibida qayta o'ynab jonli holat bilan 100% bir xil natija beradi.
+
+#### d) `supplier_ledger` (`FACT`, `store` scope) va Avans qarori
+
+- **Turlar:** `opening_balance` (`+`), `receiving_debt` (`+`), `supplier_payment` (`-`), `supplier_return` (`-`), `adjustment` (`+/-`).
+- **Ortiqcha to'lov / Avans (QAROR):**
+  - **Ruxsat beriladi!** `local_supplier_balances.balance` **`>= 0` ga cheklanmaydi** (`balance` manfiy bo'lishi mumkin).
+  - `balance > 0`: biz ta'minotchiga qarzdormiz (`netDebt = balance`).
+  - `balance < 0`: bizda ta'minotchiga **oldindan to'lov / avans** bor (`advanceBalance = -balance`).
+- **FIFO va muddat (`allocateSupplierLedgerFifo`):**
+  - `(hlc ASC, id ASC)` tartibida bir o'tishli `O(N)` replay (`allocateCustomerLedgerFifo` bilan bir xil HLC prinsipi + T1.7 `computeDebtDueAtMs`/`computeOverdueDaysAt` qayta ishlatiladi):
+    - Kredit (`supplier_payment`, `supplier_return`, `-adjustment`) avval eng eski ochiq debit majburiyatlarni (`opening_balance`, `receiving_debt`, `+adjustment`) FIFO bilan yopadi;
+    - Ortiqcha kredit **`unappliedAdvance`** puliga yig'iladi (`overdueAmount = 0`);
+    - Keyinchalik HLC bo'yicha yangi debit majburiyat (`receiving_debt`, `+adjustment`) kelganda avval mavjud `unappliedAdvance` avtomatik uni qo'playdi, faqat ortgan qismi `remainingDebt > 0` va `dueAtMs` bilan kechikish hisobiga kiradi.
+- **Proyeksiya (`local_supplier_balances`, `LOCAL`):** `rebuildSupplierBalances()` `supplier_ledger` dan to'liq qayta quradi va test natijani tekshiradi.
+
+#### e) Ta'minotchiga to'lov
+
+- **Naqd to'lov (`cash`):** Shu terminalning kassa naqd qoldig'i (`readTerminalCashBalanceSync`) tekshiriladi: `balance < amount` -> `409 INSUFFICIENT_CASH_IN_DRAWER`. Yetarli bo'lsa bitta tranzaksiyada `cash_moves` da **`supplier_payment_out`** (`amountDelta = -amount`, `sourceType = 'supplier_payment'`) va `supplier_ledger` (`supplier_payment`) yoziladi. (`0010` migratsiyada `cash_moves` jadvali `PRAGMA foreign_keys=ON` ostida xavfsiz yangi CHECK bilan qayta quriladi).
+- **Naqdsiz to'lov (`card`, `uzqr`, `payme`, `click`, `uzum`, `other`):** `cash_moves` ga yozilmaydi (`providerRef?` saqlanadi). (`social_card` ta'minotchiga to'lovda qabul qilinmaydi).
+- **Idempotency:** `clientRequestId` + kanonik `request_hash` (`409 IDEMPOTENCY_CONFLICT` yoki `200 idempotentReplay: true`).
+
+#### f) Ta'minotchiga qaytarish (`supplier_returns` + `supplier_return_lines`, `FACT`)
+
+- **Qaror:** T1.8 ichida to'liq amalga oshiriladi.
+- **Qoidalar:**
+  - Faqat joylangan (`goods_receivings`) qatordan qaytariladi.
+  - `cost_status === 'unknown'` qator qaytarilmaydi (`409 RECEIVING_LINE_COST_UNKNOWN` — avval narx tasdiqlanishi kerak).
+  - `returnQty <= receivingLine.qty - sum(previousSupplierReturnsOnLine)` (ortiqcha -> `409 SUPPLIER_RETURN_QTY_EXCEEDED`).
+  - **Ombor chiqimi:**
+    - `stock_moves` da `reason = 'supplier_return'`, `sourceType = 'supplier_return'`, `sourceId = supplierReturn.id`.
+    - Partiyali tovarda **aynan asl `batchId` dan** chiqim qilinadi; agar shu partiyadan qolgan zaxira `< returnQty` bo'lsa `409 SUPPLIER_RETURN_BATCH_DEPLETED` bilan rad etiladi.
+    - Partiyasiz tovarda `qtyOnHand >= returnQty` tekshiriladi (`INSUFFICIENT_STOCK`), `costValueDelta` asl kirim qatorining narxidan mutanosib (`computeProportionalCost` + oxirgi to'liq qoldiqda aniq qoldiq tiyin) olinadi (`applyOutboundExactCostSync`), o'rtacha pul va qoldiq farqi nazorat qilinadi.
+  - `supplier_ledger` ga `-totalReturnCost` (`entryType = 'supplier_return'`) yoziladi (agar oldindan to'langan bo'lsa avansga aylanishi mumkin).
+
+#### g) RBAC, maxfiylik va unumdorlik
+
+- **RBAC:** Ta'minotchi, kirim, narx tasdiqlash, to'lov va qaytarish **faqat `owner` va `manager`** uchun; `cashier` da `403 AUTH_FORBIDDEN`.
+- **Maxfiylik:** PII (`name`, `phone`, `tin`, `contactPerson`) xato xabarlari, Pino loglari va outbox debug'da chiqmaydi; kassir API'lariga tannarx kirishlari umuman ochilmaydi.
+- **Unumdorlik:** 100 qatorli kirim hujjatini joylash (`postReceiving`) haqiqiy WAL disk SQLite'da **`<= 500 ms`** (100 qator uchun ommaviy prefetch + bitta tranzaksiya).
+
+#### h) Model testi
+
+- Mustaqil TypeScript modeli bilan kamida **60 qadamli** tasodifiy ketma-ketlik (aralash ma'lum va `costUnknown = true` kirimlar, sotuvlar, `confirmReceivingLineCost`, naqd/karta to'lovlar avans bilan, ta'minotchiga qaytarish, tuzatish `+`/`-`):
+  - Har qadamda ta'minotchi balansi + avansi + kechikishi, kassa qoldig'i va ombor zaxira/qiymat tenglamasi, yakunda `rebuildSupplierBalances()` va `rebuildStockProjections()` tiyinigacha tekshiriladi.
+
+#### i) Doiradan tashqari
+
+- Purchase order / avtomatik buyurtma, smena (T1.9), fiskal integratsiya (F3).
 
 ---
-
-### Test natijasi
-
-1. **Lokal to'liq tekshiruv (`pnpm verify`):**
-   - Buyruq: `pnpm run format:check && pnpm run build && pnpm run lint && pnpm run typecheck && pnpm run db:check && pnpm run test && pnpm run depcruise`
-   - Natija (exit code `0`):
-     - `prettier --check .`: `All matched files use Prettier code style!`
-     - `turbo run build`: `17 successful, 17 total` (`3.644s`)
-     - `lint-workspaces.mjs`: 0 xato
-     - `turbo run typecheck`: `22 successful, 22 total` (`10.047s`)
-     - `turbo run db:check`: `19 successful, 19 total` (`SQLite` va `PostgreSQL` `0 diff statements`)
-     - `vitest run`: `45 passed | 1 skipped (46)` fayl, `226 passed | 2 skipped (228)` test (`Duration 19.59s`; `packages/db-cloud/src/pg-rls.test.ts` lokal Postgres yo'qligi sabab skip — CI da o'tadi):
-       - `packages/domain/src/customer.test.ts`: `5/5` (`300` ta `fast-check` property run)
-       - `packages/contracts/src/customer.test.ts`: `3/3`
-       - `packages/db-local/src/customer.test.ts`: `6/6` (60-qadam model test, D4 `16.29 ms / 43.02 ms`, 10k/100k `1.15 / 5.39 / 0.65 / 23.99 ms`)
-       - `apps/hub/src/customer.test.ts`: `1/1`
-     - `depcruise`: `no dependency violations found (251 modules, 909 dependencies cruised)`
-
-2. **GitHub Actions CI (commit `8f29f348c032cf6aaf94882ddb51e50909167410`):**
-   - `pull_request` workflow (`42885577886`): barcha 4 job (`Verify (ubuntu-latest)`, `Verify (windows-latest)`, `Verify PostgreSQL RLS (ubuntu-latest)`, `Build & E2E Desktop Installer (windows-latest)`) **success** (`https://github.com/Shaxobiddin-Github/Mezon/actions/runs/42885577886`).
-   - `push` workflow (`42885565122`): dastlab parallel kontentsiya sabab `Verify (windows-latest)` dagi T1.1 `catalog.test.ts:725` (`searchP95=104.118ms <= 50ms`) yiqilgan; `rerun-failed-jobs` dan keyin barcha 4 job **success** (`https://github.com/Shaxobiddin-Github/Mezon/actions/runs/42885565122`).
-
----
-
-### Tekshirilmagan narsalar
-
-- Yangi UI komponentlari (`apps/pos`, `apps/admin`) bu vazifa doirasida yo'q (keyingi vazifalarda).
-- Lokal muhitda PostgreSQL RLS (`pg-rls.test.ts`) Docker yo'qligi sabab skip qilindi, lekin CI `Verify PostgreSQL RLS (ubuntu-latest)` jobida muvaffaqiyatli o'tdi.
-
-### Qilingan taxminlar
-
-- `POST /carts/:id/complete` da `creditOverride` berilmaganida `owner`/`manager` ham mijozning `creditLimit` chegarasini tasodifan bosib o'tmasligi uchun kredit limitidan oshish faqat aniq `creditOverride` (PIN tasdiqlash) bilan ochiladi.
-- Telefon normalizatsiyasida mahalliy O'zbekiston raqamlari (`90...`, `998...`) `+998...` ga keltiriladi, xalqaro raqamlar uchun `+` bilan boshlanuvchi E.164 (`+[1-9]\d{7,14}`) qabul qilinadi.
-
-### Takliflar
-
-- T1.1 `catalog.test.ts:725` (`searchP95 <= 50 ms`) umumiy Windows CI runnerda parallel `push` + `pull_request` kontentsiyasiga sezgir; kelajakda CI workflow concurrency yoki warm-up/median ko'rsatkichga qarash foydali bo'ladi.
 
 ### Egasi yoki Claude qarori kerak bo'lgan savollar
 
-- Yo'q. PR #14 Claude tekshiruvi (`QABUL` / `QAYTA ISHLASH`) kutilmoqda.
+- Yo'q. Reja tasdiqlangach 1-navbatda `T1.7 test qarzi`, keyin `T1.8` amalga oshiriladi.
