@@ -102,7 +102,7 @@ function toCustomerLedgerEntryDto(entry: StoredCustomerLedgerEntryRecord): Custo
   };
 }
 
-function toCashMoveDto(move: StoredCashMoveRecord): CashMoveDto {
+export function toCashMoveDto(move: StoredCashMoveRecord): CashMoveDto {
   return {
     id: move.id,
     organizationId: move.organizationId,

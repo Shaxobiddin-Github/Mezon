@@ -57,6 +57,7 @@ describe('@mezon/domain - sale payments, mixed methods, debt, cash_moves & invar
       'cash_in',
       'sale_change_out',
       'refund_cash_out',
+      'supplier_payment_out',
       'cash_out',
       'encashment',
     ]);

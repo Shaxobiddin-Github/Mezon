@@ -48,6 +48,10 @@ export {
   readReceiptSeqSync,
   advanceReturnSeqSync,
   readReturnSeqSync,
+  advanceReceivingSeqSync,
+  readReceivingSeqSync,
+  advanceSupplierReturnSeqSync,
+  readSupplierReturnSeqSync,
   SqliteDeviceStateRepository,
 } from './device-state.js';
 
@@ -120,6 +124,16 @@ export {
   customers,
   customerLedger,
   localCustomerBalances,
+  suppliers,
+  localReceivingDrafts,
+  localReceivingDraftLines,
+  goodsReceivings,
+  goodsReceivingLines,
+  receivingCostConfirmations,
+  supplierReturns,
+  supplierReturnLines,
+  supplierLedger,
+  localSupplierBalances,
 } from './schema/index.js';
 
 export {
@@ -134,6 +148,11 @@ export {
   buildCustomerSearchFtsSql,
   assertCustomerMigrationsComplete,
 } from './customer-migrations.js';
+
+export {
+  buildSupplierSearchFtsSql,
+  assertSupplierMigrationsComplete,
+} from './supplier-migrations.js';
 
 export {
   buildStockMonotoneTriggersSql,
@@ -197,9 +216,14 @@ export {
   type FinalizeInventoryCountOutcome,
   type RebuildStockProjectionsResult,
   type StockPoolPrefetchTarget,
+  type InboundStockMoveSessionParams,
+  type InboundStockMoveSessionOutcome,
   stockPoolKey,
   prefetchMutablePoolStatesSync,
   applyOutboundStockMoveSync,
+  applyInboundStockMoveSync,
+  applyCostConfirmationStockRevaluationSync,
+  applySupplierReturnStockOutboundSync,
   rebuildStockProjections,
   SqliteStockStore,
   createSqliteStockStore,
@@ -276,3 +300,46 @@ export {
   SqliteCustomerStore,
   createSqliteCustomerStore,
 } from './customer-repo.js';
+
+export {
+  type SupplierRuntimeContext,
+  type CreateSqliteSupplierStoreOptions,
+  type CreateSupplierInput,
+  type UpdateSupplierInput,
+  type SupplierSummaryRecord,
+  type SupplierDetailRecord,
+  type SupplierListQueryInput,
+  type SupplierListOutcome,
+  type ReceivingLineInput,
+  type CreateReceivingDraftInput,
+  type UpdateReceivingDraftInput,
+  type StoredReceivingDraftLineRecord,
+  type StoredReceivingDraftRecord,
+  type StoredReceivingCostConfirmationRecord,
+  type StoredReceivingLineRecord,
+  type StoredReceivingRecord,
+  type PostReceivingInput,
+  type PostReceivingOutcome,
+  type ConfirmReceivingLineCostInput,
+  type ConfirmReceivingCostOutcome,
+  type ReceivingListQueryInput,
+  type ReceivingListItemRecord,
+  type ReceivingListOutcome,
+  type SupplierReturnLineInput,
+  type CreateSupplierReturnInput,
+  type StoredSupplierReturnLineRecord,
+  type StoredSupplierReturnRecord,
+  type CreateSupplierReturnOutcome,
+  type StoredSupplierLedgerEntryRecord,
+  type SupplierLedgerListQueryInput,
+  type SupplierLedgerListOutcome,
+  type RecordSupplierOpeningBalanceInput,
+  type RecordSupplierPaymentInput,
+  type RecordSupplierAdjustmentInput,
+  type SupplierLedgerMutationOutcome,
+  type RebuildSupplierBalancesOutcome,
+  type RebuildSupplierSearchIndexOutcome,
+  readSupplierLedgerFifoSync,
+  SqliteSupplierStore,
+  createSqliteSupplierStore,
+} from './supplier-repo.js';

@@ -20,6 +20,7 @@ export const CASH_MOVE_INFLOW_TYPES = ['sale_cash_in', 'debt_payment_in', 'cash_
 export const CASH_MOVE_OUTFLOW_TYPES = [
   'sale_change_out',
   'refund_cash_out',
+  'supplier_payment_out',
   'cash_out',
   'encashment',
 ] as const;

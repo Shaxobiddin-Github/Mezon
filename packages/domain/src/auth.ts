@@ -22,7 +22,13 @@ export type HubPermission =
   | 'customers:read'
   | 'customers:write'
   | 'debt:pay'
-  | 'debt:manage';
+  | 'debt:manage'
+  | 'suppliers:read'
+  | 'suppliers:write'
+  | 'receiving:read'
+  | 'receiving:write'
+  | 'supplier_debt:pay'
+  | 'supplier_debt:manage';
 
 const ROLE_PERMISSION_TABLE: Readonly<Record<UserRole, ReadonlySet<HubPermission>>> = {
   owner: new Set<HubPermission>([
@@ -45,6 +51,12 @@ const ROLE_PERMISSION_TABLE: Readonly<Record<UserRole, ReadonlySet<HubPermission
     'customers:write',
     'debt:pay',
     'debt:manage',
+    'suppliers:read',
+    'suppliers:write',
+    'receiving:read',
+    'receiving:write',
+    'supplier_debt:pay',
+    'supplier_debt:manage',
   ]),
   manager: new Set<HubPermission>([
     'auth:self',
@@ -63,6 +75,12 @@ const ROLE_PERMISSION_TABLE: Readonly<Record<UserRole, ReadonlySet<HubPermission
     'customers:write',
     'debt:pay',
     'debt:manage',
+    'suppliers:read',
+    'suppliers:write',
+    'receiving:read',
+    'receiving:write',
+    'supplier_debt:pay',
+    'supplier_debt:manage',
   ]),
   cashier: new Set<HubPermission>([
     'auth:self',

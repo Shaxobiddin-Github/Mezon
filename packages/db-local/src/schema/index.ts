@@ -43,6 +43,12 @@ export const localDeviceState = localSchemaRegistry.defineTable(
     lastReturnSeq: sqliteBigint('last_return_seq')
       .notNull()
       .default(sql`0`),
+    lastReceivingSeq: sqliteBigint('last_receiving_seq')
+      .notNull()
+      .default(sql`0`),
+    lastSupplierReturnSeq: sqliteBigint('last_supplier_return_seq')
+      .notNull()
+      .default(sql`0`),
     lastHlc: sqliteHlc('last_hlc').notNull(),
     lastUuidMs: sqliteUnixMs('last_uuid_ms').notNull(),
   }),
@@ -51,6 +57,8 @@ export const localDeviceState = localSchemaRegistry.defineTable(
     check('chk_local_device_state_seq_nonneg', sql`${self.lastDeviceSeq} >= 0`),
     check('chk_local_device_state_receipt_nonneg', sql`${self.lastReceiptSeq} >= 0`),
     check('chk_local_device_state_return_nonneg', sql`${self.lastReturnSeq} >= 0`),
+    check('chk_local_device_state_receiving_nonneg', sql`${self.lastReceivingSeq} >= 0`),
+    check('chk_local_device_state_sup_return_nonneg', sql`${self.lastSupplierReturnSeq} >= 0`),
   ],
 );
 
@@ -155,6 +163,7 @@ export const localHubConfig = localSchemaRegistry.defineTable(
     quickSaleDefaultVatRateBp: sqliteInt('quick_sale_default_vat_rate_bp'),
     storeTimezone: text('store_timezone').notNull().default('Asia/Tashkent'),
     defaultCustomerDueDays: sqliteInt('default_customer_due_days').default(14),
+    defaultSupplierDueDays: sqliteInt('default_supplier_due_days').default(14),
   }),
   (self) => [
     uniqueIndex('uidx_local_hub_config_singleton').on(self.singletonGuard),
@@ -175,6 +184,10 @@ export const localHubConfig = localSchemaRegistry.defineTable(
     check(
       'chk_local_hub_config_cust_due_days',
       sql`${self.defaultCustomerDueDays} IS NULL OR (${self.defaultCustomerDueDays} >= 1 AND ${self.defaultCustomerDueDays} <= 3650)`,
+    ),
+    check(
+      'chk_local_hub_config_sup_due_days',
+      sql`${self.defaultSupplierDueDays} IS NULL OR (${self.defaultSupplierDueDays} >= 1 AND ${self.defaultSupplierDueDays} <= 3650)`,
     ),
   ],
 );
@@ -560,11 +573,11 @@ export const stockMoves = localSchemaRegistry.defineTable(
     ),
     check(
       'chk_stock_moves_reason',
-      sql`${self.reason} IN ('initial', 'purchase', 'sale', 'return', 'inventory', 'adjustment', 'damaged', 'broken', 'personal', 'lost')`,
+      sql`${self.reason} IN ('initial', 'purchase', 'sale', 'return', 'supplier_return', 'inventory', 'adjustment', 'damaged', 'broken', 'personal', 'lost')`,
     ),
     check(
       'chk_stock_moves_source_type',
-      sql`${self.sourceType} IN ('stock_entry', 'inventory_count', 'sale', 'return', 'purchase', 'adjustment')`,
+      sql`${self.sourceType} IN ('stock_entry', 'inventory_count', 'sale', 'return', 'purchase', 'supplier_return', 'adjustment')`,
     ),
   ],
 );
@@ -1167,11 +1180,11 @@ export const cashMoves = localSchemaRegistry.defineTable(
     index('idx_cash_moves_source').on(self.sourceType, self.sourceId),
     check(
       'chk_cash_moves_type',
-      sql`${self.type} IN ('sale_cash_in', 'debt_payment_in', 'cash_in', 'sale_change_out', 'refund_cash_out', 'cash_out', 'encashment')`,
+      sql`${self.type} IN ('sale_cash_in', 'debt_payment_in', 'cash_in', 'sale_change_out', 'refund_cash_out', 'supplier_payment_out', 'cash_out', 'encashment')`,
     ),
     check(
       'chk_cash_moves_amount_sign',
-      sql`(${self.type} IN ('sale_cash_in', 'debt_payment_in', 'cash_in') AND ${self.amountDelta} > 0) OR (${self.type} IN ('sale_change_out', 'refund_cash_out', 'cash_out', 'encashment') AND ${self.amountDelta} < 0)`,
+      sql`(${self.type} IN ('sale_cash_in', 'debt_payment_in', 'cash_in') AND ${self.amountDelta} > 0) OR (${self.type} IN ('sale_change_out', 'refund_cash_out', 'supplier_payment_out', 'cash_out', 'encashment') AND ${self.amountDelta} < 0)`,
     ),
     check('chk_cash_moves_source_type', sql`length(trim(${self.sourceType})) >= 1`),
   ],
@@ -1544,5 +1557,502 @@ export const localCustomerBalances = localSchemaRegistry.defineTable(
     check('chk_local_customer_balances_nonneg', sql`${self.balance} >= 0`),
     check('chk_local_customer_balances_accrued_nonneg', sql`${self.totalDebtAccrued} >= 0`),
     check('chk_local_customer_balances_settled_nonneg', sql`${self.totalSettled} >= 0`),
+  ],
+);
+
+/**
+ * Organization-scoped vendor/supplier directory (`ATTR`, T1.8).
+ * Supports Uzbekistan 9-digit STIR/TIN (`tin`) and normalized E.164/UZ phone numbers,
+ * each protected by a partial UNIQUE index over active (`deleted_at_ms IS NULL`) rows.
+ */
+export const suppliers = localSchemaRegistry.defineTable(
+  {
+    name: 'suppliers',
+    tableClass: 'ATTR',
+    tenantScope: 'organization',
+  },
+  (common) => ({
+    ...common,
+    name: text('name').notNull(),
+    nameSearch: text('name_search').notNull(),
+    tin: text('tin'),
+    phoneNormalized: text('phone_normalized'),
+    phoneDigits: text('phone_digits'),
+    contactPerson: text('contact_person'),
+    note: text('note'),
+    defaultDueDays: sqliteInt('default_due_days'),
+    isActive: sqliteBoolean('is_active').notNull().default(true),
+  }),
+  (self) => [
+    uniqueIndex('uidx_suppliers_org_tin_active')
+      .on(self.organizationId, self.tin)
+      .where(sql`${self.tin} IS NOT NULL AND ${self.deletedAtMs} IS NULL`),
+    uniqueIndex('uidx_suppliers_org_phone_active')
+      .on(self.organizationId, self.phoneNormalized)
+      .where(sql`${self.phoneNormalized} IS NOT NULL AND ${self.deletedAtMs} IS NULL`),
+    index('idx_suppliers_org_active_name')
+      .on(self.organizationId, self.isActive, self.nameSearch)
+      .where(sql`${self.deletedAtMs} IS NULL`),
+    check('chk_suppliers_name_nonempty', sql`length(trim(${self.name})) >= 1`),
+    check('chk_suppliers_tin_len', sql`${self.tin} IS NULL OR length(${self.tin}) = 9`),
+    check('chk_suppliers_active', sql`${self.isActive} IN (0, 1)`),
+    check(
+      'chk_suppliers_due_days',
+      sql`${self.defaultDueDays} IS NULL OR (${self.defaultDueDays} >= 1 AND ${self.defaultDueDays} <= 3650)`,
+    ),
+  ],
+);
+
+/**
+ * Mutable hub-local receiving draft header (`LOCAL`, T1.8).
+ * Draft edits stay out of sync outbox until posted atomically into immutable `goods_receivings`.
+ */
+export const localReceivingDrafts = localSchemaRegistry.defineTable(
+  {
+    name: 'local_receiving_drafts',
+    tableClass: 'LOCAL',
+    tenantScope: 'store',
+  },
+  (common) => ({
+    ...common,
+    supplierId: sqliteUuidV7('supplier_id')
+      .notNull()
+      .references(() => suppliers.id),
+    supplierInvoiceNo: text('supplier_invoice_no'),
+    dueDays: sqliteInt('due_days'),
+    note: text('note'),
+    status: text('status').notNull().default('draft'),
+    createdByUserId: sqliteUuidV7('created_by_user_id')
+      .notNull()
+      .references(() => users.id),
+    postedAtMs: sqliteUnixMs('posted_at_ms'),
+    cancelledAtMs: sqliteUnixMs('cancelled_at_ms'),
+  }),
+  (self) => [
+    index('idx_local_rcv_drafts_store_status').on(
+      self.organizationId,
+      self.storeId,
+      self.status,
+      self.createdAtMs,
+    ),
+    check('chk_local_rcv_drafts_status', sql`${self.status} IN ('draft', 'posted', 'cancelled')`),
+    check(
+      'chk_local_rcv_drafts_due_days',
+      sql`${self.dueDays} IS NULL OR (${self.dueDays} >= 1 AND ${self.dueDays} <= 3650)`,
+    ),
+  ],
+);
+
+/**
+ * Lines inside a hub-local receiving draft (`LOCAL`, T1.8).
+ */
+export const localReceivingDraftLines = localSchemaRegistry.defineTable(
+  {
+    name: 'local_receiving_draft_lines',
+    tableClass: 'LOCAL',
+    tenantScope: 'store',
+  },
+  (common) => ({
+    ...common,
+    draftId: sqliteUuidV7('draft_id')
+      .notNull()
+      .references(() => localReceivingDrafts.id),
+    sortOrder: sqliteInt('sort_order').notNull(),
+    productId: sqliteUuidV7('product_id')
+      .notNull()
+      .references(() => products.id),
+    variantId: sqliteUuidV7('variant_id').references(() => productVariants.id),
+    qty: sqliteQuantity('qty').notNull(),
+    costUnknown: sqliteBoolean('cost_unknown').notNull(),
+    totalCostValue: sqliteMoney('total_cost_value'),
+    vatRateBp: sqliteInt('vat_rate_bp'),
+    vatAmount: sqliteMoney('vat_amount'),
+    batchNumber: text('batch_number'),
+    expiryDateMs: sqliteUnixMs('expiry_date_ms'),
+  }),
+  (self) => [
+    uniqueIndex('uidx_local_rcv_draft_lines_sort').on(self.draftId, self.sortOrder),
+    index('idx_local_rcv_draft_lines_draft').on(self.draftId),
+    check('chk_local_rcv_draft_lines_sort_nonneg', sql`${self.sortOrder} >= 0`),
+    check('chk_local_rcv_draft_lines_qty_pos', sql`${self.qty} > 0`),
+    check('chk_local_rcv_draft_lines_unknown_bool', sql`${self.costUnknown} IN (0, 1)`),
+    check(
+      'chk_local_rcv_draft_lines_cost_pair',
+      sql`(${self.costUnknown} = 1 AND ${self.totalCostValue} IS NULL) OR (${self.costUnknown} = 0 AND ${self.totalCostValue} IS NOT NULL AND ${self.totalCostValue} >= 0)`,
+    ),
+    check(
+      'chk_local_rcv_draft_lines_vat_bp',
+      sql`${self.vatRateBp} IS NULL OR (${self.vatRateBp} >= 0 AND ${self.vatRateBp} <= 10000)`,
+    ),
+    check(
+      'chk_local_rcv_draft_lines_vat_amt',
+      sql`${self.vatAmount} IS NULL OR ${self.vatAmount} >= 0`,
+    ),
+  ],
+);
+
+/**
+ * Immutable posted supplier goods receiving document (`FACT`, store-scoped, T1.8).
+ * Subsequent cost confirmations and returns are recorded as separate FACT compensation docs.
+ */
+export const goodsReceivings = localSchemaRegistry.defineTable(
+  {
+    name: 'goods_receivings',
+    tableClass: 'FACT',
+    tenantScope: 'store',
+  },
+  (common) => ({
+    ...common,
+    receivingNo: sqliteBigint('receiving_no').notNull(),
+    receivingCode: text('receiving_code').notNull(),
+    supplierId: sqliteUuidV7('supplier_id')
+      .notNull()
+      .references(() => suppliers.id),
+    supplierInvoiceNo: text('supplier_invoice_no'),
+    dueDays: sqliteInt('due_days'),
+    dueAtMs: sqliteUnixMs('due_at_ms'),
+    knownCostTotal: sqliteMoney('known_cost_total').notNull(),
+    unknownCostLineCount: sqliteInt('unknown_cost_line_count').notNull(),
+    note: text('note'),
+    postedByUserId: sqliteUuidV7('posted_by_user_id')
+      .notNull()
+      .references(() => users.id),
+    clientRequestId: sqliteUuidV7('client_request_id').notNull(),
+    requestHash: text('request_hash').notNull(),
+  }),
+  (self) => [
+    uniqueIndex('uidx_goods_receivings_org_dev_no').on(
+      self.organizationId,
+      self.deviceId,
+      self.receivingNo,
+    ),
+    uniqueIndex('uidx_goods_receivings_org_client_req').on(
+      self.organizationId,
+      self.clientRequestId,
+    ),
+    index('idx_goods_receivings_store_sup').on(
+      self.organizationId,
+      self.storeId,
+      self.supplierId,
+      self.createdAtMs,
+    ),
+    check('chk_goods_receivings_no_pos', sql`${self.receivingNo} >= 1`),
+    check('chk_goods_receivings_code_nonempty', sql`length(trim(${self.receivingCode})) >= 1`),
+    check('chk_goods_receivings_known_nonneg', sql`${self.knownCostTotal} >= 0`),
+    check('chk_goods_receivings_unk_cnt_nonneg', sql`${self.unknownCostLineCount} >= 0`),
+    check('chk_goods_receivings_req_hash_nonempty', sql`length(trim(${self.requestHash})) >= 6`),
+  ],
+);
+
+/**
+ * Immutable lines inside a posted `goods_receivings` document (`FACT`, store-scoped, T1.8).
+ */
+export const goodsReceivingLines = localSchemaRegistry.defineTable(
+  {
+    name: 'goods_receiving_lines',
+    tableClass: 'FACT',
+    tenantScope: 'store',
+  },
+  (common) => ({
+    ...common,
+    receivingId: sqliteUuidV7('receiving_id')
+      .notNull()
+      .references(() => goodsReceivings.id),
+    sortOrder: sqliteInt('sort_order').notNull(),
+    productId: sqliteUuidV7('product_id')
+      .notNull()
+      .references(() => products.id),
+    variantId: sqliteUuidV7('variant_id').references(() => productVariants.id),
+    qty: sqliteQuantity('qty').notNull(),
+    costUnknown: sqliteBoolean('cost_unknown').notNull(),
+    initialTotalCost: sqliteMoney('initial_total_cost').notNull(),
+    vatRateBp: sqliteInt('vat_rate_bp'),
+    vatAmount: sqliteMoney('vat_amount'),
+    stockMoveId: sqliteUuidV7('stock_move_id')
+      .notNull()
+      .references(() => stockMoves.id),
+    batchId: sqliteUuidV7('batch_id').references(() => batches.id),
+    batchNumber: text('batch_number'),
+    expiryDateMs: sqliteUnixMs('expiry_date_ms'),
+  }),
+  (self) => [
+    uniqueIndex('uidx_goods_receiving_lines_sort').on(self.receivingId, self.sortOrder),
+    uniqueIndex('uidx_goods_receiving_lines_move').on(self.stockMoveId),
+    index('idx_goods_receiving_lines_rcv').on(self.receivingId),
+    check('chk_goods_receiving_lines_sort_nonneg', sql`${self.sortOrder} >= 0`),
+    check('chk_goods_receiving_lines_qty_pos', sql`${self.qty} > 0`),
+    check('chk_goods_receiving_lines_unk_bool', sql`${self.costUnknown} IN (0, 1)`),
+    check(
+      'chk_goods_receiving_lines_cost_pair',
+      sql`(${self.costUnknown} = 1 AND ${self.initialTotalCost} = 0) OR (${self.costUnknown} = 0 AND ${self.initialTotalCost} >= 0)`,
+    ),
+    check(
+      'chk_goods_receiving_lines_vat_bp',
+      sql`${self.vatRateBp} IS NULL OR (${self.vatRateBp} >= 0 AND ${self.vatRateBp} <= 10000)`,
+    ),
+    check(
+      'chk_goods_receiving_lines_vat_amt',
+      sql`${self.vatAmount} IS NULL OR ${self.vatAmount} >= 0`,
+    ),
+  ],
+);
+
+/**
+ * Immutable compensation documents confirming the final cost of an initially `cost_unknown`
+ * receiving line (`FACT`, store-scoped, T1.8).
+ * Enforce at DB level (`uidx_receiving_cost_confirms_line`) that each line is confirmed at most once.
+ */
+export const receivingCostConfirmations = localSchemaRegistry.defineTable(
+  {
+    name: 'receiving_cost_confirmations',
+    tableClass: 'FACT',
+    tenantScope: 'store',
+  },
+  (common) => ({
+    ...common,
+    receivingId: sqliteUuidV7('receiving_id')
+      .notNull()
+      .references(() => goodsReceivings.id),
+    receivingLineId: sqliteUuidV7('receiving_line_id')
+      .notNull()
+      .references(() => goodsReceivingLines.id),
+    supplierId: sqliteUuidV7('supplier_id')
+      .notNull()
+      .references(() => suppliers.id),
+    productId: sqliteUuidV7('product_id')
+      .notNull()
+      .references(() => products.id),
+    variantId: sqliteUuidV7('variant_id').references(() => productVariants.id),
+    batchId: sqliteUuidV7('batch_id').references(() => batches.id),
+    receivedQty: sqliteQuantity('received_qty').notNull(),
+    confirmedTotalCost: sqliteMoney('confirmed_total_cost').notNull(),
+    dueDays: sqliteInt('due_days'),
+    dueAtMs: sqliteUnixMs('due_at_ms'),
+    reason: text('reason').notNull(),
+    confirmedByUserId: sqliteUuidV7('confirmed_by_user_id')
+      .notNull()
+      .references(() => users.id),
+    clientRequestId: sqliteUuidV7('client_request_id').notNull(),
+    requestHash: text('request_hash').notNull(),
+  }),
+  (self) => [
+    uniqueIndex('uidx_receiving_cost_confirms_line').on(self.organizationId, self.receivingLineId),
+    uniqueIndex('uidx_receiving_cost_confirms_client_req').on(
+      self.organizationId,
+      self.clientRequestId,
+    ),
+    index('idx_receiving_cost_confirms_prod').on(
+      self.organizationId,
+      self.storeId,
+      self.productId,
+      self.hlc,
+    ),
+    check('chk_receiving_cost_confirms_qty_pos', sql`${self.receivedQty} > 0`),
+    check('chk_receiving_cost_confirms_cost_nonneg', sql`${self.confirmedTotalCost} >= 0`),
+    check('chk_receiving_cost_confirms_reason_nonempty', sql`length(trim(${self.reason})) >= 1`),
+    check(
+      'chk_receiving_cost_confirms_req_hash_nonempty',
+      sql`length(trim(${self.requestHash})) >= 6`,
+    ),
+  ],
+);
+
+/**
+ * Immutable return-to-supplier documents against posted receivings (`FACT`, store-scoped, T1.8).
+ */
+export const supplierReturns = localSchemaRegistry.defineTable(
+  {
+    name: 'supplier_returns',
+    tableClass: 'FACT',
+    tenantScope: 'store',
+  },
+  (common) => ({
+    ...common,
+    returnNo: sqliteBigint('return_no').notNull(),
+    returnCode: text('return_code').notNull(),
+    receivingId: sqliteUuidV7('receiving_id')
+      .notNull()
+      .references(() => goodsReceivings.id),
+    supplierId: sqliteUuidV7('supplier_id')
+      .notNull()
+      .references(() => suppliers.id),
+    reason: text('reason').notNull(),
+    totalReturnCost: sqliteMoney('total_return_cost').notNull(),
+    createdByUserId: sqliteUuidV7('created_by_user_id')
+      .notNull()
+      .references(() => users.id),
+    clientRequestId: sqliteUuidV7('client_request_id').notNull(),
+    requestHash: text('request_hash').notNull(),
+  }),
+  (self) => [
+    uniqueIndex('uidx_supplier_returns_org_dev_no').on(
+      self.organizationId,
+      self.deviceId,
+      self.returnNo,
+    ),
+    uniqueIndex('uidx_supplier_returns_org_client_req').on(
+      self.organizationId,
+      self.clientRequestId,
+    ),
+    index('idx_supplier_returns_rcv').on(self.receivingId),
+    check('chk_supplier_returns_no_pos', sql`${self.returnNo} >= 1`),
+    check('chk_supplier_returns_code_nonempty', sql`length(trim(${self.returnCode})) >= 1`),
+    check('chk_supplier_returns_reason_nonempty', sql`length(trim(${self.reason})) >= 1`),
+    check('chk_supplier_returns_cost_nonneg', sql`${self.totalReturnCost} >= 0`),
+    check('chk_supplier_returns_req_hash_nonempty', sql`length(trim(${self.requestHash})) >= 6`),
+  ],
+);
+
+/**
+ * Immutable lines inside a `supplier_returns` document (`FACT`, store-scoped, T1.8).
+ */
+export const supplierReturnLines = localSchemaRegistry.defineTable(
+  {
+    name: 'supplier_return_lines',
+    tableClass: 'FACT',
+    tenantScope: 'store',
+  },
+  (common) => ({
+    ...common,
+    supplierReturnId: sqliteUuidV7('supplier_return_id')
+      .notNull()
+      .references(() => supplierReturns.id),
+    receivingLineId: sqliteUuidV7('receiving_line_id')
+      .notNull()
+      .references(() => goodsReceivingLines.id),
+    sortOrder: sqliteInt('sort_order').notNull(),
+    productId: sqliteUuidV7('product_id')
+      .notNull()
+      .references(() => products.id),
+    variantId: sqliteUuidV7('variant_id').references(() => productVariants.id),
+    batchId: sqliteUuidV7('batch_id').references(() => batches.id),
+    stockMoveId: sqliteUuidV7('stock_move_id')
+      .notNull()
+      .references(() => stockMoves.id),
+    qty: sqliteQuantity('qty').notNull(),
+    returnCostValue: sqliteMoney('return_cost_value').notNull(),
+  }),
+  (self) => [
+    uniqueIndex('uidx_supplier_return_lines_sort').on(self.supplierReturnId, self.sortOrder),
+    uniqueIndex('uidx_supplier_return_lines_move').on(self.stockMoveId),
+    index('idx_supplier_return_lines_rcv_line').on(self.receivingLineId),
+    check('chk_supplier_return_lines_sort_nonneg', sql`${self.sortOrder} >= 0`),
+    check('chk_supplier_return_lines_qty_pos', sql`${self.qty} > 0`),
+    check('chk_supplier_return_lines_cost_nonneg', sql`${self.returnCostValue} >= 0`),
+  ],
+);
+
+/**
+ * Append-only supplier debt and advance ledger (`FACT`, store-scoped, T1.8).
+ * Signed `amount_delta`: `+` increases Accounts Payable owed to supplier; `-` settles debt
+ * or builds prepayment/advance credit (`balance < 0`).
+ */
+export const supplierLedger = localSchemaRegistry.defineTable(
+  {
+    name: 'supplier_ledger',
+    tableClass: 'FACT',
+    tenantScope: 'store',
+  },
+  (common) => ({
+    ...common,
+    supplierId: sqliteUuidV7('supplier_id')
+      .notNull()
+      .references(() => suppliers.id),
+    entryType: text('entry_type').notNull(),
+    amountDelta: sqliteMoney('amount_delta').notNull(),
+    sourceType: text('source_type').notNull(),
+    sourceId: sqliteUuidV7('source_id').notNull(),
+    receivingId: sqliteUuidV7('receiving_id').references(() => goodsReceivings.id),
+    supplierReturnId: sqliteUuidV7('supplier_return_id').references(() => supplierReturns.id),
+    paymentMethod: text('payment_method'),
+    providerRef: text('provider_ref'),
+    cashMoveId: sqliteUuidV7('cash_move_id').references(() => cashMoves.id),
+    dueAtMs: sqliteUnixMs('due_at_ms'),
+    reason: text('reason'),
+    createdByUserId: sqliteUuidV7('created_by_user_id')
+      .notNull()
+      .references(() => users.id),
+    clientRequestId: sqliteUuidV7('client_request_id'),
+    requestHash: text('request_hash'),
+  }),
+  (self) => [
+    uniqueIndex('uidx_supplier_ledger_opening_balance')
+      .on(self.organizationId, self.supplierId)
+      .where(sql`${self.entryType} = 'opening_balance'`),
+    uniqueIndex('uidx_supplier_ledger_org_client_req')
+      .on(self.organizationId, self.clientRequestId)
+      .where(sql`${self.clientRequestId} IS NOT NULL`),
+    index('idx_supplier_ledger_org_sup_hlc').on(
+      self.organizationId,
+      self.supplierId,
+      self.hlc,
+      self.id,
+    ),
+    index('idx_supplier_ledger_receiving')
+      .on(self.receivingId)
+      .where(sql`${self.receivingId} IS NOT NULL`),
+    check(
+      'chk_supplier_ledger_entry_type',
+      sql`${self.entryType} IN ('opening_balance', 'receiving_debt', 'supplier_payment', 'supplier_return', 'adjustment')`,
+    ),
+    check(
+      'chk_supplier_ledger_source_type',
+      sql`${self.sourceType} IN ('opening_balance', 'receiving', 'receiving_cost_confirm', 'supplier_payment', 'supplier_return', 'adjustment')`,
+    ),
+    check(
+      'chk_supplier_ledger_delta_sign',
+      sql`(${self.entryType} IN ('opening_balance', 'receiving_debt') AND ${self.amountDelta} > 0) OR (${self.entryType} IN ('supplier_payment', 'supplier_return') AND ${self.amountDelta} < 0) OR (${self.entryType} = 'adjustment' AND ${self.amountDelta} <> 0)`,
+    ),
+    check(
+      'chk_supplier_ledger_payment_fields',
+      sql`(${self.entryType} = 'supplier_payment' AND ${self.paymentMethod} IN ('cash', 'card', 'uzqr', 'payme', 'click', 'uzum', 'other') AND ((${self.paymentMethod} = 'cash' AND ${self.cashMoveId} IS NOT NULL AND ${self.providerRef} IS NULL) OR (${self.paymentMethod} <> 'cash' AND ${self.cashMoveId} IS NULL))) OR (${self.entryType} <> 'supplier_payment' AND ${self.paymentMethod} IS NULL AND ${self.providerRef} IS NULL AND ${self.cashMoveId} IS NULL)`,
+    ),
+    check(
+      'chk_supplier_ledger_ref_consistency',
+      sql`(${self.entryType} = 'receiving_debt' AND ${self.receivingId} IS NOT NULL) OR (${self.entryType} = 'supplier_return' AND ${self.supplierReturnId} IS NOT NULL) OR (${self.entryType} IN ('opening_balance', 'supplier_payment', 'adjustment'))`,
+    ),
+    check(
+      'chk_supplier_ledger_reason_req',
+      sql`${self.entryType} NOT IN ('opening_balance', 'adjustment') OR (${self.reason} IS NOT NULL AND length(trim(${self.reason})) >= 1)`,
+    ),
+    check(
+      'chk_supplier_ledger_req_pair',
+      sql`(${self.clientRequestId} IS NULL AND ${self.requestHash} IS NULL) OR (${self.clientRequestId} IS NOT NULL AND ${self.requestHash} IS NOT NULL AND length(trim(${self.requestHash})) >= 6)`,
+    ),
+  ],
+);
+
+/**
+ * Reconstructible derived supplier balance projection (`LOCAL`, never synced, T1.8).
+ * Deliberately permits negative `balance` (`balance < 0` represents prepayment / advance credit).
+ * Rebuilt deterministically from `supplier_ledger` via `rebuildSupplierBalances()`.
+ */
+export const localSupplierBalances = localSchemaRegistry.defineTable(
+  {
+    name: 'local_supplier_balances',
+    tableClass: 'LOCAL',
+    tenantScope: 'organization',
+  },
+  (common) => ({
+    ...common,
+    supplierId: sqliteUuidV7('supplier_id')
+      .notNull()
+      .references(() => suppliers.id),
+    balance: sqliteMoney('balance').notNull(),
+    totalDebtAccrued: sqliteMoney('total_debt_accrued').notNull(),
+    totalCredited: sqliteMoney('total_credited').notNull(),
+    earliestOpenDueAtMs: sqliteUnixMs('earliest_open_due_at_ms'),
+    lastActivityAtMs: sqliteUnixMs('last_activity_at_ms'),
+  }),
+  (self) => [
+    uniqueIndex('uidx_local_supplier_balances_sup').on(self.supplierId),
+    index('idx_local_supplier_balances_org_due').on(
+      self.organizationId,
+      self.balance,
+      self.earliestOpenDueAtMs,
+      self.supplierId,
+    ),
+    check('chk_local_supplier_balances_accrued_nonneg', sql`${self.totalDebtAccrued} >= 0`),
+    check('chk_local_supplier_balances_credited_nonneg', sql`${self.totalCredited} >= 0`),
   ],
 );

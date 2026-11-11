@@ -163,6 +163,44 @@ export function advanceDeviceSeqAndStateSync(
   return result.last_device_seq;
 }
 
+type DeviceSequenceColumn =
+  'last_receipt_seq' | 'last_return_seq' | 'last_receiving_seq' | 'last_supplier_return_seq';
+
+function advanceSeqColumnSync(
+  sqlite: Database.Database,
+  column: DeviceSequenceColumn,
+  fieldLabel: string,
+  params: {
+    readonly deviceId: UuidV7;
+    readonly updatedAtMs: bigint;
+  },
+): bigint {
+  const validDeviceId = parseUuidV7(params.deviceId);
+  const validUpdatedAtMs = unixMsFromBigInt(params.updatedAtMs);
+
+  const row = sqlite
+    .prepare<[bigint, string], Record<string, unknown>>(
+      `
+      UPDATE local_device_state
+      SET
+        ${column} = ${column} + 1,
+        updated_at_ms = ?
+      WHERE device_id = ?
+      RETURNING ${column} AS seq_val
+      `,
+    )
+    .get(validUpdatedAtMs, validDeviceId);
+
+  const seqVal = row?.seq_val;
+  if (typeof seqVal !== 'bigint') {
+    throw new Error(
+      `Cannot allocate ${fieldLabel}: local_device_state row missing or invalid for device "${validDeviceId}"`,
+    );
+  }
+
+  return seqVal;
+}
+
 /**
  * Atomically allocates the next gapless per-device `receipt_no` (`last_receipt_seq + 1`) inside the
  * caller's active `BEGIN IMMEDIATE` transaction so failed sales and crashes never consume numbers.
@@ -174,40 +212,18 @@ export function advanceReceiptSeqSync(
     readonly updatedAtMs: bigint;
   },
 ): bigint {
-  const validDeviceId = parseUuidV7(params.deviceId);
-  const validUpdatedAtMs = unixMsFromBigInt(params.updatedAtMs);
-
-  const result = sqlite
-    .prepare<[bigint, string], { readonly last_receipt_seq: unknown }>(
-      `
-      UPDATE local_device_state
-      SET
-        last_receipt_seq = last_receipt_seq + 1,
-        updated_at_ms = ?
-      WHERE device_id = ?
-      RETURNING last_receipt_seq
-      `,
-    )
-    .get(validUpdatedAtMs, validDeviceId);
-
-  if (!result || typeof result.last_receipt_seq !== 'bigint') {
-    throw new Error(
-      `Cannot allocate receipt_no: local_device_state row missing or invalid for device "${validDeviceId}"`,
-    );
-  }
-
-  return result.last_receipt_seq;
+  return advanceSeqColumnSync(sqlite, 'last_receipt_seq', 'receipt_no', params);
 }
 
 export function readReceiptSeqSync(db: BetterSQLite3Database, deviceId: UuidV7): bigint {
   const validDeviceId = parseUuidV7(deviceId);
   const rows = db
-    .select({ lastReceiptSeq: localDeviceState.lastReceiptSeq })
+    .select({ val: localDeviceState.lastReceiptSeq })
     .from(localDeviceState)
     .where(eq(localDeviceState.deviceId, validDeviceId))
     .limit(1)
     .all();
-  return rows[0]?.lastReceiptSeq ?? 0n;
+  return rows[0]?.val ?? 0n;
 }
 
 /**
@@ -221,40 +237,66 @@ export function advanceReturnSeqSync(
     readonly updatedAtMs: bigint;
   },
 ): bigint {
-  const validDeviceId = parseUuidV7(params.deviceId);
-  const validUpdatedAtMs = unixMsFromBigInt(params.updatedAtMs);
-
-  const result = sqlite
-    .prepare<[bigint, string], { readonly last_return_seq: unknown }>(
-      `
-      UPDATE local_device_state
-      SET
-        last_return_seq = last_return_seq + 1,
-        updated_at_ms = ?
-      WHERE device_id = ?
-      RETURNING last_return_seq
-      `,
-    )
-    .get(validUpdatedAtMs, validDeviceId);
-
-  if (!result || typeof result.last_return_seq !== 'bigint') {
-    throw new Error(
-      `Cannot allocate return_no: local_device_state row missing or invalid for device "${validDeviceId}"`,
-    );
-  }
-
-  return result.last_return_seq;
+  return advanceSeqColumnSync(sqlite, 'last_return_seq', 'return_no', params);
 }
 
 export function readReturnSeqSync(db: BetterSQLite3Database, deviceId: UuidV7): bigint {
   const validDeviceId = parseUuidV7(deviceId);
   const rows = db
-    .select({ lastReturnSeq: localDeviceState.lastReturnSeq })
+    .select({ val: localDeviceState.lastReturnSeq })
     .from(localDeviceState)
     .where(eq(localDeviceState.deviceId, validDeviceId))
     .limit(1)
     .all();
-  return rows[0]?.lastReturnSeq ?? 0n;
+  return rows[0]?.val ?? 0n;
+}
+
+/**
+ * Atomically allocates the next gapless per-device `receiving_no` (`last_receiving_seq + 1`).
+ */
+export function advanceReceivingSeqSync(
+  sqlite: Database.Database,
+  params: {
+    readonly deviceId: UuidV7;
+    readonly updatedAtMs: bigint;
+  },
+): bigint {
+  return advanceSeqColumnSync(sqlite, 'last_receiving_seq', 'receiving_no', params);
+}
+
+export function readReceivingSeqSync(db: BetterSQLite3Database, deviceId: UuidV7): bigint {
+  const validDeviceId = parseUuidV7(deviceId);
+  const rows = db
+    .select({ val: localDeviceState.lastReceivingSeq })
+    .from(localDeviceState)
+    .where(eq(localDeviceState.deviceId, validDeviceId))
+    .limit(1)
+    .all();
+  return rows[0]?.val ?? 0n;
+}
+
+/**
+ * Atomically allocates the next gapless per-device supplier `return_no` (`last_supplier_return_seq + 1`).
+ */
+export function advanceSupplierReturnSeqSync(
+  sqlite: Database.Database,
+  params: {
+    readonly deviceId: UuidV7;
+    readonly updatedAtMs: bigint;
+  },
+): bigint {
+  return advanceSeqColumnSync(sqlite, 'last_supplier_return_seq', 'supplier_return_no', params);
+}
+
+export function readSupplierReturnSeqSync(db: BetterSQLite3Database, deviceId: UuidV7): bigint {
+  const validDeviceId = parseUuidV7(deviceId);
+  const rows = db
+    .select({ val: localDeviceState.lastSupplierReturnSeq })
+    .from(localDeviceState)
+    .where(eq(localDeviceState.deviceId, validDeviceId))
+    .limit(1)
+    .all();
+  return rows[0]?.val ?? 0n;
 }
 
 export class SqliteDeviceStateRepository implements DeviceStateRepository<SqliteSessionDbAccess> {

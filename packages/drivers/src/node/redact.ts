@@ -7,6 +7,11 @@ export const PII_LOG_REDACT_KEYS = [
   'customerName',
   'customerPhone',
   'customerNote',
+  'supplierName',
+  'contactPerson',
+  'supplierPhone',
+  'supplierNote',
+  'tin',
   'note',
 ] as const;
 
