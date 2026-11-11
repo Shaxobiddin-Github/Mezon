@@ -1,150 +1,206 @@
-## Hisobot: T1.10
+# Reja: T1.11 — Kassa UI (`apps/pos`, `@mezon/i18n`, `@mezon/ui`)
 
-Branch / PR: `gemini/T1.10-orders-advance` / [PR #17](https://github.com/Shaxobiddin-Github/Mezon/pull/17)
-Commitlar:
-
-- `ea05627`: `T1.9 test qarzi: yopiq smenani qayta yopish`
-- `9152a74` (`9152a74fc480bbafb0759c0183c68f436f0f774f`): `T1.10: Buyurtma va avans — O1..O4 va model testi`
+- **PR #17 (T1.10: Buyurtma va avans) Squash and merge SHA:** `99ca0d69b0db5113e064178fef9111833f699798` (`gemini/T1.10-orders-advance` branch'i o'chirildi).
+- **Joriy branch:** `gemini/T1.11-pos-ui` (boshi `main` = `99ca0d6`).
 
 ---
 
-### Nima qilindi
+## a) Tuzilma va arxitektura
 
-1. **1-commit — T1.9 test qarzi (`ea05627`):**
-   - `packages/db-local/src/shift.test.ts` va `apps/hub/src/shift.test.ts` ga yopiq smenaga yangi `clientRequestId` bilan `closeShift` / `POST /shifts/:id/close` chaqirilganda **`409 SHIFT_ALREADY_CLOSED`** qaytishi, `shift_closures`, `shift_cashier_sessions`, `local_outbox` qatorlari o'zgarmasligi (`0` yozuv) hamda xuddi shu yopiq smenaga `recloseShift` (`closureSeq = 2`) ishlashi testlari qo'shildi.
-   - Mutatsiya isboti: `shift-repo.ts` (`closeShift`) dagi `if (shiftRow.status !== 'open')` tekshiruvi vaqtincha olib tashlanganda har ikki test yiqilishi tasdiqlandi va qayta tiklandi.
+1. **Paketlar va qatlamlar:**
+   - `packages/i18n`:
+     - Barcha foydalanuvchi ko'radigan matnlar yagona tiplangan o'zbek lotin (`uz-Latn`) lug'atida saqlanadi (`src/locales/uz-Latn.ts`, `src/index.ts`: `t(key, params)`).
+     - UI komponentlarida hech qanday xom matn (hardcoded string) yozilmaydi. Kalitlar guruhlangan (`auth.*`, `shift.*`, `pos.*`, `payment.*`, `parked.*`, `receipt.*`, `errors.*`, `shortcuts.*`) va T4.6 da `i18next` 27 (`uz-Latn`, `uz-Cyrl`, `ru`) ulanishiga 1:1 tayyor bo'ladi.
+   - `packages/ui`:
+     - Kassa va kelajakdagi admin/android ekranlari uchun umumiy bazaviy UI primitivlar va formatlash yordamchilari (`formatTiyinToUzs`, `formatMillisToQty`, `parseUzsInputToTiyin`, `parseQtyInputToMillis` — faqat `bigint` va satr orqali, `number`/`float` hisobda ishlatilmaydi).
+   - `apps/pos` (React 19.3.1 + Vite 8.3.7):
+     - `src/api/hub-client.ts`: tiplangan HTTP mijozi. Barcha so'rov va javob tiplari **faqat `@mezon/contracts` Zod sxemalaridan** (`z.input<...>`, `z.output<...>`) olinadi, qo'lda interfeys nusxalanmaydi. Har bir HTTP javob (`2xx` payload va `4xx/5xx` `ErrorResponseSchema`) runtime'da `@mezon/contracts` Zod sxemasi bilan `.parse()` qilinadi.
+     - Import chegarasi (`.dependency-cruiser.cjs`): `apps/pos/src` faqat ichki fayllar, `@mezon/contracts`, `@mezon/i18n`, `@mezon/ui`, `react`, `react-dom` va holat/stil paketlarini import qiladi (`@mezon/db-local`, `@mezon/hub`, `@mezon/drivers`, `electron` yoki `node:*` import qilish CI'da taqiqlangan).
 
-2. **Majburiy tuzatishlar (`O1–O4`):**
-   - **O1 (Buyurtma chekida `voidSale` taqiqlanadi):**
-     - `sales.source_order_id IS NOT NULL` bo'lgan har qanday topshirilgan buyurtma chekida `voidSale` / `POST /sales/:id/void` **`409 ORDER_SALE_USE_RETURN`** bilan rad etiladi (`packages/db-local/src/return-repo.ts`).
-     - Bunday chek faqat `createReturn` (`POST /sales/:id/returns`) orqali qaytariladi: chekdagi `'advance'` to'lov qatori buyurtmaning haqiqiy sof `order_payments` usullariga (`cash`, `card`, `uzqr`, `payme`, ...) yoyilib (`resolveOrderReturnEffectivePaidByMethod`), har usul bo'yicha real qaytarish shifti (`originalPaidByMethod`) hisoblanadi.
-     - **Mutatsiya dalili:** `return-repo.ts` dagi `if (saleRow.sourceOrderId !== null)` tekshiruvi vaqtincha olib tashlanganda `packages/db-local/src/order.test.ts` dagi 2 ta test (integratsion test + 225-qadam model testi) va `apps/hub/src/order.test.ts` dagi HTTP E2E test darhol yiqildi (`200` qaytib ketdi); tekshiruv tiklangach barcha testlar o'tdi.
-   - **O2 (`deliverOrder` vaqtida qayta hisoblash yo'q):**
-     - `deliverOrder` `evaluateCart` ni qayta chaqirmaydi va katalog narxini yoki aksiyalarni qayta o'qimaydi — `orders` va `order_lines` da buyurtma yaratilganda qotirilgan snapshot (`unitPriceSnapshot`, `promoDiscount`, `allocatedOrderDiscount`, `finalTotal`, `totalAmount`, `vatTotal`, `netExVat`) to'g'ridan-to'g'ri umumiy **`completeSaleCoreInTxSync`** yadrosiga uzatiladi (`totalFinal === order.totalAmount`).
-     - `ORDER_EXCESS_ADVANCE` himoyaviy tekshiruv sifatida `buildDeliverySalePayments` ichida saqlab qolindi.
-     - Test: buyurtma yaratilgandan keyin katalog narxi oshirilsa (`100 000 -> 180 000 UZS`) va aksiya o'chirilsa ham, `deliverOrder` chekni aynan buyurtmaning qotirilgan summasida (`totalFinal === order.totalAmount`) yakunlaydi.
-   - **O3 (Buyurtmada chegirma va aksiya — bir marta yaratishda):**
-     - `evaluateOrderDraft` (`packages/domain/src/order.ts`) T1.3 `evaluateCart` ni qayta ishlatib, buyurtma yaratilishida avtomatik aksiyalar (`percent`, `fixed_amount`, `buy_x_get_y`), qo'lda chegirma (`none | percent | amount`), kassir limiti va supervisor PIN tasdig'ini (`DISCOUNT_OVERRIDE_REQUIRED`) bir marta hisoblaydi hamda `orders` va `order_lines` da o'zgarmas qilib qotiradi (`'catalog'` va `'quick_sale'` qatorlari bilan).
-   - **O4 (Ochiq avanslar ko'rinishi):**
-     - `getOpenAdvancesTotal()` (`GET /orders/open-advances`) ochiq buyurtmalar (`status IN ('draft', 'confirmed', 'ready')`) bo'yicha mijozlardan olingan va hali savdoga aylanmagan yoki qaytarilmagan sof avans qoldig'ini usullar kesimida (`byMethod`) va jami (`totalOpenAdvance`, `openOrdersCount`) qaytaradi.
-     - 225 qadamli 2-terminal / ko'p smena / ko'p kunlik model testida har qadamda `totalOpenAdvance === totalAdvanceIn - totalAdvanceRefund - totalAdvanceAppliedAtDelivery` tengligi tiyinigacha tekshirildi.
+2. **Electron (`app://mezon`) va Brauzer Dev rejimi hamda CSP:**
+   - **Hub manzili (`baseUrl`):**
+     - Electron ichida `window.mezonBridge.getHubState()` va `window.mezonBridge.onHubState()` orqali dinamik `http://127.0.0.1:<port>` olinadi (`apps/pos/src/bridge.ts`).
+     - Brauzer dev va Playwright E2E rejimida (`window.mezonBridge` yo'q bo'lganda) `import.meta.env.VITE_HUB_BASE_URL` (yoki `window.__MEZON_HUB_URL__`) orqali faqat loopback (`http://127.0.0.1:<port>`) manziliga ulanadi.
+     - Hub CORS: `apps/hub` da lokal rivojlantirish va Electron/Playwright uchun faqat `app://mezon` va `http://127.0.0.1:<port>` / `http://localhost:<port>` origin'lariga ruxsat beriladi (`Authorization: Bearer <token>`, `Content-Type: application/json`).
+   - **Qat'iy CSP (`apps/desktop/src/security-policy.ts`):**
+     - Desktop CSP: `default-src 'self' app://mezon; script-src 'self' app://mezon; style-src 'self' app://mezon; img-src 'self' app://mezon data:; font-src 'self' app://mezon; connect-src 'self' app://mezon http://127.0.0.1:<port>`.
+     - `style-src` ichida `'unsafe-inline'` **yo'q**. Shuning uchun `apps/pos` da `style={{ ... }}` inline atributlari yoki runtime `<style>` tegi ishlatilmaydi — barcha stillar Vite orqali yig'iladigan statik `.css` faylida (Tailwind CSS 4 / CSS o'zgaruvchilari bilan tungi `[data-theme="dark"]` va kunduzgi `[data-theme="light"]` mavzular) bo'ladi.
+     - `resolveAppProtocolFilePath('app://mezon/')` faqat `/` yo'lini `index.html` ga yo'naltiradi (`/pos` kabi sub-path diskdan fayl qidirib `404` beradi). Shuning uchun `apps/pos` ichida sahifalararo o'tish URL pathname'ni o'zgartirmasdan holat (state-based screen router) orqali bajariladi (`app://mezon/` o'zgarmaydi).
 
-3. **Yagona `completeSale` yo'li (`GEMINI.md 3.1.9–3.1.10`) va kassa/tushum hisobi:**
-   - `packages/db-local/src/sale-repo.ts` da umumiy **`completeSaleCoreInTxSync`** ajratildi: oddiy POS savat yakunlash (`completeSale`) ham, buyurtmani topshirish (`deliverOrder`) ham aynan shu yagona funksiyadan o'tadi.
-   - `method === 'advance'` uchun `payments` jadvalida qator yoziladi, ammo `cash_moves` yozilmaydi (pul avans olinganda `advance_cash_in` / `advance_change_out` bilan kassaga kirgan).
-   - Avans olingan smenada savdo tushumi `0` (`grossSalesTotal = 0`, `v_sales_lines` ga kirmaydi), `shift_closures` da esa `orderAdvanceCashTotal`, `orderAdvanceNonCashTotal`, `orderAdvanceRefundTotal` aks etadi; tushum faqat topshirilganda (`deliverOrder`) bir marta `sales` va `v_sales_lines` ga tushadi.
-
----
-
-### O'zgargan fayllar (fayl — sabab)
-
-- `packages/domain/src/errors.ts` — `ORDER_NOT_FOUND`, `ORDER_EMPTY`, `ORDER_INVALID_TRANSITION`, `ORDER_ADVANCE_EXCEEDS_TOTAL`, `ORDER_ADVANCE_REFUND_EXCEEDED`, `ORDER_EXCESS_ADVANCE`, `ORDER_SALE_USE_RETURN`, `ORDER_TOTAL_CHANGED` xato kodlari.
-- `packages/domain/src/auth.ts`, `packages/domain/src/auth.test.ts` — `'orders:read' | 'orders:write' | 'orders:cancel'` ruxsatlari (`cashier` da `orders:cancel` yo'q).
-- `packages/domain/src/sale.ts`, `packages/domain/src/sale.test.ts` — `SALE_PAYMENT_METHODS` (`'advance'`), `advance_cash_in`, `advance_change_out`, `advance_refund_out`, `allowAdvancePayment` parametri (`PAYMENT_METHODS` faqat haqiqiy tenderlar uchun o'zgarishsiz qoldi).
-- `packages/domain/src/shift.ts`, `packages/domain/src/shift.test.ts` — smena hisobotida `orderAdvanceCashTotal`, `orderAdvanceNonCashTotal`, `orderAdvanceRefundTotal` va `methodTotals` da `'advance'`.
-- `packages/domain/src/order.ts`, `packages/domain/src/order.test.ts`, `packages/domain/src/index.ts` — buyurtma holat o'tishlari, `evaluateOrderDraft` (O3), avans olish/qaytarish/bekor qilish, `buildDeliverySalePayments` (O2), `resolveOrderReturnEffectivePaidByMethod` (O1), `computeOpenAdvancesAccounting` (O4), idempotentlik xesh funksiyalari va 300-run `fast-check` property testlari.
-- `packages/contracts/src/order.ts`, `packages/contracts/src/order.test.ts`, `packages/contracts/src/sale.ts`, `packages/contracts/src/sale.test.ts`, `packages/contracts/src/return.ts`, `packages/contracts/src/shift.ts`, `packages/contracts/src/index.ts` — T1.10 Zod (`z.strictObject`) kontraktlari, `SaleDto.sourceOrderId`, `VoidedSaleDto.sourceOrderId`, `ShiftClosureDto` avans maydonlari, tannarx yashirilishi testlari.
-- `packages/db-local/src/schema/index.ts`, `packages/db-local/drizzle/0012_orders_advance.sql`, `packages/db-local/drizzle/meta/_journal.json`, `packages/db-local/drizzle/meta/0012_snapshot.json`, `packages/db-local/src/order-migrations.ts`, `packages/db-local/src/sale-migrations.ts`, `packages/db-local/src/device-state.ts`, `packages/db-local/scripts/check-migrations.mjs` — `orders` (`MONOTONE`, `origin_device_id`), `order_lines` (`FACT`), `order_payments` (`FACT`), `sales.source_order_id`, `last_order_seq`, `0012` SQLite migratsiyasi va triggerlar.
-- `packages/db-local/src/sale-repo.ts`, `packages/db-local/src/return-repo.ts`, `packages/db-local/src/shift-repo.ts`, `packages/db-local/src/cart-repo.ts`, `packages/db-local/src/order-repo.ts`, `packages/db-local/src/index.ts` — `completeSaleCoreInTxSync`, `O1` `voidSale` blokirovkasi va `createReturn` da `'advance'` yoyilishi, `SqliteOrderStore`, smena/kun yakunida avans hisobi.
-- `packages/db-local/src/index.test.ts`, `packages/db-local/src/order.test.ts`, `packages/db-local/src/order.perf.test.ts` — `0011 -> 0012` migratsiya testi, O1–O4, SQLite triggerlar, 225-qadam 2-terminal model testi va 20-qatorli `deliverOrder` WAL unumdorlik testi.
-- `apps/hub/src/error-handler.ts`, `apps/hub/src/sale-service.ts`, `apps/hub/src/return-service.ts`, `apps/hub/src/shift-service.ts`, `apps/hub/src/order-service.ts`, `apps/hub/src/order-routes.ts`, `apps/hub/src/routes.ts`, `apps/hub/src/server.ts`, `apps/hub/src/index.ts`, `apps/hub/src/order.test.ts`, `apps/hub/src/order.perf.test.ts` — Hub HTTP endpointlari (`/orders`, `/orders/open-advances`, `/orders/:id/*`), RBAC + supervisor PIN lockout, PII-siz Pino audit loglari, HTTP E2E va unumdorlik testlari.
+3. **Holat boshqaruvi (`zustand` 5 yoki React 19 store):**
+   - `zustand` (`5.0.12`, GEMINI.md 2.1 ro'yxatidan) + `.dependency-cruiser.cjs` da `pos-src-imports` ga ruxsat:
+     - **Sababi:** kassa UI'da global klaviatura/skaner hodisalari, aktiv savat (`CartEvaluationResult`), to'lov oynasi holati va `clientRequestId` React render siklidan tashqarida ham sinxron o'qilishi (`store.getState()`) kerak. `zustand` hech qanday inline style qo'shmaydi, juda yengil va skaner/shortcut handler'laridan to'g'ridan-to'g'ri chaqiriladi.
+     - Agar qo'shimcha paket qo'shmaslik ma'qul ko'rilsa, React 19 `useSyncExternalStore` asosidagi 60 qatorlik tiplangan store ham xuddi shu `getState()/setState()/subscribe()` interfeysini beradi. (Rejada `zustand` 5.0.12 asosiy variant sifatida olindi).
 
 ---
 
-### Migratsiyalar
+## b) Ekranlar
 
-- `packages/db-local/drizzle/0012_orders_advance.sql`:
-  - Yangi jadvallar: `orders` (`MONOTONE`), `order_lines` (`FACT`), `order_payments` (`FACT`).
-  - `sales` jadvaliga `source_order_id` (`idx_sales_store_order`) qo'shildi va `trg_sales_immutable_core` da qulflandi.
-  - `payments`, `cash_moves`, `shift_closures`, `shift_closure_method_totals`, `local_device_state` jadvallari `PRAGMA foreign_keys = ON` ostida bola jadvallarni (`customer_ledger`, `supplier_ledger`, `shift_closure_method_totals`, `shift_closure_cashiers`) `__tmp_*` orqali saqlab qayta tiklash bilan yangilandi; barcha `FACT`/`MONOTONE`/X5 triggerlar qayta yaratildi.
-  - `pnpm --filter @mezon/db-local db:check`: `0 diff statements`.
+1. **Birinchi ishga tushirish (`FirstRunSetupScreen`) va PIN bilan kirish (`PinLoginScreen`):**
+   - `GET /auth/setup-status` `needsSetup: true` qaytarsa, boshlang'ich tashkilot/do'kon/egasi yaratish oynasi chiqadi (`POST /auth/setup`).
+   - Oddiy holatda PIN kirish ekrani: foydalanuvchi nomi (yoki oxirgi kassir tanlovi) va 4–8 xonali PIN uchun ham klaviatura, ham katta teginish numpad'i (`0–9`, `Tozalash`, `O'chirish`, `Kirish`).
+   - 5 marta xato PIN kiritilganda `429 AUTH_RATE_LIMITED` (`retryAfterSeconds`) bo'yicha ekranda qolgan blok vaqti teskari sanoqda ko'rsatiladi.
+   - Kirishdan so'ng sessiya tokeni faqat xotirada saqlanadi; foydalanuvchi roli (`owner`, `manager`, `cashier`) va `userId` holatga yoziladi.
 
----
+2. **Smenani ochish (`OpenShiftScreen`):**
+   - Kassir tizimga kirgach, `GET /shifts/current` tekshiriladi. Agar terminalda ochiq smena bo'lmasa (yoki boshqa kassirning smenasi ochiq bo'lsa — ogohlantirish bilan), smena ochish ekrani ko'rsatiladi.
+   - Boshlang'ich naqd pul (`openingCash` tiyinda, ixtiyoriy kupyura/tanga kalkulyatori `denominations` bilan) kiritiladi. Agar oldingi smena yopilishidagi naqd qoldiqdan farq qilsa, `openingDiscrepancyReason` maydoni so'raladi (`POST /shifts/open`).
 
-### Qabul mezonlari
+3. **Asosiy Savdo ekrani (`PosSalesScreen`):**
+   - **Yuqori panel:** do'kon/terminal nomi, joriy kassir, smena holati, skaner tayyorlik indikatori, kechiktirilgan cheklar soni (`F6`), kassa harakatlari / smena yopish (`F8`), tungi/kunduzgi mavzu almashtirgich (`dark`/`light`), chiqish tugmasi.
+   - **Chap/Markaziy qism — Savat jadvali:**
+     - Har bir qator: tartib raqami, tovar nomi (variant/birlik bilan), shtrix-kod, miqdor (`+` / `-` va aniq miqdor tahrirlash oynasi — kg/litr/dona uchun), birlik narxi, qator chegirmasi (avtomatik aksiya yoki qo'lda chegirma belgisi), qator yakuniy summasi (`lineTotal`).
+     - Tanlangan qator klaviatura (`ArrowUp`/`ArrowDown`) yoki teginish bilan belgilanadi.
+   - **O'ng/Yuqori qism — Qidiruv va Tez amallar:**
+     - Qidiruv maydoni (`F2`): `GET /catalog/search?q=...` (FTS5 + kategoriya filtri). Natijalar ro'yxatidan Enter yoki bosish bilan savatga qo'shish (`POST /carts/current/lines`).
+     - **Tez savdo qatori (`F3`):** katalogda yo'q tovar uchun nom (`customTitle`), birlik (`unit`), miqdor va narx kiritib savatga qo'shish.
+     - **Chegirma oynasi (`F4`):** tanlangan qatorga yoki butun savatga foiz (`percent`, bps) yoki aniq summa (`fixed`, tiyin) chegirma berish. Kassir limitidan (`maxCashierDiscountBps`) oshsa yoki `DISCOUNT_OVERRIDE_REQUIRED` qaytsa, darhol **Supervisor PIN oynasi (`SupervisorPinModal`)** ochiladi (`overrideApprovedByUserId` + `overrideSupervisorPin` faqat bir martalik so'rovda yuboriladi, xotirada saqlanmaydi).
+   - **Pastki yakuniy panel:**
+     - Jami dastlabki summa (`subtotal`), aksiya chegirmasi (`promoDiscountTotal`), qo'lda chegirma (`manualDiscountTotal`), QQS (`vatTotal`) va katta shriftda **To'lanadigan jami (`total`)**.
+     - Katta amal tugmalari: `Kechiktirish (F5)`, `Kechiktirilganlar (F6)`, `To'lov (F9 / F12)`.
 
-- [x] **T1.9 test qarzi (`ea05627`)** — yopiq smenaga yangi `clientRequestId` bilan `closeShift` `409 SHIFT_ALREADY_CLOSED` qaytaradi, mutatsiya bilan isbotlangan (`packages/db-local/src/shift.test.ts`, `apps/hub/src/shift.test.ts`).
-- [x] **O1: Topshirilgan buyurtma chekida `voidSale` rad etiladi (`409 ORDER_SALE_USE_RETURN`), faqat `createReturn` ishlaydi + mutatsiya dalili** — `packages/db-local/src/order.test.ts`, `apps/hub/src/order.test.ts`.
-- [x] **O2: `deliverOrder` qayta narxlamaydi (`totalFinal === order.totalAmount`), yagona `completeSaleCoreInTxSync` orqali o'tadi** — katalog narxi oshirilganda va aksiya o'chirilganda ham buyurtma qotirilgan summada topshiriladi (`packages/db-local/src/order.test.ts`, `apps/hub/src/order.test.ts`).
-- [x] **O3: Buyurtma yaratishda T1.3 `evaluateCart` orqali aksiya + chegirma + kassir limiti + supervisor PIN bir marta hisoblanib qotiriladi (`catalog` va `quick_sale`)** — `packages/domain/src/order.test.ts`, `packages/db-local/src/order.test.ts`, `apps/hub/src/order.test.ts`.
-- [x] **O4: `getOpenAdvancesTotal()` (`GET /orders/open-advances`) + 225-qadamli 2-terminal model testi** — har qadamda `totalOpenAdvance === totalAdvanceIn - totalAdvanceRefund - totalAdvanceAppliedAtDelivery` va smena yopilishida `expectedCash`, `orderAdvanceCashTotal`, `orderAdvanceNonCashTotal`, `orderAdvanceRefundTotal`, `grossSalesTotal`, `returnsTotal` tiyinigacha teng (`packages/db-local/src/order.test.ts`).
-- [x] **Avans olingan va ishlatilgan kunlarda kassa to'g'ri, tushum bir marta** — avans olingan smenada `grossSalesTotal = 0`, topshirilgan smenada `grossSalesTotal = totalFinal`, `cash_moves` da `'advance'` ikki marta yozilmaydi (`packages/db-local/src/order.test.ts`, `apps/hub/src/order.test.ts`).
-- [x] **20-qatorli buyurtmani topshirish unumdorligi ≤ 300 ms** — `db-local`: **`40.29 ms`** (`packages/db-local/src/order.perf.test.ts`); `hub` HTTP E2E: **`47.40 ms`** (`apps/hub/src/order.perf.test.ts`).
-- [x] **CI-siz ishlash siyosati** — `packages/db-cloud` va `apps/desktop` ga tegilmadi (`git diff main -- packages/db-cloud apps/desktop` bo'sh).
+4. **To'lov ekrani (`PaymentModal`):**
+   - `total` summasi, to'lov usullari (`cash`, `card`, `uzqr`, `payme`, `click`, `uzum`, `social_card`, `other`) va aralash to'lov qatorlari.
+   - **Naqd to'lov (`cash`):** kassir mijoz bergan naqd pulni (`tenderedCash`) kiritadi yoki tez kupyura tugmalarini (`Aniq summa`, `10 000`, `20 000`, `50 000`, `100 000`, `200 000`) bosadi. Qaytim (`changeDue = tenderedCash - cashApplied`) real vaqtda hisoblanadi; qaytim faqat naqd to'lovdan beriladi.
+   - **Qarzga savdo (`debtAmount > 0`):** qolgan summa qarzga yozilishi tanlansa, mijoz qidirish / yangi mijoz yaratish (`GET /customers/search`, `POST /customers`) va to'lov muddati (`dueDays`) majburiy bo'ladi. Mijoz kredit limiti oshsa (`CREDIT_LIMIT_EXCEEDED`), Supervisor PIN oynasi orqali tasdiqlanadi.
+   - **Ijtimoiy karta (`social_card`):** tanlanganda `cardType`, `cardLast4`, `transactionRef` maydonlari ko'rsatiladi.
+   - Invariant: `SUM(payments.amount) + debtAmount === total` bajarilmaguncha `Savdoni yakunlash (Enter)` tugmasi faol bo'lmaydi.
 
----
+5. **Kechiktirilgan cheklar oynasi (`ParkedCartsModal`):**
+   - Joriy savatni ixtiyoriy izoh (`label`) bilan kechiktirish (`POST /carts/current/park`, `F5`).
+   - Kechiktirilgan savatlar ro'yxati (`GET /carts/parked`, `F6`): vaqti, izohi, qatorlar soni, summasi, `Davom ettirish (Resume)` (`POST /carts/parked/:id/resume`) va `O'chirish` (`DELETE /carts/parked/:id`).
 
-### Test natijasi (buyruq va haqiqiy chiqish)
+6. **Yakunlangan chek ko'rinishi (`ReceiptModal`):**
+   - Savdo muvaffaqiyatli yakunlangach (`POST /sales/complete`), ekranda chek tafsilotlari chiqadi:
+     - Yuqorida aniq ogohlantirish: **`SINOV — FISKAL EMAS`** (`fiscalStatus: 'non_fiscal'` / fake rejim talabi, GEMINI.md 3.3).
+     - `receiptNo`, vaqt, kassir, qatorlar (nomi, miqdori × narxi, chegirma, QQS, jami), to'lov turlari, berilgan naqd, qaytim, qarz summasi.
+     - `Yangi savdo (Enter / Esc)` tugmasi (haqiqiy printerda chop etish T1.12 da ulanadi).
 
-Buyruq: `pnpm verify`
-
-```text
-$ pnpm run format:check && pnpm run build && pnpm run lint && pnpm run typecheck && pnpm run db:check && pnpm run test && pnpm run depcruise
-$ prettier --check .
-Checking formatting...
-All matched files use Prettier code style!
-$ turbo run build
- Tasks:    13 successful, 13 total
-$ node scripts/lint-workspaces.mjs
-(0 errors, 0 warnings)
-$ turbo run typecheck
- Tasks:    13 successful, 13 total
-$ turbo run db:check
-@mezon/db-local:db:check: Everything's fine 🐶🔥
-@mezon/db-local:db:check: SQLite schema matches committed migrations (0 diff statements).
-@mezon/db-cloud:db:check: Everything's fine 🐶🔥
-@mezon/db-cloud:db:check: PostgreSQL schema and RLS migrations verified (0 diff statements).
-$ pnpm run test:unit && pnpm run test:perf
-$ vitest run --project unit --project sqlite-hub
-
- Test Files  57 passed | 1 skipped (58)
-      Tests  276 passed | 2 skipped (278)
-   Duration  24.49s
-
-$ vitest run --project perf
-
-[PERF T1.4 db-local] 20-line completeSale (10 FIFO batched + 10 avg) took 42.60 ms
-[PERF T1.5 db-local] 20-line completeSale (3 payments: card+payme+cash) median=35.88 ms
-[T1.1 Perf 50k products / 70k barcodes WAL] seedMs=5438.8 scan(n=250): p50=0.454ms p95=0.633ms | search(n=100): p50=19.432ms p95=22.675ms
-[PERF T1.7 D4] 5,000 entries (1 customer): getCustomerDetail=9.17 ms | createReturn=29.57 ms
-[PERF T1.7 10k/100k] seedMs=5584.9 | ftsMs=1.59 | phoneMs=5.25 | balanceMs=0.79 | overdueMs=23.83
-[PERF T1.6 db-local] 20-line full createReturn (10 FIFO + 10 avg) median=46.08 ms
-[PERF T1.8 100-line receiving]: 173.45 ms
-[PERF T1.4 HTTP E2E] 20-line POST /carts/:id/complete took 44.89 ms
-[PERF T1.5 HTTP E2E] 20-line 3-payment POST /carts/:id/complete median=37.90 ms
-[PERF T1.10 HTTP E2E] 20-line POST /orders/:id/deliver took 47.40 ms
-[db-local perf] 20-line order deliverOrder completed in 40.29 ms
-[PERF T1.9 db-local] 1,000-receipt shift closeShift elapsed=23.52 ms
-
- Test Files  9 passed (9)
-      Tests  12 passed (12)
-   Duration  30.48s
-
-$ depcruise --config .dependency-cruiser.cjs apps/*/src packages/*/src
-✔ no dependency violations found (302 modules, 1290 dependencies cruised)
-```
+7. **Kassa harakatlari va Smenani yopish ekrani (`ShiftManagementModal`):**
+   - **Kassa pul harakati (`POST /shifts/current/cash-moves`):** `cash_in` (kassaga kirim), `cash_out` (inkassatsiya/chiqim), `expense` (xarajat) — faqat naqd summa va majburiy `reason` (sabab).
+   - **Smenani yopish (`POST /shifts/current/close`):**
+     - Kassir **faqat sanalgan haqiqiy naqd pulni (`countedCash`)** (yoki kupyuralar sonini `denominations`) va izohni (`notes`) kiritadi.
+     - **Qat'iy qoida (GEMINI.md T1.9 / T1.11):** smena yopish ekranida naqdsiz summa (`card`, `uzqr`, `payme`, `click`, `uzum` va h.k.) kiritish maydoni **umuman bo'lmaydi** — naqdsiz tushumlar backend'da `payments` jadvalidan avtomatik olinadi va faqat yopilgan smena hisobotida ko'rsatiladi.
+     - Agar naqd farq ruxsat etilgan chegaradan oshsa (`SUPERVISOR_OVERRIDE_REQUIRED`), Supervisor PIN so'raladi.
 
 ---
 
-### Tekshirilmagan narsalar
+## c) USB Skaner aniqlash (sof funksiya va global ushlagich)
 
-- `packages/db-cloud/src/pg-rls.test.ts` (2 ta test) lokalda Docker/Testcontainers yo'qligi sababli `skipped` (`packages/db-cloud` ga bu vazifada umuman tegilmadi).
-- GitHub Actions CI egasi qaroriga binoan (bepul limit tiklanguncha) ishlatilmadi; barcha tekshiruvlar lokal `pnpm verify` orqali to'liq bajarildi.
+1. **Sof funksiya (`apps/pos/src/scanner/scanner-detector.ts`):**
+   - Tashqi DOM yoki `Date.now()` ga bog'lanmagan sof avtomat:
+     ```ts
+     export interface ScannerKeyInput {
+       readonly key: string;
+       readonly code: string;
+       readonly ctrlKey: boolean;
+       readonly altKey: boolean;
+       readonly metaKey: boolean;
+       readonly timestampMs: number;
+     }
+     export interface ScannerDetectorConfig {
+       readonly maxInterKeyMs: number; // default: 30 ms
+       readonly minLength: number; // default: 4 ta belgi
+       readonly terminators: readonly ('Enter' | 'Tab')[];
+     }
+     ```
+   - `stepScannerDetector(state, input, config)` funksiyasi yangi `ScannerDetectorState` va natija hodisasini (`{ type: 'none' | 'buffering' | 'scan_completed' | 'flushed_as_typing', barcode?: string }`) qaytaradi.
+
+2. **GS (`\x1D`, ASCII 29) va DataMatrix / GS1 himoyasi:**
+   - Skaner yuborgan GS ajratuvchisi uch xil ko'rinishda kelishi mumkin:
+     1. `input.key === '\x1d'` yoki `input.key === '\u001d'` yoki `input.key === 'GroupSeparator'`;
+     2. `input.ctrlKey === true && (input.key === ']' || input.code === 'BracketRight' || input.key === '\x1d')` (ko'plab USB HID skanerlar ASCII 29 ni `Ctrl+]` sifatida yuboradi);
+     3. `input.code === 'Numpad0'` / Alt-ketma-ketlikdan kelgan `\x1d`.
+   - Algoritm bularning barchasini yagona `\x1D` belgisiga normallashtirib buferga qo'shadi.
+   - Bufer yakunlanganda `.trim()` **qilinmaydi** va ichki `\x1D`, qavslar, `=`, `+`, `/` yoki boshqa DataMatrix / Asl belgisi belgilari hech qachon o'chirilmaydi — shtrix-kod / marking kodi aynan o'z holicha Hub'ga (`POST /catalog/scan` yoki savatga) yuboriladi.
+
+3. **Belgilar tezligi va fokusdagi `<input>` himoyasi:**
+   - Ketma-ket belgilar orasidagi farq `timestampMs - prevTimestampMs <= 30 ms` bo'lsa va kamida `minLength` (`4`) ta belgi yig'ilib `Enter` (yoki `Tab`) bosilsa -> **`scan_completed`**.
+   - Agar foydalanuvchi qidiruv maydonida (`<input>`) yozayotgan paytda skaner ishlab ketsa:
+     - Birinchi belgi kiritilishi bilan `inputSnapshot` (fokusdagi input'ning skan boshlanishidan oldingi `value` va `selectionStart`) eslab qolinadi;
+     - `scan_completed` bo'lganda `event.preventDefault()` va `event.stopPropagation()` chaqiriladi (forma bexosdan submit bo'lib ketmaydi), fokusdagi `<input>` qiymati `inputSnapshot` ga qaytariladi (skaner yozib yuborgan belgilar qidiruv matnini buzmaydi) va skanerlangan kod savatga qo'shiladi.
+   - Odamiy tez yozish (`80–120 ms` oraliq): `timestampMs - prevTimestampMs > 30 ms` bo'lgani uchun bufer skaner sifatida qabul qilinmaydi (`flushed_as_typing`), oddiy input yozuvi buzilmaydi va Enter bosilganda skaner emas, oddiy qidiruv ishlaydi.
+
+4. **Unit testlar (`apps/pos/src/scanner/scanner-detector.test.ts`):**
+   - Tez yozuvchi odam (`80–120 ms` oraliq bilan 13 xonali kod + `Enter`) -> skaner deb qabul qilinmaydi;
+   - USB skaner (`5–15 ms` oraliq bilan EAN-13 + `Enter` yoki `Tab`) -> `scan_completed`;
+   - GS1 DataMatrix (`010478000000001221ABC12345\x1D91EE06\x1D92dGVzdA==`) ham to'g'ridan-to'g'ri `\x1D`, ham `Ctrl+]` (`ctrlKey: true, key: ']'`) orqali yuborilganda `\x1D` buzilmasdan to'liq saqlanadi;
+   - Qidiruv maydonida `"shakar"` yozib turib (`100 ms` oraliq), ketidan skaner bosilganda (`8 ms` oraliq) -> `"shakar"` matni input'da o'zgarishsiz qoladi, skaner kodi esa alohida `scan_completed` beradi.
 
 ---
 
-### Qilingan taxminlar
+## d) Pul xavfsizligi UI'da
 
-- Ko'p kassali (multi-terminal) do'konda bir terminalda yaratilgan buyurtma boshqa terminalda tasdiqlanishi, tayyor deb belgilanishi, topshirilishi yoki bekor qilinishi mumkin (`updateMonotone` `device_id` ustunini oxirgi yozgan terminalga yangilaydi). Shu sababli buyurtma tartib raqami (`order_no`) bo'yicha unikal indeks yaratuvchi terminalning o'zgarmas `origin_device_id` ustuniga (`uidx_orders_org_origin_device_no(organization_id, origin_device_id, order_no)`) bog'landi va `origin_device_id` `trg_orders_immutable_core` triggerida qulflandi.
+1. **Idempotent `clientRequestId` boshqaruvi (`completeSale`, kassa harakati, buyurtma):**
+   - Kassir `To'lov` oynasini ochganda (yoki savat/to'lov summalari o'zgarganda) bitta UUIDv7 `clientRequestId` yaratiladi va to'lov holatida saqlanadi.
+   - `Savdoni yakunlash` tugmasi bosilganda:
+     - `isSubmitting = true` qulfi tushadi — ikkinchi marta bosish (`double-click` yoki `Enter`ni ketma-ket bosish) yangi HTTP so'rov yubormaydi;
+     - Tarmoq uzilishi (`TypeError: Failed to fetch` / timeout) yoki `5xx` yuz bersa, `clientRequestId` **o'zgartirilmaydi**. Kassir `Qayta urinish` tugmasini bosganda **aynan o'sha `clientRequestId`** qayta yuboriladi va Hub idempotent ravishda o'sha yagona chekni qaytaradi.
+     - Faqat savdo muvaffaqiyatli yakunlangach (`200 OK`) yoki kassir savat tarkibini o'zgartirgach yangi `clientRequestId` generatsiya qilinadi.
+
+2. **`409 SALE_TOTAL_CHANGED` himoyasi:**
+   - Agar `POST /sales/complete` `409 SALE_TOTAL_CHANGED` qaytarsa (aksiya muddati tugagan yoki savat summasi yangilangan bo'lsa), UI savatni qayta o'qiydi (`GET /carts/current`), eski summa va yangi summani yonma-yon ko'rsatib kassirdan aniq tasdiq so'raydi (`"Savat summasi o'zgardi: 50 000 so'm -> 55 000 so'm. Yangi summa bilan davom etasizmi?"`). Kassir tasdiqlamaguncha savdo qayta yuborilmaydi.
+
+3. **Biznes xatolarini aniq o'zbekcha ko'rsatish:**
+   - `INSUFFICIENT_STOCK`: qaysi mahsulotlarda qoldiq yetmagani (`details.shortages`: mahsulot nomi, so'ralgan miqdor va mavjud qoldiq) jadval ko'rinishida chiqariladi va savatda o'sha qatorlar qizil bilan ajratib ko'rsatiladi;
+   - `SHIFT_NOT_OPEN`: `"Smena ochilmagan. Savdo qilish uchun avval smenani oching"` + smena ochish ekraniga o'tish;
+   - `CASHIER_SESSION_MISMATCH`: `"Terminalda boshqa kassirning smenasi ochiq. O'z smenangizga kiring"`;
+   - `DISCOUNT_OVERRIDE_REQUIRED` / `SUPERVISOR_OVERRIDE_REQUIRED` / `CREDIT_LIMIT_EXCEEDED`: tushunarli sabab bilan Supervisor PIN oynasini ochadi.
+
+4. **Tannarx va foyda izolyatsiyasi (GEMINI.md 3.4):**
+   - Kassir UI kodida va `@mezon/contracts` katalog/savat/savdo sxemalarida `costPrice`, `profit`, `margin` maydonlari umuman yo'q (avvalgi bosqichlarda backend'da ham kassir javoblaridan olib tashlangan; E2E testda ham DOM va tarmoq javoblarida bu kalitlar yo'qligi tekshiriladi).
 
 ---
 
-### Takliflar
+## e) Klaviatura va unumdorlik
 
-- T1.11 (Kassa UI) da buyurtmalar ro'yxati va topshirish ekranida `remainingToPay` hamda `netAdvanceByMethod` ko'rsatkichlarini bevosita `OrderDto` dan chiqarish kassirga qoldiq to'lovni kiritishni tezlashtiradi.
+1. **Sichqonsiz to'liq savdo — Tugmalar xaritasi:**
+   - `F1`: Klaviatura yorliqlari yordam oynasi (`ShortcutsModal`)
+   - `F2`: Mahsulot qidiruv maydoniga fokus (`SearchInput`)
+   - `F3`: Tez savdo (katalogda yo'q tovar) oynasi (`QuickSaleModal`)
+   - `F4`: Chegirma oynasi (tanlangan qator yoki butun savat) (`DiscountModal`)
+   - `F5`: Joriy savatni kechiktirish (`ParkCartModal`)
+   - `F6`: Kechiktirilgan cheklar ro'yxati (`ParkedCartsModal`)
+   - `F7`: Mijoz tanlash / qarz uchun mijoz bog'lash
+   - `F8`: Kassa pul harakati va Smena yopish oynasi (`ShiftManagementModal`)
+   - `F9` yoki `F12` yoki `Ctrl+Enter`: To'lov oynasini ochish (`PaymentModal`) / To'lov oynasi ochiq bo'lsa savdoni tasdiqlash
+   - `ArrowUp` / `ArrowDown`: Savat qatorlari yoki qidiruv natijalari bo'ylab harakatlanish
+   - `+` / `=` va `-`: Tanlangan savat qatori miqdorini 1 birlikka oshirish / kamaytirish
+   - `Enter` (savat qatorida): Tanlangan qator miqdorini aniq kiritish oynasi
+   - `Delete` / `Backspace` (savat qatorida): Tanlangan qatorni savatdan o'chirish
+   - `Escape`: Ochiq modalni yopish yoki qidiruv maydonini tozalash
+
+2. **Teginish (Touch) ergonomikasi:**
+   - Barcha interaktiv tugmalar, numpad katakchalari va savat qatori boshqaruvlari kamida **`48×48 px`** (`min-h-12 min-w-12`, katta numpad va to'lov tugmalari `56–64 px`) o'lchamda bo'ladi.
+
+3. **Unumdorlik maqsadlari va testlari:**
+   - **Skan -> savatdagi qator ko'rinishi:** `<= 100 ms` (Playwright/perf testda skan hodisasidan DOM'da savat qatori paydo bo'lguncha o'lchanadi);
+   - **50 000 tovarli katalogda qidiruv + UI render:** `<= 150 ms` (Hub + SQLite FTS5 + UI ro'yxat; qidiruv natijalari sahifalab/cheklangan 50 ta eng mos qator bilan ko'rsatiladi, DOM minglab tugun bilan to'lib qolmaydi).
 
 ---
 
-### Egasi yoki Claude qarori kerak bo'lgan savollar
+## f) E2E (Playwright) va Test rejasi
 
-- Savollar yo'q.
+Playwright testlari (`apps/pos/e2e/pos.spec.ts`) test oldidan haqiqiy `@mezon/hub` serverini vaqtinchalik SQLite bazasi bilan `127.0.0.1:0` portida ishga tushiradi va `apps/pos` UI'ni Chromium'da (Ubuntu va Windows CI'da headless rejimda) tekshiradi:
+
+1. **Skan -> To'lov -> Chek (va 50k qidiruv / <= 100 ms skan tezligi):**
+   - PIN bilan kirish -> smena ochish -> USB skaner tezligida (`8 ms` oraliq) shtrix-kod va GS (`\x1D`) belgili DataMatrix yuborish -> savatda qator `<= 100 ms` ichida chiqishi -> naqd to'lov (`tenderedCash`, qaytim hisobi) -> `SINOV — FISKAL EMAS` belgili chek ekrani.
+2. **Sichqonsiz to'liq savdo (100% klaviatura):**
+   - Sichqoncha (`page.click`) umuman ishlatilmasdan faqat klaviatura (`PIN` + `Enter`, smena ochish `Enter`, `F2` qidiruv -> `ArrowDown` -> `Enter`, `+` miqdor oshirish, `F4` chegirma, `F9` to'lov -> `Enter` yakunlash) bilan savdoni boshidan oxirigacha yakunlash.
+3. **Tez yozgan odam skaner deb qabul qilinmaydi:**
+   - Qidiruv maydoniga `85 ms` oraliq bilan shtrix-kodga o'xshash matn va `Enter` yuborilganda u skaner sifatida savatga tushib ketmaydi, balki oddiy qidiruv natijasini chiqaradi.
+4. **Ikki marta bosish va tarmoq uzilishi -> bitta chek (`clientRequestId` idempotentligi):**
+   - To'lovni tasdiqlash tugmasini ketma-ket ikki marta bosish hamda birinchi `POST /sales/complete` javobini tarmoqda uzib qo'yib (Playwright route intercept: Hub bazaga yozadi, lekin javob uziladi) `Qayta urinish` bosilganda aynan o'sha `clientRequestId` ketishi va bazada faqat **bitta** chek (`receipt_no = 1`) hosil bo'lishi isbotlanadi.
+5. **Kechiktirilgan chek (`park` / `resume`):**
+   - Birinchi mijoz savatini `F5` bilan kechiktirish -> ikkinchi mijozga savdo qilish -> `F6` orqali kechiktirilgan savatni qayta tiklash va yakunlash.
+6. **Smena ochish, kassa harakati va smena yopish:**
+   - `F8` orqali `expense` / `cash_in` kiritish -> smenani yopish ekranida **naqdsiz summa kiritish maydoni yo'qligini** (`expect(page.locator(...)).toHaveCount(0)`) tekshirish -> `countedCash` kiritib smenani yopish va kutilgan naqd/naqdsiz summalar to'g'riligini tasdiqlash.
+
+---
+
+## g) Doiradan tashqari (bu vazifada qilinmaydi)
+
+- Haqiqiy printer va ESC/POS bayt drayverlari (`T1.12`);
+- Hisobotlar, Excel import/eksport va zaxira nusxa (`T1.13`);
+- Android Capacitor qobig'i (`T4.4`);
+- Ko'p tilli (`uz-Cyrl`, `ru`) tarjima va til almashtirish (`T4.6`).
