@@ -213,15 +213,27 @@ const OUTBOX_DEBUG_REDACTED_KEYS = new Set<string>([
   'customerName',
   'customerPhone',
   'customerNote',
+  'supplierName',
+  'supplier_name',
+  'contactPerson',
+  'contact_person',
+  'supplierPhone',
+  'supplierNote',
+  'tin',
   'note',
 ]);
 
+const SUPPLIER_ENTITY_DEBUG_REDACTED_KEYS = new Set<string>(['name', 'nameSearch', 'name_search']);
+
 /**
- * Redacts PII (customer names, phones, notes) and secrets recursively before writing any outbox
- * record to debug logs, crash diagnostics, or support bundles while leaving the persisted sync
- * envelope untouched.
+ * Redacts PII (customer/supplier names, contacts, TINs, phones, notes) and secrets recursively
+ * before writing any outbox record to debug logs, crash diagnostics, or support bundles while
+ * leaving the persisted sync envelope untouched.
  */
-export function redactOutboxPayloadForDebug(value: unknown): unknown {
+export function redactOutboxPayloadForDebug(
+  value: unknown,
+  extraRedactedKeys?: ReadonlySet<string>,
+): unknown {
   if (value === null || typeof value === 'boolean' || typeof value === 'number') {
     return value;
   }
@@ -232,15 +244,15 @@ export function redactOutboxPayloadForDebug(value: unknown): unknown {
     return /^\+[1-9]\d{7,14}$/.test(value) ? '[Redacted]' : value;
   }
   if (Array.isArray(value)) {
-    return value.map((item) => redactOutboxPayloadForDebug(item));
+    return value.map((item) => redactOutboxPayloadForDebug(item, extraRedactedKeys));
   }
   if (typeof value === 'object') {
     const out: Record<string, unknown> = {};
     for (const [k, v] of Object.entries(value)) {
-      if (OUTBOX_DEBUG_REDACTED_KEYS.has(k)) {
+      if (OUTBOX_DEBUG_REDACTED_KEYS.has(k) || extraRedactedKeys?.has(k) === true) {
         out[k] = v === null || v === undefined ? v : '[Redacted]';
       } else {
-        out[k] = redactOutboxPayloadForDebug(v);
+        out[k] = redactOutboxPayloadForDebug(v, extraRedactedKeys);
       }
     }
     return out;
@@ -249,6 +261,7 @@ export function redactOutboxPayloadForDebug(value: unknown): unknown {
 }
 
 export function formatOutboxRecordForDebug(record: PersistedOutboxRecord): string {
+  const extraKeys = record.entity === 'suppliers' ? SUPPLIER_ENTITY_DEBUG_REDACTED_KEYS : undefined;
   return JSON.stringify({
     eventId: record.eventId,
     organizationId: record.organizationId,
@@ -263,7 +276,7 @@ export function formatOutboxRecordForDebug(record: PersistedOutboxRecord): strin
     schemaVersion: record.schemaVersion,
     status: record.status,
     attempts: record.attempts,
-    payload: redactOutboxPayloadForDebug(record.payload),
+    payload: redactOutboxPayloadForDebug(record.payload, extraKeys),
   });
 }
 

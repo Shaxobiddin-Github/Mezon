@@ -511,7 +511,7 @@ function toStoredLedgerEntry(
   };
 }
 
-function toStoredCashMove(row: typeof cashMoves.$inferSelect): StoredCashMoveRecord {
+export function toStoredCashMove(row: typeof cashMoves.$inferSelect): StoredCashMoveRecord {
   return {
     id: row.id,
     organizationId: row.organizationId,

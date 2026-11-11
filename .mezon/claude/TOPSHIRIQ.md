@@ -1,111 +1,115 @@
-# Claude topshirig'i: T1.7 QABUL → T1.8 rejasi
+# Claude topshirig'i: T1.8 QABUL → T1.9 rejasi
 
-## 1. T1.7 xulosasi: QABUL (kod `8f29f34`)
+## 1. T1.8 xulosasi: QABUL (kod `519781c`)
 
 Claude tekshirdi:
 
-- **Toza nusxada `pnpm verify`:** 226 test o'tadi.
-  - Birinchi ishga tushirishda ikkita eski test (`auth.test.ts` T5, `cart.test.ts` persist) yuklama ostida 5 soniyalik vaqt chegarasidan oshib yiqildi.
-  - Alohida ishga tushirilganda ham, ikki marta qayta to'liq ishga tushirilganda ham o'tdi. Bu beqarorlik, quyidagi 3-bandga qarang.
-- **Mustaqil FIFO model, 300 qadam:**
-  - amallar: 4 mijoz (cheksiz, 50 000, 0 va 200 000 limit), qarzli va qarzsiz savdo, naqd va karta qarz to'lovi, kechirish (manfiy tuzatish), qarzli chekni void qilish va to'liq qaytarish;
-  - 58 qarzli savdo, 54 to'lov, 15 qaytarish, 8 void;
-  - kutilgan rad etishlar: 11 `CREDIT_LIMIT_EXCEEDED`, 39 `OVERPAYMENT_NOT_ALLOWED`, 25 `SALE_DEBT_HAS_PAYMENTS` va boshqalar;
-  - har qadamda har mijoz balansi, ochiq majburiyatlar yig'indisi va har chekning qolgan qarzi model bilan tiyinigacha teng;
-  - kassa qoldig'i ham teng; `rebuildCustomerBalances()` jonli balans bilan teng.
-- **Mutatsiya:** 12 tadan 8 tasi ushlandi. Biri ekvivalent: kechirilgan chekni void qilishni domen `sale_void` qoidasi ham ushlaydi.
+- **Toza nusxada lokal `pnpm verify` yashil:** 248 test, sxema diff 0, depcruise toza.
+- **`packages/db-cloud` va `apps/desktop` ga tegilmagan.** `packages/drivers` da faqat redact ro'yxati o'zgargan. Egasining vaqtinchalik CI qoidasi bo'yicha merge qilish mumkin.
+- **Mustaqil model, 220 qadam:**
+  - amallar: 2 ta'minotchi, FIFO va o'rtacha tovar, `warn` rejimi; ma'lum va noma'lum narxli kirim, narxni tasdiqlash, naqd sotuv, naqd va karta to'lov (avans bilan), to'liq qaytarish, `±` tuzatish;
+  - 47 kirim, 21 tasdiqlash, 19 qaytarish, 36 to'lov, avans holatlari;
+  - kutilgan rad etishlar: 8 naqd yetmasligi, 26 tasdiqlangan qatorni qayta tasdiqlash, 10 ortiqcha qaytarish, partiya tugashi, noma'lum narxli qatorni qaytarish;
+  - har qadamda ta'minotchi balansi, `debtBalance`, `advanceBalance`, kassa qoldig'i va miqdor saqlanishi model bilan teng;
+  - `total_value` va partiya qiymati hech qachon manfiy emas;
+  - har 10 qadamda ombor va ta'minotchi rebuild jonli holat bilan teng;
+  - rad etilgan qaytarishda ombor holati o'zgarmaydi.
+- **Mutatsiya:** 9 tadan 7 tasi ushlandi. E1 `Q_rem` (FIFO va o'rtacha), E2 qiymat chegarasi, avans FIFO, naqd yetmasligi va PII redact ham ushlandi.
 
 ### Test qarzi
 
-T1.8 PR'ining birinchi alohida commit'i: `T1.7 test qarzi: nofaol mijoz, PII redaksiya, test vaqt chegarasi`.
+T1.9 PR'ining birinchi alohida commit'i: `T1.8 test qarzi: qaytarish chegaralari`. Har birini mutatsiya bilan isbotla.
 
-1. **Nofaol mijoz.** `customer-repo.ts` dagi `if (!customer.isActive)` olib tashlanganda testlar yiqilmadi. Test: `isActive = false` mijozga qarzli savdo `409 CUSTOMER_INACTIVE` bilan rad etiladi, hech narsa yozilmaydi. Qarz to'lovi esa qabul qilinadi (rejadagi qaror). Mutatsiya bilan isbotla.
-2. **PII redaksiya.** `DEFAULT_LOG_REDACT_PATHS` dan `fullName` yoki `customerName` olib tashlanganda testlar yiqilmadi. Test: ro'yxatdagi **har bir** PII kaliti (`phone`, `phoneNormalized`, `phoneDigits`, `fullName`, `customerName`, `customerPhone`, `note`; tashqi, `*.` va `*.*.` darajalarda) haqiqiy Pino logger orqali `[Redacted]` bo'lishi tekshirilsin. Kalitlar ro'yxatini sikl bilan tekshir, shunda yangi kalit qo'shilganda test ham avtomatik qamraydi.
-3. **Beqaror vaqt chegarasi.** Og'ir SQLite testlari bor paketlarda (`db-local`, `hub`) vitest `testTimeout` ni oshir (masalan 30 000 ms). Uzoq testlar (model, benchmark) o'z vaqt chegarasini aniq bersin. Unumdorlik chegaralari (≤ 300 ms va hokazo) esa o'zgarmaydi.
+1. **Ortiqcha qaytarish, 1 milli chegara.** `supplier-repo.ts` dagi `quantityToMilli(validQty) > maxRemainingMilli` sharti `> maxRemainingMilli + 1n` ga o'zgartirilganda testlar yiqilmadi.
+   - Test: kg tovar, 2.000 kirim. Avval 1.500 qaytariladi.
+   - So'ng 0.500 o'tadi. Shundan keyin 0.001 `SUPPLIER_RETURN_QTY_EXCEEDED` bilan rad etiladi.
+   - Alohida holat: 1.500 dan keyin 0.501 rad etiladi.
+2. **Partiya tugashi, 1 milli chegara.** `stock-repo.ts` dagi `batchAvailMilli < retMilli` sharti `batchAvailMilli + 1n < retMilli` ga o'zgartirilganda testlar yiqilmadi.
+   - Test: FIFO partiya 2.000, shundan 0.700 sotilgan, 1.300 qolgan.
+   - 1.301 qaytarish `SUPPLIER_RETURN_BATCH_DEPLETED` bilan rad etiladi. 1.300 qaytarish esa o'tadi.
 
 ## 2. Merge
 
+CI limiti tiklanguncha egasining qoidasi amal qiladi.
+
 1. `git pull --ff-only`.
-2. PR #14 boshi Claude'ning shu topshiriq commit'i bo'lsin, to'rtala CI job yashil bo'lsin.
-3. `T1.7: Mijoz qarz daftari` nomi bilan Squash and merge qil, SHA'ni yoz, branch'ni o'chir.
-4. `main`dan `gemini/T1.8-suppliers-receiving` branch'ini och.
+2. PR boshi Claude'ning shu topshiriq commit'i bo'lsin.
+3. `T1.8: Ta'minotchi, kirim va ta'minotchi qarzi` nomi bilan Squash and merge qil, SHA'ni yoz, branch'ni o'chir.
+4. `main`dan `gemini/T1.9-shifts` branch'ini och.
 
-## 3. T1.8 — Ta'minotchi va kirim: avval REJA
+## 3. T1.9 — Smena va kun yakuni: avval REJA
 
-Kod yozma. Rejani `.mezon/gemini/HISOBOT.md` ga yoz, `[gemini-reja] T1.8` bilan commit qil va push qil, so'ng `node .mezon/kutish.mjs` bilan kut.
+Kod yozma. Rejani `.mezon/gemini/HISOBOT.md` ga yoz, `[gemini-reja] T1.9` bilan commit qil va push qil, so'ng `node .mezon/kutish.mjs` bilan kut.
 
-GEMINI.md T1.8 talablari:
+GEMINI.md T1.9 talablari:
 
-- ta'minotchi;
-- kirim hujjati;
-- tannarx;
-- muddat;
-- `supplier_ledger`;
-- to'lovlar.
+- smena ochish va yopish;
+- kutilgan naqd `cash_moves` dan;
+- naqdsiz `payments` dan avtomatik;
+- sanoq va farq;
+- xarajatlar;
+- snapshot o'zgarmas.
 
-Mezon: tannarx noma'lum bo'lsa, qarz taxminan yozilmaydi.
+Mezonlar:
+
+- naqdsiz summa qo'lda kiritilmaydi;
+- qayta yopish tarixni saqlaydi;
+- ikki kassir farqi ajraladi.
 
 Rejada quyidagilar aniq bo'lsin:
 
-### a) Ta'minotchi
+### a) Smena modeli
 
-- `suppliers` (ATTR): nomi, STIR (INN, 9 raqam, ixtiyoriy, UNIQUE yoki yo'q, qaror qil), telefon, izoh, faollik.
-- PII qoidalari mijozdagi kabi.
-- Arxivlash: qarzi bor ta'minotchi bo'yicha qoida.
+- **Smena terminalga (`device_id`) bog'lanadi**, chunki kassa qutisi terminalniki.
+  - Bir terminalda bir vaqtda faqat bitta ochiq smena.
+  - Bitta smenada bir nechta kassir ishlay oladimi, yoki kassir almashsa smena yopiladimi? "Ikki kassir farqi ajraladi" mezoniga mos qaror qil. Tavsiya: smena terminalniki, ichida kassir kesimlari (`shift_cashier_sessions`); farq har kassir topshirgan paytda alohida hisoblanadi.
+- **Ochish:** boshlang'ich naqd sanog'i. Avvalgi smenaning yopilish sanog'i bilan farq bo'lsa, qayd etiladi.
+- **Jadval sinflari:** `shifts` (MONOTONE: `open` → `closed`), yopilish snapshot'i (FACT), qayta yopish (FACT, eskisini o'chirmaydi). Qaror qil.
 
-### b) Kirim hujjati
+### b) Smenaga bog'lash (T1.4–T1.8 dagi `shift_id`)
 
-- **Holatlar:** `draft` → `posted`. Ehtimol `cancelled`, qaror qil.
-  - Qoralama tahrirlanadi. Joylangan (posted) hujjat o'zgarmaydi: FACT yoki MONOTONE, sinfni tanla.
-  - Joylashdan keyingi xatolar qanday tuzatiladi: teskari hujjat yoki ta'minotchiga qaytarish? Qaror qil.
-- **Qatorlar:** tovar va variant, miqdor, tannarx (birlik yoki jami, qaror qil), partiya raqami, yaroqlilik muddati (partiyali tovarda majburiymi?).
-- **Joylash bitta tranzaksiyada:** ombor kirimi + `supplier_ledger` + outbox.
-  - Ombor kirimi T1.2 dagi `recordInboundMove` ichki funksiyasi orqali o'tsin. Nusxa yo'q, T1.4 b) qoidasi.
-- **Differensial test:** kirim hujjatini joylash ombor holatini xuddi shu qatorlar bilan `recordInboundMove` chaqirgandek o'zgartirsin. 6 maydon va partiyalar teng bo'lsin (T1.5 B1 usuli).
+- `completeSale`, qaytarish, void, qarz to'lovi, ta'minotchiga to'lov va `cash_moves`: ochiq smena bo'lmasa nima bo'ladi? Tavsiya: savdo va naqd harakatlari ochiq smenasiz **rad etiladi** (`SHIFT_NOT_OPEN`). Hozirgi testlarni shunga moslashtir.
+- Barcha yangi yozuvlarga `shift_id` yoziladi. Eski (smenasiz) yozuvlar `NULL` qoladi.
+- **V1 toraytirish (T1.6 dagi va'da):** void endi faqat **o'sha ochiq smenadagi** chek uchun. Yopilgan smena cheki faqat qaytarish orqali.
 
-### c) Tannarx noma'lum (mezon)
+### c) Kutilgan summalar va farq
 
-- Qator tannarxsiz joylanishi mumkinmi? Masalan, narx keyin keladi.
-- Ruxsat bo'lsa:
-  - ombor T1.2 dagi noma'lum tannarx mexanizmi bilan qanday ishlaydi;
-  - `supplier_ledger` ga shu qator uchun qarz **yozilmaydi**;
-  - keyin tannarx aniqlanganda qarz va tannarx qanday yangilanadi: alohida "narxni tasdiqlash" hujjati.
-- Bu oqim to'liq va testlangan bo'lsin: noma'lum → aniq, ombor qiymati va qarz to'g'ri.
+- **Kutilgan naqd** = boshlang'ich naqd + smenadagi `cash_moves` yig'indisi (savdo kirimi, qaytim, qaytarish, qarz to'lovi, ta'minotchiga to'lov, xarajat, inkassatsiya, kirim).
+- **Naqdsiz summalar** usullar bo'yicha `payments` va `return_payments` dan avtomatik hisoblanadi. Qo'lda kiritish maydoni umuman bo'lmaydi (mezon). API ham qabul qilmaydi; test bilan isbotla.
+- **Sanoq:** kassir haqiqiy naqdni kiritadi (ixtiyoriy kupyura bo'yicha). Farq = sanoq − kutilgan. Farqning sababi; katta farqda supervisor tasdig'i, chegarani konfiguratsiyada saqla.
 
-### d) `supplier_ledger`
+### d) Xarajat, inkassatsiya va kassaga kirim
 
-- **Turlar:** boshlang'ich qarz, kirim qarzi, to'lov, qaytarish, tuzatish.
-- **Balans = SUM.** Proyeksiya bo'lsa, rebuild testi bo'lsin.
-- **Ortiqcha to'lov (avans):** ta'minotchiga oldindan to'lash amalda keng tarqalgan. Ruxsat berilsinmi? Qaror qil.
-  - Agar ruxsat bo'lsa, manfiy balans ma'nosi va FIFO qoidalari aniq yozilsin.
-- **FIFO va muddat:** T1.7 dagi HLC tartibi va kechikish hisobini qayta ishlat.
+- `cash_out` (xarajat, sabab va toifa bilan), `encashment` (inkassatsiya), `cash_in` (kassaga qo'yish).
+- T1.5 da nomlangan turlardan foydalan.
+- RBAC: kim qila oladi? Naqd yetmasa rad etiladi (T1.6 qoidasi).
 
-### e) Ta'minotchiga to'lov
+### e) Yopish va qayta yopish
 
-- Naqd to'lov `cash_moves` da yangi chiqim turi bilan, shu terminalda yoziladi. Naqd yetmasa `INSUFFICIENT_CASH_IN_DRAWER`.
-- Naqdsiz to'lov ham qayd etiladi.
-- `clientRequestId` + `request_hash` bilan idempotent.
+- **Yopilish snapshot'i o'zgarmas.** Unda quyidagilar bo'ladi:
+  - smena davri;
+  - savdolar soni va jami (`v_sales_lines` dan, qaytarishlar bilan);
+  - usullar bo'yicha summalar;
+  - kutilgan naqd, sanoq va farq;
+  - kassir kesimlari.
+- **Qayta yopish:** sanoq xato kiritilgan bo'lsa, yangi snapshot yoziladi va eskisi tarixda qoladi. Faqat supervisor, sabab bilan.
+- **Smena yopilgandan keyin unga yozib bo'lmaydi.** DB darajasida ham.
+- **Kun yakuni (Z-hisobot):** bir kundagi barcha smenalar jamlanmasi. F3 fiskal Z-hisobot keyin ulanadi, buning uchun joy qoldir.
 
-### f) Ta'minotchiga qaytarish (ixtiyoriy)
+### f) Model testi va idempotentlik
 
-- Joylangan kirimdan tovarni qaytarish T1.8 ichidami yoki keyinroqmi? Qaror qil.
-- Agar T1.8 da bo'lsa:
-  - asl partiya va asl tannarx bilan chiqim;
-  - `supplier_ledger` dan ayirish;
-  - ortiqcha qaytarish rad etiladi.
+- Ochish, yopish va qayta yopish `clientRequestId` + `request_hash` bilan idempotent.
+- **Model testi (kamida 200 qadam, seed'li):**
+  - amallar: smena ochish, ikki kassir, savdo (naqd va aralash), qaytarish, void, qarz to'lovi, ta'minotchiga to'lov, xarajat, inkassatsiya, yopish, qayta yopish;
+  - har yopilishda kutilgan naqd, usullar bo'yicha summalar va kassir kesimlari mustaqil model bilan tiyinigacha teng;
+  - ikki terminal (`device_id`) parallel smenalari bir-biriga aralashmasin.
 
-### g) RBAC, maxfiylik va unumdorlik
+### g) Unumdorlik
 
-- **RBAC:** ta'minotchi, kirim va to'lovlar `owner`/`manager` uchun. Kassir umuman ko'rmaydimi? Qaror qil.
-- **Tannarx** faqat ruxsatli rollarga ko'rinadi.
-- 100 qatorli kirim hujjatini joylash ≤ 500 ms (lokal).
+1 000 chekli smenani yopish ≤ 500 ms (lokal).
 
-### h) Model testi
+### h) Doiradan tashqari
 
-Tasodifiy kirim (shu jumladan tannarxsiz), narxni tasdiqlash, to'lov va qaytarish ketma-ketligida ta'minotchi balansi, ombor qiymati va kassa mustaqil model bilan tiyinigacha teng bo'lsin.
-
-### i) Doiradan tashqari
-
-- Buyurtma (purchase order) va avtomatik buyurtma.
-- Smena (T1.9).
-- Fiskal (F3).
+- Fiskal Z-hisobot va OFD (F3).
+- Chek va hisobot chop etish (T1.12).
+- POS UI (T1.11).

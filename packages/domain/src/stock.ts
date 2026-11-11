@@ -10,6 +10,7 @@ export const STOCK_MOVE_REASONS = [
   'purchase',
   'sale',
   'return',
+  'supplier_return',
   'inventory',
   'adjustment',
   'damaged',
@@ -28,6 +29,7 @@ export const INBOUND_STOCK_REASONS = [
 ] as const;
 export const OUTBOUND_STOCK_REASONS = [
   'sale',
+  'supplier_return',
   'inventory',
   'adjustment',
   'damaged',
@@ -45,6 +47,7 @@ export const STOCK_SOURCE_TYPES = [
   'sale',
   'return',
   'purchase',
+  'supplier_return',
   'adjustment',
 ] as const;
 export type StockSourceType = (typeof STOCK_SOURCE_TYPES)[number];
@@ -407,6 +410,18 @@ export interface ReplayStockMoveEvent {
   readonly qtyDelta: Quantity;
   readonly costValueDelta: Money;
   readonly trackBatches: boolean;
+  readonly isUnknownCost?: boolean;
+}
+
+export interface ReplayCostConfirmationEvent {
+  readonly confirmationId: UuidV7;
+  readonly productId: UuidV7;
+  readonly variantId: UuidV7 | null;
+  readonly batchId: UuidV7 | null;
+  readonly hlc: string;
+  readonly receivedQty: Quantity;
+  readonly confirmedTotalCost: Money;
+  readonly trackBatches: boolean;
 }
 
 export function createEmptyStockPoolState(): ReplayStockPoolState {
@@ -444,7 +459,10 @@ export function applyReplayStockMove(
     const inVal = move.costValueDelta;
 
     const prevOnHandMilli = quantityToMilli(state.qtyOnHand);
-    if (move.reason === 'inventory' && valTiyin === 0n && state.lastUnitCost === null) {
+    if (
+      (move.reason === 'inventory' && valTiyin === 0n && state.lastUnitCost === null) ||
+      (move.isUnknownCost === true && valTiyin === 0n)
+    ) {
       conflicts.push({
         productId: move.productId,
         variantId: move.variantId,
@@ -455,6 +473,7 @@ export function applyReplayStockMove(
       });
     } else if (
       move.reason !== 'return' &&
+      !move.isUnknownCost &&
       (valTiyin > 0n || move.reason === 'initial' || move.reason === 'purchase')
     ) {
       state.lastUnitCost = computeUnitCostFromTotals(inVal, inQty);
@@ -575,20 +594,41 @@ export function applyReplayStockMove(
     return conflicts;
   }
 
-  // Unbatched outbound (`batchId === null`): weighted average pool or pre-existing deficit leg
+  // Unbatched outbound (`batchId === null`): weighted average pool or supplier exact-cost return (E2)
   if (!move.trackBatches) {
     const availMilli = onHandMilli > 0n ? onHandMilli : 0n;
     const takePosMilli = needMilli <= availMilli ? needMilli : availMilli;
-    const truePosTiyin =
-      takePosMilli > 0n
-        ? moneyToTiyin(
-            computeProportionalCost(
-              state.totalValue,
-              quantityFromMilli(availMilli),
-              quantityFromMilli(takePosMilli),
-            ),
-          )
-        : 0n;
+    let truePosTiyin: bigint;
+    if (move.reason === 'supplier_return') {
+      // E2: Deduct original return cost up to available pool value (`totalValue` NEVER goes negative).
+      // Any difference between original supplier return cost (`recordedOutTiyin`) and pool deduction
+      // is recorded in `costVarianceValue` so the accounting conservation equation stays exact.
+      const desiredOutTiyin =
+        takePosMilli === 0n
+          ? 0n
+          : takePosMilli < needMilli
+            ? moneyToTiyin(
+                computeProportionalCost(
+                  moneyFromTiyin(recordedOutTiyin),
+                  needQty,
+                  quantityFromMilli(takePosMilli),
+                ),
+              )
+            : recordedOutTiyin;
+      const availPoolTiyin = moneyToTiyin(state.totalValue);
+      truePosTiyin = desiredOutTiyin <= availPoolTiyin ? desiredOutTiyin : availPoolTiyin;
+    } else {
+      truePosTiyin =
+        takePosMilli > 0n
+          ? moneyToTiyin(
+              computeProportionalCost(
+                state.totalValue,
+                quantityFromMilli(availMilli),
+                quantityFromMilli(takePosMilli),
+              ),
+            )
+          : 0n;
+    }
     const defStepMilli = needMilli - takePosMilli;
 
     state.totalValue = moneyFromTiyin(moneyToTiyin(state.totalValue) - truePosTiyin);
@@ -613,4 +653,77 @@ export function applyReplayStockMove(
     moneyToTiyin(state.provisionalDeficitValue) + recordedOutTiyin,
   );
   return conflicts;
+}
+
+/**
+ * E1: Deterministically applies an immutable `receiving_cost_confirmations` event onto a
+ * mutable stock pool state when an initially unknown-cost purchase line receives its confirmed cost.
+ *
+ * - FIFO (`trackBatches = true`): `Q_rem = batch.remainingQty` (the exact unsold quantity remaining
+ *   in that batch). `shareOnHand = proportional(confirmedTotalCost, receivedQty, Q_rem)` is added
+ *   to both `batch.remainingValue` and `state.totalValue`.
+ * - Weighted average (`trackBatches = false`): Since average-cost pools merge quantities with no
+ *   batch identity, we treat the unknown receipt as newest (`Q_rem = min(max(qtyOnHand, 0), lineQty)`).
+ *   `shareOnHand = proportional(confirmedTotalCost, receivedQty, Q_rem)` is added to `state.totalValue`.
+ * - Any remaining cost for units already consumed/sold (`confirmedTotalCost - shareOnHand`) is
+ *   booked into `state.costVarianceValue` so `totalValue >= 0`, `remainingValue >= 0`, and the
+ *   conservation identity (`SUM(inbound) + SUM(confirmed) = SUM(outbound) + totalValue - provisionalDeficit + costVariance`)
+ *   holds to the exact tiyin.
+ */
+export function applyStockCostConfirmation(
+  state: ReplayStockPoolState,
+  confirmation: ReplayCostConfirmationEvent,
+): void {
+  const receivedMilli = quantityToMilli(confirmation.receivedQty);
+  const confirmedTiyin = moneyToTiyin(confirmation.confirmedTotalCost);
+  if (receivedMilli <= 0n || confirmedTiyin < 0n) {
+    throw new DomainError(
+      'VALIDATION_ERROR',
+      'Cost confirmation requires positive receivedQty and non-negative confirmedTotalCost',
+    );
+  }
+
+  let qRemMilli: bigint;
+  let targetBatch: ReplayBatchState | undefined;
+  if (confirmation.trackBatches) {
+    if (confirmation.batchId === null) {
+      throw new DomainError(
+        'BATCH_REQUIRED',
+        'Batch-tracked cost confirmation requires a non-null batchId',
+      );
+    }
+    targetBatch = state.batches.get(confirmation.batchId);
+    const rawRemMilli = targetBatch ? quantityToMilli(targetBatch.remainingQty) : 0n;
+    qRemMilli =
+      rawRemMilli > 0n ? (rawRemMilli <= receivedMilli ? rawRemMilli : receivedMilli) : 0n;
+  } else {
+    const onHandPosMilli =
+      quantityToMilli(state.qtyOnHand) > 0n ? quantityToMilli(state.qtyOnHand) : 0n;
+    qRemMilli = onHandPosMilli <= receivedMilli ? onHandPosMilli : receivedMilli;
+  }
+
+  const shareOnHandTiyin =
+    qRemMilli > 0n
+      ? moneyToTiyin(
+          computeProportionalCost(
+            confirmation.confirmedTotalCost,
+            confirmation.receivedQty,
+            quantityFromMilli(qRemMilli),
+          ),
+        )
+      : 0n;
+
+  if (targetBatch) {
+    targetBatch.remainingValue = moneyFromTiyin(
+      moneyToTiyin(targetBatch.remainingValue) + shareOnHandTiyin,
+    );
+  }
+  state.totalValue = moneyFromTiyin(moneyToTiyin(state.totalValue) + shareOnHandTiyin);
+  state.costVarianceValue = moneyFromTiyin(
+    moneyToTiyin(state.costVarianceValue) + (confirmedTiyin - shareOnHandTiyin),
+  );
+  state.lastUnitCost = computeUnitCostFromTotals(
+    confirmation.confirmedTotalCost,
+    confirmation.receivedQty,
+  );
 }

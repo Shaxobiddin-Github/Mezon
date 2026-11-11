@@ -15,6 +15,7 @@ import {
   ZERO_MONEY,
   ZERO_QUANTITY,
   applyReplayStockMove,
+  applyStockCostConfirmation,
   computeSurplusCostValue,
   createEmptyStockPoolState,
   moneyFromTiyin,
@@ -36,6 +37,7 @@ import type { LocalSqliteConnection } from './connection.js';
 import {
   batches,
   categories,
+  goodsReceivingLines,
   inventoryCountLines,
   inventoryCounts,
   localBatchBalances,
@@ -44,6 +46,7 @@ import {
   localStockConflicts,
   productVariants,
   products,
+  receivingCostConfirmations,
   stockMoves,
 } from './schema/index.js';
 import {
@@ -975,6 +978,399 @@ export function applyReturnStockMoveSync(
   return { moves: writtenMoves };
 }
 
+export interface InboundStockMoveSessionParams {
+  readonly organizationId: UuidV7;
+  readonly storeId: UuidV7;
+  readonly productId: UuidV7;
+  readonly variantId: UuidV7 | null;
+  readonly reason: StockMoveReason;
+  readonly qty: Quantity;
+  readonly totalCostValue: Money;
+  readonly batchNumber: string | null;
+  readonly expiryDateMs: UnixMs | null;
+  readonly sourceType: StockSourceType;
+  readonly sourceId: UuidV7;
+  readonly note: string | null;
+  readonly actorUserId: UuidV7;
+  readonly supplierId?: UuidV7 | null;
+  readonly isUnknownCost?: boolean;
+  readonly prefetchedProduct?: typeof products.$inferSelect;
+  readonly sessionPoolCache?: Map<string, ReplayStockPoolState>;
+}
+
+export interface InboundStockMoveSessionOutcome {
+  readonly move: StoredStockMoveRecord;
+  readonly batch: StoredBatchRecord | null;
+  readonly conflicts: readonly StoredStockConflictRecord[];
+}
+
+function persistStockConflictsSync(
+  session: SqliteUnitOfWorkSession,
+  organizationId: UuidV7,
+  storeId: UuidV7,
+  conflicts: readonly ReplayStockConflict[],
+  nowMs: UnixMs,
+): StoredStockConflictRecord[] {
+  const out: StoredStockConflictRecord[] = [];
+  for (const c of conflicts) {
+    const id = session.nextId();
+    const row = {
+      id,
+      organizationId,
+      storeId,
+      productId: c.productId,
+      variantId: c.variantId,
+      batchId: c.batchId,
+      moveId: c.moveId,
+      conflictQty: c.conflictQty,
+      reason: c.reason,
+      detail: formatConflictDetail(c),
+      resolvedAtMs: null,
+      createdAtMs: nowMs,
+      updatedAtMs: nowMs,
+    };
+    session.db.insert(localStockConflicts).values(row).run();
+    out.push(toStoredConflict(row));
+  }
+  return out;
+}
+
+/**
+ * Shared authoritative internal helper for inbound stock moves (initial, purchase, receiving, surplus).
+ * Reused directly by `SqliteStockStore.recordInboundMove`, `finalizeInventoryCount`, and
+ * `SqliteSupplierStore.postReceiving` so stock valuation, batches, and outbox share ONE code path.
+ */
+export function applyInboundStockMoveSync(
+  session: SqliteUnitOfWorkSession,
+  params: InboundStockMoveSessionParams,
+): InboundStockMoveSessionOutcome {
+  session.assertActiveTransaction();
+  const { product } = requireTrackedProductSync(
+    session,
+    params.organizationId,
+    params.productId,
+    params.variantId,
+    params.prefetchedProduct,
+  );
+  const unit = parseProductUnit(product.unit);
+  const validQty = validatePositiveStockQuantity(unit, params.qty);
+  const trackBatches = Boolean(product.trackBatches);
+  const nowMs = session.nowUnixMs();
+
+  const key = poolKey(params.productId, params.variantId);
+  const cachedState = params.sessionPoolCache?.get(key);
+  const poolState =
+    cachedState ??
+    loadMutablePoolStateSync(
+      session,
+      params.organizationId,
+      params.storeId,
+      params.productId,
+      params.variantId,
+      trackBatches,
+    );
+  if (params.sessionPoolCache && !cachedState) {
+    params.sessionPoolCache.set(key, poolState);
+  }
+
+  let createdBatchRow: typeof batches.$inferSelect | null = null;
+  if (trackBatches) {
+    const batchWrite = insertFact(session, batches, {
+      organizationId: params.organizationId,
+      storeId: params.storeId,
+      values: {
+        productId: params.productId,
+        variantId: params.variantId,
+        batchNumber: params.batchNumber,
+        expiryDateMs: params.expiryDateMs,
+        initialQty: validQty,
+        initialCostValue: params.totalCostValue,
+        supplierId: params.supplierId ?? null,
+      },
+      eventType: 'batch.created',
+      schemaVersion: 1,
+    });
+    createdBatchRow = batchWrite.row;
+  }
+
+  const moveWrite = insertFact(session, stockMoves, {
+    organizationId: params.organizationId,
+    storeId: params.storeId,
+    values: {
+      productId: params.productId,
+      variantId: params.variantId,
+      batchId: createdBatchRow?.id ?? null,
+      qtyDelta: validQty,
+      costValueDelta: params.totalCostValue,
+      reason: params.reason,
+      sourceType: params.sourceType,
+      sourceId: params.sourceId,
+      createdByUserId: params.actorUserId,
+      note: params.note,
+    },
+    eventType: 'stock_move.created',
+    schemaVersion: 1,
+  });
+
+  const emittedConflicts = applyReplayStockMove(poolState, {
+    moveId: moveWrite.entityId,
+    productId: params.productId,
+    variantId: params.variantId,
+    batchId: createdBatchRow?.id ?? null,
+    hlc: moveWrite.hlc,
+    reason: params.reason,
+    qtyDelta: validQty,
+    costValueDelta: params.totalCostValue,
+    trackBatches,
+    isUnknownCost: params.isUnknownCost,
+  });
+
+  savePoolAndBatchesSync(
+    session,
+    params.organizationId,
+    params.storeId,
+    params.productId,
+    params.variantId,
+    poolState,
+    nowMs,
+    createdBatchRow !== null ? [createdBatchRow.id] : [],
+  );
+
+  const savedConflicts = persistStockConflictsSync(
+    session,
+    params.organizationId,
+    params.storeId,
+    emittedConflicts,
+    nowMs,
+  );
+
+  let batchRecord: StoredBatchRecord | null = null;
+  if (createdBatchRow !== null) {
+    const batchBal = poolState.batches.get(createdBatchRow.id);
+    batchRecord = {
+      id: createdBatchRow.id,
+      organizationId: createdBatchRow.organizationId,
+      storeId: createdBatchRow.storeId,
+      productId: createdBatchRow.productId,
+      variantId: createdBatchRow.variantId,
+      batchNumber: createdBatchRow.batchNumber,
+      expiryDateMs: createdBatchRow.expiryDateMs,
+      initialQty: createdBatchRow.initialQty,
+      initialCostValue: createdBatchRow.initialCostValue,
+      remainingQty: batchBal?.remainingQty ?? ZERO_QUANTITY,
+      remainingValue: batchBal?.remainingValue ?? ZERO_MONEY,
+      createdAtMs: createdBatchRow.createdAtMs,
+    };
+  }
+
+  return {
+    move: toStoredMove(moveWrite.row),
+    batch: batchRecord,
+    conflicts: savedConflicts,
+  };
+}
+
+/**
+ * E1: Revalues stock balances & batch projection in an active UoW transaction when a
+ * `receiving_cost_confirmations` FACT document settles an unknown-cost purchase line, and marks any
+ * matching open `UNKNOWN_COST_SURPLUS` conflict as resolved.
+ */
+export function applyCostConfirmationStockRevaluationSync(
+  session: SqliteUnitOfWorkSession,
+  params: {
+    readonly organizationId: UuidV7;
+    readonly storeId: UuidV7;
+    readonly confirmationId: UuidV7;
+    readonly hlc: string;
+    readonly productId: UuidV7;
+    readonly variantId: UuidV7 | null;
+    readonly batchId: UuidV7 | null;
+    readonly sourceStockMoveId: UuidV7;
+    readonly receivedQty: Quantity;
+    readonly confirmedTotalCost: Money;
+  },
+): void {
+  session.assertActiveTransaction();
+  const { product } = requireTrackedProductSync(
+    session,
+    params.organizationId,
+    params.productId,
+    params.variantId,
+  );
+  const trackBatches = Boolean(product.trackBatches);
+  const nowMs = session.nowUnixMs();
+  const poolState = loadMutablePoolStateSync(
+    session,
+    params.organizationId,
+    params.storeId,
+    params.productId,
+    params.variantId,
+    trackBatches,
+  );
+
+  applyStockCostConfirmation(poolState, {
+    confirmationId: params.confirmationId,
+    productId: params.productId,
+    variantId: params.variantId,
+    batchId: params.batchId,
+    hlc: params.hlc,
+    receivedQty: params.receivedQty,
+    confirmedTotalCost: params.confirmedTotalCost,
+    trackBatches,
+  });
+
+  savePoolAndBatchesSync(
+    session,
+    params.organizationId,
+    params.storeId,
+    params.productId,
+    params.variantId,
+    poolState,
+    nowMs,
+    params.batchId !== null ? [params.batchId] : [],
+  );
+
+  session.db
+    .update(localStockConflicts)
+    .set({
+      resolvedAtMs: nowMs,
+      updatedAtMs: nowMs,
+    })
+    .where(
+      and(
+        eq(localStockConflicts.organizationId, params.organizationId),
+        eq(localStockConflicts.storeId, params.storeId),
+        eq(localStockConflicts.moveId, params.sourceStockMoveId),
+        isNull(localStockConflicts.resolvedAtMs),
+      ),
+    )
+    .run();
+}
+
+/**
+ * E2: Records an immutable outbound stock movement for a return-to-supplier document (`reason = 'supplier_return'`):
+ * - Batch-tracked: requires exact original `batchId` with `remainingQty >= returnQty` (`SUPPLIER_RETURN_BATCH_DEPLETED`).
+ * - Average-costed: requires `qtyOnHand >= returnQty` (`INSUFFICIENT_STOCK`), using exact return cost capped at
+ *   available pool `totalValue` (`costVarianceValue` absorbs any excess so `totalValue` never becomes negative).
+ */
+export function applySupplierReturnStockOutboundSync(
+  session: SqliteUnitOfWorkSession,
+  params: {
+    readonly organizationId: UuidV7;
+    readonly storeId: UuidV7;
+    readonly productId: UuidV7;
+    readonly variantId: UuidV7 | null;
+    readonly batchId: UuidV7 | null;
+    readonly returnQty: Quantity;
+    readonly returnCostValue: Money;
+    readonly supplierReturnId: UuidV7;
+    readonly note: string | null;
+    readonly actorUserId: UuidV7;
+    readonly prefetchedProduct?: typeof products.$inferSelect;
+    readonly sessionPoolCache?: Map<string, ReplayStockPoolState>;
+  },
+): StoredStockMoveRecord {
+  session.assertActiveTransaction();
+  const { product } = requireTrackedProductSync(
+    session,
+    params.organizationId,
+    params.productId,
+    params.variantId,
+    params.prefetchedProduct,
+  );
+  const unit = parseProductUnit(product.unit);
+  const validQty = validatePositiveStockQuantity(unit, params.returnQty);
+  const trackBatches = Boolean(product.trackBatches);
+  const nowMs = session.nowUnixMs();
+
+  const key = poolKey(params.productId, params.variantId);
+  const cachedState = params.sessionPoolCache?.get(key);
+  const poolState =
+    cachedState ??
+    loadMutablePoolStateSync(
+      session,
+      params.organizationId,
+      params.storeId,
+      params.productId,
+      params.variantId,
+      trackBatches,
+    );
+  if (params.sessionPoolCache && !cachedState) {
+    params.sessionPoolCache.set(key, poolState);
+  }
+
+  const retMilli = quantityToMilli(validQty);
+  const retCostTiyin = moneyToTiyin(params.returnCostValue);
+
+  if (trackBatches) {
+    if (params.batchId === null) {
+      throw new DomainError(
+        'BATCH_REQUIRED',
+        'Batch-tracked supplier return requires original batchId',
+      );
+    }
+    const batch = poolState.batches.get(params.batchId);
+    const batchAvailMilli = batch ? quantityToMilli(batch.remainingQty) : 0n;
+    if (batchAvailMilli < retMilli) {
+      throw new DomainError(
+        'SUPPLIER_RETURN_BATCH_DEPLETED',
+        'Original batch does not have enough remaining stock for supplier return',
+      );
+    }
+  } else {
+    if (quantityToMilli(poolState.qtyOnHand) < retMilli) {
+      throw new DomainError(
+        'INSUFFICIENT_STOCK',
+        'Available store stock is insufficient for supplier return',
+      );
+    }
+  }
+
+  const moveWrite = insertFact(session, stockMoves, {
+    organizationId: params.organizationId,
+    storeId: params.storeId,
+    values: {
+      productId: params.productId,
+      variantId: params.variantId,
+      batchId: trackBatches ? params.batchId : null,
+      qtyDelta: quantityFromMilli(-retMilli),
+      costValueDelta: moneyFromTiyin(-retCostTiyin),
+      reason: 'supplier_return',
+      sourceType: 'supplier_return',
+      sourceId: params.supplierReturnId,
+      createdByUserId: params.actorUserId,
+      note: params.note,
+    },
+    eventType: 'stock_move.created',
+    schemaVersion: 1,
+  });
+
+  applyReplayStockMove(poolState, {
+    moveId: moveWrite.entityId,
+    productId: params.productId,
+    variantId: params.variantId,
+    batchId: trackBatches ? params.batchId : null,
+    hlc: moveWrite.hlc,
+    reason: 'supplier_return',
+    qtyDelta: quantityFromMilli(-retMilli),
+    costValueDelta: moneyFromTiyin(-retCostTiyin),
+    trackBatches,
+  });
+
+  savePoolAndBatchesSync(
+    session,
+    params.organizationId,
+    params.storeId,
+    params.productId,
+    params.variantId,
+    poolState,
+    nowMs,
+    trackBatches && params.batchId !== null ? [params.batchId] : [],
+  );
+
+  return toStoredMove(moveWrite.row);
+}
+
 function parsePositiveBigInt(
   raw: string,
   code: 'INVALID_UNIT_QUANTITY' | 'VALIDATION_ERROR',
@@ -1037,6 +1433,88 @@ export async function rebuildStockProjections(
       .orderBy(asc(stockMoves.hlc), asc(stockMoves.id))
       .all();
 
+    const rcvLineUnknownRows = db
+      .select({
+        stockMoveId: goodsReceivingLines.stockMoveId,
+        costUnknown: goodsReceivingLines.costUnknown,
+      })
+      .from(goodsReceivingLines)
+      .where(
+        and(
+          eq(goodsReceivingLines.organizationId, organizationId),
+          eq(goodsReceivingLines.storeId, storeId),
+          eq(goodsReceivingLines.costUnknown, true),
+        ),
+      )
+      .all();
+    const unknownCostMoveIds = new Set<UuidV7>(rcvLineUnknownRows.map((r) => r.stockMoveId));
+
+    const confirmRows = db
+      .select()
+      .from(receivingCostConfirmations)
+      .where(
+        and(
+          eq(receivingCostConfirmations.organizationId, organizationId),
+          eq(receivingCostConfirmations.storeId, storeId),
+        ),
+      )
+      .orderBy(asc(receivingCostConfirmations.hlc), asc(receivingCostConfirmations.id))
+      .all();
+
+    // Map receiving line ID -> stockMoveId & resolution timestamp for confirmed unknown-cost conflicts
+    const lineIdToStockMoveId = new Map<UuidV7, UuidV7>();
+    if (confirmRows.length > 0) {
+      const rcvLinesForConfirm = db
+        .select({
+          id: goodsReceivingLines.id,
+          stockMoveId: goodsReceivingLines.stockMoveId,
+        })
+        .from(goodsReceivingLines)
+        .where(
+          inArray(
+            goodsReceivingLines.id,
+            confirmRows.map((c) => c.receivingLineId),
+          ),
+        )
+        .all();
+      for (const rl of rcvLinesForConfirm) {
+        lineIdToStockMoveId.set(rl.id, rl.stockMoveId);
+      }
+    }
+    const resolvedMoveTimestamps = new Map<UuidV7, UnixMs>();
+    for (const c of confirmRows) {
+      const mId = lineIdToStockMoveId.get(c.receivingLineId);
+      if (mId) {
+        resolvedMoveTimestamps.set(mId, c.createdAtMs);
+      }
+    }
+
+    type RebuildTimelineEvent =
+      | {
+          readonly kind: 'move';
+          readonly hlc: string;
+          readonly id: UuidV7;
+          readonly row: typeof stockMoves.$inferSelect;
+        }
+      | {
+          readonly kind: 'confirm';
+          readonly hlc: string;
+          readonly id: UuidV7;
+          readonly row: typeof receivingCostConfirmations.$inferSelect;
+        };
+
+    const timeline: RebuildTimelineEvent[] = [
+      ...moveRows.map((row) => ({ kind: 'move' as const, hlc: row.hlc, id: row.id, row })),
+      ...confirmRows.map((row) => ({ kind: 'confirm' as const, hlc: row.hlc, id: row.id, row })),
+    ].sort((a, b) => {
+      if (a.hlc < b.hlc) return -1;
+      if (a.hlc > b.hlc) return 1;
+      if (a.kind !== b.kind) return a.kind === 'move' ? -1 : 1;
+      if (a.id < b.id) return -1;
+      if (a.id > b.id) return 1;
+      return 0;
+    });
+
     const pools = new Map<
       string,
       {
@@ -1047,31 +1525,48 @@ export async function rebuildStockProjections(
     >();
     const allConflicts: ReplayStockConflict[] = [];
 
-    for (const m of moveRows) {
-      const key = poolKey(m.productId, m.variantId);
+    for (const ev of timeline) {
+      const r = ev.row;
+      const key = poolKey(r.productId, r.variantId);
       let entry = pools.get(key);
       if (!entry) {
         entry = {
-          productId: m.productId,
-          variantId: m.variantId,
+          productId: r.productId,
+          variantId: r.variantId,
           state: createEmptyStockPoolState(),
         };
         pools.set(key, entry);
       }
 
-      const trackBatches = trackBatchesByProduct.get(m.productId) ?? false;
-      const emitted = applyReplayStockMove(entry.state, {
-        moveId: m.id,
-        productId: m.productId,
-        variantId: m.variantId,
-        batchId: m.batchId,
-        hlc: m.hlc,
-        reason: parseStockMoveReason(m.reason),
-        qtyDelta: m.qtyDelta,
-        costValueDelta: m.costValueDelta,
-        trackBatches,
-      });
-      allConflicts.push(...emitted);
+      const trackBatches = trackBatchesByProduct.get(r.productId) ?? false;
+      if (ev.kind === 'move') {
+        const m = ev.row;
+        const emitted = applyReplayStockMove(entry.state, {
+          moveId: m.id,
+          productId: m.productId,
+          variantId: m.variantId,
+          batchId: m.batchId,
+          hlc: m.hlc,
+          reason: parseStockMoveReason(m.reason),
+          qtyDelta: m.qtyDelta,
+          costValueDelta: m.costValueDelta,
+          trackBatches,
+          isUnknownCost: unknownCostMoveIds.has(m.id),
+        });
+        allConflicts.push(...emitted);
+      } else {
+        const c = ev.row;
+        applyStockCostConfirmation(entry.state, {
+          confirmationId: c.id,
+          productId: c.productId,
+          variantId: c.variantId,
+          batchId: c.batchId,
+          hlc: c.hlc,
+          receivedQty: c.receivedQty,
+          confirmedTotalCost: c.confirmedTotalCost,
+          trackBatches,
+        });
+      }
     }
 
     // Clear existing LOCAL projection & conflict cache for this store only
@@ -1145,6 +1640,8 @@ export async function rebuildStockProjections(
     }
 
     for (const c of allConflicts) {
+      const resolvedAt =
+        c.reason === 'UNKNOWN_COST_SURPLUS' ? (resolvedMoveTimestamps.get(c.moveId) ?? null) : null;
       db.insert(localStockConflicts)
         .values({
           id: scope.nextId(),
@@ -1157,7 +1654,7 @@ export async function rebuildStockProjections(
           conflictQty: c.conflictQty,
           reason: c.reason,
           detail: formatConflictDetail(c),
-          resolvedAtMs: null,
+          resolvedAtMs: resolvedAt,
           createdAtMs: nowMs,
           updatedAtMs: nowMs,
         })
@@ -1985,140 +2482,9 @@ export class SqliteStockStore {
 
   private applyInboundInsideSessionSync(
     session: SqliteUnitOfWorkSession,
-    params: {
-      readonly organizationId: UuidV7;
-      readonly storeId: UuidV7;
-      readonly productId: UuidV7;
-      readonly variantId: UuidV7 | null;
-      readonly reason: StockMoveReason;
-      readonly qty: Quantity;
-      readonly totalCostValue: Money;
-      readonly batchNumber: string | null;
-      readonly expiryDateMs: UnixMs | null;
-      readonly sourceType: StockSourceType;
-      readonly sourceId: UuidV7;
-      readonly note: string | null;
-      readonly actorUserId: UuidV7;
-    },
-  ): {
-    readonly move: StoredStockMoveRecord;
-    readonly batch: StoredBatchRecord | null;
-    readonly conflicts: readonly StoredStockConflictRecord[];
-  } {
-    const { product } = requireTrackedProductSync(
-      session,
-      params.organizationId,
-      params.productId,
-      params.variantId,
-    );
-    const unit = parseProductUnit(product.unit);
-    const validQty = validatePositiveStockQuantity(unit, params.qty);
-    const trackBatches = Boolean(product.trackBatches);
-    const nowMs = session.nowUnixMs();
-
-    const poolState = loadMutablePoolStateSync(
-      session,
-      params.organizationId,
-      params.storeId,
-      params.productId,
-      params.variantId,
-      trackBatches,
-    );
-
-    let createdBatchRow: typeof batches.$inferSelect | null = null;
-    if (trackBatches) {
-      const batchWrite = insertFact(session, batches, {
-        organizationId: params.organizationId,
-        storeId: params.storeId,
-        values: {
-          productId: params.productId,
-          variantId: params.variantId,
-          batchNumber: params.batchNumber,
-          expiryDateMs: params.expiryDateMs,
-          initialQty: validQty,
-          initialCostValue: params.totalCostValue,
-          supplierId: null,
-        },
-        eventType: 'batch.created',
-        schemaVersion: 1,
-      });
-      createdBatchRow = batchWrite.row;
-    }
-
-    const moveWrite = insertFact(session, stockMoves, {
-      organizationId: params.organizationId,
-      storeId: params.storeId,
-      values: {
-        productId: params.productId,
-        variantId: params.variantId,
-        batchId: createdBatchRow?.id ?? null,
-        qtyDelta: validQty,
-        costValueDelta: params.totalCostValue,
-        reason: params.reason,
-        sourceType: params.sourceType,
-        sourceId: params.sourceId,
-        createdByUserId: params.actorUserId,
-        note: params.note,
-      },
-      eventType: 'stock_move.created',
-      schemaVersion: 1,
-    });
-
-    const emittedConflicts = applyReplayStockMove(poolState, {
-      moveId: moveWrite.entityId,
-      productId: params.productId,
-      variantId: params.variantId,
-      batchId: createdBatchRow?.id ?? null,
-      hlc: moveWrite.hlc,
-      reason: params.reason,
-      qtyDelta: validQty,
-      costValueDelta: params.totalCostValue,
-      trackBatches,
-    });
-
-    savePoolAndBatchesSync(
-      session,
-      params.organizationId,
-      params.storeId,
-      params.productId,
-      params.variantId,
-      poolState,
-      nowMs,
-      createdBatchRow !== null ? [createdBatchRow.id] : [],
-    );
-
-    const savedConflicts = this.persistConflictsSync(
-      session,
-      params.organizationId,
-      params.storeId,
-      emittedConflicts,
-      nowMs,
-    );
-
-    let batchRecord: StoredBatchRecord | null = null;
-    if (createdBatchRow !== null) {
-      const batchBal = poolState.batches.get(createdBatchRow.id);
-      batchRecord = {
-        id: createdBatchRow.id,
-        organizationId: createdBatchRow.organizationId,
-        storeId: createdBatchRow.storeId,
-        productId: createdBatchRow.productId,
-        variantId: createdBatchRow.variantId,
-        batchNumber: createdBatchRow.batchNumber,
-        expiryDateMs: createdBatchRow.expiryDateMs,
-        initialQty: createdBatchRow.initialQty,
-        initialCostValue: createdBatchRow.initialCostValue,
-        remainingQty: batchBal?.remainingQty ?? ZERO_QUANTITY,
-        remainingValue: batchBal?.remainingValue ?? ZERO_MONEY,
-        createdAtMs: createdBatchRow.createdAtMs,
-      };
-    }
-
-    return {
-      move: toStoredMove(moveWrite.row),
-      batch: batchRecord,
-      conflicts: savedConflicts,
-    };
+    params: InboundStockMoveSessionParams,
+  ): InboundStockMoveSessionOutcome {
+    return applyInboundStockMoveSync(session, params);
   }
 
   private persistConflictsSync(
@@ -2128,28 +2494,7 @@ export class SqliteStockStore {
     conflicts: readonly ReplayStockConflict[],
     nowMs: UnixMs,
   ): StoredStockConflictRecord[] {
-    const out: StoredStockConflictRecord[] = [];
-    for (const c of conflicts) {
-      const id = session.nextId();
-      const row = {
-        id,
-        organizationId,
-        storeId,
-        productId: c.productId,
-        variantId: c.variantId,
-        batchId: c.batchId,
-        moveId: c.moveId,
-        conflictQty: c.conflictQty,
-        reason: c.reason,
-        detail: formatConflictDetail(c),
-        resolvedAtMs: null,
-        createdAtMs: nowMs,
-        updatedAtMs: nowMs,
-      };
-      session.db.insert(localStockConflicts).values(row).run();
-      out.push(toStoredConflict(row));
-    }
-    return out;
+    return persistStockConflictsSync(session, organizationId, storeId, conflicts, nowMs);
   }
 
   private readLedgerQtySumSync(

@@ -7,6 +7,7 @@ import {
   SqliteReturnStore,
   SqliteSaleStore,
   SqliteStockStore,
+  SqliteSupplierStore,
   createSqliteCartStore,
   createSqliteCatalogStore,
   createSqliteCustomerStore,
@@ -14,6 +15,7 @@ import {
   createSqliteReturnStore,
   createSqliteSaleStore,
   createSqliteStockStore,
+  createSqliteSupplierStore,
   migrateLocalDatabase,
   openLocalSqliteDatabase,
 } from '@mezon/db-local';
@@ -34,6 +36,7 @@ import { HubSaleService } from './sale-service.js';
 import { HubCustomerService } from './customer-service.js';
 import { HubReturnService } from './return-service.js';
 import { HubStockService } from './stock-service.js';
+import { HubSupplierService } from './supplier-service.js';
 
 export interface CreateHubServerOptions {
   readonly dbPath: string;
@@ -64,6 +67,7 @@ export interface HubServer {
   readonly saleStore: SqliteSaleStore;
   readonly returnStore: SqliteReturnStore;
   readonly customerStore: SqliteCustomerStore;
+  readonly supplierStore: SqliteSupplierStore;
   readonly authService: HubAuthService;
   readonly catalogService: HubCatalogService;
   readonly stockService: HubStockService;
@@ -71,6 +75,7 @@ export interface HubServer {
   readonly saleService: HubSaleService;
   readonly returnService: HubReturnService;
   readonly customerService: HubCustomerService;
+  readonly supplierService: HubSupplierService;
   listen(): Promise<{ readonly host: typeof DEFAULT_HUB_HOST; readonly port: number }>;
   close(): Promise<void>;
 }
@@ -98,6 +103,7 @@ export async function createHubServer(options: CreateHubServerOptions): Promise<
   let saleStore: SqliteSaleStore;
   let returnStore: SqliteReturnStore;
   let customerStore: SqliteCustomerStore;
+  let supplierStore: SqliteSupplierStore;
   let authService: HubAuthService;
   let catalogService: HubCatalogService;
   let stockService: HubStockService;
@@ -105,6 +111,7 @@ export async function createHubServer(options: CreateHubServerOptions): Promise<
   let saleService: HubSaleService;
   let returnService: HubReturnService;
   let customerService: HubCustomerService;
+  let supplierService: HubSupplierService;
   let app: FastifyInstance;
 
   try {
@@ -193,6 +200,19 @@ export async function createHubServer(options: CreateHubServerOptions): Promise<
           : null;
       },
     });
+    supplierStore = createSqliteSupplierStore({
+      connection,
+      getRuntimeContext: () => {
+        const ctx = store.getActiveRuntimeContext();
+        return ctx
+          ? {
+              uow: ctx.uow,
+              organizationId: ctx.config.organizationId,
+              storeId: ctx.config.storeId,
+            }
+          : null;
+      },
+    });
     authService = await HubAuthService.create({
       store,
       pinHasher,
@@ -204,6 +224,7 @@ export async function createHubServer(options: CreateHubServerOptions): Promise<
     saleService = new HubSaleService(saleStore, authService);
     returnService = new HubReturnService(returnStore, authService);
     customerService = new HubCustomerService(customerStore);
+    supplierService = new HubSupplierService(supplierStore);
 
     app = Fastify({
       loggerInstance: logger as unknown as FastifyBaseLogger,
@@ -221,6 +242,7 @@ export async function createHubServer(options: CreateHubServerOptions): Promise<
       saleService,
       returnService,
       customerService,
+      supplierService,
     );
     options.registerExtraTestRoutes?.(app);
 
@@ -236,6 +258,7 @@ export async function createHubServer(options: CreateHubServerOptions): Promise<
       saleStore,
       returnStore,
       customerStore,
+      supplierStore,
       authService,
       catalogService,
       stockService,
@@ -243,6 +266,7 @@ export async function createHubServer(options: CreateHubServerOptions): Promise<
       saleService,
       returnService,
       customerService,
+      supplierService,
       async listen() {
         await app.listen({
           host: DEFAULT_HUB_HOST,

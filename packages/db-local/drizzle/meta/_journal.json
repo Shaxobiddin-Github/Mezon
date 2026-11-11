@@ -71,6 +71,13 @@
       "when": 1794337514133,
       "tag": "0009_customer_ledger",
       "breakpoints": true
+    },
+    {
+      "idx": 10,
+      "version": "6",
+      "when": 1794363504636,
+      "tag": "0010_suppliers_receiving",
+      "breakpoints": true
     }
   ]
 }

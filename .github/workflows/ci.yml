@@ -4,16 +4,71 @@ on:
   push:
     branches:
       - main
-      - 'gemini/**'
+    paths-ignore:
+      - '.mezon/**'
+      - '**/*.md'
   pull_request:
     branches:
       - main
+    paths-ignore:
+      - '.mezon/**'
+      - '**/*.md'
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:
+  detect-changes:
+    name: Detect Desktop Changes
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: read
+    outputs:
+      desktop: ${{ steps.filter.outputs.desktop }}
+    steps:
+      - id: filter
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR_URL: ${{ github.event.pull_request.url }}
+        run: |
+          node -e '
+            const fs = require("node:fs");
+            (async () => {
+              let page = 1;
+              let desktopChanged = false;
+              while (true) {
+                const res = await fetch(`${process.env.PR_URL}/files?per_page=100&page=${page}`, {
+                  headers: {
+                    Authorization: `Bearer ${process.env.GH_TOKEN}`,
+                    Accept: "application/vnd.github+json",
+                    "X-GitHub-Api-Version": "2022-11-28",
+                  },
+                });
+                if (!res.ok) throw new Error(`GitHub API ${res.status}`);
+                const files = await res.json();
+                if (
+                  files.some(
+                    (f) =>
+                      f.filename.startsWith("apps/desktop/") ||
+                      f.filename.startsWith("packages/drivers/"),
+                  )
+                ) {
+                  desktopChanged = true;
+                  break;
+                }
+                if (files.length < 100) break;
+                page += 1;
+              }
+              fs.appendFileSync(process.env.GITHUB_OUTPUT, `desktop=${desktopChanged}\n`);
+            })().catch((e) => {
+              console.error(e);
+              process.exit(1);
+            });
+          '
+
   verify:
     name: Verify (${{ matrix.os }})
     runs-on: ${{ matrix.os }}
@@ -75,6 +130,12 @@ jobs:
 
   desktop:
     name: Build & E2E Desktop Installer (windows-latest)
+    needs: [detect-changes]
+    if: |
+      !cancelled() && (
+        (github.event_name == 'push' && github.ref == 'refs/heads/main') ||
+        (github.event_name == 'pull_request' && needs.detect-changes.result == 'success' && needs.detect-changes.outputs.desktop == 'true')
+      )
     runs-on: windows-latest
 
     steps:

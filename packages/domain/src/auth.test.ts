@@ -39,6 +39,12 @@ describe('@mezon/domain - auth rules, RBAC, and PIN security policy', () => {
     expect(roleHasPermission('owner', 'customers:write')).toBe(true);
     expect(roleHasPermission('owner', 'debt:pay')).toBe(true);
     expect(roleHasPermission('owner', 'debt:manage')).toBe(true);
+    expect(roleHasPermission('owner', 'suppliers:read')).toBe(true);
+    expect(roleHasPermission('owner', 'suppliers:write')).toBe(true);
+    expect(roleHasPermission('owner', 'receiving:read')).toBe(true);
+    expect(roleHasPermission('owner', 'receiving:write')).toBe(true);
+    expect(roleHasPermission('owner', 'supplier_debt:pay')).toBe(true);
+    expect(roleHasPermission('owner', 'supplier_debt:manage')).toBe(true);
 
     expect(roleHasPermission('manager', 'auth:self')).toBe(true);
     expect(roleHasPermission('manager', 'users:read')).toBe(true);
@@ -59,6 +65,12 @@ describe('@mezon/domain - auth rules, RBAC, and PIN security policy', () => {
     expect(roleHasPermission('manager', 'customers:write')).toBe(true);
     expect(roleHasPermission('manager', 'debt:pay')).toBe(true);
     expect(roleHasPermission('manager', 'debt:manage')).toBe(true);
+    expect(roleHasPermission('manager', 'suppliers:read')).toBe(true);
+    expect(roleHasPermission('manager', 'suppliers:write')).toBe(true);
+    expect(roleHasPermission('manager', 'receiving:read')).toBe(true);
+    expect(roleHasPermission('manager', 'receiving:write')).toBe(true);
+    expect(roleHasPermission('manager', 'supplier_debt:pay')).toBe(true);
+    expect(roleHasPermission('manager', 'supplier_debt:manage')).toBe(true);
 
     expect(roleHasPermission('cashier', 'auth:self')).toBe(true);
     expect(roleHasPermission('cashier', 'users:read')).toBe(false);
@@ -79,6 +91,12 @@ describe('@mezon/domain - auth rules, RBAC, and PIN security policy', () => {
     expect(roleHasPermission('cashier', 'customers:write')).toBe(true);
     expect(roleHasPermission('cashier', 'debt:pay')).toBe(true);
     expect(roleHasPermission('cashier', 'debt:manage')).toBe(false);
+    expect(roleHasPermission('cashier', 'suppliers:read')).toBe(false);
+    expect(roleHasPermission('cashier', 'suppliers:write')).toBe(false);
+    expect(roleHasPermission('cashier', 'receiving:read')).toBe(false);
+    expect(roleHasPermission('cashier', 'receiving:write')).toBe(false);
+    expect(roleHasPermission('cashier', 'supplier_debt:pay')).toBe(false);
+    expect(roleHasPermission('cashier', 'supplier_debt:manage')).toBe(false);
   });
 
   it('validates 6-12 digit PINs and rejects trivial or leaking error messages', () => {
