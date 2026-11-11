@@ -1762,4 +1762,153 @@ describe('@mezon/db-local - T1.8 Suppliers, Receiving, Unknown Cost, Ledger & Re
     expect(env.connection.db.select().from(goodsReceivingLines).all()).toHaveLength(100);
     expect(elapsedMs).toBeLessThanOrEqual(500);
   });
+
+  it('T1.8 test qarzi: enforces exact 1-milli return quantity and FIFO batch depletion boundaries', async () => {
+    const env = await setupSupplierEnv({ seed: 808 });
+    const sup = await env.supplierStore.createSupplier({ name: 'Boundary Supplier' });
+
+    const kgAvg = await env.catalogStore.createProduct({
+      name: 'Shakar Kg Boundary',
+      unit: 'kg',
+      trackBatches: false,
+      salePrice: '15000',
+      vatRateBp: 0,
+      actorUserId: env.ownerId,
+    });
+    const kgFifo = await env.catalogStore.createProduct({
+      name: 'Choy FIFO Kg Boundary',
+      unit: 'kg',
+      trackBatches: true,
+      salePrice: '20000',
+      vatRateBp: 0,
+      actorUserId: env.ownerId,
+    });
+
+    // 1a) Over-return 1-milli boundary: 2.000 -> return 1.500 -> return 0.500 ok -> 0.001 fails
+    const d1 = await env.supplierStore.createReceivingDraft({
+      supplierId: sup.id,
+      actorUserId: env.ownerId,
+      lines: [
+        {
+          productId: kgAvg.product.id,
+          qty: quantityFromMilli(2_000n),
+          costUnknown: false,
+          totalCostValue: moneyFromTiyin(200_000n),
+        },
+      ],
+    });
+    const rcv1 = await env.supplierStore.postReceiving(d1.id, {
+      actorUserId: env.ownerId,
+      clientRequestId: env.nextUuid(),
+    });
+    await env.supplierStore.createSupplierReturn(rcv1.receiving.id, {
+      actorUserId: env.ownerId,
+      clientRequestId: env.nextUuid(),
+      reason: 'First 1.500 kg',
+      items: [{ receivingLineId: rcv1.receiving.lines[0].id, qty: quantityFromMilli(1_500n) }],
+    });
+    await env.supplierStore.createSupplierReturn(rcv1.receiving.id, {
+      actorUserId: env.ownerId,
+      clientRequestId: env.nextUuid(),
+      reason: 'Exact remaining 0.500 kg',
+      items: [{ receivingLineId: rcv1.receiving.lines[0].id, qty: quantityFromMilli(500n) }],
+    });
+    const movesBefore001 = env.connection.db.select().from(stockMoves).all().length;
+    await expect(
+      env.supplierStore.createSupplierReturn(rcv1.receiving.id, {
+        actorUserId: env.ownerId,
+        clientRequestId: env.nextUuid(),
+        reason: 'Exceeds by 0.001 kg',
+        items: [{ receivingLineId: rcv1.receiving.lines[0].id, qty: quantityFromMilli(1n) }],
+      }),
+    ).rejects.toMatchObject({ code: 'SUPPLIER_RETURN_QTY_EXCEEDED' });
+    expect(env.connection.db.select().from(stockMoves).all().length).toBe(movesBefore001);
+
+    // 1b) Separate case: 2.000 -> return 1.500 -> 0.501 rejected!
+    const d2 = await env.supplierStore.createReceivingDraft({
+      supplierId: sup.id,
+      actorUserId: env.ownerId,
+      lines: [
+        {
+          productId: kgAvg.product.id,
+          qty: quantityFromMilli(2_000n),
+          costUnknown: false,
+          totalCostValue: moneyFromTiyin(200_000n),
+        },
+      ],
+    });
+    const rcv2 = await env.supplierStore.postReceiving(d2.id, {
+      actorUserId: env.ownerId,
+      clientRequestId: env.nextUuid(),
+    });
+    await env.supplierStore.createSupplierReturn(rcv2.receiving.id, {
+      actorUserId: env.ownerId,
+      clientRequestId: env.nextUuid(),
+      reason: 'First 1.500 kg',
+      items: [{ receivingLineId: rcv2.receiving.lines[0].id, qty: quantityFromMilli(1_500n) }],
+    });
+    const movesBefore501 = env.connection.db.select().from(stockMoves).all().length;
+    await expect(
+      env.supplierStore.createSupplierReturn(rcv2.receiving.id, {
+        actorUserId: env.ownerId,
+        clientRequestId: env.nextUuid(),
+        reason: 'Exceeds by 0.001 kg (0.501)',
+        items: [{ receivingLineId: rcv2.receiving.lines[0].id, qty: quantityFromMilli(501n) }],
+      }),
+    ).rejects.toMatchObject({ code: 'SUPPLIER_RETURN_QTY_EXCEEDED' });
+    expect(env.connection.db.select().from(stockMoves).all().length).toBe(movesBefore501);
+
+    // 2) FIFO batch depletion 1-milli boundary: 2.000 batch, 0.700 sold -> 1.300 left; 1.301 fails, 1.300 ok
+    const dFifo = await env.supplierStore.createReceivingDraft({
+      supplierId: sup.id,
+      actorUserId: env.ownerId,
+      lines: [
+        {
+          productId: kgFifo.product.id,
+          qty: quantityFromMilli(2_000n),
+          costUnknown: false,
+          totalCostValue: moneyFromTiyin(200_000n),
+          batchNumber: 'LOT-1MILLI',
+        },
+      ],
+    });
+    const rcvFifo = await env.supplierStore.postReceiving(dFifo.id, {
+      actorUserId: env.ownerId,
+      clientRequestId: env.nextUuid(),
+    });
+    const cart = await env.cartStore.openCart(env.ownerId);
+    await env.cartStore.addLine(cart.id, {
+      kind: 'catalog',
+      productId: kgFifo.product.id,
+      variantId: null,
+      qty: quantityFromMilli(700n),
+    });
+    await env.saleStore.completeSale({
+      cartId: cart.id,
+      actorUserId: env.ownerId,
+      clientRequestId: env.nextUuid(),
+      expectedTotal: moneyFromTiyin(14_000n),
+      payments: [{ method: 'cash', tenderedAmount: moneyFromTiyin(14_000n) }],
+    });
+
+    const movesBefore1301 = env.connection.db.select().from(stockMoves).all().length;
+    await expect(
+      env.supplierStore.createSupplierReturn(rcvFifo.receiving.id, {
+        actorUserId: env.ownerId,
+        clientRequestId: env.nextUuid(),
+        reason: 'Batch exceeded by 1 milli (1.301)',
+        items: [{ receivingLineId: rcvFifo.receiving.lines[0].id, qty: quantityFromMilli(1_301n) }],
+      }),
+    ).rejects.toMatchObject({ code: 'SUPPLIER_RETURN_BATCH_DEPLETED' });
+    expect(env.connection.db.select().from(stockMoves).all().length).toBe(movesBefore1301);
+
+    // Exact 1.300 succeeds
+    const retExact = await env.supplierStore.createSupplierReturn(rcvFifo.receiving.id, {
+      actorUserId: env.ownerId,
+      clientRequestId: env.nextUuid(),
+      reason: 'Exact 1.300 kg left in batch',
+      items: [{ receivingLineId: rcvFifo.receiving.lines[0].id, qty: quantityFromMilli(1_300n) }],
+    });
+    expect(retExact.supplierReturn.totalReturnCost).toBe(moneyFromTiyin(130_000n));
+  });
 });
