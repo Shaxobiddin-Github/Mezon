@@ -18,9 +18,10 @@ import {
   VoidSaleResponseSchema,
 } from '@mezon/contracts';
 import { type PinHasher } from '@mezon/domain';
+import { PII_LOG_REDACT_KEYS } from '@mezon/drivers/node';
 import { FixedClock, SeededRandomSource } from '@mezon/test-utils';
 import { afterEach, describe, expect, it } from 'vitest';
-import { createHubServer } from './index.js';
+import { createHubLogger, createHubServer } from './index.js';
 
 const tempDirs: string[] = [];
 const TEST_PORT = 47839;
@@ -719,6 +720,57 @@ describe('@mezon/hub - T1.7 Customers, Ledger, FIFO Overdue, RBAC & PII-Free Aud
       ]);
       expect(cust2Ledger.currentBalance).toBe('40000');
 
+      // Inactive customer: sales rejected (409 CUSTOMER_INACTIVE), debt payment still allowed (201)
+      const deactivateRes = await hub.app.inject({
+        method: 'PATCH',
+        url: `/customers/${cust2.id}`,
+        headers: authHeaders(mgrLogin.token),
+        payload: { isActive: false },
+      });
+      expect(deactivateRes.statusCode).toBe(200);
+      expect(CustomerMutationResponseSchema.parse(deactivateRes.json()).customer.isActive).toBe(
+        false,
+      );
+
+      const cartInactive = await openCart(cashLogin.token);
+      await hub.app.inject({
+        method: 'POST',
+        url: `/carts/${cartInactive}/lines`,
+        headers: authHeaders(cashLogin.token),
+        payload: { kind: 'catalog', productId: product.id, variantId: null, qty: '1000' },
+      });
+      const inactiveSaleRes = await hub.app.inject({
+        method: 'POST',
+        url: `/carts/${cartInactive}/complete`,
+        headers: authHeaders(cashLogin.token),
+        payload: {
+          clientRequestId: '01950000-0000-7000-8000-170000000080',
+          expectedTotal: '50000',
+          customerId: cust2.id,
+          debtAmount: '50000',
+          payments: [],
+        },
+      });
+      expect(inactiveSaleRes.statusCode).toBe(409);
+      expect(ApiErrorEnvelopeSchema.parse(inactiveSaleRes.json()).error.code).toBe(
+        'CUSTOMER_INACTIVE',
+      );
+
+      const inactivePayRes = await hub.app.inject({
+        method: 'POST',
+        url: `/customers/${cust2.id}/payments`,
+        headers: authHeaders(cashLogin.token),
+        payload: {
+          clientRequestId: '01950000-0000-7000-8000-170000000081',
+          method: 'card',
+          amount: '10000',
+        },
+      });
+      expect(inactivePayRes.statusCode).toBe(201);
+      expect(
+        CustomerLedgerMutationResponseSchema.parse(inactivePayRes.json()).customer.balance,
+      ).toBe('30000');
+
       // 8. SECURITY AUDIT: Zero customer PII in Pino logs & HTTP errors; Zero cost/profit/hash keys in DTOs
       const joinedLogs = logLines.join('\n');
       expect(joinedLogs).not.toContain('SecretMijoz');
@@ -752,4 +804,63 @@ describe('@mezon/hub - T1.7 Customers, Ledger, FIFO Overdue, RBAC & PII-Free Aud
       await hub.close();
     }
   }, 20_000);
+
+  it('T1.7 test debt: redacts EVERY PII key at top, *. and *.*. levels via real Pino logger loop', () => {
+    const requiredPiiKeys = [
+      'phone',
+      'phoneNormalized',
+      'phoneDigits',
+      'fullName',
+      'nameSearch',
+      'customerName',
+      'customerPhone',
+      'customerNote',
+      'note',
+    ] as const;
+
+    const allKeys = Array.from(new Set([...requiredPiiKeys, ...PII_LOG_REDACT_KEYS]));
+    const rawLines: string[] = [];
+    const stream = new Writable({
+      write(chunk, _encoding, callback) {
+        rawLines.push(Buffer.isBuffer(chunk) ? chunk.toString('utf8') : String(chunk));
+        callback();
+      },
+    });
+    const logger = createHubLogger({ level: 'info', stream });
+
+    for (let idx = 0; idx < allKeys.length; idx += 1) {
+      const key = allKeys[idx];
+      if (!key) continue;
+      const secretTop = `SECRET_TOP_${idx}_${key}`;
+      const secretNested = `SECRET_NESTED_${idx}_${key}`;
+      const secretDeep = `SECRET_DEEP_${idx}_${key}`;
+
+      rawLines.length = 0;
+      logger.info(
+        {
+          [key]: secretTop,
+          nested: { [key]: secretNested },
+          req: { body: { [key]: secretDeep } },
+        },
+        'PII redaction loop check',
+      );
+
+      const line = rawLines.join('');
+      expect(line).not.toContain(secretTop);
+      expect(line).not.toContain(secretNested);
+      expect(line).not.toContain(secretDeep);
+
+      const parsed = JSON.parse(line) as {
+        readonly nested: Record<string, unknown>;
+        readonly req: { readonly body: Record<string, unknown> };
+      } & Record<string, unknown>;
+      expect(parsed[key]).toBe('[Redacted]');
+      expect(parsed.nested[key]).toBe('[Redacted]');
+      expect(parsed.req.body[key]).toBe('[Redacted]');
+    }
+
+    for (const reqKey of requiredPiiKeys) {
+      expect(PII_LOG_REDACT_KEYS).toContain(reqKey);
+    }
+  });
 });

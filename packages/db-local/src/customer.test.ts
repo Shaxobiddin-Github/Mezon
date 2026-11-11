@@ -508,6 +508,128 @@ describe('@mezon/db-local - T1.7 Customer Profile, Ledger, FIFO, D1-D4 & Benchma
     }
   });
 
+  it('T1.7 test debt: rejects sales for inactive customers (CUSTOMER_INACTIVE) with 0 DB writes while allowing debt payments', async () => {
+    const env = await setupCustomerEnv();
+    try {
+      const cust = await env.customerStore.createCustomer({
+        fullName: 'Nofaol Mijoz',
+        phone: '+998907778899',
+        creditLimit: moneyFromTiyin(200_000n),
+      });
+
+      const prod = await env.catalogStore.createProduct({
+        name: 'Shakar 1kg',
+        unit: 'kg',
+        trackBatches: false,
+        salePrice: '50000',
+        vatRateBp: 0,
+        actorUserId: env.ownerId,
+      });
+      await env.stockStore.recordInboundMove({
+        productId: prod.product.id,
+        reason: 'purchase',
+        qty: '10000',
+        totalCostValue: '300000',
+        actorUserId: env.ownerId,
+      });
+
+      // Accrue initial 50_000 debt while customer is active
+      const activeCart = await env.cartStore.openCart(env.cashierId);
+      await env.cartStore.addLine(activeCart.id, {
+        kind: 'catalog',
+        productId: prod.product.id,
+        variantId: null,
+        qty: quantityFromMilli(1_000n),
+      });
+      await env.saleStore.completeSale({
+        cartId: activeCart.id,
+        actorUserId: env.cashierId,
+        clientRequestId: env.nextUuid(),
+        expectedTotal: moneyFromTiyin(50_000n),
+        customerId: cust.id,
+        debtAmount: moneyFromTiyin(50_000n),
+        payments: [],
+      });
+
+      // Deactivate customer (isActive = false)
+      const deactivated = await env.customerStore.updateCustomer(cust.id, { isActive: false });
+      expect(deactivated.isActive).toBe(false);
+
+      const countRows = () => ({
+        sales: (
+          env.connection.sqlite.prepare('SELECT COUNT(*) AS c FROM "sales"').get() as {
+            readonly c: bigint;
+          }
+        ).c,
+        stockMoves: (
+          env.connection.sqlite.prepare('SELECT COUNT(*) AS c FROM "stock_moves"').get() as {
+            readonly c: bigint;
+          }
+        ).c,
+        customerLedger: (
+          env.connection.sqlite.prepare('SELECT COUNT(*) AS c FROM "customer_ledger"').get() as {
+            readonly c: bigint;
+          }
+        ).c,
+        outbox: (
+          env.connection.sqlite.prepare('SELECT COUNT(*) AS c FROM "local_outbox"').get() as {
+            readonly c: bigint;
+          }
+        ).c,
+      });
+
+      // Attempt credit sale to inactive customer -> MUST reject with CUSTOMER_INACTIVE and 0 DB writes
+      const inactiveCart = await env.cartStore.openCart(env.cashierId);
+      await env.cartStore.addLine(inactiveCart.id, {
+        kind: 'catalog',
+        productId: prod.product.id,
+        variantId: null,
+        qty: quantityFromMilli(1_000n),
+      });
+      const snapBefore = countRows();
+
+      await expect(
+        env.saleStore.completeSale({
+          cartId: inactiveCart.id,
+          actorUserId: env.cashierId,
+          clientRequestId: env.nextUuid(),
+          expectedTotal: moneyFromTiyin(50_000n),
+          customerId: cust.id,
+          debtAmount: moneyFromTiyin(50_000n),
+          payments: [],
+        }),
+      ).rejects.toMatchObject({ code: 'CUSTOMER_INACTIVE' });
+      expect(countRows()).toEqual(snapBefore);
+
+      // Even non-debt sale attached to inactive customer -> rejected with CUSTOMER_INACTIVE and 0 DB writes
+      await expect(
+        env.saleStore.completeSale({
+          cartId: inactiveCart.id,
+          actorUserId: env.cashierId,
+          clientRequestId: env.nextUuid(),
+          expectedTotal: moneyFromTiyin(50_000n),
+          customerId: cust.id,
+          debtAmount: ZERO_MONEY,
+          payments: [{ method: 'cash', tenderedAmount: moneyFromTiyin(50_000n) }],
+        }),
+      ).rejects.toMatchObject({ code: 'CUSTOMER_INACTIVE' });
+      expect(countRows()).toEqual(snapBefore);
+
+      // Debt payment MUST still succeed for inactive customer (debt collection remains open)
+      const paymentOutcome = await env.customerStore.recordDebtPayment({
+        customerId: cust.id,
+        actorUserId: env.cashierId,
+        clientRequestId: env.nextUuid(),
+        method: 'card',
+        amount: moneyFromTiyin(20_000n),
+        reason: 'Nofaol mijoz qarzini tolash',
+      });
+      expect(moneyToTiyin(paymentOutcome.customer.balance)).toBe(30_000n);
+    } finally {
+      env.connection.close();
+    }
+  });
+
   it('D2 + D3: enforces HLC FIFO ordering even under out-of-order DB insertion & positive/negative adjustment overdue rules', async () => {
     const env = await setupCustomerEnv();
     try {
