@@ -1,92 +1,117 @@
-## Hisobot: T1.9 R1
+## Reja: T1.10 — Buyurtma va avans
 
-Branch / PR: `gemini/T1.9-shifts` / PR #16 (`https://github.com/Shaxobiddin-Github/Mezon/pull/16`)
-Commitlar:
-- `069736aa47d6b1a8e8bbffcfbcc38347d5049d87` — `T1.8 test qarzi: qaytarish chegaralari`
-- `9ac15e709842df1e72c31724640a6fc5eae10b14` — `T1.9: Smena, kassa harakatlari, qayta yopish va kun yakuni`
-- `4542f69bc0b64315248b25e5b0cc9fdf5421f6ad` — `T1.9 R1: Kassir almashishdagi haqiqiy kassa (B1) va PERF loyihasi (B2)`
+Branch: `gemini/T1.10-orders-advance` (asos: `main` = `a2806d4`)
+T1.9 merge commit SHA: `a2806d46c0e0e4c75f776334e20ecf71d8dd534d` (`PR #16`, `gemini/T1.9-shifts` o'chirildi)
 
-*(Yangi commit bilan tuzatildi, amend qilinmadi. Egasining vaqtinchalik CI qoidasi asosida merge qilinmadi va `packages/db-cloud` / `apps/desktop` ga tegilmadi.)*
+> **Ish tartibi:**
+> 1. Reja tasdiqlangach, **birinchi alohida commit**: `T1.9 test qarzi: yopiq smenani qayta yopish` (`closeShift` + `SHIFT_ALREADY_CLOSED` + mutatsiya dalili).
+> 2. Keyingi commitlarda T1.10 funksionalligi (`domain -> contracts -> db-local -> hub`) va testlari bajariladi.
 
-### Nima qilindi
+---
 
-1. **B1 — Kassir almashgandan keyingi mavjud naqd pul (`X1` sessiya chegarasi):**
-   - `packages/db-local/src/shift-repo.ts`:
-     - `getActiveShiftDrawerBalanceSync` endi jismoniy kassa qoldig'ini **aktiv sessiyaning `openingFloat` i + shu sessiyadagi `cash_moves` yig'indisi** (`shift_cashier_session_id = activeSession.id` yoki `sessionSeq = 1 AND shift_cashier_session_id IS NULL`) bo'yicha hisoblaydi (`openingCash: ctx.activeSession.openingFloat`). Shunda barcha chiqim tekshiruvlari (qaytarish, void, ta'minotchiga naqd to'lov, xarajat, inkassatsiya), `getCurrentShift().drawerCashBalance` va `getTerminalCashBalance()` oldingi sessiya kamomadidan oshiqcha pul sarflanishiga yo'l qo'ymaydi.
-     - `getActiveStoreCashBalanceSync` do'kondagi har bir ochiq smena terminali uchun `getActiveShiftDrawerBalanceSync` ni chaqirib jamlaydi (kod takrorlanishisiz yagona haqiqat manbai).
-   - `packages/domain/src/shift.ts` va `packages/db-local/src/shift-repo.ts` izohlarida ikki tushuncha munosabati hujjatlashtirildi:
-     - joriy sarflanadigan quti qoldig'i = `activeSession.openingFloat + SUM(activeSession cash_moves)`;
-     - smena yopilishi `expectedCash` = `O_shift + SUM(barcha smena cash_moves)`, natijada `D_shift = C_final - (O_shift + SUM(M_i)) = SUM(D_i)` saqlanadi.
-   - `packages/db-local/src/shift.test.ts` va `apps/hub/src/shift.test.ts`:
-     - `240` qadamli 2-terminalli model testida `verifyTerminalDrawer` (`shift.test.ts:1048`) va void/return/cash-move quti tekshiruvlari (`1215`, `1245`, `1276`) `activeSess.openingFloat + activeSess.cashDelta` ga moslandi.
-     - Maxsus B1 testi (`B1 (X1 session physical cash)...`) va HTTP E2E B1 tekshiruvi (`GET /shifts/current`, `POST /shifts/:id/cash-moves`) qo'shildi.
-   - **B1 mutatsiya dalili:** `getActiveShiftDrawerBalanceSync` vaqtincha eski formulaga (`ctx.shift.openingCash` va `shift_id` bo'yicha barcha `cash_moves`) qaytarilib `pnpm exec vitest run packages/db-local/src/shift.test.ts` ishga tushirilganda 2 ta test yiqildi (so'ng tiklandi):
-     - `model test (>= 240 steps across 2 parallel terminals A & B)...`: `AssertionError: expected 133000n to be 131000n` (`packages/db-local/src/shift.test.ts:1050`)
-     - `B1 (X1 session physical cash)...`: `AssertionError: expected 8573n to be 8473n` (`packages/db-local/src/shift.test.ts:1725`)
+### 0. T1.9 test qarzi rejasi (1-commit)
 
-2. **B2 — Unumdorlik testlarini alohida ketma-ket `perf` Vitest loyihasiga ajratish:**
-   - `vitest.config.ts` da 3 ta loyiha tuzildi:
-     - `unit` (`groupOrder: 0`): `**/*.perf.test.ts`, `packages/db-local/**`, `apps/hub/**` chiqarib tashlangan;
-     - `sqlite-hub` (`groupOrder: 0`): `packages/db-local/**/*.test.ts`, `apps/hub/**/*.test.ts` (`**/*.perf.test.ts` chiqarib tashlangan);
-     - `perf` (`groupOrder: 1`): `['packages/**/*.perf.test.ts', 'apps/**/*.perf.test.ts']`, **`fileParallelism: false`**, **`maxWorkers: 1`**, `testTimeout: 60_000`.
-   - `package.json`: `"test:unit": "vitest run --project unit --project sqlite-hub"`, `"test:perf": "vitest run --project perf"`, `"test": "pnpm run test:unit && pnpm run test:perf"`.
-   - Barcha 10 ta `PERF` testi 7 ta alohida `*.perf.test.ts` faylga ko'chirildi (barcha chegaralar `<= 20 ms`, `<= 50 ms`, `<= 100 ms`, `<= 300 ms`, `<= 500 ms` o'zgarishsiz qoldi).
+- **Fayllar:** `packages/db-local/src/shift.test.ts`, `apps/hub/src/shift.test.ts`.
+- **Test:**
+  - Smena ochiladi va `closeShift` bilan yopiladi (`closureSeq = 1`).
+  - Xuddi shu yopiq smenaga **yangi** `clientRequestId` bilan yana `closeShift` chaqiriladi -> **`409 SHIFT_ALREADY_CLOSED`** qaytadi (SQLite xatosi yoki 500 emas). `shift_closures`, `shift_cashier_sessions`, `local_outbox` qatorlari soni o'zgarmaydi (`0` yozuv).
+  - Xuddi shu holatda `recloseShift` chaqirilganda esa `closureSeq = 2` muvaffaqiyatli yaratilishi ko'rsatiladi.
+  - HTTP E2E da ham yopiq smenaga yangi `clientRequestId` bilan `POST /shifts/:id/close` `409 SHIFT_ALREADY_CLOSED` qaytarishi tekshiriladi.
+- **Mutatsiya isboti:** `shift-repo.ts` (`closeShift`) dagi `if (shiftRow.status !== 'open')` tekshiruvi vaqtincha olib tashlanganda yuqoridagi testlar yiqilishi isbotlanadi va tiklanadi.
 
-### O'zgargan fayllar
+---
 
-- `packages/domain/src/shift.ts` — B1 quti qoldig'i va `D_shift = SUM(D_i)` munosabati hujjatlashtirildi
-- `packages/db-local/src/shift-repo.ts` — `getActiveShiftDrawerBalanceSync` (`activeSession.openingFloat` + aktiv sessiya `cash_moves`) va `getActiveStoreCashBalanceSync` tuzatildi
-- `packages/db-local/src/shift.test.ts` — Model testi `openingFloat + cashDelta` ga o'tkazildi, B1 to'liq testi (`8 573 -> 8 473`, `8 474` rad etish, `8 473` o'tishi, `D_1 + D_2 = D_shift`) qo'shildi, 1 000 chekli PERF testi ajratildi
-- `apps/hub/src/shift.test.ts` — HTTP E2E B1 tekshiruvi (`GET /shifts/current` `'8473'`, `'8474'` -> `409 INSUFFICIENT_CASH_IN_DRAWER`, `'8473'` -> `201`) qo'shildi
-- `vitest.config.ts` va `package.json` — `perf` loyihasi (`fileParallelism: false`, `maxWorkers: 1`, `groupOrder: 1`) va `test:unit && test:perf` zanjiri
-- `packages/db-local/src/{catalog,sale,return,customer,supplier,shift}.perf.test.ts` hamda `apps/hub/src/sale.perf.test.ts` — Ajratilgan 10 ta ketma-ket PERF benchmark testi
-- `packages/db-local/src/{catalog,sale,return,customer,supplier}.test.ts` hamda `apps/hub/src/sale.test.ts` — Ko'chirilgan PERF bloklari va ortiqcha importlar tozalandi
+### 1. Buyurtma va holatlar (`a`)
 
-### Migratsiyalar
+- **Jadvallar va sinflar (`0012_orders_advance.sql`):**
+  1. `orders` — **`MONOTONE`**, store-scoped (`organization_id`, `store_id`).
+     - Ustunlar: `orderNo` (`last_order_seq` dan bo'shliqsiz), `orderCode` (`ORD-<last4>-<000001>`), `status`, `customerId` (nullable FK -> `customers.id`), `customerName` (majburiy snapshot), `customerPhoneNormalized` (ixtiyoriy E.164), `dueAtMs` (ixtiyoriy topshirish vaqti), `note`, `totalAmount`, `createdByUserId`, `confirmedAtMs`, `readyAtMs`, `deliveredAtMs`, `deliveredSaleId` (nullable FK -> `sales.id`), `cancelledAtMs`, `cancelledByUserId`, `cancelReason`, `createClientRequestId`, `createRequestHash`.
+     - **Bir tomonlama holatlar:**
+       - `draft` -> `confirmed` | `cancelled`
+       - `confirmed` -> `ready` | `delivered` | `cancelled`
+       - `ready` -> `delivered` | `cancelled`
+       - `delivered` va `cancelled` — terminal (`UPDATE` / `DELETE` SQLite trigger bilan to'liq bloklanadi; ruxsat etilmagan o'tishlar `BEFORE UPDATE` trigger bilan to'siladi).
+  2. `order_lines` — **`FACT`**, store-scoped (`organization_id`, `store_id`, `order_id` -> `orders.id`).
+     - Buyurtma yaratilishida o'zgarmas `FACT` snapshot sifatida yoziladi (`FACT` triggerlar tahrirlash va o'chirishni bloklaydi; shuning uchun `draft` da xato qilinsa bekor qilinib yangisi yaratiladi — sinxron bilan 100% mos).
+     - `lineKind`: `'catalog' | 'quick_sale'` (`CART_LINE_KINDS` bilan bir xil).
+       - `'catalog'`: `productId` (`products.id`), `variantId` ixtiyoriy, katalogdan `itemName`, `unit`, `mxikSnapshot`, `packageCodeSnapshot`, `vatRateBpSnapshot`.
+       - `'quick_sale'` (katalogda yo'q tovar): `productId = null`, `variantId = null`, foydalanuvchi kiritgan `itemName`, `unit`, `unitPriceSnapshot`, `mxikSnapshot` (ixtiyoriy), `vatRateBpSnapshot` (default hub sozlamasidan).
+- **Narx qotirilishi (qaror):**
+  - Narx (`unitPriceSnapshot`, `lineTotal`, `totalAmount`) **buyurtma yaratilganda qotiriladi**. Topshirish paytida katalog narxi o'zgarsa ham buyurtma narxi o'zgarmaydi (`fixed at order`), chunki mijoz shu narx asosida avans to'lagan.
+- **Mijoz (qaror):**
+  - `customerId` ixtiyoriy (`customers` bilan bog'lash tavsiya etiladi, aktiv mijoz tekshiriladi `CUSTOMER_INACTIVE`), lekin har buyurtmada `customerName` (yoki tanlangan `customer.fullName`) saqlanadi. Topshirishda qarz (`debtAmount > 0`) ishlatilsa `customerId` **majburiy** (`CUSTOMER_REQUIRED` + T1.7 kredit limiti tekshiruvi).
 
-R1 bosqichida yangi migratsiya qo'shilmadi (`0011_shifts_day_close.sql` o'zgarishsiz qoldi, `db:check` 0 diff).
+---
 
-### Qabul mezonlari (R1)
+### 2. Avans (`b`)
 
-- [x] **B1.1–B1.3: Almashishda −100 kamomad → B sessiyasida `drawerCashBalance` = `8 473` + B harakatlari; `8 474` qaytarish va inkassatsiya `INSUFFICIENT_CASH_IN_DRAWER`, `8 473` o'tadi; `D_shift = SUM(D_i)`** — `packages/db-local/src/shift.test.ts` (`B1 (X1 session physical cash)...`, `-100n + 25n = -75n`), model testi (`240` qadam), hamda `apps/hub/src/shift.test.ts` HTTP E2E.
-- [x] **B1.4: Mutatsiya dalili** — Eski formula qaytarilganda `model test` (`133000n !== 131000n`) va `B1` (`8573n !== 8473n`) yiqildi.
-- [x] **B2: Barcha `PERF` testlari alohida `perf` loyihasida (`fileParallelism: false`), `pnpm verify` oxirida yolg'iz ketma-ket ishlaydi, chegaralar o'zgarmagan** — `vitest.config.ts`, `package.json` hamda `task-8335` chiqishi (`7 passed (7)`, `10 passed (10)`, `catalog` FTS p95 = `25.613ms <= 50ms`, `supplier` 100-line = `232.52ms <= 500ms`, `shift` 1,000-receipt = `22.91ms <= 500ms`).
+- **`order_payments` (`FACT`, store-scoped):**
+  - `orderId`, `shiftId` (`shifts.id`, majburiy), `shiftCashierSessionId` (`shift_cashier_sessions.id`, majburiy), `kind` (`'advance' | 'advance_refund'`), `method` (`PAYMENT_METHODS`), `amount` (`> 0`), `tenderedAmount`, `changeAmount`, `providerRef`, `reason`, `createdByUserId`, `overrideApprovedByUserId`, `clientRequestId`, `requestHash`.
+- **Avans olish (`recordOrderAdvance`):**
+  - Faqat `draft`, `confirmed`, `ready` buyurtmalarga olinadi (`draft` bo'lsa avtomatik `confirmed` ga o'tadi).
+  - Yig'indi `netAdvance + amount <= order.totalAmount` (`409 ORDER_ADVANCE_EXCEEDS_TOTAL`).
+  - Ochiq smena va aktiv kassir sessiyasi majburiy (`409 SHIFT_NOT_OPEN` / `409 CASHIER_SESSION_MISMATCH`).
+  - **Naqd avans:** `cash_moves` ga yangi tur **`advance_cash_in`** (`+tenderedAmount`) va agar qaytim bo'lsa **`advance_change_out`** (`-changeAmount`) yoziladi (sof o'zgarish = `+amount`).
+  - **Naqdsiz avans (`card`, `uzqr`, ...):** faqat `order_payments` ga yoziladi, `cash_moves` ga yozilmaydi.
+- **Avans tushum emas, majburiyat:**
+  - `v_sales_lines` va `shift_closures.grossSalesTotal` / `netSalesTotal` ga **kirmaydi** (avans olingan kunda savdo tushumi `0`).
+  - `shift_closures` da alohida majburiyat ustunlari qo'shiladi: `orderAdvanceCashTotal`, `orderAdvanceNonCashTotal`, `orderAdvanceRefundTotal`. Kassa qutisi (`drawerCashBalance`, `expectedCash`) esa `cash_moves` orqali avans naqdini to'g'ri hisobga oladi.
+- **Avans qaytarish (`refundOrderAdvance` / `cancelOrder`):**
+  - Buyurtma bekor qilinsa qolgan `netAdvance > 0` alohida `advance_refund` yozuvlari bilan to'liq qaytariladi (yoki oldindan `refundOrderAdvance` qilinadi).
+  - T1.6 V2 usul cheklovi: har usuldan faqat o'sha usulda olingan va hali qaytarilmagan miqdorgacha (`netMethodAdvance`) qaytariladi.
+  - Naqd avans qaytarilganda **`advance_refund_out`** (`-amount`) `cash_moves` ga tushadi va avval `getActiveShiftDrawerBalanceSync >= cashRefund` tekshiriladi (`409 INSUFFICIENT_CASH_IN_DRAWER`).
+  - Yopiq smenaga `order_payments` `INSERT` qilish DB trigger bilan to'siladi (X5 F2 sinxron izohi bilan).
 
-### Test natijasi
+---
 
-Buyruq: `pnpm verify` (`task-8335`, chiqish kodi `0`):
-- `prettier --check .`: `All matched files use Prettier code style!`
-- `turbo run build`: `Tasks: 17 successful, 17 total`
-- `node scripts/lint-workspaces.mjs`: `0` xato
-- `turbo run typecheck`: `Tasks: 22 successful, 22 total`
-- `turbo run db:check`: `PostgreSQL schema matches committed migrations (0 diff statements).` & `SQLite schema matches committed migrations (0 diff statements).`
-- `pnpm run test:unit` (`vitest run --project unit --project sqlite-hub`): `Test Files  53 passed | 1 skipped (54)`, `Tests  258 passed | 2 skipped (260)`, `Duration  23.46s` (`packages/db-cloud/src/pg-rls.test.ts` skipped)
-- `pnpm run test:perf` (`vitest run --project perf`, `fileParallelism: false`, `maxWorkers: 1`): `Test Files  7 passed (7)`, `Tests  10 passed (10)`, `Duration  48.25s`:
-  - `T1.1 Catalog 50k/70k WAL`: `scan p95=0.747ms <= 20ms | search p95=25.613ms <= 50ms`
-  - `T1.4 db-local 20-line`: `69.15 ms <= 300ms`
-  - `T1.5 db-local 20-line 3-pay`: `median=93.94 ms <= 300ms`
-  - `T1.6 db-local 20-line return`: `median=45.15 ms <= 300ms`
-  - `T1.7 D4 5k`: `getCustomerDetail=9.18 ms | createReturn=29.45 ms` (`<= 100ms`)
-  - `T1.7 10k/100k`: `ftsMs=1.66 | phoneMs=5.33 | balanceMs=0.75 | overdueMs=24.61` (`<= 100ms`)
-  - `T1.8 100-line receiving`: `232.52 ms <= 500ms`
-  - `T1.9 1,000-receipt closeShift`: `22.91 ms <= 500ms`
-  - `T1.4 HTTP E2E 20-line`: `129.59 ms <= 300ms`
-  - `T1.5 HTTP E2E 20-line 3-pay`: `median=38.57 ms <= 300ms`
-- `depcruise --config .dependency-cruiser.cjs apps/*/src packages/*/src`: `✔ no dependency violations found (286 modules, 1169 dependencies cruised)`
+### 3. Topshirish = yagona `completeSale` yo'li (`c`)
 
-### Tekshirilmagan narsalar
+- **Yagona yo'l (`GEMINI.md 3.1.9`):**
+  - `deliverOrder` alohida savdo jadvali yozuvchisi yaratmaydi — `sale-repo.ts` dagi umumiy tranzaksiya yadrosi (**`completeSaleCoreInTxSync`**) orqali `sales` (`sourceOrderId`), `sale_lines`, `payments`, `stock_moves`, `cash_moves`, `customer_ledger`, `local_outbox` ni yozadi!
+  - Barcha amallar (`orders.status = 'delivered'`, `deliveredSaleId`, chek, ombor chiqimi, to'lovlar, kassa harakati) **bitta `BEGIN IMMEDIATE` tranzaksiyada** bajariladi.
+- **Yangi to'lov usuli `'advance'`:**
+  - `payments` (`chk_payments_method`) va `shift_closure_method_totals` ga `'advance'` qo'shiladi (`sales.totalPaid` da hisobga olinadi, `SUM(payments) + debt = totalFinal`).
+  - **Oddiy POS `completeSale` API da `'advance'` taqiqlanadi** (`400 VALIDATION_ERROR`): `'advance'` faqat `deliverOrder` ichidan qolgan `netAdvance` summasi qadar qo'llanadi.
+  - **`cash_moves` da ikki marta yozilmaydi:** `completeSaleCoreInTxSync` `method === 'advance'` qatori uchun `cash_moves` yaratmaydi (pul avans olinganda kirgan); faqat topshirish paytidagi yangi `'cash'` to'lovlari `sale_cash_in` / `sale_change_out` ga tushadi.
+- **Tushum bir marta (mezon):**
+  - Avans olingan kunda: kassa naqdi ko'payadi, savdo tushumi = `0`.
+  - Topshirish kunida: chek to'liq summa (`totalFinal`) bilan `sales` va `v_sales_lines` ga tushadi -> tushum aynan bir marta hisoblanadi.
+- **Ombor va rezerv (qaror):**
+  - Buyurtma yaratilganda **ombor rezervi (band qilish) qilinmaydi** (`catalog`/`quick_sale` zaxirasi topshirish paytidagina `applyOutboundStockMoveSync` orqali chiqadi va `negative_stock_policy` `'block'`/`'warn'` ishlaydi; bu hujjatda aniq yoziladi).
+- **Avans > chek summasi holati:**
+  - `recordOrderAdvance` `netAdvance <= order.totalAmount` ni majburlaydi. Agar topshirishda qo'llanadigan `netAdvance` `totalFinal` dan katta bo'lib qolsa (`appliedAdvance = min(netAdvance, totalFinal)`), ortiqcha qism `deliverOrder` bilan birga `refundOrderAdvance` (yoki `deliverOrder` dagi majburiy `excessRefundPayments`) orqali qaytariladi (`409 ORDER_EXCESS_ADVANCE`), kassa ham shunga mos yangilanadi.
 
-- `packages/db-cloud/src/pg-rls.test.ts` (2 test skipped — PostgreSQL Testcontainers lokal Docker muhiti yoqilmagan).
-- GitHub Actions CI (egasining vaqtinchalik qoidasi bo'yicha kutilmadi).
+---
 
-### Qilingan taxminlar
+### 4. Avansli savdoni qaytarish / Void (`d`, T1.6)
 
-- R1 ga oid qo'shimcha taxmin yo'q (avvalgi `HISOBOT.md` dagi `MAX_MONEY_TIYIN` va `businessDate` taxminlari o'z kuchida).
+- **Qaror (`createReturn`):**
+  - Chekdagi `method === 'advance'` **haqiqiy qaytarish usuli emas** (`return_payments` da `'advance'` ishlatilmaydi — mijozga haqiqiy naqd/karta qaytarilishi shart!).
+  - `createReturn` da `originalPaidByMethod` hisoblanayotganda: agar chek `sourceOrderId` ga ega bo'lsa, chekdagi `'advance'` summasi o'sha buyurtmaning sof haqiqiy `order_payments` usullariga (`cash`, `card`, ...) yoyib beriladi (`effectiveOriginalPaidByMethod`). Shunda kassir avansda naqd to'langan qismni `cash` bilan (qutidan `refund_cash_out` va `INSUFFICIENT_CASH_IN_DRAWER` nazorati bilan), kartadagi qismni `card` bilan qaytara oladi.
+- **Qaror (`voidSale`, V1):**
+  - Smena ichidagi topshirilgan buyurtma cheki `voidSale` qilinsa (`orders.status = 'delivered'` o'zgarmaydi — `MONOTONE`!), `cashRefundAmount` topshirishdagi naqd to'lov + buyurtma avansidagi sof naqd ulushidan iborat bo'lib, `refund_cash_out` bilan kassadan qaytariladi (naqdsiz qism bilan mutanosib). *(Agar avans va topshirish turli smenalarda bo'lsa, V1 qoidasiga ko'ra void faqat topshirilgan smena ochiqligida ishlaydi, va kassa harakatlari yig'indisi har ikki smenada 0 ga yopiladi!)*
+- **Model testi (kamida 200 qadam):**
+  - 2 terminal / ko'p kun / ko'p smenali deterministic model testi (`TOTAL_STEPS >= 220`): buyurtma yaratish (`catalog` + `quick_sale`), avans olish (`cash` + `card`), smena yopish, boshqa smenada qo'shimcha avans yoki avans qaytarish, bekor qilish, topshirish (`advance` + `cash` + `card` + `debt`), topshirilgan chekni qaytarish va void qilish, kun yakuni (`closeBusinessDay`).
+  - Har smena yopilishida `expectedCash`, `orderAdvanceCashTotal`, `orderAdvanceNonCashTotal`, `orderAdvanceRefundTotal`, `grossSalesTotal`, `returnsTotal`, `v_sales_lines` va usul kesimlari mustaqil model bilan tiyinigacha tengligi tekshiriladi (avans olingan smena != topshirilgan smena holati alohida tekshiriladi!).
 
-### Takliflar
+---
 
-- Yo'q.
+### 5. Idempotentlik, RBAC, unumdorlik va doira (`e`, `f`)
 
-### Egasi yoki Claude qarori kerak bo'lgan savollar
+- **Idempotentlik:** barcha 7 komanda (`createOrder`, `confirmOrder`, `markOrderReady`, `recordOrderAdvance`, `refundOrderAdvance`, `deliverOrder`, `cancelOrder`) `clientRequestId` + kanonik SHA-256 `requestHash` bilan (`IDEMPOTENCY_CONFLICT` 409).
+- **RBAC:**
+  - `orders:read`, `orders:write` -> `owner`, `manager`, `cashier`.
+  - `orders:cancel` (hamda `refundOrderAdvance` va `cancelOrder`) -> `owner` va `manager` to'g'ridan-to'g'ri; `cashier` esa **majburiy supervisor PIN override** (`T0.6` 5-urinish lockout bilan, aks holda `403 SUPERVISOR_OVERRIDE_REQUIRED`).
+  - Kassir javoblarida `costValue` / `costPrice` mutlaqo qaytmaydi.
+- **Unumdorlik:** 20-qatorli buyurtmani topshirish (`deliverOrder` `completeSale` orqali) real WAL SQLite da `<= 300 ms` (`apps/hub` va `db-local` `.perf.test.ts` loyihasida alohida benchmark!).
+- **Doiradan tashqari (`f`):** yetkazib berish/kuryer, onlayn buyurtma (F6), fiskal (F3).
 
-- Claude PR #16 (`4542f69` va `HISOBOT` commit) bo'yicha yakuniy qarorini kutaman.
+---
+
+### 6. Rejalashtirilgan fayllar ro'yxati
+
+1. **T1.9 test qarzi (1-commit):** `packages/db-local/src/shift.test.ts`, `apps/hub/src/shift.test.ts`.
+2. **`@mezon/domain`:** `errors.ts`, `auth.ts`, `sale.ts`, `shift.ts`, `order.ts`, `order.test.ts` (jumladan `fast-check` property testlar), `index.ts`.
+3. **`@mezon/contracts`:** `order.ts`, `order.test.ts`, `sale.ts`, `shift.ts`, `index.ts`.
+4. **`@mezon/db-local`:** `schema/index.ts`, `drizzle/0012_orders_advance.sql`, `drizzle/meta/{_journal.json,0012_snapshot.json}`, `order-migrations.ts`, `device-state.ts`, `scripts/check-migrations.mjs`, `order-repo.ts`, `sale-repo.ts` (`completeSaleCoreInTxSync`), `return-repo.ts`, `shift-repo.ts`, `index.ts`, `index.test.ts` (`0011 -> 0012`), `order.test.ts`, `order.perf.test.ts`.
+5. **`apps/hub`:** `error-handler.ts`, `order-service.ts`, `order-routes.ts`, `routes.ts`, `server.ts`, `index.ts`, `order.test.ts`, `order.perf.test.ts`.
