@@ -4,6 +4,7 @@ import {
   MAX_MONEY_TIYIN,
   MAX_PROVIDER_REF_LENGTH,
   PAYMENT_METHODS,
+  SHIFT_EXPENSE_CATEGORIES,
 } from '@mezon/domain';
 import { z } from 'zod';
 import { BigIntStringSchema, LoginRequestSchema, UuidV7Schema } from './auth.js';
@@ -149,11 +150,13 @@ export const CashMoveDtoSchema = z.strictObject({
   storeId: UuidV7Schema,
   deviceId: UuidV7Schema,
   shiftId: UuidV7Schema.nullable(),
+  shiftCashierSessionId: UuidV7Schema.nullable(),
   type: CashMoveTypeSchema,
   amountDelta: SignedBigIntStringSchema,
   sourceType: z.string(),
   sourceId: UuidV7Schema,
   paymentId: UuidV7Schema.nullable(),
+  expenseCategory: z.enum(SHIFT_EXPENSE_CATEGORIES).nullable(),
   reason: z.string().nullable(),
   createdByUserId: UuidV7Schema,
   createdAtMs: BigIntStringSchema,
@@ -172,6 +175,7 @@ export const SaleDtoSchema = z.strictObject({
   completedByUserId: UuidV7Schema,
   customerId: UuidV7Schema.nullable(),
   shiftId: UuidV7Schema.nullable(),
+  shiftCashierSessionId: UuidV7Schema.nullable(),
   clientRequestId: UuidV7Schema,
   status: z.literal('completed'),
   subtotalGross: BigIntStringSchema,

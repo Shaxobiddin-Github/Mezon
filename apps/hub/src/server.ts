@@ -6,6 +6,7 @@ import {
   SqliteHubAuthStore,
   SqliteReturnStore,
   SqliteSaleStore,
+  SqliteShiftStore,
   SqliteStockStore,
   SqliteSupplierStore,
   createSqliteCartStore,
@@ -14,6 +15,7 @@ import {
   createSqliteHubAuthStore,
   createSqliteReturnStore,
   createSqliteSaleStore,
+  createSqliteShiftStore,
   createSqliteStockStore,
   createSqliteSupplierStore,
   migrateLocalDatabase,
@@ -37,6 +39,7 @@ import { HubCustomerService } from './customer-service.js';
 import { HubReturnService } from './return-service.js';
 import { HubStockService } from './stock-service.js';
 import { HubSupplierService } from './supplier-service.js';
+import { HubShiftService } from './shift-service.js';
 
 export interface CreateHubServerOptions {
   readonly dbPath: string;
@@ -68,6 +71,7 @@ export interface HubServer {
   readonly returnStore: SqliteReturnStore;
   readonly customerStore: SqliteCustomerStore;
   readonly supplierStore: SqliteSupplierStore;
+  readonly shiftStore: SqliteShiftStore;
   readonly authService: HubAuthService;
   readonly catalogService: HubCatalogService;
   readonly stockService: HubStockService;
@@ -76,6 +80,7 @@ export interface HubServer {
   readonly returnService: HubReturnService;
   readonly customerService: HubCustomerService;
   readonly supplierService: HubSupplierService;
+  readonly shiftService: HubShiftService;
   listen(): Promise<{ readonly host: typeof DEFAULT_HUB_HOST; readonly port: number }>;
   close(): Promise<void>;
 }
@@ -104,6 +109,7 @@ export async function createHubServer(options: CreateHubServerOptions): Promise<
   let returnStore: SqliteReturnStore;
   let customerStore: SqliteCustomerStore;
   let supplierStore: SqliteSupplierStore;
+  let shiftStore: SqliteShiftStore;
   let authService: HubAuthService;
   let catalogService: HubCatalogService;
   let stockService: HubStockService;
@@ -112,6 +118,7 @@ export async function createHubServer(options: CreateHubServerOptions): Promise<
   let returnService: HubReturnService;
   let customerService: HubCustomerService;
   let supplierService: HubSupplierService;
+  let shiftService: HubShiftService;
   let app: FastifyInstance;
 
   try {
@@ -213,6 +220,19 @@ export async function createHubServer(options: CreateHubServerOptions): Promise<
           : null;
       },
     });
+    shiftStore = createSqliteShiftStore({
+      connection,
+      getRuntimeContext: () => {
+        const ctx = store.getActiveRuntimeContext();
+        return ctx
+          ? {
+              uow: ctx.uow,
+              organizationId: ctx.config.organizationId,
+              storeId: ctx.config.storeId,
+            }
+          : null;
+      },
+    });
     authService = await HubAuthService.create({
       store,
       pinHasher,
@@ -225,6 +245,7 @@ export async function createHubServer(options: CreateHubServerOptions): Promise<
     returnService = new HubReturnService(returnStore, authService);
     customerService = new HubCustomerService(customerStore);
     supplierService = new HubSupplierService(supplierStore);
+    shiftService = new HubShiftService(shiftStore, authService);
 
     app = Fastify({
       loggerInstance: logger as unknown as FastifyBaseLogger,
@@ -243,6 +264,7 @@ export async function createHubServer(options: CreateHubServerOptions): Promise<
       returnService,
       customerService,
       supplierService,
+      shiftService,
     );
     options.registerExtraTestRoutes?.(app);
 
@@ -259,6 +281,7 @@ export async function createHubServer(options: CreateHubServerOptions): Promise<
       returnStore,
       customerStore,
       supplierStore,
+      shiftStore,
       authService,
       catalogService,
       stockService,
@@ -267,6 +290,7 @@ export async function createHubServer(options: CreateHubServerOptions): Promise<
       returnService,
       customerService,
       supplierService,
+      shiftService,
       async listen() {
         await app.listen({
           host: DEFAULT_HUB_HOST,

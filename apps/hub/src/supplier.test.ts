@@ -137,6 +137,17 @@ describe('@mezon/hub - T1.8 Suppliers, Receiving, Unknown Cost, E1-E3, RBAC & PI
       let mgrLogin = await loginAs('mgr18', mgrPin);
       let cashLogin = await loginAs('cash18', cashierPin);
 
+      const shiftOpen18 = await hub.app.inject({
+        method: 'POST',
+        url: '/shifts/open',
+        headers: authHeaders(ownerLogin.token),
+        payload: {
+          clientRequestId: '01950000-0000-7000-8000-1800000000a1',
+          openingCash: '0',
+        },
+      });
+      expect(shiftOpen18.statusCode).toBe(201);
+
       // Seed catalog products
       const prodRes = await hub.app.inject({
         method: 'POST',

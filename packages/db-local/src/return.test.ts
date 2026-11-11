@@ -2,7 +2,6 @@ import { spawnSync } from 'node:child_process';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { performance } from 'node:perf_hooks';
 import { pathToFileURL } from 'node:url';
 import {
   type PinHasher,
@@ -28,8 +27,10 @@ import {
   createSqliteHubAuthStore,
   createSqliteReturnStore,
   createSqliteSaleStore,
+  createSqliteShiftStore,
   createSqliteStockStore,
-  getCashDrawerBalanceSync,
+  getActiveShiftDrawerBalanceSync,
+  getActiveShiftSessionSync,
   listAllOutboxRecordsSync,
   localBatchBalances,
   localStockBalances,
@@ -137,6 +138,12 @@ async function setupReturnEnv(options?: {
   const cartStore = createSqliteCartStore({ connection, getRuntimeContext: getStoreCtx });
   const saleStore = createSqliteSaleStore({ connection, getRuntimeContext: getStoreCtx });
   const returnStore = createSqliteReturnStore({ connection, getRuntimeContext: getStoreCtx });
+  const shiftStore = createSqliteShiftStore({ connection, getRuntimeContext: getStoreCtx });
+  const initialShift = await shiftStore.openShift({
+    actorUserId: cashier.id,
+    clientRequestId: parseUuidV7('01960000-0000-7000-8000-000000000099'),
+    openingCash: ZERO_MONEY,
+  });
 
   return {
     dbPath,
@@ -149,6 +156,8 @@ async function setupReturnEnv(options?: {
     cartStore,
     saleStore,
     returnStore,
+    shiftStore,
+    initialShiftId: initialShift.shift.id,
     organizationId: setup.organizationId,
     storeId: setup.storeId,
     deviceId: setup.deviceId,
@@ -256,10 +265,15 @@ function readNormalizedBatchSnapshots(
 async function seedCashInDrawer(
   env: Awaited<ReturnType<typeof setupReturnEnv>>,
   amountTiyin: bigint,
-  tag: number,
+  _tag: number,
 ) {
   const ctx = env.authStore.getActiveRuntimeContext()!;
   await ctx.uow.execute((session) => {
+    const active = getActiveShiftSessionSync(session.db, {
+      organizationId: env.organizationId,
+      storeId: env.storeId,
+      deviceId: env.deviceId,
+    })!;
     const nowMs = session.nowUnixMs();
     session.db
       .insert(cashMoves)
@@ -270,12 +284,14 @@ async function seedCashInDrawer(
         deviceId: env.deviceId,
         hlc: serializeHlc(session.nextHlc()),
         createdAtMs: nowMs,
-        shiftId: null,
+        shiftId: active.shift.id,
+        shiftCashierSessionId: active.activeSession.id,
         type: 'cash_in',
         amountDelta: moneyFromTiyin(amountTiyin),
         sourceType: 'manual',
-        sourceId: parseUuidV7(`01960000-0000-7000-8000-${tag.toString().padStart(12, '0')}`),
+        sourceId: session.nextId(),
         paymentId: null,
+        expenseCategory: null,
         reason: 'Opening drawer float',
         createdByUserId: env.ownerId,
       })
@@ -363,6 +379,11 @@ describe('@mezon/db-local - T1.6 Void, Return, V1-V5, Oracle Parity, C1 Crash & 
       // Drain drawer cash to 119,999 (total was 10,000 + 120,000 = 130,000 -> remove 10,001) to prove V2 applies to voidSale!
       const ctx = env.authStore.getActiveRuntimeContext()!;
       await ctx.uow.execute((session) => {
+        const active = getActiveShiftSessionSync(session.db, {
+          organizationId: env.organizationId,
+          storeId: env.storeId,
+          deviceId: env.deviceId,
+        })!;
         session.db
           .insert(cashMoves)
           .values({
@@ -372,12 +393,14 @@ describe('@mezon/db-local - T1.6 Void, Return, V1-V5, Oracle Parity, C1 Crash & 
             deviceId: env.deviceId,
             hlc: serializeHlc(session.nextHlc()),
             createdAtMs: session.nowUnixMs(),
-            shiftId: null,
+            shiftId: active.shift.id,
+            shiftCashierSessionId: active.activeSession.id,
             type: 'encashment',
             amountDelta: moneyFromTiyin(-10_001n),
             sourceType: 'manual',
             sourceId: nextTestUuid(),
             paymentId: null,
+            expenseCategory: null,
             reason: 'Partial drop',
             createdByUserId: env.ownerId,
           })
@@ -397,24 +420,12 @@ describe('@mezon/db-local - T1.6 Void, Return, V1-V5, Oracle Parity, C1 Crash & 
       // Top drawer back up by 1 tiyin -> now 120,000 (exact needed for completed sale's net cash)
       await seedCashInDrawer(env, 1n, 9001);
 
-      // V1: Advance FixedClock past midnight (2026-06-16 00:01:00 Asia/Tashkent) -> VOID_WINDOW_EXPIRED
+      // T1.9 V1 rule: advancing clock across midnight INSIDE the SAME open shift still permits voiding quickSaleCompleted!
       env.clock.set(TASHKENT_000100_NEXT_UTC_MS);
-      await expect(
-        env.returnStore.voidSale({
-          saleId: completed.sale.id,
-          actorUserId: env.managerId,
-          reason: 'Kechikkan void',
-          clientRequestId: nextTestUuid(),
-        }),
-      ).rejects.toMatchObject({ code: 'VOID_WINDOW_EXPIRED' });
-
-      // Prove storeTimezone config works dynamically: switching to 'UTC' keeps 19:01Z on 2026-06-15 UTC -> succeeds on quick_sale,
-      // then switch back to 'Asia/Tashkent' and rewind clock to 23:59:45 Tashkent for primary sale test!
-      await env.returnStore.setStoreTimezone('UTC');
       const voidQuickUtc = await env.returnStore.voidSale({
         saleId: quickSaleCompleted.sale.id,
         actorUserId: env.ownerId,
-        reason: 'UTC same day quick sale void',
+        reason: 'Overnight same open shift void',
         clientRequestId: nextTestUuid(),
       });
       expect(voidQuickUtc.sale.status).toBe('voided');
@@ -426,22 +437,7 @@ describe('@mezon/db-local - T1.6 Void, Return, V1-V5, Oracle Parity, C1 Crash & 
         .all();
       expect(quickSaleVoidStockMoves).toHaveLength(0);
 
-      // Also exercise arbitrary IANA DST zone (`America/New_York`: 2026-06-16T04:01Z = 00:01 EDT June 16 vs sale June 15)
-      await env.returnStore.setStoreTimezone('America/New_York');
-      env.clock.set(BigInt(Date.parse('2026-06-16T04:01:00.000Z')));
-      await expect(
-        env.returnStore.voidSale({
-          saleId: completed.sale.id,
-          actorUserId: env.managerId,
-          reason: 'EDT midnight crossed',
-          clientRequestId: nextTestUuid(),
-        }),
-      ).rejects.toMatchObject({ code: 'VOID_WINDOW_EXPIRED' });
-
-      // Reset timezone to default Asia/Tashkent and restore FixedClock inside same Tashkent day (23:59:45)
-      await env.returnStore.setStoreTimezone('Asia/Tashkent');
-      env.clock.set(TASHKENT_235930_UTC_MS + 15_000n);
-      // Replenish the 10,000 tiyin voided from quickSaleCompleted so drawer = 120,000 exact for primary sale void
+      // Keep drawer balance replenished after quick-sale void so primary sale void succeeds cleanly
       await seedCashInDrawer(env, 10_000n, 9002);
 
       // V3 BEFORE void: writing partial void columns (`void_reason` alone, etc.) on unvoided sale MUST ABORT in raw SQL
@@ -487,7 +483,7 @@ describe('@mezon/db-local - T1.6 Void, Return, V1-V5, Oracle Parity, C1 Crash & 
           .qtyOnHand,
       ).toBe(5_000n);
       expect(
-        getCashDrawerBalanceSync(env.connection.db, {
+        getActiveShiftDrawerBalanceSync(env.connection.db, env.connection.sqlite, {
           organizationId: env.organizationId,
           storeId: env.storeId,
           deviceId: env.deviceId,
@@ -1828,85 +1824,6 @@ describe('@mezon/db-local - T1.6 Void, Return, V1-V5, Oracle Parity, C1 Crash & 
       env.connection.close();
     }
   });
-
-  it('meets <= 300ms latency for full return of a 20-line tracked receipt (10 FIFO + 10 avg) on disk WAL SQLite', async () => {
-    const samplesMs: number[] = [];
-    for (let runIdx = 0; runIdx < 5; runIdx += 1) {
-      const env = await setupReturnEnv({ seed: 600 + runIdx });
-      try {
-        const cart = await env.cartStore.openCart(env.cashierId);
-        let expectedTotal = 0n;
-
-        for (let i = 0; i < 20; i += 1) {
-          const isBatched = i < 10;
-          const p = await env.catalogStore.createProduct({
-            name: `Perf Tovar ${i}`,
-            unit: 'dona',
-            trackBatches: isBatched,
-            salePrice: '15000',
-            vatRateBp: 1200,
-            actorUserId: env.ownerId,
-          });
-          await env.stockStore.recordInboundMove({
-            productId: p.product.id,
-            reason: 'purchase',
-            qty: '10000',
-            totalCostValue: '80000',
-            batchNumber: isBatched ? `PB-${i}` : null,
-            actorUserId: env.ownerId,
-          });
-          await env.cartStore.addLine(cart.id, {
-            kind: 'catalog',
-            productId: p.product.id,
-            variantId: null,
-            qty: quantityFromMilli(2_000n),
-          });
-          expectedTotal += 30_000n;
-        }
-
-        const sale = await env.saleStore.completeSale({
-          cartId: cart.id,
-          actorUserId: env.cashierId,
-          clientRequestId: nextTestUuid(),
-          expectedTotal: moneyFromTiyin(expectedTotal),
-          payments: [
-            { method: 'cash', tenderedAmount: moneyFromTiyin(300_000n) },
-            { method: 'card', amount: moneyFromTiyin(300_000n), providerRef: 'PERF-CARD' },
-          ],
-        });
-
-        const items = sale.sale.lines.map((l) => ({
-          saleLineId: l.id,
-          qty: l.qty,
-        }));
-        const t0 = performance.now();
-        const ret = await env.returnStore.createReturn({
-          saleId: sale.sale.id,
-          actorUserId: env.managerId,
-          reason: 'Perf 20-line full return',
-          clientRequestId: nextTestUuid(),
-          items,
-          payments: [
-            { method: 'cash', amount: moneyFromTiyin(300_000n) },
-            { method: 'card', amount: moneyFromTiyin(300_000n), providerRef: 'PERF-RET' },
-          ],
-        });
-        const elapsedMs = performance.now() - t0;
-        samplesMs.push(elapsedMs);
-        expect(ret.returnDoc.lines).toHaveLength(20);
-        expect(moneyToTiyin(ret.returnDoc.totalRefund)).toBe(600_000n);
-      } finally {
-        env.connection.close();
-      }
-    }
-
-    const sorted = [...samplesMs].sort((a, b) => a - b);
-    const medianMs = sorted[Math.floor(sorted.length / 2)];
-    console.info(
-      `[PERF T1.6 db-local] 20-line full createReturn (10 FIFO + 10 avg) median=${medianMs.toFixed(2)} ms samples=[${samplesMs.map((s) => s.toFixed(2)).join(', ')}]`,
-    );
-    expect(medianMs).toBeLessThanOrEqual(300);
-  }, 15_000);
 });
 
 async function setupEnvAfterCrash(

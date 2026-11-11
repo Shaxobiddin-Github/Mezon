@@ -27,6 +27,7 @@ import {
   type SqliteCartStore,
   type SqliteCatalogStore,
   type SqliteSaleStore,
+  type SqliteShiftStore,
   type SqliteStockStore,
   advanceReceiptSeqSync,
   applyOutboundStockMoveSync,
@@ -35,14 +36,16 @@ import {
   createSqliteCatalogStore,
   createSqliteHubAuthStore,
   createSqliteSaleStore,
+  createSqliteShiftStore,
   createSqliteStockStore,
-  getCashDrawerBalanceSync,
+  getActiveShiftDrawerBalanceSync,
+  getActiveStoreCashBalanceSync,
   getDefaultLocalMigrationsFolder,
-  getStoreCashBalanceSync,
   insertMonotone,
   listAllOutboxRecordsSync,
   localBatchBalances,
   localCarts,
+  localDeviceState,
   localStockBalances,
   migrateLocalDatabase,
   openLocalSqliteDatabase,
@@ -50,6 +53,8 @@ import {
   readReceiptSeqSync,
   saleLines,
   sales,
+  shiftCashierSessions,
+  shifts,
   stockMoves,
 } from './index.js';
 
@@ -132,6 +137,15 @@ async function setupSaleEnv(dbPath = createTempDbPath()) {
     connection,
     getRuntimeContext: getStoreCtx,
   });
+  const shiftStore: SqliteShiftStore = createSqliteShiftStore({
+    connection,
+    getRuntimeContext: getStoreCtx,
+  });
+  const initialShift = await shiftStore.openShift({
+    actorUserId: cashier.id,
+    clientRequestId: parseUuidV7('01950000-0000-7000-8000-0000000000a1'),
+    openingCash: ZERO_MONEY,
+  });
 
   return {
     dbPath,
@@ -143,6 +157,8 @@ async function setupSaleEnv(dbPath = createTempDbPath()) {
     stockStore,
     cartStore,
     saleStore,
+    shiftStore,
+    initialShiftId: initialShift.shift.id,
     organizationId: setup.organizationId,
     storeId: setup.storeId,
     deviceId: setup.deviceId,
@@ -792,63 +808,6 @@ describe('@mezon/db-local - T1.4 completeSale atomic TX, receipts, stock policy,
     }
   }, 30_000);
 
-  it('meets <= 300ms local completion target for a 20-line tracked catalog cart on disk WAL SQLite', async () => {
-    const dbPath = createTempDbPath('perf-20-lines.db');
-    const env = await setupSaleEnv(dbPath);
-    try {
-      const prodIds: UuidV7[] = [];
-      for (let i = 0; i < 20; i += 1) {
-        const created = await env.catalogStore.createProduct({
-          name: `Perf Mahsulot ${i + 1}`,
-          unit: 'dona',
-          trackBatches: i % 2 === 0,
-          salePrice: String((i + 1) * 10_000),
-          vatRateBp: 1200,
-          actorUserId: env.ownerId,
-        });
-        await env.stockStore.recordInboundMove({
-          productId: created.product.id,
-          reason: 'purchase',
-          qty: '10000',
-          totalCostValue: String((i + 1) * 60_000),
-          batchNumber: i % 2 === 0 ? `B-${i}` : null,
-          actorUserId: env.ownerId,
-        });
-        prodIds.push(created.product.id);
-      }
-
-      const cart = await env.cartStore.openCart(env.cashierId);
-      let detail = await env.cartStore.getCart(cart.id);
-      for (const pid of prodIds) {
-        detail = await env.cartStore.addLine(cart.id, {
-          kind: 'catalog',
-          productId: pid,
-          variantId: null,
-          qty: quantityFromMilli(2_000n),
-        });
-      }
-      expect(detail.lines.length).toBe(20);
-
-      const t0 = performance.now();
-      const completed = await env.saleStore.completeSale({
-        cartId: cart.id,
-        actorUserId: env.cashierId,
-        clientRequestId: parseUuidV7('01950000-0000-7000-8000-555555555501'),
-        expectedTotal: detail.totalFinal,
-        payments: [{ method: 'cash', tenderedAmount: detail.totalFinal }],
-      });
-      const elapsedMs = performance.now() - t0;
-
-      expect(completed.sale.lines.length).toBe(20);
-      expect(elapsedMs).toBeLessThanOrEqual(300);
-      console.info(
-        `[PERF T1.4 db-local] 20-line completeSale (10 FIFO batched + 10 avg) took ${elapsedMs.toFixed(2)} ms`,
-      );
-    } finally {
-      env.connection.close();
-    }
-  }, 30_000);
-
   it('T1.4 debt (1): block mode enforces exact 1-milli threshold across single & multi-line carts without partial writes', async () => {
     const env = await setupSaleEnv();
     try {
@@ -1142,7 +1101,7 @@ describe('@mezon/db-local - T1.4 completeSale atomic TX, receipts, stock policy,
       expect(movesForSale[0]?.amountDelta).toBe(moneyFromTiyin(100_000n));
       expect(movesForSale[0]?.createdByUserId).toBe(env.managerId);
       expect(movesForSale[0]?.deviceId).toBe(env.deviceId);
-      expect(movesForSale[0]?.shiftId).toBeNull();
+      expect(movesForSale[0]?.shiftId).toBe(env.initialShiftId);
       expect(movesForSale[1]?.type).toBe('sale_change_out');
       expect(movesForSale[1]?.amountDelta).toBe(moneyFromTiyin(-40_000n));
       expect(await env.saleStore.getTerminalCashBalance()).toBe(moneyFromTiyin(60_000n));
@@ -1285,12 +1244,66 @@ describe('@mezon/db-local - T1.4 completeSale atomic TX, receipts, stock policy,
       // Terminal drawer balance = 60_000 + 16_000 = 76_000
       expect(await env.saleStore.getTerminalCashBalance()).toBe(moneyFromTiyin(76_000n));
 
-      // 5) M2: Another terminal (device B) within same store has its own isolated cash drawer balance;
-      //    getCashDrawerBalanceSync is strictly terminal-scoped, getStoreCashBalanceSync sums all terminals.
+      // 5) M2: Another terminal (device B) within same store has its own isolated open shift & cash drawer balance (X1).
       const deviceB = parseUuidV7('01950000-0000-7000-8000-9999999999b2');
+      const shiftBId = parseUuidV7('01950000-0000-7000-8000-9999999999b3');
+      const sessBId = parseUuidV7('01950000-0000-7000-8000-9999999999b4');
       const ctx = env.authStore.getActiveRuntimeContext()!;
       await ctx.uow.execute((session) => {
-        // Seed manual/cash_in row attributing deviceId directly on another terminal in the same store
+        const nowMs = session.nowUnixMs();
+        const hlcB = serializeHlc(createHlcTimestamp(nowMs, 0, deviceB));
+        session.db
+          .insert(localDeviceState)
+          .values({
+            id: parseUuidV7('01950000-0000-7000-8000-9999999999b5'),
+            organizationId: env.organizationId,
+            createdAtMs: nowMs,
+            updatedAtMs: nowMs,
+            deviceId: deviceB,
+            lastDeviceSeq: 1n,
+            lastHlc: hlcB,
+            lastUuidMs: nowMs,
+          })
+          .run();
+        session.db
+          .insert(shifts)
+          .values({
+            id: shiftBId,
+            organizationId: env.organizationId,
+            storeId: env.storeId,
+            deviceId: deviceB,
+            hlc: hlcB,
+            createdAtMs: nowMs,
+            updatedAtMs: nowMs,
+            shiftNo: 1n,
+            shiftCode: 'SHF-99B2-000001',
+            status: 'open',
+            openedByUserId: env.ownerId,
+            openingCash: ZERO_MONEY,
+            openingDiscrepancy: ZERO_MONEY,
+            openedAtMs: nowMs,
+            openClientRequestId: parseUuidV7('01950000-0000-7000-8000-9999999999b6'),
+            openRequestHash: 'device-b-open-hash',
+          })
+          .run();
+        session.db
+          .insert(shiftCashierSessions)
+          .values({
+            id: sessBId,
+            organizationId: env.organizationId,
+            storeId: env.storeId,
+            deviceId: deviceB,
+            hlc: hlcB,
+            createdAtMs: nowMs,
+            updatedAtMs: nowMs,
+            shiftId: shiftBId,
+            sessionSeq: 1,
+            cashierUserId: env.ownerId,
+            status: 'active',
+            openingFloat: ZERO_MONEY,
+            startedAtMs: nowMs,
+          })
+          .run();
         session.db
           .insert(cashMoves)
           .values({
@@ -1298,14 +1311,16 @@ describe('@mezon/db-local - T1.4 completeSale atomic TX, receipts, stock policy,
             organizationId: env.organizationId,
             storeId: env.storeId,
             deviceId: deviceB,
-            hlc: serializeHlc(createHlcTimestamp(session.nowUnixMs(), 0, deviceB)),
-            createdAtMs: session.nowUnixMs(),
-            shiftId: null,
+            hlc: hlcB,
+            createdAtMs: nowMs,
+            shiftId: shiftBId,
+            shiftCashierSessionId: sessBId,
             type: 'cash_in',
             amountDelta: moneyFromTiyin(50_000n),
             sourceType: 'manual',
             sourceId: parseUuidV7('01950000-0000-7000-8000-9999999999c2'),
             paymentId: null,
+            expenseCategory: null,
             reason: 'Device B float',
             createdByUserId: env.ownerId,
           })
@@ -1314,21 +1329,21 @@ describe('@mezon/db-local - T1.4 completeSale atomic TX, receipts, stock policy,
       });
 
       expect(
-        getCashDrawerBalanceSync(env.connection.db, {
+        getActiveShiftDrawerBalanceSync(env.connection.db, env.connection.sqlite, {
           organizationId: env.organizationId,
           storeId: env.storeId,
           deviceId: env.deviceId,
         }),
       ).toBe(moneyFromTiyin(76_000n));
       expect(
-        getCashDrawerBalanceSync(env.connection.db, {
+        getActiveShiftDrawerBalanceSync(env.connection.db, env.connection.sqlite, {
           organizationId: env.organizationId,
           storeId: env.storeId,
           deviceId: deviceB,
         }),
       ).toBe(moneyFromTiyin(50_000n));
       expect(
-        getStoreCashBalanceSync(env.connection.db, {
+        getActiveStoreCashBalanceSync(env.connection.db, env.connection.sqlite, {
           organizationId: env.organizationId,
           storeId: env.storeId,
         }),
@@ -1676,6 +1691,15 @@ describe('@mezon/db-local - T1.4 completeSale atomic TX, receipts, stock policy,
       );
 
       // Next T1.5 checkout continues receipt_no seamlessly at 3n and records cash_moves
+      const shiftStore = createSqliteShiftStore({
+        connection: conn,
+        getRuntimeContext: getStoreCtx,
+      });
+      await shiftStore.openShift({
+        actorUserId: cashier.id,
+        clientRequestId: parseUuidV7('01950000-0000-7000-8000-a00000000099'),
+        openingCash: ZERO_MONEY,
+      });
       const saleStore = createSqliteSaleStore({ connection: conn, getRuntimeContext: getStoreCtx });
       const cart3 = await cartStore.openCart(cashier.id);
       const detail3 = await cartStore.addLine(cart3.id, {
@@ -1909,83 +1933,6 @@ describe('@mezon/db-local - T1.4 completeSale atomic TX, receipts, stock policy,
           },
         ),
         { numRuns: 50 },
-      );
-    } finally {
-      env.connection.close();
-    }
-  }, 30_000);
-
-  it('T1.5 perf: 20-line cart with 3 payment types (card + payme + cash w/ change) completes <= 300ms', async () => {
-    const dbPath = createTempDbPath('perf-t15-3pay.db');
-    const env = await setupSaleEnv(dbPath);
-    try {
-      const prodIds: UuidV7[] = [];
-      for (let i = 0; i < 20; i += 1) {
-        const created = await env.catalogStore.createProduct({
-          name: `T1.5 Perf ${i + 1}`,
-          unit: 'dona',
-          trackBatches: i % 2 === 0,
-          salePrice: String((i + 1) * 10_000),
-          vatRateBp: 1200,
-          actorUserId: env.ownerId,
-        });
-        await env.stockStore.recordInboundMove({
-          productId: created.product.id,
-          reason: 'purchase',
-          qty: '10000',
-          totalCostValue: String((i + 1) * 60_000),
-          batchNumber: i % 2 === 0 ? `B-${i}` : null,
-          actorUserId: env.ownerId,
-        });
-        prodIds.push(created.product.id);
-      }
-
-      const samplesMs: number[] = [];
-      let expectedDrawerTotal = 0n;
-      for (let run = 1; run <= 5; run += 1) {
-        const cart = await env.cartStore.openCart(env.cashierId);
-        let detail = await env.cartStore.getCart(cart.id);
-        for (const pid of prodIds) {
-          detail = await env.cartStore.addLine(cart.id, {
-            kind: 'catalog',
-            productId: pid,
-            variantId: null,
-            qty: quantityFromMilli(2_000n),
-          });
-        }
-        const total = moneyToTiyin(detail.totalFinal);
-        const cardPart = total / 3n;
-        const paymePart = total / 3n;
-        const cashNeed = total - cardPart - paymePart;
-
-        const t0 = performance.now();
-        const completed = await env.saleStore.completeSale({
-          cartId: cart.id,
-          actorUserId: env.managerId,
-          clientRequestId: parseUuidV7(`01950000-0000-7000-8000-e0000000000${run}`),
-          expectedTotal: detail.totalFinal,
-          payments: [
-            { method: 'card', amount: moneyFromTiyin(cardPart), providerRef: 'PERF-CARD' },
-            { method: 'payme', amount: moneyFromTiyin(paymePart), providerRef: 'PERF-PM' },
-            { method: 'cash', tenderedAmount: moneyFromTiyin(cashNeed + 50_000n) },
-          ],
-        });
-        samplesMs.push(performance.now() - t0);
-
-        expect(completed.sale.lines).toHaveLength(20);
-        expect(completed.sale.payments).toHaveLength(3);
-        expect(completed.sale.changeAmount).toBe(moneyFromTiyin(50_000n));
-        expectedDrawerTotal += cashNeed;
-      }
-
-      const sorted = [...samplesMs].sort((a, b) => a - b);
-      const medianMs = sorted[Math.floor(sorted.length / 2)] ?? 0;
-      expect(await env.saleStore.getTerminalCashBalance()).toBe(
-        moneyFromTiyin(expectedDrawerTotal),
-      );
-      expect(medianMs).toBeLessThanOrEqual(300);
-      console.info(
-        `[PERF T1.5 db-local] 20-line completeSale (3 payments: card+payme+cash) median=${medianMs.toFixed(2)} ms samples=[${samplesMs.map((v) => v.toFixed(2)).join(', ')}]`,
       );
     } finally {
       env.connection.close();

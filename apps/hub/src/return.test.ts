@@ -150,6 +150,17 @@ describe('@mezon/hub - T1.6 Void, Return, Supervisor Override RBAC, V1-V2 & Audi
         ).json(),
       );
 
+      const shiftOpen16 = await hub.app.inject({
+        method: 'POST',
+        url: '/shifts/open',
+        headers: authHeaders(cashLogin.token),
+        payload: {
+          clientRequestId: '01960000-0000-7000-8000-0000000000a1',
+          openingCash: '0',
+        },
+      });
+      expect(shiftOpen16.statusCode).toBe(201);
+
       // 2. Seed catalog + stock
       const prodRes = await hub.app.inject({
         method: 'POST',
@@ -514,8 +525,36 @@ describe('@mezon/hub - T1.6 Void, Return, Supervisor Override RBAC, V1-V2 & Audi
       expect(cashierOverrideVoid.statusCode).toBe(200);
       expect(VoidSaleResponseSchema.parse(cashierOverrideVoid.json()).sale.status).toBe('voided');
 
-      // V1 HTTP test: Open new sale3 at 23:59, advance FixedClock to 00:01 -> void returns 409 VOID_WINDOW_EXPIRED
+      // V1 HTTP test: Open sale3 in Shift 1, close Shift 1, open Shift 2 -> voiding sale3 returns 409 SHIFT_ALREADY_CLOSED
       const sale3 = await openCartAndComplete('1000', '01960000-0000-7000-8000-100000000003');
+      const curShiftJson = (
+        await hub.app.inject({
+          method: 'GET',
+          url: '/shifts/current',
+          headers: authHeaders(cashLogin.token),
+        })
+      ).json<{ readonly shift: { readonly id: string }; readonly drawerCashBalance: string }>();
+      const closeRes16 = await hub.app.inject({
+        method: 'POST',
+        url: `/shifts/${curShiftJson.shift.id}/close`,
+        headers: authHeaders(cashLogin.token),
+        payload: {
+          clientRequestId: '01960000-0000-7000-8000-0000000000c1',
+          countedCash: curShiftJson.drawerCashBalance,
+        },
+      });
+      expect(closeRes16.statusCode).toBe(200);
+      const reopenRes16 = await hub.app.inject({
+        method: 'POST',
+        url: '/shifts/open',
+        headers: authHeaders(cashLogin.token),
+        payload: {
+          clientRequestId: '01960000-0000-7000-8000-0000000000c2',
+          openingCash: curShiftJson.drawerCashBalance,
+        },
+      });
+      expect(reopenRes16.statusCode).toBe(201);
+
       clock.set(TASHKENT_0001_NEXT_UTC_MS);
       const expiredVoid = await hub.app.inject({
         method: 'POST',
@@ -523,12 +562,12 @@ describe('@mezon/hub - T1.6 Void, Return, Supervisor Override RBAC, V1-V2 & Audi
         headers: authHeaders(ownerLogin.token),
         payload: {
           clientRequestId: '01960000-0000-7000-8000-200000000399',
-          reason: 'Midnight crossed',
+          reason: 'Prior closed shift void attempt',
         },
       });
       expect(expiredVoid.statusCode).toBe(409);
       expect(ApiErrorEnvelopeSchema.parse(expiredVoid.json()).error.code).toBe(
-        'VOID_WINDOW_EXPIRED',
+        'SHIFT_ALREADY_CLOSED',
       );
 
       // Audit logs check: sale.voided & return.created present, ZERO PINs, tokens, or costValue/profit!

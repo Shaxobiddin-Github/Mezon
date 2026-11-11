@@ -77,6 +77,8 @@ function toReturnDto(doc: StoredReturnRecord): ReturnDto {
     storeId: doc.storeId,
     deviceId: doc.deviceId,
     saleId: doc.saleId,
+    shiftId: doc.shiftId,
+    shiftCashierSessionId: doc.shiftCashierSessionId,
     processedByUserId: doc.processedByUserId,
     overrideApprovedByUserId: doc.overrideApprovedByUserId,
     overrideApprovedAtMs:
@@ -108,6 +110,7 @@ function toVoidedSaleDto(sale: StoredVoidedSaleRecord): VoidedSaleDto {
     completedByUserId: sale.completedByUserId,
     customerId: sale.customerId,
     shiftId: sale.shiftId,
+    shiftCashierSessionId: sale.shiftCashierSessionId,
     clientRequestId: sale.clientRequestId,
     status: 'voided',
     subtotalGross: sale.subtotalGross.toString(),

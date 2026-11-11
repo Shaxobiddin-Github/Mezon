@@ -13,7 +13,6 @@ import {
   ZERO_MONEY,
   ZERO_QUANTITY,
   allocateReturnStockMoveLegs,
-  assertSaleVoidBusinessDay,
   assertValidStoreTimeZone,
   canonicalizeCreateReturnRequest,
   canonicalizeVoidSaleRequest,
@@ -40,13 +39,8 @@ import {
   reverseSaleDebtOnVoidInTxSync,
 } from './customer-repo.js';
 import { advanceReturnSeqSync } from './device-state.js';
-import { resolveIntlDateKey } from './timezone.js';
-import {
-  getCashDrawerBalanceSync,
-  type StoredSaleRecord,
-  toStoredSaleLine,
-  toStoredSalePayment,
-} from './sale-repo.js';
+import { type StoredSaleRecord, toStoredSaleLine, toStoredSalePayment } from './sale-repo.js';
+import { getActiveShiftDrawerBalanceSync, requireOpenShiftSessionSync } from './shift-repo.js';
 import {
   cashMoves,
   localHubConfig,
@@ -166,6 +160,8 @@ export interface StoredReturnRecord {
   readonly storeId: UuidV7;
   readonly deviceId: UuidV7;
   readonly saleId: UuidV7;
+  readonly shiftId: UuidV7 | null;
+  readonly shiftCashierSessionId: UuidV7 | null;
   readonly processedByUserId: UuidV7;
   readonly overrideApprovedByUserId: UuidV7 | null;
   readonly overrideApprovedAtMs: UnixMs | null;
@@ -248,6 +244,8 @@ function toStoredReturnRecord(
     storeId: row.storeId,
     deviceId: row.deviceId,
     saleId: row.saleId,
+    shiftId: row.shiftId,
+    shiftCashierSessionId: row.shiftCashierSessionId,
     processedByUserId: row.processedByUserId,
     overrideApprovedByUserId: row.overrideApprovedByUserId,
     overrideApprovedAtMs: row.overrideApprovedAtMs,
@@ -285,6 +283,7 @@ function toStoredVoidedSale(
     completedByUserId: row.completedByUserId,
     customerId: row.customerId,
     shiftId: row.shiftId,
+    shiftCashierSessionId: row.shiftCashierSessionId,
     clientRequestId: row.clientRequestId,
     status: 'voided',
     subtotalGross: row.subtotalGross,
@@ -558,7 +557,14 @@ export class SqliteReturnStore {
         });
       }
 
-      // 2) Load sale and enforce MONOTONE, zero prior returns, F3 fiscal gate, and V1 business day
+      // 2) Require active open shift + cashier session access (X2), then enforce MONOTONE, zero prior returns, F3 fiscal gate, & V1 same-open-shift
+      const activeShift = requireOpenShiftSessionSync(session.db, {
+        organizationId: ctx.organizationId,
+        storeId: ctx.storeId,
+        deviceId: ctx.uow.deviceId,
+        actorUserId: validActorId,
+      });
+
       const saleRow = session.db
         .select()
         .from(sales)
@@ -577,6 +583,13 @@ export class SqliteReturnStore {
       }
       if (saleRow.voidedAtMs !== null) {
         throw new DomainError('SALE_ALREADY_VOIDED', `Sale "${validSaleId}" is already voided`);
+      }
+
+      if (saleRow.shiftId !== activeShift.shift.id) {
+        throw new DomainError(
+          'SHIFT_ALREADY_CLOSED',
+          `Sale "${validSaleId}" belongs to another or closed shift and cannot be voided; create a return instead`,
+        );
       }
 
       const existingReturn = session.db
@@ -600,19 +613,6 @@ export class SqliteReturnStore {
 
       assertSaleNotFiscalizedForVoidSync(session, saleRow);
 
-      const hubCfg = session.db
-        .select({ storeTimezone: localHubConfig.storeTimezone })
-        .from(localHubConfig)
-        .where(eq(localHubConfig.organizationId, ctx.organizationId))
-        .limit(1)
-        .all()[0];
-      assertSaleVoidBusinessDay({
-        saleCreatedAtMs: saleRow.createdAtMs,
-        nowMs,
-        storeTimezone: hubCfg?.storeTimezone ?? DEFAULT_STORE_TIMEZONE,
-        resolveTimeZoneDateKey: resolveIntlDateKey,
-      });
-
       const lineRows = session.db
         .select()
         .from(saleLines)
@@ -626,15 +626,19 @@ export class SqliteReturnStore {
         .orderBy(asc(payments.createdAtMs))
         .all();
 
-      // 3) V2: Cash drawer check applies equally to voidSale!
+      // 3) V2 + X1: Cash drawer sufficiency uses active open shift's balance only!
       const cashRefundAmount = sumNetCashPayments(paymentRows);
       const cashRefundTiyin = moneyToTiyin(cashRefundAmount);
       if (cashRefundTiyin > 0n) {
-        const drawerBalance = getCashDrawerBalanceSync(session.db, {
-          organizationId: ctx.organizationId,
-          storeId: ctx.storeId,
-          deviceId: ctx.uow.deviceId,
-        });
+        const drawerBalance = getActiveShiftDrawerBalanceSync(
+          session.db,
+          session.internalGetSqlite(),
+          {
+            organizationId: ctx.organizationId,
+            storeId: ctx.storeId,
+            deviceId: ctx.uow.deviceId,
+          },
+        );
         if (moneyToTiyin(drawerBalance) < cashRefundTiyin) {
           throw new DomainError(
             'INSUFFICIENT_CASH_IN_DRAWER',
@@ -751,19 +755,21 @@ export class SqliteReturnStore {
         });
       }
 
-      // 7) Record compensating cash outflow in `cash_moves` (`refund_cash_out`)
+      // 7) Record compensating cash outflow in `cash_moves` (`refund_cash_out`), stamped with X2 cashier session
       if (cashRefundTiyin > 0n) {
         const cashPaymentRow = paymentRows.find((p) => p.method === 'cash');
         insertFact(session, cashMoves, {
           organizationId: ctx.organizationId,
           storeId: ctx.storeId,
           values: {
-            shiftId: null,
+            shiftId: activeShift.shift.id,
+            shiftCashierSessionId: activeShift.activeSession.id,
             type: 'refund_cash_out',
             amountDelta: negateMoney(cashRefundAmount),
             sourceType: 'sale_void',
             sourceId: saleRow.id,
             paymentId: cashPaymentRow?.id ?? null,
+            expenseCategory: null,
             reason: `Void ${saleRow.receiptCode}: ${cleanReason}`,
             createdByUserId: validActorId,
           },
@@ -859,7 +865,14 @@ export class SqliteReturnStore {
         });
       }
 
-      // 2) Load target sale & reject voided sales
+      // 2) Require active open shift + cashier session access (X2), then load target sale
+      const activeShift = requireOpenShiftSessionSync(session.db, {
+        organizationId: ctx.organizationId,
+        storeId: ctx.storeId,
+        deviceId: ctx.uow.deviceId,
+        actorUserId: validActorId,
+      });
+
       const saleRow = session.db
         .select()
         .from(sales)
@@ -1109,11 +1122,15 @@ export class SqliteReturnStore {
 
       const cashRefundTiyin = moneyToTiyin(resolvedPayments.cashRefundAmount);
       if (cashRefundTiyin > 0n) {
-        const drawerBalance = getCashDrawerBalanceSync(session.db, {
-          organizationId: ctx.organizationId,
-          storeId: ctx.storeId,
-          deviceId: ctx.uow.deviceId,
-        });
+        const drawerBalance = getActiveShiftDrawerBalanceSync(
+          session.db,
+          session.internalGetSqlite(),
+          {
+            organizationId: ctx.organizationId,
+            storeId: ctx.storeId,
+            deviceId: ctx.uow.deviceId,
+          },
+        );
         if (moneyToTiyin(drawerBalance) < cashRefundTiyin) {
           throw new DomainError(
             'INSUFFICIENT_CASH_IN_DRAWER',
@@ -1147,6 +1164,8 @@ export class SqliteReturnStore {
         storeId: ctx.storeId,
         values: {
           saleId: saleRow.id,
+          shiftId: activeShift.shift.id,
+          shiftCashierSessionId: activeShift.activeSession.id,
           returnNo,
           returnCode,
           processedByUserId: validActorId,
@@ -1236,12 +1255,14 @@ export class SqliteReturnStore {
           organizationId: ctx.organizationId,
           storeId: ctx.storeId,
           values: {
-            shiftId: null,
+            shiftId: activeShift.shift.id,
+            shiftCashierSessionId: activeShift.activeSession.id,
             type: 'refund_cash_out',
             amountDelta: negateMoney(resolvedPayments.cashRefundAmount),
             sourceType: 'return',
             sourceId: returnId,
             paymentId: null,
+            expenseCategory: null,
             reason: `Return ${returnCode}: ${cleanReason}`,
             createdByUserId: validActorId,
           },

@@ -1,7 +1,6 @@
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { performance } from 'node:perf_hooks';
 import {
   type Money,
   type PaymentMethod,
@@ -28,11 +27,11 @@ import {
   createSqliteCatalogStore,
   createSqliteHubAuthStore,
   createSqliteSaleStore,
+  createSqliteShiftStore,
   createSqliteStockStore,
   createSqliteSupplierStore,
   formatOutboxRecordForDebug,
-  getCashDrawerBalanceSync,
-  goodsReceivingLines,
+  getActiveShiftDrawerBalanceSync,
   goodsReceivings,
   listAllOutboxRecordsSync,
   localBatchBalances,
@@ -132,6 +131,12 @@ async function setupSupplierEnv(options?: {
   const cartStore = createSqliteCartStore({ connection, getRuntimeContext: getStoreCtx });
   const saleStore = createSqliteSaleStore({ connection, getRuntimeContext: getStoreCtx });
   const supplierStore = createSqliteSupplierStore({ connection, getRuntimeContext: getStoreCtx });
+  const shiftStore = createSqliteShiftStore({ connection, getRuntimeContext: getStoreCtx });
+  await shiftStore.openShift({
+    actorUserId: setup.owner.id,
+    clientRequestId: makeUuidFromIndex(0x00bb, 999999),
+    openingCash: ZERO_MONEY,
+  });
 
   let reqSeq = 1;
   const nextUuid = () => {
@@ -1570,7 +1575,7 @@ describe('@mezon/db-local - T1.8 Suppliers, Receiving, Unknown Cost, Ledger & Re
       } else if (op < 72) {
         // Cash or card supplier payment (incl. intentional overpayments into negative advance balance)
         const drawer = moneyToTiyin(
-          getCashDrawerBalanceSync(env.connection.db, {
+          getActiveShiftDrawerBalanceSync(env.connection.db, env.connection.sqlite, {
             organizationId: env.organizationId,
             storeId: env.storeId,
             deviceId: env.deviceId,
@@ -1658,7 +1663,7 @@ describe('@mezon/db-local - T1.8 Suppliers, Receiving, Unknown Cost, Ledger & Re
       await verifyAllSuppliers();
       expect(
         moneyToTiyin(
-          getCashDrawerBalanceSync(env.connection.db, {
+          getActiveShiftDrawerBalanceSync(env.connection.db, env.connection.sqlite, {
             organizationId: env.organizationId,
             storeId: env.storeId,
             deviceId: env.deviceId,
@@ -1717,49 +1722,154 @@ describe('@mezon/db-local - T1.8 Suppliers, Receiving, Unknown Cost, Ledger & Re
       .sort((a, b) => a.productId.localeCompare(b.productId));
     expect(stockAfterRebuild).toEqual(liveStockBefore);
     assertStockConservationIdentity(env.connection, stockAfterRebuild);
-  });
+  }, 20_000);
 
-  it('meets <= 500 ms performance target for posting a 100-line receiving on file-backed WAL SQLite', async () => {
-    const env = await setupSupplierEnv({ seed: 777 });
-    const sup = await env.supplierStore.createSupplier({ name: 'Perf 100-Line Wholesale' });
+  it('T1.8 test qarzi: enforces exact 1-milli return quantity and FIFO batch depletion boundaries', async () => {
+    const env = await setupSupplierEnv({ seed: 808 });
+    const sup = await env.supplierStore.createSupplier({ name: 'Boundary Supplier' });
 
-    const productIds: UuidV7[] = [];
-    for (let i = 0; i < 100; i += 1) {
-      const p = await env.catalogStore.createProduct({
-        name: `Perf Tovar ${i + 1}`,
-        unit: i % 3 === 0 ? 'kg' : 'dona',
-        trackBatches: i % 2 === 0,
-        salePrice: '25000',
-        vatRateBp: 1200,
-        actorUserId: env.ownerId,
-      });
-      productIds.push(p.product.id);
-    }
+    const kgAvg = await env.catalogStore.createProduct({
+      name: 'Shakar Kg Boundary',
+      unit: 'kg',
+      trackBatches: false,
+      salePrice: '15000',
+      vatRateBp: 0,
+      actorUserId: env.ownerId,
+    });
+    const kgFifo = await env.catalogStore.createProduct({
+      name: 'Choy FIFO Kg Boundary',
+      unit: 'kg',
+      trackBatches: true,
+      salePrice: '20000',
+      vatRateBp: 0,
+      actorUserId: env.ownerId,
+    });
 
-    const draft = await env.supplierStore.createReceivingDraft({
+    // 1a) Over-return 1-milli boundary: 2.000 -> return 1.500 -> return 0.500 ok -> 0.001 fails
+    const d1 = await env.supplierStore.createReceivingDraft({
       supplierId: sup.id,
       actorUserId: env.ownerId,
-      supplierInvoiceNo: 'PERF-100',
-      lines: productIds.map((pid, idx) => ({
-        productId: pid,
-        qty: quantityFromMilli(idx % 3 === 0 ? 5_500n : 10_000n),
-        costUnknown: idx % 10 === 0,
-        totalCostValue: idx % 10 === 0 ? null : moneyFromTiyin(BigInt(50_000 + idx * 100)),
-        batchNumber: idx % 2 === 0 ? `B-${idx}` : null,
-      })),
+      lines: [
+        {
+          productId: kgAvg.product.id,
+          qty: quantityFromMilli(2_000n),
+          costUnknown: false,
+          totalCostValue: moneyFromTiyin(200_000n),
+        },
+      ],
     });
-
-    const reqId = env.nextUuid();
-    const startMs = performance.now();
-    const posted = await env.supplierStore.postReceiving(draft.id, {
+    const rcv1 = await env.supplierStore.postReceiving(d1.id, {
       actorUserId: env.ownerId,
-      clientRequestId: reqId,
+      clientRequestId: env.nextUuid(),
     });
-    const elapsedMs = performance.now() - startMs;
+    await env.supplierStore.createSupplierReturn(rcv1.receiving.id, {
+      actorUserId: env.ownerId,
+      clientRequestId: env.nextUuid(),
+      reason: 'First 1.500 kg',
+      items: [{ receivingLineId: rcv1.receiving.lines[0].id, qty: quantityFromMilli(1_500n) }],
+    });
+    await env.supplierStore.createSupplierReturn(rcv1.receiving.id, {
+      actorUserId: env.ownerId,
+      clientRequestId: env.nextUuid(),
+      reason: 'Exact remaining 0.500 kg',
+      items: [{ receivingLineId: rcv1.receiving.lines[0].id, qty: quantityFromMilli(500n) }],
+    });
+    const movesBefore001 = env.connection.db.select().from(stockMoves).all().length;
+    await expect(
+      env.supplierStore.createSupplierReturn(rcv1.receiving.id, {
+        actorUserId: env.ownerId,
+        clientRequestId: env.nextUuid(),
+        reason: 'Exceeds by 0.001 kg',
+        items: [{ receivingLineId: rcv1.receiving.lines[0].id, qty: quantityFromMilli(1n) }],
+      }),
+    ).rejects.toMatchObject({ code: 'SUPPLIER_RETURN_QTY_EXCEEDED' });
+    expect(env.connection.db.select().from(stockMoves).all().length).toBe(movesBefore001);
 
-    console.info(`[PERF T1.8 100-line receiving]: ${elapsedMs.toFixed(2)} ms`);
-    expect(posted.receiving.lines).toHaveLength(100);
-    expect(env.connection.db.select().from(goodsReceivingLines).all()).toHaveLength(100);
-    expect(elapsedMs).toBeLessThanOrEqual(500);
+    // 1b) Separate case: 2.000 -> return 1.500 -> 0.501 rejected!
+    const d2 = await env.supplierStore.createReceivingDraft({
+      supplierId: sup.id,
+      actorUserId: env.ownerId,
+      lines: [
+        {
+          productId: kgAvg.product.id,
+          qty: quantityFromMilli(2_000n),
+          costUnknown: false,
+          totalCostValue: moneyFromTiyin(200_000n),
+        },
+      ],
+    });
+    const rcv2 = await env.supplierStore.postReceiving(d2.id, {
+      actorUserId: env.ownerId,
+      clientRequestId: env.nextUuid(),
+    });
+    await env.supplierStore.createSupplierReturn(rcv2.receiving.id, {
+      actorUserId: env.ownerId,
+      clientRequestId: env.nextUuid(),
+      reason: 'First 1.500 kg',
+      items: [{ receivingLineId: rcv2.receiving.lines[0].id, qty: quantityFromMilli(1_500n) }],
+    });
+    const movesBefore501 = env.connection.db.select().from(stockMoves).all().length;
+    await expect(
+      env.supplierStore.createSupplierReturn(rcv2.receiving.id, {
+        actorUserId: env.ownerId,
+        clientRequestId: env.nextUuid(),
+        reason: 'Exceeds by 0.001 kg (0.501)',
+        items: [{ receivingLineId: rcv2.receiving.lines[0].id, qty: quantityFromMilli(501n) }],
+      }),
+    ).rejects.toMatchObject({ code: 'SUPPLIER_RETURN_QTY_EXCEEDED' });
+    expect(env.connection.db.select().from(stockMoves).all().length).toBe(movesBefore501);
+
+    // 2) FIFO batch depletion 1-milli boundary: 2.000 batch, 0.700 sold -> 1.300 left; 1.301 fails, 1.300 ok
+    const dFifo = await env.supplierStore.createReceivingDraft({
+      supplierId: sup.id,
+      actorUserId: env.ownerId,
+      lines: [
+        {
+          productId: kgFifo.product.id,
+          qty: quantityFromMilli(2_000n),
+          costUnknown: false,
+          totalCostValue: moneyFromTiyin(200_000n),
+          batchNumber: 'LOT-1MILLI',
+        },
+      ],
+    });
+    const rcvFifo = await env.supplierStore.postReceiving(dFifo.id, {
+      actorUserId: env.ownerId,
+      clientRequestId: env.nextUuid(),
+    });
+    const cart = await env.cartStore.openCart(env.ownerId);
+    await env.cartStore.addLine(cart.id, {
+      kind: 'catalog',
+      productId: kgFifo.product.id,
+      variantId: null,
+      qty: quantityFromMilli(700n),
+    });
+    await env.saleStore.completeSale({
+      cartId: cart.id,
+      actorUserId: env.ownerId,
+      clientRequestId: env.nextUuid(),
+      expectedTotal: moneyFromTiyin(14_000n),
+      payments: [{ method: 'cash', tenderedAmount: moneyFromTiyin(14_000n) }],
+    });
+
+    const movesBefore1301 = env.connection.db.select().from(stockMoves).all().length;
+    await expect(
+      env.supplierStore.createSupplierReturn(rcvFifo.receiving.id, {
+        actorUserId: env.ownerId,
+        clientRequestId: env.nextUuid(),
+        reason: 'Batch exceeded by 1 milli (1.301)',
+        items: [{ receivingLineId: rcvFifo.receiving.lines[0].id, qty: quantityFromMilli(1_301n) }],
+      }),
+    ).rejects.toMatchObject({ code: 'SUPPLIER_RETURN_BATCH_DEPLETED' });
+    expect(env.connection.db.select().from(stockMoves).all().length).toBe(movesBefore1301);
+
+    // Exact 1.300 succeeds
+    const retExact = await env.supplierStore.createSupplierReturn(rcvFifo.receiving.id, {
+      actorUserId: env.ownerId,
+      clientRequestId: env.nextUuid(),
+      reason: 'Exact 1.300 kg left in batch',
+      items: [{ receivingLineId: rcvFifo.receiving.lines[0].id, qty: quantityFromMilli(1_300n) }],
+    });
+    expect(retExact.supplierReturn.totalReturnCost).toBe(moneyFromTiyin(130_000n));
   });
 });

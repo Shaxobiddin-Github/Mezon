@@ -45,6 +45,12 @@ describe('@mezon/domain - auth rules, RBAC, and PIN security policy', () => {
     expect(roleHasPermission('owner', 'receiving:write')).toBe(true);
     expect(roleHasPermission('owner', 'supplier_debt:pay')).toBe(true);
     expect(roleHasPermission('owner', 'supplier_debt:manage')).toBe(true);
+    expect(roleHasPermission('owner', 'shifts:read')).toBe(true);
+    expect(roleHasPermission('owner', 'shifts:open')).toBe(true);
+    expect(roleHasPermission('owner', 'shifts:close')).toBe(true);
+    expect(roleHasPermission('owner', 'shifts:reclose')).toBe(true);
+    expect(roleHasPermission('owner', 'shifts:cash_move')).toBe(true);
+    expect(roleHasPermission('owner', 'day_close:execute')).toBe(true);
 
     expect(roleHasPermission('manager', 'auth:self')).toBe(true);
     expect(roleHasPermission('manager', 'users:read')).toBe(true);
@@ -71,6 +77,12 @@ describe('@mezon/domain - auth rules, RBAC, and PIN security policy', () => {
     expect(roleHasPermission('manager', 'receiving:write')).toBe(true);
     expect(roleHasPermission('manager', 'supplier_debt:pay')).toBe(true);
     expect(roleHasPermission('manager', 'supplier_debt:manage')).toBe(true);
+    expect(roleHasPermission('manager', 'shifts:read')).toBe(true);
+    expect(roleHasPermission('manager', 'shifts:open')).toBe(true);
+    expect(roleHasPermission('manager', 'shifts:close')).toBe(true);
+    expect(roleHasPermission('manager', 'shifts:reclose')).toBe(true);
+    expect(roleHasPermission('manager', 'shifts:cash_move')).toBe(true);
+    expect(roleHasPermission('manager', 'day_close:execute')).toBe(true);
 
     expect(roleHasPermission('cashier', 'auth:self')).toBe(true);
     expect(roleHasPermission('cashier', 'users:read')).toBe(false);
@@ -97,6 +109,12 @@ describe('@mezon/domain - auth rules, RBAC, and PIN security policy', () => {
     expect(roleHasPermission('cashier', 'receiving:write')).toBe(false);
     expect(roleHasPermission('cashier', 'supplier_debt:pay')).toBe(false);
     expect(roleHasPermission('cashier', 'supplier_debt:manage')).toBe(false);
+    expect(roleHasPermission('cashier', 'shifts:read')).toBe(true);
+    expect(roleHasPermission('cashier', 'shifts:open')).toBe(true);
+    expect(roleHasPermission('cashier', 'shifts:close')).toBe(true);
+    expect(roleHasPermission('cashier', 'shifts:reclose')).toBe(false);
+    expect(roleHasPermission('cashier', 'shifts:cash_move')).toBe(false);
+    expect(roleHasPermission('cashier', 'day_close:execute')).toBe(false);
   });
 
   it('validates 6-12 digit PINs and rejects trivial or leaking error messages', () => {

@@ -52,6 +52,8 @@ export {
   readReceivingSeqSync,
   advanceSupplierReturnSeqSync,
   readSupplierReturnSeqSync,
+  advanceShiftSeqSync,
+  readShiftSeqSync,
   SqliteDeviceStateRepository,
 } from './device-state.js';
 
@@ -134,6 +136,12 @@ export {
   supplierReturnLines,
   supplierLedger,
   localSupplierBalances,
+  shifts,
+  shiftCashierSessions,
+  shiftClosures,
+  shiftClosureMethodTotals,
+  shiftClosureCashiers,
+  dayCloses,
 } from './schema/index.js';
 
 export {
@@ -165,6 +173,8 @@ export {
   buildSalesLinesViewSql,
   assertReturnAndViewMigrationsComplete,
 } from './sale-migrations.js';
+
+export { buildShiftTriggersSql, assertShiftMigrationsComplete } from './shift-migrations.js';
 
 export {
   type HubConfigSnapshot,
@@ -254,11 +264,46 @@ export {
   type StoredCashMoveRecord,
   type StoredSaleRecord,
   type CompleteSaleOutcome,
-  getCashDrawerBalanceSync,
-  getStoreCashBalanceSync,
+  getHistoricalCashMovesTotalSync,
+  getHistoricalStoreCashMovesTotalSync,
   SqliteSaleStore,
   createSqliteSaleStore,
 } from './sale-repo.js';
+
+export {
+  type ShiftRuntimeContext,
+  type CreateSqliteShiftStoreOptions,
+  type ActiveShiftSessionContext,
+  type StoredShiftCashierSessionRecord,
+  type StoredShiftRecord,
+  type StoredShiftClosureMethodTotalRecord,
+  type StoredShiftClosureCashierRecord,
+  type StoredShiftClosureRecord,
+  type StoredDayCloseRecord,
+  type CurrentShiftOutcome,
+  type OpenShiftInput,
+  type OpenShiftOutcome,
+  type HandoffCashierInput,
+  type HandoffCashierOutcome,
+  type CloseShiftInput,
+  type RecloseShiftInput,
+  type CloseShiftOutcome,
+  type RecordShiftCashMoveInput,
+  type ShiftCashMoveOutcome,
+  type CloseBusinessDayInput,
+  type CloseBusinessDayOutcome,
+  type ShiftListQueryInput,
+  type ShiftListOutcome,
+  type DayCloseListQueryInput,
+  type DayCloseListOutcome,
+  type ShiftDetailOutcome,
+  getActiveShiftSessionSync,
+  requireOpenShiftSessionSync,
+  getActiveShiftDrawerBalanceSync,
+  getActiveStoreCashBalanceSync,
+  SqliteShiftStore,
+  createSqliteShiftStore,
+} from './shift-repo.js';
 
 export {
   type ReturnRuntimeContext,
