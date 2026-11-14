@@ -467,6 +467,8 @@ export {
 export {
   type BackupMetadata,
   type StagedRestoreIntent,
+  type StagedRestoreExecutionOutcome,
+  type PostRestoreRebuildResult,
   type BackupServiceOptions,
   SqliteBackupService,
 } from './backup-service.js';

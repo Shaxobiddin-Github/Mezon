@@ -134,7 +134,7 @@ export async function createHubServer(options: CreateHubServerOptions): Promise<
   });
 
   const backupDir = path.join(path.dirname(options.dbPath), 'backups');
-  SqliteBackupService.executeStagedRestoreIfPending({
+  const restoreOutcome = await SqliteBackupService.executeStagedRestoreIfPending({
     dbPath: options.dbPath,
     backupDir,
   });
@@ -293,6 +293,17 @@ export async function createHubServer(options: CreateHubServerOptions): Promise<
       pinHasher,
       random,
     });
+    if (restoreOutcome.wasRestored) {
+      await SqliteBackupService.executePostRestoreRebuildAndVerify({
+        connection,
+        backupDir,
+        backupId: restoreOutcome.backupId,
+        stockStore,
+        customerStore,
+        supplierStore,
+        logger,
+      });
+    }
     catalogService = new HubCatalogService(catalogStore);
     stockService = new HubStockService(stockStore);
     cartService = new HubCartService(cartStore, authService);

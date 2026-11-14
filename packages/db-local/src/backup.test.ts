@@ -1,3 +1,5 @@
+import { spawnSync } from 'node:child_process';
+import { createHash } from 'node:crypto';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -17,10 +19,12 @@ import {
   SqliteBackupService,
   createSqliteCartStore,
   createSqliteCatalogStore,
+  createSqliteCustomerStore,
   createSqliteHubAuthStore,
   createSqliteSaleStore,
   createSqliteShiftStore,
   createSqliteStockStore,
+  createSqliteSupplierStore,
   migrateLocalDatabase,
   openLocalSqliteDatabase,
 } from './index.js';
@@ -105,6 +109,14 @@ async function setupBackupEnv(options?: { readonly initialMs?: bigint }) {
     connection,
     getRuntimeContext: getStoreCtx,
   });
+  const customerStore = createSqliteCustomerStore({
+    connection,
+    getRuntimeContext: getStoreCtx,
+  });
+  const supplierStore = createSqliteSupplierStore({
+    connection,
+    getRuntimeContext: getStoreCtx,
+  });
 
   const backupService = new SqliteBackupService({
     connection,
@@ -125,6 +137,8 @@ async function setupBackupEnv(options?: { readonly initialMs?: bigint }) {
     cartStore,
     saleStore,
     shiftStore,
+    customerStore,
+    supplierStore,
     backupService,
     ownerId: setup.owner.id,
   };
@@ -345,8 +359,8 @@ describe('T1.13: SqliteBackupService & R2/R3 Restore Lifecycle', () => {
 
     // Live DB currently has receipt_seq = 5
     const stateBefore = env.connection.sqlite
-      .prepare<[], { last_receipt_seq: unknown; last_device_seq: unknown }>(
-        'SELECT last_receipt_seq, last_device_seq FROM local_device_state LIMIT 1',
+      .prepare<[], { last_receipt_seq: unknown; last_device_seq: unknown; last_hlc: unknown }>(
+        'SELECT last_receipt_seq, last_device_seq, last_hlc FROM local_device_state LIMIT 1',
       )
       .get()!;
     expect(Number(stateBefore.last_receipt_seq)).toBe(5);
@@ -362,11 +376,11 @@ describe('T1.13: SqliteBackupService & R2/R3 Restore Lifecycle', () => {
     openConnections.length = 0;
 
     // 6. Execute staged restore via hub startup lifecycle
-    const restored = SqliteBackupService.executeStagedRestoreIfPending({
+    const restored = await SqliteBackupService.executeStagedRestoreIfPending({
       dbPath: env.dbPath,
       backupDir: env.backupDir,
     });
-    expect(restored).toBe(true);
+    expect(restored.wasRestored).toBe(true);
     expect(fs.existsSync(path.join(env.backupDir, 'pending-restore.json'))).toBe(false);
 
     // 7. Re-open DB and verify:
@@ -381,8 +395,8 @@ describe('T1.13: SqliteBackupService & R2/R3 Restore Lifecycle', () => {
     expect(Number(salesCountRow.count)).toBe(2);
 
     const stateAfter = reconnected.sqlite
-      .prepare<[], { last_receipt_seq: unknown; last_device_seq: unknown }>(
-        'SELECT last_receipt_seq, last_device_seq FROM local_device_state LIMIT 1',
+      .prepare<[], { last_receipt_seq: unknown; last_device_seq: unknown; last_hlc: unknown }>(
+        'SELECT last_receipt_seq, last_device_seq, last_hlc FROM local_device_state LIMIT 1',
       )
       .get()!;
 
@@ -390,6 +404,7 @@ describe('T1.13: SqliteBackupService & R2/R3 Restore Lifecycle', () => {
     expect(BigInt(stateAfter.last_device_seq as string | number)).toBeGreaterThanOrEqual(
       BigInt(stateBefore.last_device_seq as string | number),
     );
+    expect(String(stateAfter.last_hlc) >= String(stateBefore.last_hlc)).toBe(true);
 
     // 8. Next sale generates receipt #6 (never rewinds or collides with #3, #4, #5)
     const reAuth = await createSqliteHubAuthStore({
@@ -439,5 +454,359 @@ describe('T1.13: SqliteBackupService & R2/R3 Restore Lifecycle', () => {
     });
 
     expect(nextSale.sale.receiptNo).toBe(6n);
+  });
+
+  it('B1: safety pre-restore backup checkpoints WAL and includes uncheckpointed crash commits', async () => {
+    const env = await setupBackupEnv();
+
+    // 1. Initial backup before crash commit
+    const backupInit = await env.backupService.createBackup({ reason: 'Initial checkpoint' });
+
+    // Close parent connection so child can write to WAL exclusively
+    env.connection.close();
+    openConnections.length = 0;
+
+    // 2. Child process connects to SQLite with journal_mode=WAL, commits a new row, then process.exit(0) without closing!
+    const crashScript = path.join(env.dir, 'child-wal-crash.mjs');
+    const crashedProductId = '01950000-0000-7000-8000-000000000999';
+    fs.writeFileSync(
+      crashScript,
+      `
+      import { createRequire } from 'node:module';
+      const localRequire = createRequire(${JSON.stringify(import.meta.url)});
+      const Database = localRequire('better-sqlite3');
+      const db = new Database(${JSON.stringify(env.dbPath)});
+      db.pragma('journal_mode = WAL');
+      const dev = db.prepare('SELECT organization_id, device_id, last_hlc FROM local_device_state LIMIT 1').get();
+      db.prepare(\`
+        INSERT INTO products (
+          id, organization_id, device_id, hlc, created_at_ms, updated_at_ms, name, name_search, unit, sale_price, vat_rate_bp
+        ) VALUES (
+          ?, ?, ?, ?, 1763100000000, 1763100000000, 'Crash Product', 'crash product', 'dona', 1500000, 0
+        )
+      \`).run(
+        ${JSON.stringify(crashedProductId)},
+        dev.organization_id,
+        dev.device_id,
+        dev.last_hlc
+      );
+      // Exit abruptly without closing DB connection or checkpointing!
+      process.exit(0);
+      `,
+      'utf8',
+    );
+
+    const childRes = spawnSync(process.execPath, [crashScript], {
+      encoding: 'utf8',
+      timeout: 15_000,
+    });
+    expect(childRes.status, childRes.stderr).toBe(0);
+
+    const walFile = `${env.dbPath}-wal`;
+    expect(fs.existsSync(walFile)).toBe(true);
+    expect(fs.statSync(walFile).size).toBeGreaterThan(0);
+
+    // 3. Stage restore to backupInit
+    const stagingPath = path.join(env.backupDir, 'pending-restore.json');
+    fs.writeFileSync(
+      stagingPath,
+      JSON.stringify({
+        backupId: backupInit.id,
+        targetDbPath: env.dbPath,
+        reason: 'B1 crash recovery restore test',
+        actorUserId: env.ownerId,
+        stagedAtMs: Date.now(),
+      }),
+      'utf8',
+    );
+
+    // 4. Execute staged restore: it MUST checkpoint WAL before taking safety backup
+    const outcome = await SqliteBackupService.executeStagedRestoreIfPending({
+      dbPath: env.dbPath,
+      backupDir: env.backupDir,
+    });
+    expect(outcome.wasRestored).toBe(true);
+    expect(outcome.safetyBackupPath).toBeDefined();
+    expect(fs.existsSync(outcome.safetyBackupPath!)).toBe(true);
+
+    // 5. Open safety backup database: verify uncheckpointed crashed commit is present and accounted for!
+    const sDb = new Database(outcome.safetyBackupPath, { readonly: true });
+    try {
+      const row = sDb
+        .prepare('SELECT id, name, sale_price FROM products WHERE id = ?')
+        .get(crashedProductId) as { id: string; name: string; sale_price: unknown } | undefined;
+      expect(row).toBeDefined();
+      expect(row?.id).toBe(crashedProductId);
+      expect(row?.name).toBe('Crash Product');
+    } finally {
+      sDb.close();
+    }
+
+    // 6. Live restored DB should NOT have this product (it was restored to backupInit)
+    const liveDb = openLocalSqliteDatabase(env.dbPath);
+    openConnections.push(liveDb);
+    const liveRow = liveDb.sqlite
+      .prepare('SELECT id FROM products WHERE id = ?')
+      .get(crashedProductId);
+    expect(liveRow).toBeUndefined();
+  });
+
+  it('B2: rejects staged restore and leaves current DB untouched if backup SHA-256 or integrity fails', async () => {
+    const env = await setupBackupEnv();
+
+    const p = (
+      await env.catalogStore.createProduct({
+        actorUserId: env.ownerId,
+        name: 'Guarded Product B2',
+        unit: 'dona',
+        salePrice: '500000',
+        vatRateBp: 0,
+      })
+    ).product;
+
+    const backupA = await env.backupService.createBackup({ reason: 'Valid backup' });
+
+    // Case 1: Tampered byte in backup file (fails SHA-256 and/or integrity)
+    env.backupService.stageRestore({
+      backupId: backupA.id,
+      actorUserId: env.ownerId,
+    });
+
+    env.connection.close();
+    openConnections.length = 0;
+
+    const backupDbFile = path.join(env.backupDir, `${backupA.id}.db`);
+    const originalBuf = fs.readFileSync(backupDbFile);
+    const tamperedBuf = Buffer.from(originalBuf);
+    tamperedBuf[32] = tamperedBuf[32] ^ 0xff; // Flip a byte in SQLite header/data
+    fs.writeFileSync(backupDbFile, tamperedBuf);
+
+    // executeStagedRestoreIfPending MUST throw VALIDATION_ERROR
+    await expect(
+      SqliteBackupService.executeStagedRestoreIfPending({
+        dbPath: env.dbPath,
+        backupDir: env.backupDir,
+      }),
+    ).rejects.toMatchObject({ code: 'VALIDATION_ERROR' });
+
+    // Current database MUST remain completely untouched!
+    const curDb = openLocalSqliteDatabase(env.dbPath);
+    openConnections.push(curDb);
+    const prodRow = curDb.sqlite.prepare('SELECT id, name FROM products WHERE id = ?').get(p.id) as
+      { id: string; name: string } | undefined;
+    expect(prodRow).toBeDefined();
+    expect(prodRow?.name).toBe('Guarded Product B2');
+
+    // Case 2: Corrupted SQLite file failing integrity_check with matching sha
+    curDb.close();
+    openConnections.length = 0;
+
+    const garbageDbPath = path.join(env.backupDir, 'corrupted.db');
+    fs.writeFileSync(garbageDbPath, Buffer.alloc(4096, 0xaa));
+    const garbageSha = createHash('sha256').update(fs.readFileSync(garbageDbPath)).digest('hex');
+    fs.writeFileSync(
+      path.join(env.backupDir, 'corrupted.meta.json'),
+      JSON.stringify({ id: 'corrupted', sha256: garbageSha, filename: 'corrupted.db' }),
+    );
+
+    const stagingPath = path.join(env.backupDir, 'pending-restore.json');
+    fs.writeFileSync(
+      stagingPath,
+      JSON.stringify({
+        backupId: 'corrupted',
+        targetDbPath: env.dbPath,
+        reason: 'corrupted test',
+        actorUserId: env.ownerId,
+        stagedAtMs: Date.now(),
+      }),
+    );
+
+    await expect(
+      SqliteBackupService.executeStagedRestoreIfPending({
+        dbPath: env.dbPath,
+        backupDir: env.backupDir,
+      }),
+    ).rejects.toMatchObject({ code: 'VALIDATION_ERROR' });
+
+    // Again, current database is intact
+    const verifyDb = openLocalSqliteDatabase(env.dbPath);
+    openConnections.push(verifyDb);
+    const intact = verifyDb.sqlite
+      .prepare('SELECT COUNT(*) as cnt FROM products WHERE id = ?')
+      .get(p.id) as { cnt: unknown };
+    expect(Number(intact.cnt)).toBe(1);
+  });
+
+  it('B3: rebuilds stock, customer, and supplier projections post-restore and verifies ledger parity', async () => {
+    const env = await setupBackupEnv();
+
+    const p = (
+      await env.catalogStore.createProduct({
+        actorUserId: env.ownerId,
+        name: 'Olma B3',
+        unit: 'kg',
+        salePrice: '1000000',
+        vatRateBp: 0,
+      })
+    ).product;
+
+    await env.stockStore.recordInboundMove({
+      productId: p.id,
+      qty: '50000', // 50 kg
+      totalCostValue: '25000000',
+      reason: 'purchase',
+      actorUserId: env.ownerId,
+    });
+
+    const cust = await env.customerStore.createCustomer({
+      fullName: 'Anvar B3',
+      phone: '+998901234567',
+      creditLimit: moneyFromTiyin(1_000_000_00n),
+    });
+
+    await env.customerStore.recordDebtAdjustment({
+      customerId: cust.id,
+      actorUserId: env.ownerId,
+      clientRequestId: nextUuid(),
+      amountDelta: moneyFromTiyin(150_000_00n),
+      reason: 'B3 opening debt',
+    });
+
+    const sup = await env.supplierStore.createSupplier({
+      name: 'Supplier B3 MCHJ',
+    });
+
+    await env.supplierStore.recordAdjustment({
+      supplierId: sup.id,
+      actorUserId: env.ownerId,
+      clientRequestId: nextUuid(),
+      amountDelta: moneyFromTiyin(200_000_00n),
+      reason: 'B3 opening payable',
+    });
+
+    // Create backup with consistent ledger + projections
+    const backupConsistent = await env.backupService.createBackup({
+      reason: 'Consistent B3 backup',
+    });
+
+    // Manually corrupt projection tables to simulate stale/desynced projections
+    env.connection.sqlite.prepare('UPDATE local_stock_balances SET qty_on_hand = 999999').run();
+    env.connection.sqlite.prepare('UPDATE local_customer_balances SET balance = 888888').run();
+    env.connection.sqlite.prepare('UPDATE local_supplier_balances SET balance = 777777').run();
+
+    // Stage restore to backupConsistent
+    env.backupService.stageRestore({
+      backupId: backupConsistent.id,
+      actorUserId: env.ownerId,
+    });
+
+    env.connection.close();
+    openConnections.length = 0;
+
+    // Execute staged restore
+    const restoreOutcome = await SqliteBackupService.executeStagedRestoreIfPending({
+      dbPath: env.dbPath,
+      backupDir: env.backupDir,
+    });
+    expect(restoreOutcome.wasRestored).toBe(true);
+
+    const reconnected = openLocalSqliteDatabase(env.dbPath);
+    openConnections.push(reconnected);
+
+    // Run post-restore rebuild and verification
+    const rebuildOutcome = await SqliteBackupService.executePostRestoreRebuildAndVerify({
+      connection: reconnected,
+      backupDir: env.backupDir,
+      backupId: restoreOutcome.backupId,
+    });
+
+    expect(rebuildOutcome.stockResult).toBeDefined();
+    expect(rebuildOutcome.customerResult).toBeDefined();
+    expect(rebuildOutcome.supplierResult).toBeDefined();
+
+    // Verify projection = ledger parity:
+    const stockRow = reconnected.sqlite
+      .prepare('SELECT qty_on_hand FROM local_stock_balances WHERE product_id = ?')
+      .get(p.id) as { qty_on_hand: unknown };
+    expect(Number(stockRow.qty_on_hand)).toBe(50000); // 50 kg exactly matching stock_moves
+
+    const custRow = reconnected.sqlite
+      .prepare('SELECT balance FROM local_customer_balances WHERE customer_id = ?')
+      .get(cust.id) as { balance: unknown };
+    expect(Number(custRow.balance)).toBe(15000000); // 150,000 so'm exactly matching customer_ledger
+
+    const supRow = reconnected.sqlite
+      .prepare('SELECT balance FROM local_supplier_balances WHERE supplier_id = ?')
+      .get(sup.id) as { balance: unknown };
+    expect(Number(supRow.balance)).toBe(20000000); // 200,000 so'm exactly matching supplier_ledger
+  });
+
+  it('B4: advances last_hlc to max(restored, current) lexicographically across restore', async () => {
+    const env = await setupBackupEnv();
+
+    const p = (
+      await env.catalogStore.createProduct({
+        actorUserId: env.ownerId,
+        name: 'HLC Test Product',
+        unit: 'dona',
+        salePrice: '100000',
+        vatRateBp: 0,
+      })
+    ).product;
+
+    // Checkpoint A has an earlier HLC
+    const backupA = await env.backupService.createBackup({ reason: 'HLC checkpoint A' });
+
+    // Read HLC at checkpoint A
+    const hlcAtA = (
+      env.connection.sqlite.prepare('SELECT last_hlc FROM local_device_state LIMIT 1').get() as {
+        last_hlc: string;
+      }
+    ).last_hlc;
+
+    // Advance system clock and perform multiple operations to generate a strictly higher HLC
+    env.clock.advance(120_000n);
+    await env.stockStore.recordInboundMove({
+      productId: p.id,
+      qty: '10000',
+      totalCostValue: '500000',
+      reason: 'purchase',
+      actorUserId: env.ownerId,
+    });
+
+    const hlcBeforeRestore = (
+      env.connection.sqlite.prepare('SELECT last_hlc FROM local_device_state LIMIT 1').get() as {
+        last_hlc: string;
+      }
+    ).last_hlc;
+
+    expect(hlcBeforeRestore > hlcAtA).toBe(true);
+
+    // Stage restore to checkpoint A
+    env.backupService.stageRestore({
+      backupId: backupA.id,
+      actorUserId: env.ownerId,
+    });
+
+    env.connection.close();
+    openConnections.length = 0;
+
+    await SqliteBackupService.executeStagedRestoreIfPending({
+      dbPath: env.dbPath,
+      backupDir: env.backupDir,
+    });
+
+    // Reopen and check that last_hlc was advanced to max(restored, current) = hlcBeforeRestore
+    const reconnected = openLocalSqliteDatabase(env.dbPath);
+    openConnections.push(reconnected);
+
+    const hlcAfterRestore = (
+      reconnected.sqlite.prepare('SELECT last_hlc FROM local_device_state LIMIT 1').get() as {
+        last_hlc: string;
+      }
+    ).last_hlc;
+
+    expect(hlcAfterRestore).toBe(hlcBeforeRestore);
+    expect(hlcAfterRestore > hlcAtA).toBe(true);
   });
 });
