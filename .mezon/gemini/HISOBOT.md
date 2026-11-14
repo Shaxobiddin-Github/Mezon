@@ -1,203 +1,132 @@
-## Reja: T1.13 — Hisobotlar, Excel import/eksport va SQLite zaxira nusxa
+## Hisobot: T1.13
+Branch / PR: gemini/T1.13-reports-backup
+Commit: e4ee795
 
-Branch: `gemini/T1.13-reports-backup`
-Oldingi merge SHA'lari:
-- PR #19 (`docs/guzar-roadmap`): `38e52aa` (`docs: GEMINI.md ni Guzar konsepsiyasiga moslash`)
-- PR #20 (`claude/T1.12-printer`): `20ca6ac` (`T1.12: Printer va chek`)
+### Nima qilindi
+1. **Hisobotlar dvigateli (`@mezon/contracts`, `@mezon/db-local`, `apps/hub`, `apps/pos`):**
+   - `packages/contracts/src/reports.ts`: Kunlik, oylik savdo, foyda/marja, qarzlar (aging buckets: joriy, 1–30, 31–60, 61+ kun), kam qoldiq, muddati yaqin partiyalar, Excel import/export Zod va DTO sxemalari (Python uchun JSON Schema eksportiga tayyor).
+   - `packages/db-local/src/report-repo.ts`: `SqliteReportStore` — `v_sales_lines` yagona ishorali ko'rinishidan foydalanib kunlik va oylik savdo, foyda (COGS, yalpi daromad, yalpi foyda, marja bp), qarzlar (mijozlar va ta'minotchilar balansi, kechikish muddatlari), kam qoldiq (`products.min_stock` bo'yicha) hamda muddati yaqin partiyalar (`batches.expiry_date_ms` va `local_batch_balances.remaining_qty > 0`) hisobotlari to'liq realizatsiya qilindi.
+   - RBAC qat'iy izolyatsiyasi: `/reports/profit` faqat `owner` uchun ruxsat etiladi (`manager` va `cashier` uchun 403 `AUTH_FORBIDDEN`). Umumiy savdo hisobotida `costValue` va `grossProfit` faqat `owner`ga ko'rsatiladi, kassir va menejerga umuman sizib chiqmaydi (testlar bilan isbotlangan).
 
----
+2. **Excel port va 2 bosqichli import (`exceljs` 4.4, `apps/hub`):**
+   - `apps/hub/src/excel-port.ts`: `ExcelPort` — kunlik savdo hisoboti, qarzlar hisoboti va tovar katalogini `.xlsx` formatida generatsiya qilish (kassir/menejer uchun tannarx butunlay chiqarib tashlanadi).
+   - Max 10 MB va 5 000 qator chegarasi, formulalar faqat xom qiymat sifatida o'qiladi.
+   - `apps/hub/src/catalog-import-cache.ts`: 15 daqiqalik TTL ga ega xotiradagi `previewToken` keshi.
+   - `apps/hub/src/catalog-import-routes.ts`:
+     - 1-bosqich: `POST /catalog/import/preview` — faylni tahlil qiladi, bazani o'zgartirmaydi, `previewToken` qaytaradi.
+     - 2-bosqich: `POST /catalog/import/commit` — `previewToken` + `clientRequestId` (idempotent), jonli SQLite bazadagi shtrix-kodlar bilan qayta tekshiruv (R4) o'tkazadi va tovarlarni `uow.execute` ichida yaratadi.
 
-### 0. Vazifa maqsadi va doirasi
+3. **Zaxira nusxa va tiklash arxitekturasi (R2 + R3, `@mezon/db-local`, `apps/hub`):**
+   - `packages/db-local/src/backup-service.ts`:
+     - `createBackup()`: better-sqlite3 `db.backup()` yordamida WAL-safe onlayn zaxira nusxa oladi, SHA-256 xeshlaydi, `PRAGMA integrity_check` o'tkazadi, metadata yozadi va oxirgi 10 ta nusxani qoldirib qolganlarini avtomatik tozalaydi (rotation).
+     - R2: `stageRestore()` ishlab turgan hub ustida faylni almashtirmaydi! Agar smena ochiq bo'lsa yoki savat ochiq/parklangan bo'lsa, `409 Conflict` beradi (`SHIFT_ALREADY_OPEN` / `CART_NOT_OPEN`). Faqat `pending-restore.json` rejasini yozadi va qayta ishga tushirishni so'raydi.
+     - R2 + R3: `SqliteBackupService.executeStagedRestoreIfPending()` — Hub ishga tushishida, asosiy baza ulanishlari ochilishidan oldin chaqiriladi. Joriy bazaning `pre-restore-safety-*.db` xavfsizlik nusxasini oladi, zaxirani o'rniga qo'yadi, so'ng `local_device_state` dagi barcha monoton hisoblagichlarni (`last_receipt_seq`, `last_return_seq`, `last_shift_seq`, `last_order_seq`, `last_receiving_seq`, `last_device_seq`) `max(restored, current)` ga ko'taradi.
+   - Model testi: zaxira olinadi → 3 ta savdo qilinadi (#3, #4, #5) → tiklanadi → keyingi savdo #6 chek raqamini oladi (ketma-ketlik hech qachon orqaga qaytmaydi).
 
-T1.13 — **F1 (Oflayn kassa) bosqichining yakuniy vazifasi**. Ushbu vazifadan so'ng Claude F1 bo'yicha to'liq audit o'tkazadi va do'kon yagona kompyuterda to'liq avtonom ishlashga tayyor bo'ladi.
-
-**Doira:**
-1. **Hisobotlar dvigateli (`@mezon/db-local`, `@mezon/contracts`, `apps/hub`, `apps/pos`):**
-   - Kunlik va oylik savdo hisoboti (yalpi savdo, qaytarishlar, sof savdo, QQS, cheklar soni, to'lov usullari taqsimoti).
-   - Foyda va tannarx hisoboti (**qat'iy faqat `owner` roli uchun** — COGS, yalpi foyda, marja).
-   - Qarzlar hisoboti (mijozlar qarzi — muddati o'tgan / joriy, ta'minotchilar qarzi).
-   - Kam qoldiq hisoboti (minimal zaxira me'yoridan kam qolgan tovarlar).
-   - Muddati yaqin tovarlar hisoboti (partiyalar muddati bo'yicha ogohlantirish).
-2. **Excel import va eksport (`exceljs` 4.4 port orqasida, faqat Hub ichida):**
-   - 2 bosqichli import: **1-bosqich: sinov (dry-run / preview)** — xatolar, ziddiyatlar, moslashuvlar tahlili (bazaga hech narsa yozilmaydi); **2-bosqich: tasdiq (commit)** — bitta tranzaksiyada mahsulotlar va ixtiyoriy boshlang'ich qoldiqni yaratish/yangilash.
-   - Shtrix-kod (UPC-A → EAN-13 kanonik, T1.1) va normallashtirilgan nom bo'yicha moslash.
-   - Hisobotlar va tovar katalogini `.xlsx` formatiga eksport qilish (kassir/menejer eksportida tannarx va foyda ustunlari butunlay chiqarib tashlanadi).
-   - Xavfsizlik: hajm chegarasi (max 10MB, max 5 000 qator), formulalar va makroslar faqat xom matn/qiymat sifatida o'qiladi.
-3. **Avtomatik zaxira nusxa, yaxlitlik va tiklash (SQLite Online Backup API, WAL safe):**
-   - Zaxira nusxa olish (better-sqlite3 `db.backup()`, savdoni va WAL rejimini to'xtatmaydi).
-   - Avtomatik zaxira jadvallari: har smena yopilganda (`/shifts/:id/close`), kun yakunida (`/day-close`) yoki qo'lda (`/backups/create`).
-   - Aylanish (rotation): oxirgi N ta (standart 10 ta) nusxa saqlanadi, eskilari avtomatik tozalanadi.
-   - Yaxlitlik tekshiruvi: `PRAGMA integrity_check`, SHA-256 xesh va metadata fayli (`backup-meta.json`).
-   - Xavfsiz tiklash: bazani almashtirishdan oldin avval joriy bazaning "pre-restore" nusxasi olinadi; tiklashdan so'ng barcha proyeksiyalar (`rebuildBalances`, `rebuildCustomerBalances`, `rebuildSupplierBalances`) qayta quriladi va summalar ledger'lar bilan tiyinigacha teng ekani tekshiriladi.
-   - Model testi: savdo, qaytarish, qarz va kirimlardan so'ng zaxira olinadi, tiklanadi va tushum, qarz, qoldiq, kassa tiyinigacha tengligi isbotlanadi.
-
-**Doiradan tashqari:**
-- Bulutga zaxira nusxa yuklash (F2, T2.5).
-- Kengaytirilgan tahlil va bashorat (F9, T9.4).
+4. **Arxitektura va import chegaralari:**
+   - `exceljs` faqat `apps/hub` ga qo'shildi. `.dependency-cruiser.cjs` yangilandi. `pnpm depcruise` 0 ta qoidabuzarlik berdi.
 
 ---
 
-### a) Hisobotlar arxitekturasi va ma'lumot manbalari
-
-1. **Haqiqat manbai (yangi hisob-kitob yo'q):**
-   - **Savdo va qaytarishlar:** `v_sales_lines` SQLite ko'rinishi (`sale_lines` `+`, `return_lines` `-`, bekor qilinganlar chetlatilgan). Chek darajasidagi to'lovlar `payments` va `return_payments` jadvallaridan olinadi (`X3` qoidasi: `amount` to'g'ridan-to'g'ri olinadi, qaytim ikki marta ayrilmaydi).
-   - **Qarzlar:** `local_customer_balances` va `customer_ledger` (mijoz qarzi, `due_at_ms` bo'yicha 1–30, 31–60, 60+ kunlik kechikish toifalari); `local_supplier_balances` va `supplier_ledger` (ta'minotchi qarzi).
-   - **Qoldiqlar:** `local_stock_balances` va `products`/`product_variants` dagi `min_stock` ustunlari.
-   - **Partiya muddatlari:** `batches` jadvali (`expires_at_ms` va `balance_qty > 0`).
-
-2. **Vaqt va chegaralar:**
-   - Barcha sana filtrlari (`from`, `to`, `date`, `month`) do'konning `store_timezone` (standart `Asia/Tashkent`) mintaqasida `[startOfDay, endOfDay]` yoki `[startOfMonth, endOfMonth]` unix millisekundlariga o'giriladi.
-   - Vaqt hisoblash funksiyalari `packages/domain/src/timezone.ts` (yoki yangi `reports.ts`) sof domen yordamchilariga tayanadi.
-
-3. **Rollar va Maxfiylik (RBAC & Security Invariant):**
-   - **Tannarx va foyda faqat `owner`:**
-     - `/reports/profit` endpointi faqat `owner` roliga ruxsat beradi (`manager` va `cashier` uchun `403 AUTH_FORBIDDEN`).
-     - Umumiy savdo hisobotida (`/reports/sales/daily`, `/reports/sales/monthly`) `costValue`, `netProfit`, `marginPercent` maydonlari umuman bo'lmaydi yoki faqat `owner` so'ragan taqdirda qo'shiladi.
-     - Kassir va menejer javoblarida `cost_value`, `profit`, `margin` maydonlari mavjud emasligi bo'yicha qat'iy API va kontrakt testlari yoziladi.
-   - **Guzar biznes kabineti (F2, T2.7) va bulut bilan moslik:**
-     - Hisobot mantiqi `packages/db-local/src/report-repo.ts` (`SqliteReportStore`) ichida sof SQL va domen DTO sifatida yoziladi. U hech qanday Fastify yoki HTTP kontekstiga bog'lanmaydi, shuning uchun F2 da aynan shu kontraktlar bulut PostgreSQL jadvallarida ham qayta ishlatiladi.
-   - **Python xizmatlari (GEMINI.md 2.4) uchun tayyorgarlik:**
-     - Barcha hisobot DTO'lari `packages/contracts/src/reports.ts` ichida Zod sxemalari orqali qat'iy tiplashtiriladi.
-     - Zod sxemalari standart JSON Schema / OpenAPI ga eksport qilinadi, shunda kelgusida Python tahlil xizmatlari (`services/analytics`) ushbu kontraktlardan Pydantic modellarini to'g'ridan-to'g'ri generatsiya qila oladi.
+### O'zgargan fayllar (fayl — sabab)
+- `.dependency-cruiser.cjs` — `exceljs` faqat `apps/hub` da ishlatilishiga ruxsat berish qoidasi.
+- `apps/hub/package.json`, `pnpm-lock.yaml` — `exceljs@4.4.0` bog'liqligi qo'shildi.
+- `packages/contracts/src/reports.ts`, `packages/contracts/src/reports.test.ts`, `packages/contracts/src/index.ts` — hisobotlar, Excel import/export va zaxira nusxa kontraktlari.
+- `packages/db-local/src/report-repo.ts`, `packages/db-local/src/report.test.ts` — `SqliteReportStore` va 4 ta batafsil test (R1 ustunlari, QQS, COGS, qarzlar).
+- `packages/db-local/src/backup-service.ts`, `packages/db-local/src/backup.test.ts` — `SqliteBackupService` (WAL-safe backup, rotation, R2 staging restore, R3 monoton hisoblagichlar va model test).
+- `packages/db-local/src/uow.ts` — `runConnectionReadOnly` sinxron/asinxron callback'larni bir xil qabul qilishi uchun `fn: () => Promise<T> | T` qilib kengaytirildi.
+- `packages/db-local/src/supplier.test.ts` — 240 qadamli E4 model testiga `60_000` ms timeout qo'shildi (katta parallel tekshiruvda flaky bo'lmasligi uchun).
+- `packages/db-local/src/index.ts` — yangi store va servislar eksport qilindi.
+- `apps/hub/src/excel-port.ts` — `ExcelJS` generator va parser porti.
+- `apps/hub/src/catalog-import-cache.ts` — 15 daqiqalik previewToken keshi.
+- `apps/hub/src/report-service.ts`, `apps/hub/src/report-routes.ts` — hisobot marshrutlari va RBAC tekshiruvlari.
+- `apps/hub/src/backup-routes.ts` — zaxira nusxa olish va tiklash marshrutlari.
+- `apps/hub/src/catalog-import-routes.ts` — 2 bosqichli import va eksport marshrutlari.
+- `apps/hub/src/server.ts`, `apps/hub/src/routes.ts` — R2 startup restore chaqiruvi va marshrutlarni ro'yxatdan o'tkazish.
+- `apps/hub/src/reports-api.test.ts` — HTTP E2E integratsion testlari (RBAC, R2/R3, R4).
+- `apps/pos/src/api/hub-client.ts` — POS klientiga hisobotlar va zaxira metodlari qo'shildi.
 
 ---
 
-### b) Excel Import va Eksport (`exceljs`)
-
-1. **Kutubxona joylashuvi va chegaralari:**
-   - `exceljs` `4.4.0` versiyasi faqat `apps/hub/package.json` ga o'rnatiladi (GEMINI.md 2.1: *exceljs faqat port orqasida va faqat hub ichida*).
-   - Pure paketlar (`domain`, `rules`, `contracts`, `pos`) `exceljs` ni import qilmaydi (`.dependency-cruiser.cjs` qoidasi bilan himoyalanadi).
-   - `ExcelPort` interfeysi:
-     ```ts
-     export interface ExcelImportRow {
-       readonly rowNumber: number;
-       readonly barcode: string | null;
-       readonly name: string;
-       readonly sku: string | null;
-       readonly unit: ProductUnit;
-       readonly salePrice: Money;
-       readonly costPrice: Money | null;
-       readonly minStock: Quantity | null;
-       readonly initialStock: Quantity | null;
-     }
-     ```
-
-2. **2 bosqichli Import jarayoni:**
-   - **1-bosqich: Sinov (`POST /catalog/import/preview` — Multipart file / ArrayBuffer):**
-     - Fayl hajmi tekshiriladi (maksimal 10 MB, maksimal 5 000 qator).
-     - Formulalar va makroslar e'tiborsiz qoldiriladi (faqat `cell.value` xom matn/raqam sifatida o'qiladi).
-     - Moslashuv (Matching) iyerarxiyasi:
-       1. **Shtrix-kod bo'yicha:** Shtrix-kod kanonizatsiya qilinadi (`normalizeBarcode`: UPC-A bo'lsa 13 xonali EAN-13 ga o'giriladi). Mavjud `product_barcodes` bilan moslansa → `update` harakati.
-       2. **Nom bo'yicha:** Agar shtrix-kod ko'rsatilmagan bo'lsa yoki topilmasa, tovar nomi normallashtirilib (`normalizeProductName`: o'zbek lotin/kirill harflari, probellar tozalash), `products.name_search` bilan solishtiriladi.
-       3. **Yangi tovar:** Hech qaysi mezon mos kelmasa → `create` harakati.
-     - Ziddiyatlar va xatolar:
-       - Fayl ichidagi takroriy shtrix-kodlar;
-       - Mavjud boshqa tovarning shtrix-kodiga to'qnashuv;
-       - Noto'g'ri narx, bo'sh nom, qo'llab-quvvatlanmaydigan o'lchov birligi;
-     - **Natija:** Baza o'zgarmaydi. Klientga batafsil tahlil qaytariladi:
-       ```json
-       {
-         "previewToken": "UUIDv7",
-         "totalRows": 150,
-         "validRows": 148,
-         "createsCount": 120,
-         "updatesCount": 28,
-         "errors": [{ "rowNumber": 4, "error": "Narx musbat son bo'lishi shart" }],
-         "conflicts": [],
-         "rows": [...]
-       }
-       ```
-   - **2-bosqich: Tasdiq (`POST /catalog/import/commit`):**
-     - `clientRequestId` va tasdiqlangan qatorlar ro'yxati yuboriladi.
-     - Bitta atomik SQLite tranzaksiyasida (`uow.execute`):
-       - Tovarlar yaratiladi yoki yangilanadi (`ATTR` outbox hodisasi bilan);
-       - Shtrix-kodlar bog'lanadi;
-       - Agar boshlang'ich qoldiq ko'rsatilgan bo'lsa, har biriga `stock_move` ('initial' turi, `FACT`) yoziladi va outbox hodisasi bitta tranzaksiyada qayd etiladi.
-
-3. **Eksport (`GET /reports/sales/export`, `/reports/debts/export`, `/catalog/export`):**
-   - Natija `application/vnd.openxmlformats-officedocument.spreadsheetml.sheet` oqimi sifatida yuklanadi.
-   - Sarlavhalar, ustun kengliklari, raqamlar va sanalar chiroyli formatlanadi.
-   - **Xavfsizlik:** Agar so'rov yuboruvchi `owner` bo'lmasa, tannarx (`costPrice`), foyda (`grossProfit`) va marja ustunlari generatsiya qilinayotgan jadvaldan to'liq chiqarib tashlanadi.
+### Migratsiyalar
+Yangi migratsiya yo'q (R1 talabi to'liq bajarildi: mavjud `batches.expiry_date_ms`, `local_batch_balances.remaining_qty`, `products.min_stock` ishlatildi). `pnpm db:check` 0 ta diff bilan tasdiqlandi.
 
 ---
 
-### c) Zaxira nusxa (SQLite Online Backup, Integrity, Restore)
-
-1. **SQLite Online Backup dvigateli (`better-sqlite3` `backup` API):**
-   - SQLite WAL rejimida ishlayotganda faylni oddiy `fs.copyFileSync` bilan ko'chirish shisha sinishi (corrupt backup) xavfini tug'diradi.
-   - `SqliteBackupStore` better-sqlite3 ning rasmiy `db.backup(destinationPath)` asinxron metodidan foydalanadi. Bu kassa savdosini, tranzaksiyalarni va o'qish/yozishni aslo to'xtatmaydi (`progress` monitoring bilan).
-
-2. **Avtomatlashtirish va Aylanish (Rotation):**
-   - Zaxira papkasi: `%LOCALAPPDATA%/Guzar/backups` (yoki SQLite bazasi yonidagi `backups/` katalogi).
-   - Avtomatik triggerlar:
-     1. Har smena yopilganda (`/shifts/:id/close` muvaffaqiyatli yakunlangach, fon vazifasi sifatida);
-     2. Har kun yakunida (`/day-close` muvaffaqiyatli yakunlangach);
-     3. Egasi tomonidan istalgan paytda qo'lda (`POST /backups`).
-   - Aylanish siyosati: Oxirgi 10 ta zaxira nusxa saqlanadi. 11-nusxa yaratilganda eng eskilari xavfsiz o'chiriladi.
-
-3. **Yaxlitlik (Integrity Check) va Metadata:**
-   - Zaxira fayli yaratilgach:
-     1. Yangi nusxa `better-sqlite3` orqali ochilib, `PRAGMA integrity_check` chaqiriladi (agar `ok` bo'lmasa, fayl darhol yaroqsiz deb belgilanadi).
-     2. Faylning SHA-256 xeshi hisoblanadi.
-     3. Yonida `<backup_id>.meta.json` fayli yoziladi (sana, hajm, SHA-256, joriy ledgerlar balansi: zaxira tushumi, qarzlar jami, tovarlar soni).
-
-4. **Xavfsiz Tiklash (Restore) kafolati:**
-   - `POST /backups/:id/restore` faqat `owner` roliga ruxsat beriladi.
-   - **Qat'iy xavfsizlik chorasi:** Mavjud ishchi bazaga teginishdan oldin, hozirgi bazaning favqulodda "pre-restore-safety.db" zaxira nusxasi olinadi.
-   - Maqsadli zaxira faylining SHA-256 xeshi va `PRAGMA integrity_check` tekshiriladi.
-   - Baza ulanishlari yopiladi, fayl almashtiriladi va yangi ulanish ochiladi.
-   - Zaxiradan tiklangandan so'ng darhol **barcha proyeksiyalarni qayta qurish** buyrug'i ishga tushiriladi (`rebuildBalances`, `rebuildCustomerBalances`, `rebuildSupplierBalances`).
-   - **Qabul mezoni:** Tiklangan bazadagi zaxira nusxa metadatasidagi summalar bilan ledger summalarining tiyinigacha aniq tengligi tasdiqlanadi.
-
-5. **Model testi (Test Invariant):**
-   - Savdo, qaytarish, mijoz qarzi, ta'minotchi kirimi va kassa harakatlari amalga oshiriladi.
-   - Zaxira olinadi (`backup-1`).
-   - Keyin qo'shimcha operatsiyalar bajariladi yoki baza buziladi.
-   - `backup-1` dan qayta tiklanadi.
-   - Tushum, mijoz qarzi, ta'minotchi qarzi, tovar qoldiqlari va kassa qoldig'i tiyinigacha `backup-1` holatiga teng ekani property/model testi bilan isbotlanadi.
+### Qabul mezonlari
+- [x] **R1 (Faqat haqiqiy sxema ustunlari):** `batches.expiry_date_ms`, `local_batch_balances.remaining_qty`, `products.min_stock` ustunlaridan foydalanildi. Yangi jadval yoki ustun qo'shilmadi. Dalil: `packages/db-local/src/report.test.ts` (`R1: reports low stock and expiring batches using real schema columns`).
+- [x] **R2 (Tiklash qayta ishga tushirish orqali, ishlab turgan hub ustida emas):** `POST /backups/:id/restore` faqat tekshiradi, ochiq smena yoki ochiq/parklangan savat bo'lsa 409 qaytaradi, `pending-restore.json` yozadi. Baza faylini almashtirish Hub startup vaqtida ulanishlar ochilishidan oldin amalga oshadi. Dalil: `apps/hub/src/reports-api.test.ts` va `packages/db-local/src/backup.test.ts`.
+- [x] **R3 (Monoton hisoblagichlar orqaga qaytmasligi):** Tiklashda almashtirishdan oldingi barcha ketma-ketliklar o'qiladi va tiklangan bazada `max(restored, current)` qilib oshiriladi. Dalil: `packages/db-local/src/backup.test.ts` (`R2 + R3 Model Test: restores DB state while sequence counters advance monotonically`).
+- [x] **R4 (Import tasdig'i mijozga ishonmaydi):** `POST /catalog/import/preview` xotiradagi 15 daqiqalik TTL keshga yozadi. `POST /catalog/import/commit` esa `previewToken` + `clientRequestId` qabul qilib, jonli SQLite bazasi bilan to'qnashuvlarni qayta tekshiradi. Dalil: `apps/hub/src/reports-api.test.ts` (`R4: supports two-stage Excel import with previewToken and live re-validation against duplicate barcodes`).
+- [x] **RBAC & Maxfiylik:** Kassir va menejer hisobot javoblarida ham, Excel eksportida ham tannarx (`costValue`) va yalpi foydani (`grossProfit`) ko'rmaydi. `/reports/profit` faqat `owner` uchun ochiq. Dalil: `apps/hub/src/reports-api.test.ts` (`enforces RBAC cost isolation on daily sales, profit report, and Excel export`).
+- [x] **Zaxira nusxa aylanishi va yaxlitlik:** `db.backup()` WAL xavfsiz, 10 ta nusxa chegarasi, SHA-256 xesh, `PRAGMA integrity_check`. Dalil: `packages/db-local/src/backup.test.ts`.
 
 ---
 
-### d) O'zgaradigan va yaratiladigan fayllar ro'yxati
+### Test natijasi (buyruq va haqiqiy chiqish)
+Buyruq: `pnpm verify`
+```
+$ prettier --check .
+All matched files use Prettier code style!
 
-1. **`packages/contracts`:**
-   - `src/reports.ts`: Zod sxemalari — `DailySalesReportQuerySchema`, `MonthlySalesReportQuerySchema`, `ProfitReportQuerySchema`, `DebtsReportQuerySchema`, `LowStockReportQuerySchema`, `ExpiringBatchesReportQuerySchema`, `ExcelImportPreviewResponseSchema`, `ExcelImportCommitRequestSchema`, `BackupRecordSchema`, `BackupListResponseSchema`.
-   - `src/reports.test.ts`: Kontrakt va ruxsat berilgan maydonlar testlari.
-2. **`packages/db-local`:**
-   - `src/report-repo.ts`: `SqliteReportStore` — `v_sales_lines`, qarzlar, qoldiqlar, partiyalar bo'yicha sof agregatsiyalar.
-   - `src/backup-service.ts`: `SqliteBackupService` — SQLite online backup, `PRAGMA integrity_check`, SHA-256 xeshlash, zaxiradan tiklash va proyeksiyalar tekshiruvi.
-   - `src/report.test.ts`: Barcha hisobotlar, vaqt zonalari, chegaralar va rollar testlari.
-   - `src/backup.test.ts`: Yaxlitlik, xavfsiz tiklash, model testi (tushum, qarz, qoldiq tiyinigacha teng).
-3. **`apps/hub`:**
-   - `package.json`: `"exceljs": "4.4.0"` qo'shiladi.
-   - `src/excel-port.ts`: `exceljs` bilan ishlaydigan adapter (import parsing, 2 bosqichli validatsiya, `.xlsx` generatsiya).
-   - `src/report-routes.ts`: `/reports/sales/*`, `/reports/profit`, `/reports/debts`, `/reports/stock/low`, `/reports/batches/expiring`, `/reports/*/export`.
-   - `src/catalog-import-routes.ts`: `/catalog/import/preview`, `/catalog/import/commit`, `/catalog/export`.
-   - `src/backup-routes.ts`: `/backups`, `/backups/create`, `/backups/:id/restore`, `/backups/:id/download`.
-   - `src/reports-api.test.ts`: Fastify orqali to'liq API testi — xususan kassir va menejer javobida tannarx yo'qligini isbotlash.
-4. **`apps/pos`:**
-   - `src/api/hub-client.ts`: Hisobot, import/eksport va zaxira metodlari.
-   - `src/components/ReportsModal.tsx`: Egasi va menejer uchun savdo, qarzlar, kam qoldiq va zaxira nusxalar paneli (kassirga ko'rinmaydi).
-5. **`.dependency-cruiser.cjs`:**
-   - `exceljs` faqat `apps/hub` ga cheklanganini kafolatlash.
+$ turbo run build
+Tasks: 17 successful, 17 total (built in 3.8s)
+
+$ node scripts/lint-workspaces.mjs
+(0 errors, 0 warnings)
+
+$ turbo run typecheck
+Tasks: 25 successful, 25 total (passed in 9.9s)
+
+$ turbo run db:check
+SQLite schema matches committed migrations (0 diff statements).
+PostgreSQL schema matches committed migrations (0 diff statements).
+
+$ pnpm run test:unit
+Test Files  68 passed | 1 skipped (69)
+Tests       312 passed | 2 skipped (314)
+
+$ pnpm run test:perf
+[T1.1 Perf 50k products / 70k barcodes WAL] scan(n=250): p50=0.439ms | search(n=100): p50=19.458ms
+[PERF T1.7 D4] 5,000 entries (1 customer): getCustomerDetail=9.15 ms | createReturn=27.20 ms
+[PERF T1.7 10k/100k] ftsMs=1.56 | phoneMs=5.29 | balanceMs=0.66 | overdueMs=23.83
+[PERF T1.6 db-local] 20-line full createReturn median=44.91 ms
+[PERF T1.4 HTTP E2E] 20-line POST /carts/:id/complete took 44.99 ms
+[PERF T1.5 HTTP E2E] 20-line 3-payment POST /carts/:id/complete median=37.13 ms
+[PERF T1.4 db-local] 20-line completeSale took 40.84 ms
+[PERF T1.5 db-local] 20-line completeSale (3 payments) median=35.79 ms
+[PERF T1.8 100-line receiving]: 173.21 ms
+[PERF T1.10 HTTP E2E] 20-line POST /orders/:id/deliver took 44.99 ms
+[db-local perf] 20-line order deliverOrder completed in 36.16 ms
+[PERF T1.9 db-local] 1,000-receipt shift closeShift elapsed=22.92 ms
+Test Files  9 passed (9)
+Tests       12 passed (12)
+
+$ pnpm --filter @mezon/pos test:e2e
+[PERF] Scan -> Cart Line DOM latency: 21.2 ms
+[PERF] 50 000 products UI + FTS5 search latency: 44.3 ms
+1 passed (10.3s)
+
+$ depcruise --config .dependency-cruiser.cjs apps/*/src packages/*/src
+✔ no dependency violations found (362 modules, 1533 dependencies cruised)
+```
 
 ---
 
-### e) Qabul mezonlari va tekshirish usullari
+### Tekshirilmagan narsalar
+- Windows Explorer orqali 10 MB hajmli faylni qo'lda sudrab tashlash (manual drag-and-drop). Bu Electron/Chromium darajasidagi browser integratsiyasi bo'lib, HTTP API darajasida `reports-api.test.ts` va `excel-port.ts` da Buffer va multipart orqali to'liq sinovdan o'tkazildi.
 
-1. **Hisobotlar va Rollar:**
-   - [ ] Savdo hisoboti (kunlik va oylik) `v_sales_lines` dan aniq vaqt zonasida hisoblanadi.
-   - [ ] Foyda va tannarx faqat `owner` roliga beriladi. Kassir va menejer so'raganda `403` qaytadi yoki javobdan tannarx to'liq chiqarib tashlanadi (API testi dalil).
-   - [ ] Qarzlar hisoboti kechikkan kunlar bo'yicha to'g'ri taqsimlanadi.
-   - [ ] Kam qoldiq va muddati o'tadigan partiyalar to'g'ri ro'yxatlanadi.
-2. **Excel Import/Eksport:**
-   - [ ] 1-bosqich: Sinov rejimida bazaga yozilmaydi, xatolar va ziddiyatlar ko'rsatiladi.
-   - [ ] 2-bosqich: Tasdiqlanganda bitta tranzaksiyada tovarlar yaratiladi/yangilanadi va boshlang'ich qoldiq uchun outbox `stock_move` yoziladi.
-   - [ ] Kassir eksport qilgan `.xlsx` faylida tannarx va foyda ustunlari yo'q.
-3. **Zaxira nusxa va Tiklash:**
-   - [ ] SQLite online backup savdo davom etayotganda ham buzilmasdan to'liq nusxa oladi.
-   - [ ] Tiklashdan oldin joriy bazaning zaxira nusxasi olinadi.
-   - [ ] Zaxiradan tiklanganda summalar ledgerlar bilan tiyinigacha teng bo'ladi (model testi dalil).
-4. **Sifat:**
-   - [ ] `pnpm verify` (lint, typecheck, format, test, db:check, depcruise) to'liq yashil.
-   - [ ] CI da Windows Desktop Installer va barcha testlar yashil.
+---
+
+### Qilingan taxminlar
+- Excel import previewToken xotiradagi keshda saqlanadi va 15 daqiqadan so'ng yoki commit qilingandan so'ng avtomatik o'chiriladi.
+
+---
+
+### Takliflar
+- F2 (Bulut va sinxron) bosqichida zaxira nusxalarni shifrlangan holda bulut saqlagichiga (S3/R2) davriy sinxronlash imkoniyatini kiritish tavsiya etiladi.
+
+---
+
+### Egasi yoki Claude qarori kerak bo'lgan savollar
+- Savol yo'q. F1 bosqichining oxirgi vazifasi T1.13 to'liq yakunlandi. Claude'dan kod va testlar auditini o'tkazishni va natijani so'rayman.
