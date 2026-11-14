@@ -144,7 +144,7 @@ module.exports = {
       },
       to: {
         pathNot:
-          '^(apps/hub/src/|packages/(domain|contracts|db-local|drivers)/|node_modules/(\\.pnpm/)?(fastify|pino|@node-rs/argon2|@node-rs\\+argon2|zod)@|(node:)?(crypto|fs|path|stream)$)',
+          '^(apps/hub/src/|packages/(domain|contracts|db-local|drivers)/|node_modules/(\\.pnpm/)?(fastify|pino|@node-rs/argon2|@node-rs\\+argon2|zod|exceljs)@|(node:)?(crypto|fs|path|stream)$)',
       },
     },
     {

@@ -445,3 +445,30 @@ export {
   SqliteOrderStore,
   createSqliteOrderStore,
 } from './order-repo.js';
+
+export {
+  type ReportRuntimeContext,
+  type CreateSqliteReportStoreOptions,
+  type DailySalesDaySummary,
+  type DailySalesReportResult,
+  type MonthlySalesMonthSummary,
+  type MonthlySalesReportResult,
+  type ProfitItemSummary,
+  type ProfitReportResult,
+  type CustomerDebtSummary,
+  type SupplierDebtSummary,
+  type DebtsReportResult,
+  type LowStockItemSummary,
+  type ExpiringBatchItemSummary,
+  SqliteReportStore,
+  createSqliteReportStore,
+} from './report-repo.js';
+
+export {
+  type BackupMetadata,
+  type StagedRestoreIntent,
+  type StagedRestoreExecutionOutcome,
+  type PostRestoreRebuildResult,
+  type BackupServiceOptions,
+  SqliteBackupService,
+} from './backup-service.js';

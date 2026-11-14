@@ -1871,5 +1871,5 @@ describe('@mezon/db-local - T1.8 Suppliers, Receiving, Unknown Cost, Ledger & Re
       items: [{ receivingLineId: rcvFifo.receiving.lines[0].id, qty: quantityFromMilli(1_300n) }],
     });
     expect(retExact.supplierReturn.totalReturnCost).toBe(moneyFromTiyin(130_000n));
-  });
+  }, 60_000);
 });

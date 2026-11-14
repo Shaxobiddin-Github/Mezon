@@ -28,6 +28,12 @@ import { registerOrderRoutes } from './order-routes.js';
 import type { HubOrderService } from './order-service.js';
 import { registerPrinterRoutes } from './printer-routes.js';
 import type { HubPrinterService } from './printer-service.js';
+import { registerReportRoutes } from './report-routes.js';
+import type { HubReportService } from './report-service.js';
+import { registerBackupRoutes } from './backup-routes.js';
+import type { SqliteBackupService, SqliteCatalogStore, SqliteStockStore } from '@mezon/db-local';
+import { registerCatalogImportRoutes } from './catalog-import-routes.js';
+import { CatalogImportCache } from './catalog-import-cache.js';
 
 async function authorize(
   authService: HubAuthService,
@@ -52,6 +58,11 @@ export function registerHubRoutes(
   shiftService?: HubShiftService,
   orderService?: HubOrderService,
   printerService?: HubPrinterService,
+  reportService?: HubReportService,
+  backupService?: SqliteBackupService,
+  catalogStore?: SqliteCatalogStore,
+  stockStore?: SqliteStockStore,
+  importCache?: CatalogImportCache,
 ): void {
   app.get('/health', async () => {
     return authService.getHealth();
@@ -146,5 +157,14 @@ export function registerHubRoutes(
   }
   if (printerService) {
     registerPrinterRoutes(app, authService, printerService);
+  }
+  if (reportService) {
+    registerReportRoutes(app, authService, reportService);
+  }
+  if (backupService) {
+    registerBackupRoutes(app, authService, backupService);
+  }
+  if (catalogStore && stockStore && importCache) {
+    registerCatalogImportRoutes(app, authService, catalogStore, stockStore, importCache);
   }
 }
