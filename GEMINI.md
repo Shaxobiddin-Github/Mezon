@@ -1,10 +1,11 @@
-# Mezon: noldan qurish bo'yicha to'liq topshiriq
+# Guzar platformasi (kod nomi: Mezon) — to'liq topshiriq
 
-> **Bajaruvchi:** Gemini.
+> **Bajaruvchi:** Gemini yoki Claude (vazifa boshida belgilanadi).
 > **Ish boshqaruvchi va tekshiruvchi:** Claude.
 > **Qaror egasi:** loyiha egasi (Shaxobiddin).
-> **Mahsulot:** Mezon (to'liq nomi: Mezon Kassa).
-> **Loyiha:** yangi, bo'sh repozitoriya: `mezon`. Paketlar nomi: `@mezon/domain`, `@mezon/rules` va h.k.
+> **Mahsulot:** Guzar — Kattaqo'rg'ondan boshlanadigan shahar savdo va xizmatlar platformasi. Ikki brend: **Guzar Kassa** (biznes uchun kassa va boshqaruv) va **Guzar Market** (aholi uchun buyurtma va band qilish).
+> **Kod nomi:** Mezon. Repozitoriya `mezon`, paketlar `@mezon/domain`, `@mezon/rules` va h.k. Kod nomi o'zgarmaydi, foydalanuvchiga faqat "Guzar" ko'rinadi.
+> **Asosiy manba:** "Guzar — Loyiha konsepsiyasi" (ishchi versiya 1.1, 2026-yil noyabr). Bu hujjat uni texnik vazifalarga aylantiradi. Konsepsiyada Django yozilgan; egasi 2026-11-11 da **TypeScript'da qolishga** qaror qildi (2.4-bo'lim).
 
 ---
 
@@ -21,9 +22,24 @@
 
 ## 1. Mahsulot
 
-O'zbekiston qonunlariga mos, internetsiz ishlaydigan, turli sohalarga moslanadigan POS tizimi.
+Guzar — do'kon, kafe, restoran, fitnes zali, bilyard klubi va boshqa xizmat nuqtalarini bitta tizimda boshqarish hamda aholiga ulardan bitta ilova orqali foydalanish imkonini beradigan platforma. Asosiy g'oya: **bir marta kiritiladi — hamma joyda ko'rinadi.** Kassaga kiritilgan mahsulot, menyu, jadval yoki bo'sh vaqt avtomatik ravishda mijoz ilovasida ham paydo bo'ladi.
 
-**Foydalanuvchilar:** kassir, do'kon egasi, tarmoq menejeri, buxgalter.
+**Interfeyslar:**
+
+| Interfeys | Kim foydalanadi | Asosiy vazifasi |
+|---|---|---|
+| Guzar Kassa (POS) | Do'kon va savdo nuqtasi | Sotuv, chek, mahsulot, kirim, ombor, qarzlar |
+| Biznes kabineti | Biznes egasi, menejer | Sozlash, xodimlar, buyurtmalar, bronlar, hisobotlar |
+| Guzar Market (mijoz ilovasi) | Aholi | Qidirish, buyurtma, bron, bonus |
+| Onlayn vitrina | Mijozlar | Har bir biznesning havola va QR orqali ochiladigan sahifasi |
+| Ovqatlanish moduli | Kafe, restoran | Menyu, stollar, QR buyurtma, oshxona ekrani |
+| Bron moduli | Fitnes, bilyard, xizmatlar | Vaqt, stol, zal yoki mutaxassisni band qilish |
+| Haydovchi ilovasi | Haydovchi va kuryerlar | Buyurtmani qabul qilish va yetkazish |
+| Platforma boshqaruvi | Loyiha jamoasi | Bizneslarni ulash, nazorat, yordam, tahlil |
+
+**Yo'nalishlar:** do'kon (tovar), kafe va restoran (taom va stol), fitnes (dars va abonement), bilyard (stol vaqti), xizmatlar — salon, avtoservis, o'quv markazi, sport maydoni (mutaxassis vaqti). Barchasi bitta yagona API va bitta domen ustida; farq faqat nima sotilishida: tovar, taom yoki vaqt.
+
+**Bozorga chiqish qoidasi:** hammasi rejada va arxitekturada bor, lekin bosqichma-bosqich chiqariladi. Keyingi bosqich oldingisi haqiqiy bizneslarda ishlagach boshlanadi. Birinchi 5 ta har kuni ishlaydigan biznes ro'yxatdagi 50 tadan muhimroq.
 
 **Sifat maqsadlari:**
 
@@ -31,30 +47,37 @@ O'zbekiston qonunlariga mos, internetsiz ishlaydigan, turli sohalarga moslanadig
 |---|---|
 | Skanerdan savatdagi qatorgacha | ≤ 150 ms (50 000 mahsulotli hub) |
 | Savdoni yakunlash (lokal) | ≤ 300 ms |
-| Internet uzilishi | Savdo to'xtamaydi |
+| Internet uzilishi | Savdo to'xtamaydi (markirovkali tovar bundan mustasno, 3.3 ga qarang) |
 | Yiqilishdan keyin | Yakunlangan savdo yo'qolmaydi |
 | Kassirni o'rgatish | 15 daqiqa ichida birinchi savdo |
 | Past quvvatli monoblok | 4 GB RAM, Windows 10 22H2+ da silliq |
+| Mijoz ilovasi | Bir necha soniyada kerakli joyni topish, 3–4 bosishda buyurtma yoki bron |
+| Elektr uzilishi | Tugallanmagan sotuv saqlanadi; planshet yoki telefondagi web-kassa zaxira |
 
-**Doiradan tashqari:** buxgalteriya bosh kitobi, HR/maosh, AI agent savdo protokollari, MiniERP bilan integratsiya.
+**Doiradan tashqari:** buxgalteriya bosh kitobi, HR/maosh, MiniERP bilan integratsiya.
 
 ---
 
 ## 2. Arxitektura
 
 ```text
-Terminallar: Windows (Electron), Android (Capacitor) — bitta React UI
+Guzar Kassa terminallari: Windows (Electron), Android/planshet (Capacitor), web-kassa — bitta React UI
         │  do'kon ichki tarmog'i, juftlangan qurilmalar
-Do'kon hub'i: Fastify + SQLite, domen, qoidalar, fiskal/to'lov navbati
-        │  internet bo'lganda
-Bulut (O'zbekistonda): Fastify + PostgreSQL, egasi paneli, bot, AI
+Do'kon hub'i: Fastify + SQLite, domen, qoidalar, fiskal/to'lov navbati (internetsiz ishlaydi)
+        │  internet bo'lganda: outbox → sinxron
+Bulut (O'zbekistonda): Fastify + PostgreSQL — yagona API qatlami
+   ├─ Biznes kabineti, Platforma boshqaruvi (apps/admin)
+   ├─ Guzar Market: web, QR vitrina, Telegram mini-ilova (apps/market)
+   ├─ Haydovchi ilovasi (apps/driver), oshxona ekrani (apps/pos ichida)
+   └─ Python xizmatlari (ixtiyoriy, 2.4): tahlil, prognoz, AI — faqat API orqali
         │
-Soliq/OFD · UzQR · Payme/Click/Uzum · Asl belgisi · yetkazib berish
+Soliq/OFD · UzQR · Payme/Click/Uzum · Asl belgisi · xarita · SMS/Telegram bildirishnomalar
 ```
 
 - **Yagona kassa:** hub va terminal bitta Electron ilovasida.
 - **Ko'p kassa:** bitta kompyuter hub, qolganlari unga ulanadi.
-- **Haqiqat manbai:** savdo paytida hub, do'konlararo ko'rinish uchun bulut.
+- **Haqiqat manbai:** savdo paytida hub; onlayn buyurtma, bron, yetkazish va do'konlararo ko'rinish uchun bulut.
+- **Ko'p biznesli tuzilma:** har bir yozuv qaysi tashkilotga tegishli ekanini biladi (`organization_id` + RLS). A do'kon B restoranning ma'lumotini hech qachon ko'rmaydi. Guzar Market faqat biznes **ochiq e'lon qilgan** ma'lumotni ko'radi (2.5).
 
 ### 2.1. Texnologiyalar
 
@@ -109,7 +132,9 @@ apps/
   pos/          kassa va do'kon UI
   android/      Capacitor qobig'i
   cloud/        bulut API va sinxron
-  admin/        egasi va tarmoq paneli
+  admin/        biznes kabineti va platforma boshqaruvi
+  market/       Guzar Market: mijoz ilovasi, QR vitrina, Telegram mini-ilova
+  driver/       haydovchi ilovasi
   bot/          Telegram bot
 packages/
   domain/       sof biznes mantiq, IO yo'q
@@ -120,6 +145,7 @@ packages/
   db-cloud/     PostgreSQL sxema
   drivers/      fiskal, to'lov, printer, markirovka
   ui/  i18n/  test-utils/
+services/       ixtiyoriy Python xizmatlari (2.4): tahlil, prognoz, AI
 ```
 
 Qat'iy chegara: `domain` va `rules` hech narsaga bog'lanmaydi (baza, tarmoq, soat va tasodif tashqaridan beriladi). CI import qoidalari bilan tekshiradi.
@@ -144,6 +170,42 @@ Kod identifikatorlari inglizcha. UI matnlari `i18n`da.
 | `fiscal_doc` | Fiskal hujjat |
 | `order`, `order_payment` | Buyurtma, avans |
 | `session` | Vaqtli xizmat seansi (zal) |
+| `resource`, `booking`, `booking_hold` | Bron resursi (stol, zal, usta), bron, vaqtinchalik band |
+| `membership` | Abonement |
+| `reservation` | Onlayn buyurtma uchun qoldiqni vaqtincha band qilish |
+| `public_listing` | Guzar Market ochiq proyeksiyasi |
+| `delivery_job`, `driver` | Yetkazish topshirig'i, haydovchi |
+
+### 2.4. TypeScript asosiy til, Python — chegaralangan xizmatlar
+
+**Qaror (egasi, 2026-11-11):** asosiy tizim TypeScript'da qoladi. Sabab: kassa (Electron, Android, web) va server bir xil hisob kodini ishlatadi — pul, QQS, aksiya, ombor tannarxi, sinxron. Ikki tilda yozilsa, oflayn sinxronda tiyin va qoldiq farqlari chiqadi.
+
+**Python qayerda ishlatilishi mumkin** (AI rivojlangani sari kengayadi):
+
+| Soha | Misol |
+|---|---|
+| Tahlil va hisobot | Kogorta, saqlanish, ABC tahlili, biznes kabinetidagi kengaytirilgan tahlil (pullik) |
+| Prognoz | Buyurtma tavsiyasi, talab prognozi, bron bandligi prognozi |
+| AI yordamchi | O'zbekcha savol-javob, ovoz, anomaliya qidirish |
+| Hujjat bilan ishlash | Ta'minotchi fakturasini rasmdan o'qish (OCR), Excel tozalash |
+| Tavsiya | Mijozga yaqin joylar va mahsulot tavsiyasi, reklama joylashuvi |
+
+**Python uchun qat'iy chegaralar:**
+
+1. Python xizmati **pul, ombor, chek, qarz, bron yoki sinxron mantig'ini o'zi hisoblamaydi** va FACT/MONOTONE jadvallarga to'g'ridan-to'g'ri yozmaydi. U faqat o'qiydi (alohida faqat-o'qish roli yoki replika) yoki TypeScript API'dagi domen komandasini chaqiradi (tasdiq va audit bilan, 16-bo'lim AI qoidalari).
+2. Aloqa faqat hujjatlashtirilgan API yoki navbat orqali. Kontraktlar Zod'dan **JSON Schema / OpenAPI** sifatida eksport qilinadi (`packages/contracts`), Python tomonda Pydantic modellar shundan generatsiya qilinadi. Qo'lda nusxalash taqiqlangan.
+3. Python xizmati alohida konteyner (`services/<nom>`), o'z testlari, CI'da alohida job. Ishlamay qolsa, kassa va savdo to'xtamaydi.
+4. Shaxsiy ma'lumot tashqi AI modelga yuborilmaydi (16-bo'lim).
+
+**Kelajakda Python'ga o'tish imkoni:** chegaralar shunday qurilsinki, istalgan bulut moduli (masalan tahlil yoki tavsiya) keyinchalik Python'da qayta yozilishi mumkin bo'lsin: modul faqat kontrakt orqali gaplashadi, ichki tuzilishi tashqariga chiqmaydi. Kassa va hub yadrosi (domen, sinxron) TypeScript'da qoladi.
+
+### 2.5. Ochiq katalog (Guzar Market uchun)
+
+RLS tenantlarni qat'iy ajratadi. Mijoz ilovasi esa ko'p bizneslarni birga ko'rsatadi. Shuning uchun:
+
+- Biznes nimani ochiq qilishini o'zi belgilaydi: profil (nom, manzil, xaritadagi nuqta, ish vaqti, yo'nalish, rasmlar), mahsulot/menyu/xizmat, narx, mavjudlik (qoldiq son yoki faqat "bor/yo'q"), bo'sh vaqtlar.
+- Bulutda alohida **ochiq proyeksiya** (`public_*` jadvallar yoki ko'rinishlar) faqat shu maydonlarni saqlaydi va hodisalardan yangilanadi. Tannarx, qarz, xodim, mijoz ma'lumoti u yerga hech qachon tushmaydi (test bilan).
+- Market API faqat ochiq proyeksiyani o'qiydi. Buyurtma va bron esa biznesning tenant kontekstida domen komandasi orqali yaratiladi.
 
 ---
 
@@ -180,6 +242,7 @@ Bularni buzgan o'zgarish avtomatik rad etiladi. Bular MiniERP'da amalda sinalgan
 - Hujjat berilmaguncha faqat interfeys va `Fake...Driver` yoziladi.
 - Fake rejimda chek va UI'da "SINOV — FISKAL EMAS" chiqadi.
 - Fiskal belgi driver javobisiz yozilmaydi.
+- Markirovkalangan tovar cheki onlayn tekshiruv talab qiladi (VMQ-23): bunday tovar uchun oflayn rejim zaxira hisoblanadi, asosiy ish tartibi emas. Internet yo'qligida qanday ishlash F3 da hamkor hujjati bo'yicha belgilanadi.
 - `[TASDIQLANSIN]` belgili qiymatlar konfiguratsiyada turadi.
 
 ### 3.4. Xavfsizlik
@@ -296,18 +359,22 @@ Commit:
 
 ## 6. Bosqichlar
 
-| Bosqich | Natija | Vazifalar | Taxminiy muddat |
-|---|---|---|---|
-| F0. Poydevor | Monorepo, domen asoslari, CI | T0.1–T0.7 | 3–4 hafta |
-| F1. Oflayn kassa | Bitta kompyuterda to'liq do'kon | T1.1–T1.13 | 8–10 hafta |
-| F2. Bulut va sinxron | Egasi telefondan ko'radi | T2.1–T2.8 | 6–8 hafta |
-| F3. Qonuniy kassa | Pilotga tayyor | T3.0–T3.9 | 8–10 hafta |
-| F4. Ko'p kassa va tijorat | Keng sotuvga tayyor | T4.1–T4.8 | 6–8 hafta |
-| F5. Soha va filial | Universal | T5.1–T5.8 | 8–10 hafta |
-| F6. Omnikanal va API | Tashqi ulanishlar | T6.1–T6.5 | 6–8 hafta |
-| F7. AI | Yordamchi | T7.1–T7.5 | doimiy |
+Konsepsiyadagi bozor bosqichlari (0–6) bilan moslik ustunda ko'rsatilgan.
 
-Bosqich mezoni bajarilmaguncha keyingisi boshlanmaydi.
+| Bosqich | Natija | Vazifalar | Guzar bosqichi |
+|---|---|---|---|
+| F0. Poydevor | Monorepo, domen asoslari, CI | T0.1–T0.7 | 0 · Tayyorgarlik |
+| F1. Oflayn kassa | Bitta kompyuterda to'liq do'kon | T1.1–T1.13 | 1 · Kassa va do'konlar |
+| F2. Bulut, sinxron va biznes kabineti | Egasi telefondan ko'radi va boshqaradi | T2.1–T2.8 | 1 · Kassa va do'konlar |
+| F3. Qonuniy kassa | Fiskal chek, UzQR, markirovka, pilot | T3.0–T3.9 | 1 · yakuni: 3–5 do'kon har kuni savdo qiladi |
+| F4. Ko'p kassa, web-kassa va obuna | Keng sotuvga tayyor | T4.1–T4.8 | 1 → 2 o'tishi |
+| F5. Guzar Market va onlayn vitrina | Mijoz havoladan buyurtma beradi | T5.1–T5.9 | 2 · Onlayn vitrina |
+| F6. Kafe va restoran | 2–3 ovqatlanish nuqtasi ulangan | T6.1–T6.6 | 3 · Kafe va restoran |
+| F7. Bron: fitnes, bilyard, xizmatlar | Fitnes zali va bilyard klubi ishlaydi | T7.1–T7.7 | 4 · Bron |
+| F8. Yetkazib berish | Cheklangan hududda yetkazish sinovi | T8.1–T8.6 | 5 · Yetkazib berish |
+| F9. O'sish | Bonus, tahlil, reklama, filial, sohalar, API, AI | T9.1–T9.12 | 6 · O'sish |
+
+Bosqich mezoni bajarilmaguncha keyingisi boshlanmaydi. Har bosqich oxirida Claude chuqur audit o'tkazadi (mustaqil model va mutatsiya).
 
 ---
 
@@ -419,7 +486,7 @@ Kunlik va oylik savdo, foyda (faqat egasi), qarzlar, kam qoldiq, muddati yaqin. 
 
 ---
 
-## 9. F2 — Bulut va sinxron
+## 9. F2 — Bulut, sinxron va biznes kabineti
 
 ### T2.1. Bulut API
 Fastify + PostgreSQL, RLS, tashkilot, do'kon, foydalanuvchi, deploy (Docker Compose, Caddy, PostgreSQL zaxirasi). Server O'zbekistonda bo'lishi egasi qarori.
@@ -441,8 +508,8 @@ Yangi hub va mavjud hubni tiklash. **Mezonlar:** har jadval tenant bilan filtrla
 ### T2.6. Proyeksiya va konfliktlar
 Faqat tegilgan yozuvlar qayta hisoblanadi, to'liq qayta qurish ham bor. Konflikt UI. **Mezonlar:** qisman = to'liq natija.
 
-### T2.7. Egasi paneli
-`apps/admin`: dashboard, hisobot, mahsulot, konfliktlar, qurilmalar. Mobil moslashuv.
+### T2.7. Biznes kabineti
+`apps/admin`: bugungi savdo, cheklar, tugayotgan tovar, onlayn buyurtmalar (F5 dan keyin), mahsulotlar, ombor, mijozlar, qarzlar, hisobotlar, xodimlar va ruxsatlar, qurilmalar, konfliktlar, sozlamalar. Har muhim amal (narx o'zgarishi, chek bekor qilish, qoldiq tuzatish) kim va qachon qilgani bilan ko'rinadi. Mobil moslashuv. UI Guzar brend uslubida.
 
 ### T2.8. Telegram bot va yakuniy test
 Egaga kunlik xulosa, mijozga qarz eslatmasi (rozilik bilan), hisobni bog'lash. Integratsion test: ikki baza, oflayn savdo, ikki tomon sinxron, bekor, qaytarish, uzilish, soat farqi.
@@ -507,71 +574,108 @@ Kassir yo'riqnomasi, nosozlik kitobi, reliz ro'yxati.
 
 ---
 
-## 11. F4 — Ko'p kassa va tijorat
+## 11. F4 — Ko'p kassa, web-kassa va obuna
 
 | ID | Vazifa | Asosiy qabul mezoni |
 |---|---|---|
 | T4.1 | Ichki tarmoq hub'i, juftlangan terminallar, pinned TLS | Ruxsatsiz qurilma kira olmaydi |
 | T4.2 | Ko'p kassa va parallel savdo | 3 terminalda zaxira va chek raqami to'g'ri |
 | T4.3 | Terminalga bog'langan printer, yashik | Har terminal o'z printeriga chiqaradi |
-| T4.4 | Android qobig'i, yolg'iz va terminal rejimi | Printer va kamera skaneri ishlaydi |
+| T4.4 | Android/planshet qobig'i va **web-kassa** (hub'ga LAN orqali, elektr uzilganda zaxira) | Printer va kamera skaneri ishlaydi; kompyuter o'chsa planshetdan savdo davom etadi |
 | T4.5 | Payme, Click, Uzum drayverlari (hujjat bilan) | T3.6 mezonlari har provayderda |
 | T4.6 | Tillar: o'zbek lotin, kirill, rus | Barcha matn `i18n`dan |
-| T4.7 | Litsenziya va tariflar (Start, Biznes, Tarmoq), oflayn imzo | Muddat tugashi savdoni to'xtatmaydi |
+| T4.7 | **Obuna va tariflar:** Start, Business, Pro; bepul sinov davri; oflayn imzolangan litsenziya; platforma hisob-fakturasi | Muddat tugashi savdoni to'xtatmaydi; tarif chegarasi API'da ham tekshiriladi |
 | T4.8 | Imzolangan avtomatik yangilanish, hub tiklash yo'riqnomasi | Yangilanish ochiq chekni buzmaydi, kassir vaqtini tanlaydi |
 
-## 12. F5 — Soha va filial
+## 12. F5 — Guzar Market va onlayn vitrina
 
 | ID | Vazifa | Asosiy qabul mezoni |
 |---|---|---|
-| T5.1 | Tashkilot → filial → ombor, filial hisobotlari | Filial foydalanuvchisi boshqasini ko'rmaydi |
-| T5.2 | Filiallararo ko'chirish | Yo'ldagi tovar ikki marta hisoblanmaydi |
-| T5.3 | Kengaytirilgan rollar | Backendda tekshiriladi |
-| T5.4 | Modul bayroqlari va soha paketlari | O'chiq modul API'da ham yopiq |
-| T5.5 | Telefon: IMEI/seriya | Bitta IMEI ikki marta sotilmaydi |
-| T5.6 | Dorixona: retsept, partiya, markirovka | F3 qoidalari bilan to'liq oqim |
-| T5.7 | Kafe: stol, oshxona ekrani, modifikator, BOM, chek bo'lish | Xomashyo to'g'ri kamayadi |
-| T5.8 | Vaqtli xizmat (bilyard, klub), tarozi, kiyim, ulgurji | Har biri `completeSale` orqali |
+| T5.1 | Biznes profili: nom, yo'nalish, manzil, xarita nuqtasi, ish vaqti, rasmlar, aloqa; mahsulot rasmlari | Rasm hajmi va turi cheklangan; profil faqat egasi/menejer tomonidan o'zgaradi |
+| T5.2 | Ochiq proyeksiya (2.5): ochiq e'lon qilingan katalog, menyu, narx, mavjudlik | Tannarx, qarz, xodim, mijoz maydonlari proyeksiyada yo'qligi testlangan; o'zgarish ≤ 1 daqiqada ko'rinadi |
+| T5.3 | Market API va qidiruv: yaqin joylar (masofa), yo'nalish, ochiq/yopiq, aksiyalar, matn qidiruv (lotin/kirill) | 1 000 biznes, 200 000 ochiq mahsulotda qidiruv ≤ 200 ms |
+| T5.4 | Mijoz akkaunti: telefon + bir martalik kod, profil, sevimlilar, tarix; faqat zarur ma'lumot | Bir xil raqamdan takror akkaunt yo'q; kod urinishlari cheklangan |
+| T5.5 | Onlayn buyurtma va **qoldiqni vaqtincha band qilish** (TTL bilan), tasdiq, olib ketish | Oxirgi 2 donani ikki mijoz parallel buyurtma qilsa, bittasi oladi; bekor yoki muddat o'tsa band bo'shaydi; topshirish yagona `completeSale` orqali |
+| T5.6 | Mijoz ilovasi (web + QR vitrina) va Telegram mini-ilova: bosh sahifa, biznes sahifasi, savat, buyurtma holati | O'rnatishsiz QR orqali ochiladi; Playwright: QR → savat → buyurtma → kabinetda ko'rinadi |
+| T5.7 | Onlayn to'lov (UzQR va provayderlar), "kutilmoqda" holati, takroriy yechishdan himoya | Tasdiqsiz to'lov buyurtmani yopmaydi; kech tasdiq ikki marta yozilmaydi |
+| T5.8 | Platforma komissiyasi hisobi (kelishilgan foiz), biznes uchun oylik akt | Komissiya faqat platforma orqali kelgan buyurtmadan; summalar hisobot bilan teng |
+| T5.9 | Bildirishnomalar: buyurtma holati mijoz va biznesga (Telegram, push, SMS — port orqasida) | Bildirishnoma xatosi buyurtmani buzmaydi; reklama xabari faqat rozilik bilan |
 
-## 13. F6 — Omnikanal va API
-
-| ID | Vazifa | Asosiy qabul mezoni |
-|---|---|---|
-| T6.1 | Ochiq API, kalitlar, webhook imzosi, OpenAPI | Kalit faqat o'z tashkilotiga kiradi |
-| T6.2 | Telegram do'kon | Onlayn buyurtma qoldiqni band qiladi |
-| T6.3 | Yetkazib berish (hujjat bilan) | Takror buyurtma yaratilmaydi |
-| T6.4 | Sodiqlik: ball, kupon | Ball FACT, sinxronda yo'qolmaydi |
-| T6.5 | Buxgalteriya eksporti | Summalar hisobot bilan teng |
-
-## 14. F7 — AI
-
-**Chegaralar:** AI pul yoki omborni tasdiqsiz o'zgartirmaydi. Tashqi modelga shaxsiy ma'lumot yuborilmaydi. Provayder almashtiriladi. Internetsiz qoidaviy yordamchi ishlaydi. Har chaqiruv xarajati yoziladi.
+## 13. F6 — Kafe va restoran
 
 | ID | Vazifa | Asosiy qabul mezoni |
 |---|---|---|
-| T7.1 | Provayder qatlami, shaxsiy ma'lumot filtri | So'rovda PII yo'qligi testlangan |
-| T7.2 | O'zbekcha savol-javob, ovoz | Sonlar modeldan emas, hisobotdan |
-| T7.3 | Buyurtma tavsiyasi | Oddiy o'rtachadan yaxshiligi o'lchangan |
-| T7.4 | Anomaliya: ko'p bekor, chegirma, kassa farqi | Soxta signal darajasi o'lchangan |
-| T7.5 | Tasdiq bilan bajariladigan amallar | Domen komandalari, tasdiq va audit bilan |
+| T6.1 | Menyu: kategoriya, taom rasmi, tarkib, qo'shimchalar (sous, garnir) va modifikatorlar | Modifikator narxi chekda to'g'ri; ochiq menyuga chiqadi |
+| T6.2 | Stollar sxemasi, ochiq stol hisobi, ofitsiant, chekni bo'lish va birlashtirish | Bo'lingan cheklar yig'indisi asl hisobga teng |
+| T6.3 | QR menyu va stoldan buyurtma (mijoz telefonidan) | Buyurtma oshxona ekranida paydo bo'ladi; noto'g'ri stol QR rad etiladi |
+| T6.4 | Oshxona ekrani (KDS): holatlar, tayyor bo'lganda ofitsiantga bildirishnoma | Internet uzilsa ham lokal hub orqali ishlaydi |
+| T6.5 | Retsept/BOM: taom sotilganda xomashyo kamayadi | Xomashyo to'g'ri kamayadi; proyeksiya ledgerga teng |
+| T6.6 | Olib ketish va stol band qilish (F7 bron dvigatelidan) | Band qilingan stol ikki marta berilmaydi |
+
+## 14. F7 — Bron: fitnes, bilyard, xizmatlar
+
+| ID | Vazifa | Asosiy qabul mezoni |
+|---|---|---|
+| T7.1 | Umumiy bron dvigateli: resurs (stol, zal, usta, post), jadval, ish vaqti, slot, sig'im | Bitta vaqt ikki marta sotilmaydi (PostgreSQL'da haqiqiy parallel test) |
+| T7.2 | Vaqtinchalik band (to'lov yoki tasdiq kutilayotganda bir necha daqiqa), muddat o'tsa bo'shatish | Band paytida boshqa mijozga taklif qilinmaydi; muddat o'tgach avtomatik bo'shaydi |
+| T7.3 | Depozit va oldindan to'lov, bekor qilish qoidalari (oldindan ko'rsatiladi), kelmaganlar | Depozit `order_payments` kabi hisoblanadi; tushum faqat xizmat ko'rsatilganda |
+| T7.4 | Bilyard va vaqtli xizmat: o'yin vaqtini avtomatik hisoblash, soatbay narx, savdo bilan birlashtirish | Har biri `completeSale` orqali; vaqt hisobi daqiqagacha to'g'ri |
+| T7.5 | Fitnes: abonement turlari, muddati, muzlatish, tashriflar, murabbiylar, guruh darsiga yozilish va bo'sh joylar | Muzlatish muddatni to'g'ri suradi; sig'imdan ortiq yozilish yo'q |
+| T7.6 | Xizmatlar: salon, avtoservis, o'quv markazi — usta va vaqt bo'yicha qabulga yozilish | Bir usta bir vaqtda bitta mijoz |
+| T7.7 | Bron ziddiyati qoidasi: birinchi tasdiqlangan qoladi, ikkinchiga boshqa vaqt va bonus taklifi | Ziddiyat jurnalga tushadi va biznesga ko'rinadi |
+
+## 15. F8 — Yetkazib berish
+
+**Ishga tushirishdan oldin (egasi va huquqshunos):** haydovchilarni tekshirish, transport talablari, sug'urta, javobgarlik, yetkazish xizmati uchun fiskal chek tartibi. Avval kichik hududda sinov.
+
+| ID | Vazifa | Asosiy qabul mezoni |
+|---|---|---|
+| T8.1 | Haydovchi ro'yxati: shaxsni tasdiqlash, transport, hujjatlar, "ishdaman" holati | Tasdiqlanmagan haydovchi buyurtma ololmaydi |
+| T8.2 | Haydovchi ilovasi (`apps/driver`): taklif (masofa va to'lov), qabul, olib ketish va topshirishni tasdiqlash, daromad tarixi | Bitta buyurtmani ikki haydovchi bir vaqtda qabul qila olmaydi (server kafolati, parallel test) |
+| T8.3 | Taqsimlash: joylashuv, biznesgacha masofa, transport, yuklama, sifat | Qayta taqsimlash haydovchi kelmasa avtomatik |
+| T8.4 | Buyurtma yo'li va kuzatish: 8 holat, mijoz va biznesga bildirishnoma | Holatlar faqat oldinga o'tadi; har o'tish audit bilan |
+| T8.5 | Yetkazish narxi va hisob-kitob: haydovchi ulushi, platforma ulushi, naqd puldagi farq | Naqd farqi alohida qayd etiladi; summalar teng |
+| T8.6 | Qoidalar: haydovchi bekor qilsa, kechiksa, mijoz bo'lmasa, mahsulot shikastlansa, ob-havo | Har holat uchun yozilgan oqim va testi |
+
+## 16. F9 — O'sish
+
+**AI chegaralari:** AI pul yoki omborni tasdiqsiz o'zgartirmaydi. Tashqi modelga shaxsiy ma'lumot yuborilmaydi. Provayder almashtiriladi. Internetsiz qoidaviy yordamchi ishlaydi. Har chaqiruv xarajati yoziladi. AI va tahlil xizmatlari Python'da bo'lishi mumkin (2.4).
+
+| ID | Vazifa | Asosiy qabul mezoni |
+|---|---|---|
+| T9.1 | Sodiqlik: ball, kupon, do'st taklifi (soxta akkauntlardan himoya), tug'ilgan kun aksiyasi | Ball FACT, sinxronda yo'qolmaydi |
+| T9.2 | Reklama: kategoriyada yuqori o'rin, banner, hududiy aksiya; "reklama" belgisi doim ko'rinadi | Reklama belgisi testlangan; to'lov bilan bog'langan |
+| T9.3 | Reyting va izohlar: faqat haqiqiy buyurtma yoki brondan keyin | Soxta izoh qo'shib bo'lmaydi |
+| T9.4 | Kengaytirilgan tahlil (pullik): qaysi mahsulot sotilyapti, kim qaytib kelyapti, qaysi aksiya ishladi | Raqamlar hisobotdan, modeldan emas |
+| T9.5 | Tashkilot → filial → ombor, filial hisobotlari, filiallararo ko'chirish | Yo'ldagi tovar ikki marta hisoblanmaydi |
+| T9.6 | Kengaytirilgan rollar, modul bayroqlari va soha paketlari | O'chiq modul API'da ham yopiq |
+| T9.7 | Telefon (IMEI/seriya), dorixona (retsept, markirovka), kiyim, tarozi, ulgurji | Har biri `completeSale` orqali |
+| T9.8 | Ochiq API, kalitlar, webhook imzosi, OpenAPI | Kalit faqat o'z tashkilotiga kiradi |
+| T9.9 | Buxgalteriya eksporti | Summalar hisobot bilan teng |
+| T9.10 | AI provayder qatlami va PII filtri (Python mumkin) | So'rovda PII yo'qligi testlangan |
+| T9.11 | O'zbekcha savol-javob, ovoz, buyurtma tavsiyasi, anomaliya (Python mumkin) | Sonlar hisobotdan; tavsiya oddiy o'rtachadan yaxshiligi o'lchangan |
+| T9.12 | Platforma boshqaruvi: bizneslarni ulash, nazorat, yordam, yangi hududlar | Platforma xodimi biznes ma'lumotini faqat ruxsat va audit bilan ko'radi |
 
 ---
 
-## 15. Egasi qarorlari
+## 17. Egasi qarorlari
 
-| Qaror | Qachon kerak |
+| Qaror | Holat / qachon kerak |
 |---|---|
-| Yangi `mezon` repozitoriyasini ochish | T0.1 |
-| Domen va "Mezon" savdo belgisini rasmiylashtirish | F3 yakunidan oldin |
+| Yangi `mezon` repozitoriyasini ochish | Bajarildi |
+| Server tili | **TypeScript** (2026-11-11), Python chegaralangan xizmatlar uchun (2.4) |
+| Brend: "Guzar" nomi, logotip, ranglar, shior; domen va savdo belgisini rasmiylashtirish | Brend uslubi F2 dagi kabinet UI'sidan oldin; rasmiylashtirish F3 yakunidan oldin |
 | Server joyi va 27-1-modda bo'yicha huquqshunos fikri | T2.1 |
 | Virtual kassa hamkori va API hujjatlari | T3.0 |
 | UzQR va Asl belgisi hujjatlari | T3.6, T3.7 |
-| Pilot do'kon | F3 yakuni |
-| Tarif narxlari | T4.7 |
+| Pilot bizneslar (konsepsiya: 5 do'kon, 3 kafe, 1 restoran, 1 fitnes, 1 bilyard) | F3 yakuni va har bosqich pilotida |
+| Tariflar (gipoteza: Start 99–149 ming, Business 199–299 ming, Pro 399–599 ming so'm) va bepul sinov davri | T4.7 |
+| Onlayn buyurtma komissiyasi (gipoteza 1,5–2%) | T5.8 |
+| Yetkazish: huquqiy tartib, sug'urta, haydovchi talablari, fiskal chek | F8 boshlanishidan oldin |
 
 ---
 
-## 16. Birinchi qadam
+## 18. Birinchi qadam
 
 1. Repozitoriya bo'sh ekanini tasdiqlang. Unda MiniERP kodi bo'lmasligi kerak.
 2. Hujjatdagi noaniq joylarni ro'yxat qiling.
