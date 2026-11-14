@@ -9,6 +9,7 @@
     "build": "tsc -b",
     "typecheck": "tsc --noEmit",
     "start": "node dist/index.js",
+    "db:migrate": "node dist/cli/migrate.js",
     "org:create": "node dist/cli/create-org.js"
   },
   "dependencies": {

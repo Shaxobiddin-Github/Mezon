@@ -49,3 +49,17 @@ docker compose exec -T postgres /bin/sh /scripts/restore-pg.sh /backups/mezon_cl
 
 - Parollar va maxfiy kalitlar skriptlarga qattiq yozilmaydi, faqat muhit o‘zgaruvchilaridan (`MEZON_POSTGRES_ADMIN_PASSWORD`) olinadi.
 - Zaxira nusxalari serverdan tashqaridagi alohida xavfsiz xotiraga (masalan S3 / rsync orqali) muntazam sinxronlanishi tavsiya etiladi.
+
+---
+
+## 4. Migratsiyalarni qo‘llash (Database Migrations)
+
+- Migratsiyalar ilova runtime konteynerida (`cloud`) EMAS, bir martalik alohida `migrate` konteynerida `DATABASE_ADMIN_URL` orqali bajariladi:
+  ```bash
+  docker compose run --rm migrate
+  ```
+  yoki ishlab chiqish/avtonom muhitda:
+  ```bash
+  pnpm --filter @mezon/cloud db:migrate
+  ```
+- `cloud` servisi runtime'da faqat cheklangan huquqli `mezon_app` (`DATABASE_URL`) roli bilan ulanadi va unga hech qachon superuser/admin URL berilmaydi.

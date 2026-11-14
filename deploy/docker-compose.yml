@@ -20,6 +20,21 @@ services:
     networks:
       - mezon_internal
 
+  migrate:
+    build:
+      context: ..
+      dockerfile: deploy/Dockerfile
+    container_name: mezon-cloud-migrate
+    restart: 'no'
+    command: ['pnpm', '--filter', '@mezon/cloud', 'db:migrate']
+    environment:
+      DATABASE_ADMIN_URL: postgres://${POSTGRES_USER:-mezon_admin}:${MEZON_POSTGRES_ADMIN_PASSWORD}@postgres:5432/${POSTGRES_DB:-mezon_cloud}
+    depends_on:
+      postgres:
+        condition: service_healthy
+    networks:
+      - mezon_internal
+
   cloud:
     build:
       context: ..
@@ -30,13 +45,14 @@ services:
       PORT: 4000
       HOST: 0.0.0.0
       DATABASE_URL: postgres://mezon_app:${MEZON_APP_DB_PASSWORD}@postgres:5432/${POSTGRES_DB:-mezon_cloud}
-      DATABASE_ADMIN_URL: postgres://${POSTGRES_USER:-mezon_admin}:${MEZON_POSTGRES_ADMIN_PASSWORD}@postgres:5432/${POSTGRES_DB:-mezon_cloud}
       JWT_SECRET: ${JWT_SECRET}
       CORS_ORIGINS: ${CORS_ORIGINS:-https://admin.guzar.uz,https://market.guzar.uz}
       NODE_ENV: production
     depends_on:
       postgres:
         condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
     networks:
       - mezon_internal
 
