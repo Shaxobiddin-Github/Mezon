@@ -38,8 +38,20 @@ export {
   type CloudPgConnection,
   createCloudPgPool,
   withPgTenantContext,
+  assertNonSuperuserNonBypassRls,
 } from './connection.js';
 
 export { getDefaultCloudMigrationsFolder, migrateCloudDatabase } from './migrate.js';
 
-export { cloudSchemaRegistry } from './schema/index.js';
+export {
+  cloudSchemaRegistry,
+  cloudOrganizations,
+  cloudStores,
+  cloudUsers,
+  cloudRefreshTokens,
+  cloudLoginIdentities,
+} from './schema/index.js';
+
+export { CloudAuthStore, type CloudLoginLookupResult } from './auth-store.js';
+
+export { CloudTenantStore, type CreateOrganizationParams } from './tenant-store.js';

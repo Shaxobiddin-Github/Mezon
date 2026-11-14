@@ -252,3 +252,26 @@ export function computeRetryAfterSeconds(remainingMs: bigint): bigint {
   }
   return (remainingMs + 999n) / 1000n;
 }
+
+/**
+ * Normalizes cloud login (email, Uzbekistan phone, or username) for identity matching (S3 requirement).
+ * - Strips leading/trailing whitespace and converts to lowercase.
+ * - If the login consists strictly of digits (and optional leading +, spaces, dashes, parentheses),
+ *   normalizes to standard +998XXXXXXXXX format.
+ */
+export function normalizeCloudLogin(raw: string): string {
+  if (typeof raw !== 'string') {
+    throw new DomainError('VALIDATION_ERROR', 'Login must be a string');
+  }
+  const trimmed = raw.trim().toLowerCase();
+  if (/^(\+)?[\d\s\-()]+$/.test(trimmed)) {
+    const digits = trimmed.replace(/\D/g, '');
+    if (digits.length === 9) {
+      return `+998${digits}`;
+    }
+    if (digits.length === 12 && digits.startsWith('998')) {
+      return `+${digits}`;
+    }
+  }
+  return trimmed;
+}

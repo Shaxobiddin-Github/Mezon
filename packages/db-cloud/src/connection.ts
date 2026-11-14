@@ -129,6 +129,30 @@ export function createCloudPgPool<TSchema extends Record<string, unknown> = Reco
 }
 
 /**
+ * Startup self-check (S1 requirement): asserts that the database role currently connected to the pool
+ * is neither a superuser nor has BYPASSRLS privilege.
+ * Prevents cloud runtime from accidentally connecting with database owner/admin credentials
+ * which would completely bypass Row Level Security.
+ */
+export async function assertNonSuperuserNonBypassRls(pool: pg.Pool): Promise<void> {
+  const result = await pool.query<{ rolname: string; rolsuper: boolean; rolbypassrls: boolean }>(
+    `SELECT rolname, rolsuper, rolbypassrls FROM pg_roles WHERE rolname = current_user`,
+  );
+  const row = result.rows[0];
+  if (!row) {
+    throw new Error(
+      'Database startup security check failed: current_user role not found in pg_roles',
+    );
+  }
+  if (row.rolsuper || row.rolbypassrls) {
+    throw new Error(
+      `Database startup security check failed: role "${row.rolname}" has rolsuper=${row.rolsuper}, rolbypassrls=${row.rolbypassrls}. ` +
+        `Runtime pool must connect as non-superuser, non-bypassrls role (mezon_app) to enforce RLS.`,
+    );
+  }
+}
+
+/**
  * Runs a callback inside an explicit PostgreSQL transaction with transaction-local
  * `set_config('app.organization_id', $1, true)` so tenant context never leaks across
  * pooled connections after commit or rollback.

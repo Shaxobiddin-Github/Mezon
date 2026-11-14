@@ -1,7 +1,8 @@
-import { PgSchemaRegistry } from '../registry.js';
-
-/**
- * Cloud PostgreSQL schema metadata registry.
- * T0.4 defines only schema foundation (no business tables yet).
- */
-export const cloudSchemaRegistry = new PgSchemaRegistry();
+export { cloudSchemaRegistry } from './registry-instance.js';
+export {
+  cloudOrganizations,
+  cloudStores,
+  cloudUsers,
+  cloudRefreshTokens,
+  cloudLoginIdentities,
+} from './tables.js';

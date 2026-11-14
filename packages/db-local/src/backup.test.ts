@@ -566,7 +566,9 @@ describe('T1.13: SqliteBackupService & R2/R3 Restore Lifecycle', () => {
 
     const backupA = await env.backupService.createBackup({ reason: 'Valid backup' });
 
-    // Case 1: Tampered byte in backup file (fails SHA-256 and/or integrity)
+    // Case 1: Targeted payload byte change inside product name string
+    // PRAGMA integrity_check STILL PASSES ('ok') because B-tree structure is intact,
+    // but SHA-256 mismatch MUST catch it and reject restore!
     env.backupService.stageRestore({
       backupId: backupA.id,
       actorUserId: env.ownerId,
@@ -577,11 +579,22 @@ describe('T1.13: SqliteBackupService & R2/R3 Restore Lifecycle', () => {
 
     const backupDbFile = path.join(env.backupDir, `${backupA.id}.db`);
     const originalBuf = fs.readFileSync(backupDbFile);
+    const targetStr = 'Guarded Product B2';
+    const targetIdx = originalBuf.indexOf(Buffer.from(targetStr));
+    expect(targetIdx).toBeGreaterThan(0);
+
     const tamperedBuf = Buffer.from(originalBuf);
-    tamperedBuf[32] = tamperedBuf[32] ^ 0xff; // Flip a byte in SQLite header/data
+    tamperedBuf[targetIdx] = 'X'.charCodeAt(0); // 'Xuarded Product B2'
     fs.writeFileSync(backupDbFile, tamperedBuf);
 
-    // executeStagedRestoreIfPending MUST throw VALIDATION_ERROR
+    // Assert: PRAGMA integrity_check ALONE returns 'ok' on this tampered database!
+    const tamperedDb = new Database(backupDbFile, { readonly: true });
+    const chkRows = tamperedDb.pragma('integrity_check') as Array<{ integrity_check: string }>;
+    tamperedDb.close();
+    expect(chkRows).toBeDefined();
+    expect(chkRows[0]?.integrity_check).toBe('ok');
+
+    // BUT executeStagedRestoreIfPending MUST reject it due to SHA-256 verification failure!
     await expect(
       SqliteBackupService.executeStagedRestoreIfPending({
         dbPath: env.dbPath,
@@ -635,6 +648,45 @@ describe('T1.13: SqliteBackupService & R2/R3 Restore Lifecycle', () => {
       .prepare('SELECT COUNT(*) as cnt FROM products WHERE id = ?')
       .get(p.id) as { cnt: unknown };
     expect(Number(intact.cnt)).toBe(1);
+
+    // Case 3: Missing .meta.json MUST reject restore with VALIDATION_ERROR and leave current DB intact
+    verifyDb.close();
+    openConnections.length = 0;
+
+    const curDbForBackup = openLocalSqliteDatabase(env.dbPath);
+    openConnections.push(curDbForBackup);
+    const backupService3 = new SqliteBackupService({
+      connection: curDbForBackup,
+      backupDir: env.backupDir,
+      dbPath: env.dbPath,
+    });
+    const backupNoMeta = await backupService3.createBackup({ reason: 'Will delete meta' });
+    backupService3.stageRestore({
+      backupId: backupNoMeta.id,
+      actorUserId: env.ownerId,
+    });
+    curDbForBackup.close();
+    openConnections.length = 0;
+
+    // Delete the metadata file
+    const metaToDelete = path.join(env.backupDir, `${backupNoMeta.id}.meta.json`);
+    expect(fs.existsSync(metaToDelete)).toBe(true);
+    fs.unlinkSync(metaToDelete);
+
+    await expect(
+      SqliteBackupService.executeStagedRestoreIfPending({
+        dbPath: env.dbPath,
+        backupDir: env.backupDir,
+      }),
+    ).rejects.toMatchObject({ code: 'VALIDATION_ERROR' });
+
+    // Verify current DB remains intact
+    const verifyDb3 = openLocalSqliteDatabase(env.dbPath);
+    openConnections.push(verifyDb3);
+    const intact3 = verifyDb3.sqlite
+      .prepare('SELECT COUNT(*) as cnt FROM products WHERE id = ?')
+      .get(p.id) as { cnt: unknown };
+    expect(Number(intact3.cnt)).toBe(1);
   });
 
   it('B3: rebuilds stock, customer, and supplier projections post-restore and verifies ledger parity', async () => {

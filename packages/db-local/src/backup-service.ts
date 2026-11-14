@@ -307,27 +307,38 @@ export class SqliteBackupService {
       );
     }
 
-    // B2: 1. Validate backup file SHA-256 against meta.json if present
-    if (fs.existsSync(backupMetaPath)) {
-      try {
-        const metaRaw = fs.readFileSync(backupMetaPath, 'utf8');
-        const meta = JSON.parse(metaRaw) as { readonly sha256?: string };
-        if (meta.sha256) {
-          const backupBuf = fs.readFileSync(backupDbPath);
-          const actualSha256 = createHash('sha256').update(backupBuf).digest('hex');
-          if (actualSha256 !== meta.sha256) {
-            fs.unlinkSync(stagingPath);
-            throw new DomainError(
-              'VALIDATION_ERROR',
-              `Backup file checksum mismatch: expected ${meta.sha256}, got ${actualSha256}`,
-            );
-          }
-        }
-      } catch (err) {
-        if (err instanceof DomainError) throw err;
+    // B2: 1. Validate backup file SHA-256 against meta.json (meta.json is MANDATORY)
+    if (!fs.existsSync(backupMetaPath)) {
+      fs.unlinkSync(stagingPath);
+      throw new DomainError(
+        'VALIDATION_ERROR',
+        `Zaxira metama'lumot fayli topilmadi: ${backupMetaPath}`,
+      );
+    }
+
+    try {
+      const metaRaw = fs.readFileSync(backupMetaPath, 'utf8');
+      const meta = JSON.parse(metaRaw) as { readonly sha256?: string };
+      if (!meta.sha256) {
         fs.unlinkSync(stagingPath);
-        throw new DomainError('VALIDATION_ERROR', `Failed reading backup metadata: ${String(err)}`);
+        throw new DomainError(
+          'VALIDATION_ERROR',
+          "Zaxira metama'lumotida sha256 kaliti mavjud emas",
+        );
       }
+      const backupBuf = fs.readFileSync(backupDbPath);
+      const actualSha256 = createHash('sha256').update(backupBuf).digest('hex');
+      if (actualSha256 !== meta.sha256) {
+        fs.unlinkSync(stagingPath);
+        throw new DomainError(
+          'VALIDATION_ERROR',
+          `Backup file checksum mismatch: expected ${meta.sha256}, got ${actualSha256}`,
+        );
+      }
+    } catch (err) {
+      if (err instanceof DomainError) throw err;
+      fs.unlinkSync(stagingPath);
+      throw new DomainError('VALIDATION_ERROR', `Failed reading backup metadata: ${String(err)}`);
     }
 
     // B2: 2. Validate backup file integrity_check BEFORE touching current database

@@ -55,9 +55,16 @@ afterEach(() => {
 });
 
 describe('@mezon/db-cloud - PostgreSQL schema registry, RLS templates, and bigint rules', () => {
-  it('exports package marker and keeps production schema empty in T0.4', () => {
+  it('exports package marker and registers T2.1 foundation schema tables', () => {
     expect(DB_CLOUD_PACKAGE).toBe('@mezon/db-cloud');
-    expect(cloudSchemaRegistry.all()).toEqual([]);
+    const tableNames = cloudSchemaRegistry.all().map((t) => t.tableName);
+    expect(tableNames).toEqual([
+      'cloud_organizations',
+      'cloud_stores',
+      'cloud_users',
+      'cloud_refresh_tokens',
+      'cloud_login_identities',
+    ]);
     expect(fs.existsSync(getDefaultCloudMigrationsFolder())).toBe(true);
   });
 

@@ -679,3 +679,25 @@ export {
   StageRestoreResponseSchema,
   type StageRestoreResponseDto,
 } from './reports.js';
+
+export {
+  normalizeCloudLogin,
+  CloudUserRoleSchema,
+  type CloudUserRole,
+  CloudLoginRequestSchema,
+  type CloudLoginRequestDto,
+  CloudRefreshRequestSchema,
+  type CloudRefreshRequestDto,
+  CloudLogoutRequestSchema,
+  type CloudLogoutRequestDto,
+  CloudUserDtoSchema,
+  type CloudUserDto,
+  CloudLoginResponseSchema,
+  type CloudLoginResponseDto,
+  CloudCreateStoreRequestSchema,
+  type CloudCreateStoreRequestDto,
+  CloudStoreDtoSchema,
+  type CloudStoreDto,
+  CloudOrganizationDtoSchema,
+  type CloudOrganizationDto,
+} from './cloud-auth.js';

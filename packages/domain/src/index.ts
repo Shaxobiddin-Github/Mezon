@@ -20,6 +20,7 @@ export {
   validateFullName,
   computeDeviceCooldownDelayMs,
   computeRetryAfterSeconds,
+  normalizeCloudLogin,
 } from './auth.js';
 
 export {

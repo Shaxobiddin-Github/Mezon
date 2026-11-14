@@ -36,16 +36,16 @@ const distPkgUrl = new URL(`file:///${path.join(pkgRoot, 'dist', 'index.js').rep
 const cloudPkg = await import(distPkgUrl.href);
 
 const schemaTables = {};
-for (const [key, val] of Object.entries(cloudPkg)) {
-  if (is(val, PgTable)) {
-    schemaTables[key] = val;
-  }
-}
 if (cloudPkg.cloudSchemaRegistry) {
   for (const meta of cloudPkg.cloudSchemaRegistry.all()) {
     schemaTables[meta.tableName] = meta.table;
   }
   cloudPkg.assertRlsMigrationsComplete(migrationsDir, cloudPkg.cloudSchemaRegistry.all());
+}
+for (const [key, val] of Object.entries(cloudPkg)) {
+  if (is(val, PgTable) && !Object.values(schemaTables).includes(val)) {
+    schemaTables[key] = val;
+  }
 }
 
 const currSnapshot = await generateDrizzleJson(schemaTables);

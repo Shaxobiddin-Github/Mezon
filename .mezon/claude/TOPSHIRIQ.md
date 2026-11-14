@@ -1,84 +1,87 @@
-# Claude topshirig'i: T1.13 QABUL → F1 yopildi → T2.1 rejasi
+# Claude topshirig'i: T2.1 QABUL → T2.2 rejasi
 
-## 1. T1.13 xulosasi: QABUL (kod `90327c2`)
+## 1. T2.1 xulosasi: QABUL (kod `0c15009`)
 
 Claude tekshirdi:
 
-- **Toza nusxada `pnpm verify` yashil:** 314 + 12 perf test, E2E, depcruise.
-- **B1–B4 bajarildi.** Xavfsizlik nusxasi `backup()` bilan olinadi va WAL bilan to'liq. Ishga tushishda SHA va `integrity_check` tekshiriladi, almashtirish atomar (temp + rename). Rebuild va paritet bor. HLC orqaga qaytmaydi.
-- **Nishonli mutatsiya:**
-  - HLC `max` olib tashlansa, ushlanadi.
-  - `wal_checkpoint` olib tashlansa, testlar yiqilmaydi. Bu ekvivalent: `backup()` WAL'ni o'zi qamraydi. Checkpoint himoya sifatida qoladi.
-  - **SHA tekshiruvi olib tashlansa, testlar yiqilmaydi.** Bu test bo'shlig'i, qarz quyida.
+- **Toza nusxada `pnpm verify` yashil:** 349 + 12 test, PG RLS testlari Docker bilan, depcruise.
+- **S1:** runtime faqat `mezon_app` bilan ishlaydi; superuser yoki `BYPASSRLS` bilan server ishga tushmaydi. **Mutatsiya dalili:** ishga tushishdagi o'z-o'zini tekshirish olib tashlansa, testlar yiqiladi.
+- **S2:** `auth_lookup_login` egasi `mezon_auth_owner`, `PUBLIC` dan `EXECUTE` olingan, `search_path` xavfsiz.
+- **S3:** login normallashtirilgan va unique indeks shu qiymat ustida.
 
-### Test qarzi
+### Xavfsizlik qarzi (T2.2 ning birinchi alohida commit'i: `T2.1 qarzi: migratsiya alohida konteynerda`)
 
-T2.1 PR'ining birinchi alohida commit'i: `T1.13 test qarzi: SHA tekshiruvi`.
+Hozir `cloud` konteyneri runtime'da `DATABASE_ADMIN_URL` ni ham oladi. Admin parol doimiy ishlab turgan ilova ichida bo'lmasligi kerak, chunki ilova buzilsa, admin huquqi ham ketadi.
 
-1. **SHA yolg'iz ushlaydigan o'zgarish.** Zaxira faylida `integrity_check` dan o'tadigan, lekin ma'lumotni o'zgartiradigan bitta baytni almashtir. Masalan, mahsulot nomining matnidagi bitta harf yoki narx raqami. Tiklash rad etilishi, joriy baza tegilmasligi va `integrity_check` = `ok` ekani testda ko'rsatilsin. Mutatsiya bilan isbotla: SHA tekshiruvi olib tashlansa, test yiqiladi.
-2. **Meta yo'q bo'lsa.** Hozir `.meta.json` yo'q bo'lsa, SHA tekshiruvi jimgina o'tkazib yuboriladi. Meta yo'q zaxira tiklanmasin: `VALIDATION_ERROR`. Test bilan.
+- `docker-compose.yml` ga bir martalik `migrate` servisini qo'sh. Unga faqat admin URL beriladi: migratsiya va `mezon_app` / `mezon_auth_owner` provisioning'ini bajaradi va chiqib ketadi.
+- `cloud` servisi `migrate` muvaffaqiyatli tugashini kutadi (`depends_on: condition: service_completed_successfully`) va **faqat** `DATABASE_URL` (`mezon_app`) ni oladi.
+- `apps/cloud` ishga tushishda migratsiya qilmaydi. Migratsiya alohida buyruq: `pnpm --filter @mezon/cloud db:migrate`.
+- `.env.example` va `deploy/BACKUP-RESTORE.md` yangilansin.
+- **Test:** runtime config `DATABASE_ADMIN_URL` ni o'qimasligi va compose faylida `cloud` servisida u yo'qligi (oddiy fayl testi).
 
 ## 2. Merge
 
-1. T1.13 uchun hali PR ochilmagan, CI ishlamagan. PR och, to'rtala CI job yashil bo'lsin.
-2. `T1.13: Hisobotlar, Excel va zaxira nusxa` nomi bilan Squash and merge qil, SHA'ni yoz, branch'ni o'chir.
-3. **F1 bosqichi yopildi.** Claude parallel ravishda F1 bo'yicha chuqur yakuniy audit o'tkazadi. Topilganlar keyingi topshiriqlarda keladi.
-4. `main`dan `gemini/T2.1-cloud-api` branch'ini och.
+1. PR boshi Claude'ning shu topshiriq commit'i bo'lsin, CI yashil bo'lsin.
+2. `T2.1: Bulut API, RLS va deploy` nomi bilan Squash and merge qil, SHA'ni yoz, branch'ni o'chir.
+3. `main`dan `gemini/T2.2-device-pairing` branch'ini och.
 
-## 3. T2.1 — Bulut API: avval REJA
+## 3. T2.2 — Qurilma juftlash: avval REJA
 
-Kod yozma. Rejani `.mezon/gemini/HISOBOT.md` ga yoz, `[gemini-reja] T2.1` bilan commit qil va push qil, so'ng `node .mezon/kutish.mjs` bilan kut.
+Kod yozma. Rejani `.mezon/gemini/HISOBOT.md` ga yoz, `[gemini-reja] T2.2` bilan commit qil va push qil, so'ng `node .mezon/kutish.mjs` bilan kut.
 
-Avval yangilangan `GEMINI.md` ni to'liq o'qi: 2, 2.4, 2.5, 3, 4-bo'limlar va 9-bo'lim (F2).
+GEMINI.md T2.2 talablari:
 
-GEMINI.md T2.1 talablari:
-
-- Fastify + PostgreSQL, RLS;
-- tashkilot, do'kon, foydalanuvchi;
-- deploy: Docker Compose, Caddy, PostgreSQL zaxirasi.
+- bir martalik kod;
+- qurilma tokeni;
+- bekor qilish;
+- aylantirish;
+- parol xeshi qurilmaga tushmaydi.
 
 Mezonlar:
 
-- `tenant` kontekstsiz so'rov ishlamaydi;
-- ikki tashkilot izolyatsiya testi.
+- bekor qilingan qurilma `401` oladi;
+- PIN bulutga chiqmaydi.
 
 Rejada quyidagilar aniq bo'lsin:
 
-### a) Tuzilma va qatlamlar
+### a) Oqim
 
-- **`apps/cloud`** (Fastify) va **`packages/db-cloud`** (T0.4 dagi PG sxema poydevori va RLS).
-- Tenant konteksti har tranzaksiyada `SET LOCAL app.organization_id`. Kontekstsiz ulanish hech qanday tenant jadvalini o'qiy olmaydi (test).
-- **Domen kodi kassa bilan umumiy:** pul, QQS, ombor va sinxron qoidalari `packages/domain` va `packages/sync` dan olinadi. Bulutda qayta yozilmaydi (2.4-bo'lim sababi).
+1. Egasi kabinetda (yoki API orqali) "hub qo'shish" deydi.
+2. Qisqa muddatli, bir martalik juftlash kodi beriladi: masalan 8 belgi, 10 daqiqa, urinishlar cheklangan.
+3. Hub kodni kiritadi.
+4. Bulut hub'ni tashkilot va do'konga bog'laydi va **qurilma tokeni** beradi.
 
-### b) Autentifikatsiya
+Qo'shimcha talablar:
 
-- **Bulut foydalanuvchilari:** egasi va menejer. Kabinet (T2.7) va platforma xodimlari (T9.12).
-- **Parol:** argon2id. Token: jose, qisqa access va aylanadigan refresh. Kirish urinishlari cheklanadi.
-- **Qurilma va hub autentifikatsiyasi T2.2 da**, bu yerda faqat joyini qoldir.
-- **Guzar Market mijozlari (T5.4)** alohida auth domeni bo'ladi. Hozir faqat sxemada joy qoldir, aralashtirma.
+- Kod faqat xeshlangan holda saqlanadi.
+- Bir marta ishlatilgach yaroqsiz bo'ladi.
+- Muddati o'tgan kod rad etiladi.
+- Brute-force urinishlari cheklanadi (IP va kod bo'yicha).
 
-### c) Deploy
+### b) Qurilma tokeni
 
-- **Docker Compose:** `cloud`, `postgres` va `caddy` (TLS).
-- **PostgreSQL zaxirasi:** kunlik `pg_dump`, aylanish va tiklash yo'riqnomasi. Tiklash sinovi skript bilan.
-- **Server joyi egasi qarori** (`GEMINI.md` 17-bo'lim, 27-1-modda). Hozir provayderga bog'lanmagan, istalgan O'zbekiston VPS'ida ishlaydigan konfiguratsiya yoz. Maxfiy qiymatlar faqat `.env` da, repoda faqat `.env.example`. **Repo public**, maxfiy narsa commit qilinmasin.
-- **CI:** `apps/cloud` uchun Docker image build va smoke test. Haqiqiy deploy yo'q.
+- **Tur:** uzoq muddatli, aylanadigan maxfiy qiymat. Bulutda faqat xeshi saqlanadi.
+- **Hub'da saqlanishi:** Electron'da OS kalit omboriga (`safeStorage`) shifrlab yoziladi. SQLite'ga ochiq matn holida yozilmaydi.
+- **Tenant konteksti:** token prefiksida `organizationId` bo'lsin, T2.1 dagi C2 uslubida.
+- **Aylantirish:** qurilma tokenni yangilay oladi. Eski token qisqa muddat ishlaydi, keyin bekor bo'ladi. Qayta ishlatish aniqlansa, qurilma bloklanadi.
+- **Bekor qilish:** egasi qurilmani o'chiradi. Keyingi har qanday so'rov `401` oladi. Test bilan.
 
-### d) Kuzatuv va xavfsizlik
+### c) Hub va bulut bog'lanishi
 
-- Strukturali Pino loglar, PII va token yo'q.
-- Health va ready endpointlar.
-- So'rovlar soni cheklovi.
-- CORS faqat kabinet va Market domenlari.
+- `cloud_devices` jadvali (RLS bilan): `store_id`, nomi, platformasi, `device_id`, oxirgi ko'rinishi, holati.
+- **Hub `device_id` si:** T0.3 dagi lokal `device_id` bulutdagi qurilma yozuviga bog'lanadi. Bitta lokal qurilma ikki tashkilotga juftlanmaydi.
+- **Bulutga chiqmaydigan narsalar:** hub foydalanuvchilarining PIN xeshlari va lokal sessiyalar (mezon). Sinxron (T2.3) bilan ham ular chiqmaydi. Bu bo'yicha qaysi jadvallar sinxron qilinmasligini sanab ber.
+- **Hub tomonidagi o'zgarishlar:** "bulutga ulanish" sozlamasi va holati (ulangan, ulanmagan, bekor qilingan). Faqat `owner`.
 
-### e) Testlar
+### d) Testlar
 
-- Ikki tashkilot izolyatsiyasi: RLS + API darajasida, Testcontainers PostgreSQL bilan.
-- Kontekstsiz so'rov rad etiladi.
-- Auth chegara holatlari.
+- Juftlash: to'g'ri kod, eskirgan kod, qayta ishlatilgan kod, brute-force cheklovi.
+- Bekor qilingan qurilma `401`.
+- Token aylantirish va reuse.
+- PIN xeshi va lokal sessiya ma'lumotlari hech qanday bulut so'rovida yo'qligi: hub → bulut so'rovlarini ushlab tekshiruvchi test.
+- Ikki tashkilot: bir tashkilot kodi bilan boshqasiga juftlab bo'lmaydi.
 
-### f) Doiradan tashqari
+### e) Doiradan tashqari
 
-- Juftlash (T2.2).
-- Push va pull (T2.3–T2.4).
+- Hodisalarni push va pull qilish (T2.3–T2.4).
 - Kabinet UI (T2.7).

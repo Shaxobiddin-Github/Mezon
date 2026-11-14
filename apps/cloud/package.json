@@ -7,6 +7,26 @@
   "types": "./dist/index.d.ts",
   "scripts": {
     "build": "tsc -b",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "start": "node dist/index.js",
+    "org:create": "node dist/cli/create-org.js"
+  },
+  "dependencies": {
+    "@fastify/cors": "^11.4.2",
+    "@fastify/rate-limit": "^11.2.2",
+    "@mezon/contracts": "workspace:*",
+    "@mezon/db-cloud": "workspace:*",
+    "@mezon/domain": "workspace:*",
+    "@node-rs/argon2": "2.2.2",
+    "fastify": "5.12.8",
+    "jose": "^6.2.17",
+    "pino": "10.4.0",
+    "zod": "4.6.7"
+  },
+  "devDependencies": {
+    "@mezon/test-utils": "workspace:*",
+    "@testcontainers/postgresql": "^12.2.1",
+    "@types/node": "^26.6.6",
+    "testcontainers": "^12.2.1"
   }
 }

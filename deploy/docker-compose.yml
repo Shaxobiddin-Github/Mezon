@@ -1,0 +1,66 @@
+services:
+  postgres:
+    image: postgres:18-alpine
+    container_name: mezon-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-mezon_cloud}
+      POSTGRES_USER: ${POSTGRES_USER:-mezon_admin}
+      POSTGRES_PASSWORD: ${MEZON_POSTGRES_ADMIN_PASSWORD}
+      MEZON_APP_DB_PASSWORD: ${MEZON_APP_DB_PASSWORD}
+    volumes:
+      - mezon_pgdata:/var/lib/postgresql/data
+      - ./init-db:/docker-entrypoint-initdb.d:ro
+    healthcheck:
+      test:
+        ['CMD-SHELL', 'pg_isready -U ${POSTGRES_USER:-mezon_admin} -d ${POSTGRES_DB:-mezon_cloud}']
+      interval: 5s
+      timeout: 5s
+      retries: 5
+    networks:
+      - mezon_internal
+
+  cloud:
+    build:
+      context: ..
+      dockerfile: deploy/Dockerfile
+    container_name: mezon-cloud-api
+    restart: unless-stopped
+    environment:
+      PORT: 4000
+      HOST: 0.0.0.0
+      DATABASE_URL: postgres://mezon_app:${MEZON_APP_DB_PASSWORD}@postgres:5432/${POSTGRES_DB:-mezon_cloud}
+      DATABASE_ADMIN_URL: postgres://${POSTGRES_USER:-mezon_admin}:${MEZON_POSTGRES_ADMIN_PASSWORD}@postgres:5432/${POSTGRES_DB:-mezon_cloud}
+      JWT_SECRET: ${JWT_SECRET}
+      CORS_ORIGINS: ${CORS_ORIGINS:-https://admin.guzar.uz,https://market.guzar.uz}
+      NODE_ENV: production
+    depends_on:
+      postgres:
+        condition: service_healthy
+    networks:
+      - mezon_internal
+
+  caddy:
+    image: caddy:2-alpine
+    container_name: mezon-caddy
+    restart: unless-stopped
+    ports:
+      - '80:80'
+      - '443:443'
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - mezon_caddy_data:/data
+      - mezon_caddy_config:/config
+    depends_on:
+      - cloud
+    networks:
+      - mezon_internal
+
+volumes:
+  mezon_pgdata:
+  mezon_caddy_data:
+  mezon_caddy_config:
+
+networks:
+  mezon_internal:
+    driver: bridge
