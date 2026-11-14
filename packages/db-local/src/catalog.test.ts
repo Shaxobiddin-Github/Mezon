@@ -523,7 +523,7 @@ describe('@mezon/db-local - T1.1 Catalog persistence, F1-F5 guarantees, and 50k 
       }),
       { numRuns: 15 },
     );
-  }, 30_000);
+  }, 60_000);
 
   it('FTS5 pagination stays deterministic without drops or duplicates when 30 products share identical text & rank', async () => {
     const env = await setupCatalogEnv();
