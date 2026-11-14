@@ -1,73 +1,58 @@
-# Claude topshirig'i: T1.13 rejasi — TUZATISHLAR BILAN TASDIQLANDI
+# Claude topshirig'i: T1.13 — QAYTA ISHLASH (R1)
 
-**Merge tekshiruvi:**
+Kod `e4ee795` tekshirildi.
 
-- `main` = `20ca6ac`. T1.12 kodi Claude'ning `2dd2c2f` commit'i bilan bir xil. Yagona farq: `catalog.test.ts` dagi vaqt chegarasi 30 s → 60 s. Bu ma'qul.
-- `GEMINI.md` = `591085c`.
+- **Toza nusxada `pnpm verify` yashil:** 310 + 12 perf test, E2E, depcruise.
+- **Bajarilgan:** R1 (haqiqiy ustunlar), R3 (hisoblagichlar `max`), R4 (import qayta tekshiruvi), tannarxni yashirish va zaxira yaratish (`db.backup` + `integrity_check` + SHA-256).
 
-Reja yaxshi. Quyidagilar tasdiqlandi:
+Lekin **ishga tushishdagi tiklash** (`executeStagedRestoreIfPending`) da uchta ishonchlilik muammosi bor. Zaxira tizimi ma'lumot yo'qotmasligi kerak, shuning uchun bular majburiy.
 
-- `SqliteReportStore` sof SQL/DTO, HTTP'ga bog'lanmagan, bulutda qayta ishlatiladi; kontraktlar Zod'da (Python uchun JSON Schema);
-- foyda faqat `owner`;
-- `exceljs` faqat `apps/hub` da, port orqasida, depcruise bilan;
-- ikki bosqichli import, shtrix-kod → nom → yangi moslash, 10 MB / 5 000 qator chegarasi, formulalar qiymat sifatida;
-- eksportda tannarx faqat `owner` ga;
-- `db.backup()`, smena va kun yakunida avtomatik zaxira, 10 ta nusxa aylanishi, `integrity_check` + SHA-256 + meta;
-- tiklashdan oldin xavfsizlik nusxasi, so'ng rebuild va summalar tengligi;
-- model testi.
+## B1. Xavfsizlik nusxasi WAL'ni yo'qotadi
 
-Quyidagi tuzatishlar bilan `gemini/T1.13-reports-backup` branch'ida kodni yoz.
+```ts
+fs.copyFileSync(options.dbPath, safetyBackupPath);   // faqat asosiy fayl
+...
+if (fs.existsSync(walPath)) fs.unlinkSync(walPath);   // keyin WAL o'chiriladi
+```
 
-## Majburiy tuzatishlar
-
-### R1. Faqat haqiqiy sxema ustunlari
-
-Rejada `batches.expires_at_ms` va `balance_qty` yozilgan. Haqiqiy sxemada partiya muddati `batches.expiry_date_ms`, partiya qoldig'i esa `local_batch_balances.remaining_qty`. `expires_at_ms` boshqa jadvalda (sessiyalar).
-
-- `products.min_stock` mavjud, yangi ustun kerak emas. Variantlarda bo'lmasa, hisobot mahsulot darajasida.
-- **Umumiy qoida:** hisobotlar uchun yangi ustun yoki jadval qo'shma. Kerak bo'lsa, hisobotda sanab ber.
-
-### R2. Tiklash ishlab turgan hub ustida emas, qayta ishga tushirish orqali
-
-Rejada "ulanishlar yopiladi, fayl almashtiriladi va yangi ulanish ochiladi" deyilgan. Ishlab turgan hub'da UoW, ochiq tranzaksiyalar va store'lar eski ulanishni ushlab turadi. Bu yarim tiklangan holatga olib kelishi mumkin.
+Hub to'satdan to'xtagan bo'lsa (elektr o'chishi, jarayon o'ldirilishi), oxirgi commit qilingan tranzaksiyalar hali `-wal` faylida turadi. Oddiy fayl nusxasi ularni olmaydi, keyin WAL o'chiriladi. Natijada "xavfsizlik nusxasi" so'nggi savdolarsiz qoladi.
 
 **Talab:**
 
-1. `POST /backups/:id/restore` faqat **tiklash so'rovini** yozadi: tekshiruvdan o'tgan zaxira, kim, qachon, sabab. So'ng hub'ni xavfsiz to'xtatish signalini beradi.
-2. Haqiqiy almashtirish hub **ishga tushishida**, baza ochilishidan oldin bajariladi:
-   - joriy bazaning xavfsizlik nusxasi;
-   - zaxira faylining SHA-256 va `integrity_check` tekshiruvi;
-   - almashtirish;
-   - migratsiyalar;
-   - rebuild.
-3. Electron supervisor hub'ni qayta ishga tushiradi (T0.7 mexanizmi). Dev va test rejimida `createHubServer` opsiyasi orqali chaqiriladi.
-4. Ochiq smena yoki ochiq savat bo'lsa, tiklash `409` bilan rad etiladi. Egasi avval smenani yopadi.
+- Xavfsizlik nusxasi WAL bilan to'liq bo'lsin. Avval joriy bazani ochib `PRAGMA wal_checkpoint(TRUNCATE)` qil, so'ng better-sqlite3 `backup()` yoki `VACUUM INTO` bilan nusxa ol.
+- Xavfsizlik nusxasining `integrity_check` natijasi `ok` bo'lmasa, tiklash to'xtatiladi.
+- **Test:** child process'da savdo commit qilinadi va checkpoint bo'lmasdan `process.exit` bo'ladi (WAL'da qoladi). So'ng tiklash bajariladi. Xavfsizlik nusxasini ochib, o'sha savdo borligi tekshiriladi.
 
-### R3. Tiklashdan keyin raqamlar orqaga qaytmasin
+## B2. Ishga tushishda zaxira qayta tekshirilmaydi, almashtirish atomar emas
 
-Eski zaxira tiklanganda `last_receipt_seq`, `last_return_seq`, `last_shift_seq`, `last_order_seq` va `last_receiving_seq` ham orqaga qaytadi. Shunda yangi cheklar mijozga allaqachon berilgan chek raqamlarini qayta oladi (va F3 da fiskal muammo bo'ladi).
+Ishga tushishda faqat fayl mavjudligi tekshiriladi. Stage va restart oralig'ida zaxira fayli buzilgan yoki almashtirilgan bo'lishi mumkin.
 
 **Talab:**
 
-- Tiklashda xavfsizlik nusxasidagi (ya'ni almashtirishdan oldingi bazadagi) barcha hisoblagichlar o'qiladi.
-- Tiklangan bazada har biri `max(zaxiradagi, eskidagi)` ga ko'tariladi.
-- `device_seq` (outbox) ham shunday ko'tariladi, chunki F2 sinxronida takror `device_seq` xavfli.
-- **Test:** zaxira olinadi → yana 3 ta savdo → tiklash → keyingi chek raqami tiklashdan oldingi oxirgi raqamdan katta.
-- **F2 uchun eslatma:** tiklash yo'qotilgan hodisalarni bulutdan qayta olish (bootstrap) talab qiladi. Hozir faqat `GEMINI.md` 4-bo'limidagi ziddiyatlar ro'yxatiga yoz.
+- Almashtirishdan oldin zaxiraning SHA-256'i `.meta.json` dagisi bilan solishtiriladi va `integrity_check` = `ok` bo'lishi shart. Aks holda tiklash bekor qilinadi, joriy baza tegilmay qoladi, xato qayd etiladi.
+- Almashtirish atomar bo'lsin: zaxira avval `dbPath` yonidagi vaqtinchalik faylga ko'chiriladi, so'ng `rename` qilinadi. O'rtada yiqilsa, asosiy baza buzilmasin.
+- **Testlar:**
+  - stage qilingandan keyin zaxira faylining bir bayti o'zgartiriladi → ishga tushishda tiklash rad etiladi, joriy baza o'zgarmaydi;
+  - buzilgan (integrity'dan o'tmaydigan) fayl ham shunday rad etiladi.
 
-### R4. Import tasdig'i mijozga ishonmasin
+## B3. Tiklashdan keyin proyeksiyalar qayta qurilmaydi
 
-`POST /catalog/import/commit` mijoz yuborgan `rows` ga ishonmasin.
+R2 da tiklashdan so'ng `rebuild` va summalar tengligi talab qilingan edi. Ishga tushish kodida rebuild chaqirilmaydi.
 
-- Sinov natijasi hub'da `previewToken` bilan saqlanadi: TTL bilan, `LOCAL` jadvalda yoki xotirada. Tasdiqda shu saqlangan natija **qayta tekshiriladi**: oradagi o'zgarishlar va yangi shtrix-kod to'qnashuvlari hisobga olinadi.
-- `clientRequestId` bilan idempotent.
-- Tasdiq faqat `owner`/`manager` uchun.
-- **Test:** sinovdan keyin boshqa yo'l bilan bir shtrix-kod band qilinadi. Tasdiq ziddiyat bilan rad etiladi va hech narsa yozilmaydi.
+**Talab:**
+
+- Tiklash bajarilgan ishga tushishda, migratsiyalardan keyin ombor, mijoz va ta'minotchi proyeksiyalari qayta quriladi.
+- Natija tekshiriladi: proyeksiya = ledger; tushum, qarz va qoldiq zaxira meta'sidagi summalar bilan teng. Tenglik bo'lmasa, aniq log va diagnostika chiqarilsin.
+- **Test:** zaxira olinadi → proyeksiya jadvali qo'lda buziladi → tiklash → proyeksiyalar ledger bilan teng.
+
+## B4. HLC ham orqaga qaytmasin
+
+`last_hlc` o'qiladi, lekin tiklangan bazada yangilanmaydi. Tiklangan bazadagi `last_hlc` ham `max(restored, current)` bo'lsin (leksik HLC solishtirish). **Test** bilan isbotla.
 
 ## Bajarish tartibi
 
-1. T1.13 kodi. Test qarzi yo'q.
+1. B1–B4 ni tuzat. Yangi commit qil, amend qilma.
 2. Lokal `pnpm verify` yashil.
-3. Commit qil, push qil va PR och. To'rtala CI job yashil bo'lsin.
-4. Hisobot: R1–R4 dalillari, zaxira va tiklash model testi, eksportda tannarx yo'qligi testi, 50 000 tovar va 100 000 chekdagi hisobot vaqti. `[gemini-hisobot] T1.13` bilan commit qil va push qil.
+3. Push qil, to'rtala CI job yashil bo'lsin.
+4. Hisobot: B1–B4 testlari va har biri uchun mutatsiya dalili. `[gemini-hisobot] T1.13 R1` bilan commit qil va push qil.
 5. `node .mezon/kutish.mjs` ni ishga tushir. Merge qilma.
