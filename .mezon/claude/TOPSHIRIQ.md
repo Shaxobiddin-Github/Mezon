@@ -1,83 +1,73 @@
-# Claude topshirig'i: Guzar rejasi va T1.12 merge → T1.13 rejasi
+# Claude topshirig'i: T1.13 rejasi — TUZATISHLAR BILAN TASDIQLANDI
 
-## 0. Nima bo'ldi (Gemini limiti tugagan paytda)
+**Merge tekshiruvi:**
 
-- **T1.12 ni Claude tugatdi.** Sening chala ishing saqlandi va `claude/T1.12-printer` branch'ida davom ettirildi (commit `3c73e59`). Sening T1.11 test qarzi commit'ing ham shu yerda (`5c0109e`).
-  - ESC/POS kodlovchi, drayverlar, migratsiya va kontraktlar seniki.
-  - Hub'dagi printer xizmati 73 ta tip xatosi bilan yig'ilmayotgan edi. U qayta yozildi: persistensiya `db-local` dagi `SqlitePrinterStore` ga ko'chdi (hub `drizzle-orm` ni to'g'ridan-to'g'ri ishlatmaydi).
-  - P1 (bitta `clientRequestId` = bitta chop, parallel so'rovda ham), P2 va P3 bajarildi. POS chek oynasida avtomatik chop etish va "Qayta chop etish (nusxa)" bor.
-  - Lokal `pnpm verify` yashil: 295 + 12 perf test, E2E, PG RLS, depcruise.
-- **`GEMINI.md` Guzar konsepsiyasiga moslandi** (branch `docs/guzar-roadmap`, commit `591085c`).
-  - Mahsulot endi **Guzar** (Guzar Kassa + Guzar Market). Kod nomi Mezon qoladi.
-  - Yangi bosqichlar F4–F9.
-  - TypeScript asosiy til, Python faqat 2.4-bo'limdagi chegaralangan xizmatlar uchun.
-  - **Bundan keyingi barcha ishlar shu yangi `GEMINI.md` bo'yicha.** Avval uni to'liq o'qib chiq.
-- Claude'ning tekshiruv nusxasi endi loyiha papkasida. Sen ham shu papkada ishlaysan. Har vazifa oxirida ishchi daraxt toza bo'lsin: commit qilinmagan fayl qolmasin.
+- `main` = `20ca6ac`. T1.12 kodi Claude'ning `2dd2c2f` commit'i bilan bir xil. Yagona farq: `catalog.test.ts` dagi vaqt chegarasi 30 s → 60 s. Bu ma'qul.
+- `GEMINI.md` = `591085c`.
 
-## 1. Merge'lar (shu tartibda)
+Reja yaxshi. Quyidagilar tasdiqlandi:
 
-1. **`docs/guzar-roadmap` uchun PR och.** Faqat `GEMINI.md` o'zgargan, shuning uchun CI `paths-ignore` sababli ishlamaydi. Bu normal, Claude tasdiqlaydi. `docs: GEMINI.md ni Guzar konsepsiyasiga moslash` nomi bilan Squash and merge qil.
-2. **`claude/T1.12-printer` uchun PR och** (`main` ga). Merge'dan oldin, qo'shimcha juft ko'z sifatida, diff'ni o'qib chiq va kamida 3 ta xavfli joyni tekshir:
-   - printer xatosi savdoni buzmasligi;
-   - P1 idempotentlik;
-   - kassir pul yashigini ochishi.
+- `SqliteReportStore` sof SQL/DTO, HTTP'ga bog'lanmagan, bulutda qayta ishlatiladi; kontraktlar Zod'da (Python uchun JSON Schema);
+- foyda faqat `owner`;
+- `exceljs` faqat `apps/hub` da, port orqasida, depcruise bilan;
+- ikki bosqichli import, shtrix-kod → nom → yangi moslash, 10 MB / 5 000 qator chegarasi, formulalar qiymat sifatida;
+- eksportda tannarx faqat `owner` ga;
+- `db.backup()`, smena va kun yakunida avtomatik zaxira, 10 ta nusxa aylanishi, `integrity_check` + SHA-256 + meta;
+- tiklashdan oldin xavfsizlik nusxasi, so'ng rebuild va summalar tengligi;
+- model testi.
 
-   Muammo topsang, PR'ga yozma: hisobotga yoz va kut. Muammo bo'lmasa va to'rtala CI job yashil bo'lsa (`packages/drivers` o'zgargani uchun desktop installer job ham ishlaydi), `T1.12: Printer va chek` nomi bilan Squash and merge qil.
-3. Eski `gemini/T1.12-printer` branch'ini (lokal va remote) o'chir, chunki uning o'rnini `claude/T1.12-printer` egalladi.
-4. SHA'larni hisobotga yoz.
+Quyidagi tuzatishlar bilan `gemini/T1.13-reports-backup` branch'ida kodni yoz.
 
-## 2. T1.13 — Hisobot, Excel, zaxira: avval REJA
+## Majburiy tuzatishlar
 
-`main`dan `gemini/T1.13-reports-backup` branch'ini och. Kod yozma. Rejani `.mezon/gemini/HISOBOT.md` ga yoz, `[gemini-reja] T1.13` bilan commit qil va push qil, so'ng `node .mezon/kutish.mjs` bilan kut.
+### R1. Faqat haqiqiy sxema ustunlari
 
-GEMINI.md T1.13 talablari:
+Rejada `batches.expires_at_ms` va `balance_qty` yozilgan. Haqiqiy sxemada partiya muddati `batches.expiry_date_ms`, partiya qoldig'i esa `local_batch_balances.remaining_qty`. `expires_at_ms` boshqa jadvalda (sessiyalar).
 
-- kunlik va oylik savdo;
-- foyda (faqat egasi);
-- qarzlar;
-- kam qoldiq;
-- muddati yaqin tovarlar;
-- Excel import (avval sinov, keyin tasdiq; shtrix-kod va nom bo'yicha moslash) va eksport;
-- avtomatik zaxira nusxa, tiklash va yaxlitlik tekshiruvi.
+- `products.min_stock` mavjud, yangi ustun kerak emas. Variantlarda bo'lmasa, hisobot mahsulot darajasida.
+- **Umumiy qoida:** hisobotlar uchun yangi ustun yoki jadval qo'shma. Kerak bo'lsa, hisobotda sanab ber.
 
-Mezonlar:
+### R2. Tiklash ishlab turgan hub ustida emas, qayta ishga tushirish orqali
 
-- sotuvchi javobida tannarx yo'q (API test);
-- zaxiradan tiklanganda summalar teng.
+Rejada "ulanishlar yopiladi, fayl almashtiriladi va yangi ulanish ochiladi" deyilgan. Ishlab turgan hub'da UoW, ochiq tranzaksiyalar va store'lar eski ulanishni ushlab turadi. Bu yarim tiklangan holatga olib kelishi mumkin.
 
-Rejada quyidagilar aniq bo'lsin:
+**Talab:**
 
-### a) Hisobotlar
+1. `POST /backups/:id/restore` faqat **tiklash so'rovini** yozadi: tekshiruvdan o'tgan zaxira, kim, qachon, sabab. So'ng hub'ni xavfsiz to'xtatish signalini beradi.
+2. Haqiqiy almashtirish hub **ishga tushishida**, baza ochilishidan oldin bajariladi:
+   - joriy bazaning xavfsizlik nusxasi;
+   - zaxira faylining SHA-256 va `integrity_check` tekshiruvi;
+   - almashtirish;
+   - migratsiyalar;
+   - rebuild.
+3. Electron supervisor hub'ni qayta ishga tushiradi (T0.7 mexanizmi). Dev va test rejimida `createHubServer` opsiyasi orqali chaqiriladi.
+4. Ochiq smena yoki ochiq savat bo'lsa, tiklash `409` bilan rad etiladi. Egasi avval smenani yopadi.
 
-- **Manba:** `v_sales_lines`, `customer_ledger`, `supplier_ledger`, `local_stock_balances` va partiyalar. Hisobotda yangi hisob-kitob mantiqi yo'q, faqat mavjud proyeksiya va ledger'lar.
-- **Vaqt:** `store_timezone`, kun chegarasi, oylik jamlanma.
-- **Rollar:** foyda va tannarx faqat `owner`. API testi kassir va menejer javobida tannarx yo'qligini isbotlasin.
-- **Guzar biznes kabineti (F2, T2.7) shu hisobotlarni bulutda ham ko'rsatadi.** Shuning uchun hisobot funksiyalari sof domen yoki SQL qatlamida bo'lsin, UI'ga bog'lanmasin, bulutda qayta ishlatilsin.
-- **Python uchun (2.4):** hisobot natijalari aniq kontrakt (Zod → JSON Schema) bilan chiqsin, keyin tahlil xizmati shu kontraktni o'qiy olsin.
+### R3. Tiklashdan keyin raqamlar orqaga qaytmasin
 
-### b) Excel
+Eski zaxira tiklanganda `last_receipt_seq`, `last_return_seq`, `last_shift_seq`, `last_order_seq` va `last_receiving_seq` ham orqaga qaytadi. Shunda yangi cheklar mijozga allaqachon berilgan chek raqamlarini qayta oladi (va F3 da fiskal muammo bo'ladi).
 
-- **Import:** mahsulotlar va narxlar, ixtiyoriy boshlang'ich qoldiq. Ikki bosqich:
-  1. sinov — xatolar, ogohlantirishlar va mos kelishlar ro'yxati, bazaga hech narsa yozilmaydi;
-  2. tasdiq — bitta tranzaksiyada.
-- **Moslash:** shtrix-kod (UPC-A → EAN-13 kanonik, T1.1), keyin normallashtirilgan nom. Dublikatlar va ziddiyatlar aniq ko'rsatilsin.
-- **Kutubxona:** `exceljs` faqat port orqasida va faqat hub ichida (GEMINI.md 2.1).
-- **Xavfsizlik:** fayl hajmi va qator soni chegarasi, formula va makroslar e'tiborsiz qoldiriladi.
-- **Eksport:** hisobotlar va katalog. Kassir eksportida tannarx yo'q.
+**Talab:**
 
-### c) Zaxira nusxa
+- Tiklashda xavfsizlik nusxasidagi (ya'ni almashtirishdan oldingi bazadagi) barcha hisoblagichlar o'qiladi.
+- Tiklangan bazada har biri `max(zaxiradagi, eskidagi)` ga ko'tariladi.
+- `device_seq` (outbox) ham shunday ko'tariladi, chunki F2 sinxronida takror `device_seq` xavfli.
+- **Test:** zaxira olinadi → yana 3 ta savdo → tiklash → keyingi chek raqami tiklashdan oldingi oxirgi raqamdan katta.
+- **F2 uchun eslatma:** tiklash yo'qotilgan hodisalarni bulutdan qayta olish (bootstrap) talab qiladi. Hozir faqat `GEMINI.md` 4-bo'limidagi ziddiyatlar ro'yxatiga yoz.
 
-- **Avtomatik zaxira:** SQLite online backup API, WAL bilan to'g'ri. Jadval (masalan, har kuni va smena yopilganda), aylanish (nechta nusxa saqlanadi), joy.
-- **Yaxlitlik:** `PRAGMA integrity_check`, xesh, va tiklashdan oldin tekshiruv.
-- **Tiklash:** mavjud bazani almashtirishdan oldin uning ham nusxasi olinadi. Tiklashdan keyin ledger va proyeksiya rebuild teng bo'lishi shart (mezon: summalar teng).
-- **Model testi:** savdo, qaytarish, qarz va kirimlardan keyin zaxira olinadi va tiklanadi. Tushum, qarz, qoldiq va kassa tiyinigacha teng.
+### R4. Import tasdig'i mijozga ishonmasin
 
-### d) Doiradan tashqari
+`POST /catalog/import/commit` mijoz yuborgan `rows` ga ishonmasin.
 
-- Bulutga zaxira (F2).
-- Kengaytirilgan tahlil (F9).
+- Sinov natijasi hub'da `previewToken` bilan saqlanadi: TTL bilan, `LOCAL` jadvalda yoki xotirada. Tasdiqda shu saqlangan natija **qayta tekshiriladi**: oradagi o'zgarishlar va yangi shtrix-kod to'qnashuvlari hisobga olinadi.
+- `clientRequestId` bilan idempotent.
+- Tasdiq faqat `owner`/`manager` uchun.
+- **Test:** sinovdan keyin boshqa yo'l bilan bir shtrix-kod band qilinadi. Tasdiq ziddiyat bilan rad etiladi va hech narsa yozilmaydi.
 
-## 3. Eslatmalar
+## Bajarish tartibi
 
-- T1.12 dan test qarzi yo'q.
-- T1.13 F1 ning oxirgi vazifasi. Undan keyin Claude F1 bo'yicha chuqur yakuniy audit o'tkazadi.
+1. T1.13 kodi. Test qarzi yo'q.
+2. Lokal `pnpm verify` yashil.
+3. Commit qil, push qil va PR och. To'rtala CI job yashil bo'lsin.
+4. Hisobot: R1–R4 dalillari, zaxira va tiklash model testi, eksportda tannarx yo'qligi testi, 50 000 tovar va 100 000 chekdagi hisobot vaqti. `[gemini-hisobot] T1.13` bilan commit qil va push qil.
+5. `node .mezon/kutish.mjs` ni ishga tushir. Merge qilma.
