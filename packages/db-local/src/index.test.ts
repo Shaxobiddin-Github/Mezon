@@ -50,6 +50,7 @@ import {
   localBatchBalances,
   localCartLines,
   localCarts,
+  localCloudState,
   localCustomerBalances,
   localDeviceAuthState,
   localDeviceState,
@@ -187,6 +188,7 @@ describe('@mezon/db-local - Schema foundation, registry, pragmas, and bigint saf
       ['order_payments', 'FACT'],
       ['local_receipt_prints', 'LOCAL'],
       ['local_cash_drawer_events', 'LOCAL'],
+      ['local_cloud_state', 'LOCAL'],
     ]);
     expect(() =>
       validateSqliteSchemaRegistry(
@@ -242,6 +244,7 @@ describe('@mezon/db-local - Schema foundation, registry, pragmas, and bigint saf
           orders,
           orderLines,
           orderPayments,
+          localCloudState,
         },
         localSchemaRegistry,
       ),
@@ -422,7 +425,7 @@ describe('@mezon/db-local - Schema foundation, registry, pragmas, and bigint saf
       const migCountRow = conn.sqlite
         .prepare('SELECT COUNT(*) as cnt FROM __drizzle_migrations')
         .get() as { cnt: bigint };
-      expect(migCountRow.cnt).toBe(14n);
+      expect(migCountRow.cnt).toBe(15n);
     } finally {
       conn.close();
     }

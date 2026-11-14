@@ -27,8 +27,17 @@ import {
   migrateLocalDatabase,
   openLocalSqliteDatabase,
   createSqlitePrinterStore,
+  SqliteCloudStore,
+  createSqliteCloudStore,
 } from '@mezon/db-local';
-import type { Clock, PinHasher, RandomSource } from '@mezon/domain';
+import {
+  type Clock,
+  DomainError,
+  MonotonicUuidV7Generator,
+  type PinHasher,
+  type RandomSource,
+  parseUuidV7,
+} from '@mezon/domain';
 import {
   CryptoRandomSource,
   SystemClock,
@@ -57,6 +66,8 @@ import { HubOrderService } from './order-service.js';
 import { HubPrinterService } from './printer-service.js';
 import { HubReportService } from './report-service.js';
 import { CatalogImportCache } from './catalog-import-cache.js';
+import { AesGcmSafeStorageAdapter, type SafeStoragePort } from './safe-storage-port.js';
+import { HubCloudService } from './cloud-service.js';
 
 export interface CreateHubServerOptions {
   readonly dbPath: string;
@@ -82,6 +93,8 @@ export interface CreateHubServerOptions {
   readonly deviceFailureWindowMs?: bigint;
   readonly printerDriverFactory?: (config: PrinterConfig) => PrinterDriver;
   readonly listWindowsPrintersFn?: () => Promise<readonly DiscoveredWindowsPrinter[]>;
+  readonly safeStorage?: SafeStoragePort;
+  readonly cloudFetchFn?: typeof fetch;
   readonly registerExtraTestRoutes?: (app: FastifyInstance) => void;
 }
 
@@ -113,6 +126,9 @@ export interface HubServer {
   readonly reportService: HubReportService;
   readonly backupService: SqliteBackupService;
   readonly importCache: CatalogImportCache;
+  readonly cloudStore: SqliteCloudStore;
+  readonly cloudService: HubCloudService;
+  readonly safeStorage: SafeStoragePort;
   listen(): Promise<{ readonly host: typeof DEFAULT_HUB_HOST; readonly port: number }>;
   close(): Promise<void>;
 }
@@ -161,6 +177,8 @@ export async function createHubServer(options: CreateHubServerOptions): Promise<
   let shiftService: HubShiftService;
   let orderService: HubOrderService;
   let printerService: HubPrinterService;
+  let cloudStore: SqliteCloudStore;
+  let cloudService: HubCloudService;
   let app: FastifyInstance;
 
   try {
@@ -356,6 +374,35 @@ export async function createHubServer(options: CreateHubServerOptions): Promise<
     });
     const importCache = new CatalogImportCache();
 
+    const safeStorage = options.safeStorage ?? new AesGcmSafeStorageAdapter();
+    const idGen = new MonotonicUuidV7Generator({ clock, random });
+
+    cloudStore = createSqliteCloudStore(connection, () => {
+      const ctx = store.getActiveRuntimeContext();
+      return ctx ? ctx.uow : null;
+    });
+
+    cloudService = new HubCloudService({
+      cloudStore,
+      safeStorage,
+      getDeviceId: () => {
+        const ctx = store.getActiveRuntimeContext();
+        if (ctx) {
+          return ctx.config.deviceId;
+        }
+        const row = connection.sqlite
+          .prepare('SELECT device_id FROM local_device_state LIMIT 1')
+          .get() as { device_id: string } | undefined;
+        if (row?.device_id) {
+          return parseUuidV7(row.device_id);
+        }
+        throw new DomainError('DEVICE_NOT_INITIALIZED', 'Qurilma holati topilmadi');
+      },
+      clock,
+      idGen,
+      fetchFn: options.cloudFetchFn,
+    });
+
     app = Fastify({
       loggerInstance: logger as unknown as FastifyBaseLogger,
     });
@@ -381,6 +428,7 @@ export async function createHubServer(options: CreateHubServerOptions): Promise<
       catalogStore,
       stockStore,
       importCache,
+      cloudService,
     );
     options.registerExtraTestRoutes?.(app);
 
@@ -414,6 +462,9 @@ export async function createHubServer(options: CreateHubServerOptions): Promise<
       reportService,
       backupService,
       importCache,
+      cloudStore,
+      cloudService,
+      safeStorage,
       async listen() {
         await app.listen({
           host: DEFAULT_HUB_HOST,

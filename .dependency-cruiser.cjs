@@ -109,7 +109,7 @@ module.exports = {
     {
       name: 'db-cloud-src-imports',
       comment:
-        'packages/db-cloud source files can only import internal files, packages/domain, drizzle-orm, pg, and node:fs/node:path (no db-local, drivers, test-utils, or testcontainers)',
+        'packages/db-cloud source files can only import internal files, packages/domain, drizzle-orm, pg, node:crypto, and node:fs/node:path (no db-local, drivers, test-utils, or testcontainers)',
       severity: 'error',
       from: {
         path: '^packages/db-cloud/src/',
@@ -117,7 +117,7 @@ module.exports = {
       },
       to: {
         pathNot:
-          '^(packages/db-cloud/src/|packages/domain/|node_modules/(\\.pnpm/)?(drizzle-orm|pg)@|(node:)?(fs|path)$)',
+          '^(packages/db-cloud/src/|packages/domain/|node_modules/(\\.pnpm/)?(drizzle-orm|pg)@|(node:)?(crypto|fs|path)$)',
       },
     },
     {

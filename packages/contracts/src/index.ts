@@ -701,3 +701,28 @@ export {
   CloudOrganizationDtoSchema,
   type CloudOrganizationDto,
 } from './cloud-auth.js';
+
+export {
+  CloudDevicePlatformSchema,
+  type CloudDevicePlatform,
+  CloudDeviceStatusSchema,
+  type CloudDeviceStatus,
+  CloudCreatePairingCodeRequestSchema,
+  type CloudCreatePairingCodeRequestDto,
+  CloudCreatePairingCodeResponseSchema,
+  type CloudCreatePairingCodeResponseDto,
+  CloudPairDeviceRequestSchema,
+  type CloudPairDeviceRequestDto,
+  CloudPairDeviceResponseSchema,
+  type CloudPairDeviceResponseDto,
+  CloudRotateDeviceTokenRequestSchema,
+  type CloudRotateDeviceTokenRequestDto,
+  CloudRotateDeviceTokenResponseSchema,
+  type CloudRotateDeviceTokenResponseDto,
+  CloudDeviceDtoSchema,
+  type CloudDeviceDto,
+  HubCloudStatusSchema,
+  type HubCloudStatusDto,
+  HubPairCloudRequestSchema,
+  type HubPairCloudRequestDto,
+} from './cloud-device.js';

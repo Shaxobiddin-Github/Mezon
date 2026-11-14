@@ -119,6 +119,19 @@ const DOMAIN_ERROR_HTTP_STATUS: Readonly<Record<DomainErrorCode, number>> = {
   ORDER_TOTAL_CHANGED: 409,
   INVALID_HOST: 421,
   AUTH_RATE_LIMITED: 429,
+  STORE_NOT_FOUND: 404,
+  DEVICE_NOT_FOUND: 404,
+  DEVICE_ALREADY_REGISTERED: 409,
+  DEVICE_REVOKED: 403,
+  DEVICE_TOKEN_REUSE: 401,
+  PAIRING_CODE_NOT_FOUND: 404,
+  PAIRING_CODE_EXPIRED: 400,
+  PAIRING_CODE_BLOCKED: 429,
+  PAIRING_ALREADY_USED: 409,
+  DEVICE_NOT_INITIALIZED: 400,
+  NETWORK_ERROR: 502,
+  RATE_LIMITED: 429,
+  PAIRING_FAILED: 400,
   UNIT_OF_WORK_REENTRANCY: 500,
   UNIT_OF_WORK_REQUIRED: 500,
   UNIT_OF_WORK_SESSION_CLOSED: 500,
@@ -170,12 +183,22 @@ export function registerHubErrorHandlers(app: FastifyInstance): void {
 
     if (err instanceof DomainError) {
       const status = domainErrorToHttpStatus(err.code);
-      if (status >= 500) {
+      if (status === 500) {
         request.log.error({ err, domainCode: err.code }, 'Internal domain invariant failure');
         return reply.code(500).send({
           error: {
             code: err.code,
             message: 'Internal server error',
+          },
+        } satisfies ApiErrorEnvelope);
+      }
+
+      if (status === 502) {
+        request.log.error({ err, domainCode: err.code }, 'External service network failure');
+        return reply.code(502).send({
+          error: {
+            code: err.code,
+            message: err.message,
           },
         } satisfies ApiErrorEnvelope);
       }

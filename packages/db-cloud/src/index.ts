@@ -50,8 +50,18 @@ export {
   cloudUsers,
   cloudRefreshTokens,
   cloudLoginIdentities,
+  cloudDevicePairingCodes,
+  cloudDevices,
+  cloudDeviceTokens,
 } from './schema/index.js';
 
 export { CloudAuthStore, type CloudLoginLookupResult } from './auth-store.js';
 
 export { CloudTenantStore, type CreateOrganizationParams } from './tenant-store.js';
+
+export {
+  CloudDeviceStore,
+  type PairingCodeLookup,
+  type DeviceOwnerLookup,
+  type VerifiedDeviceContext,
+} from './device-store.js';

@@ -1,4 +1,11 @@
-import type { CloudLoginResponseDto, CloudStoreDto, CloudUserDto } from '@mezon/contracts';
+import type {
+  CloudCreatePairingCodeResponseDto,
+  CloudLoginResponseDto,
+  CloudPairDeviceResponseDto,
+  CloudRotateDeviceTokenResponseDto,
+  CloudStoreDto,
+  CloudUserDto,
+} from '@mezon/contracts';
 import { unixMsFromBigInt } from '@mezon/domain';
 import { DeterministicUuidV7Generator } from '@mezon/test-utils';
 import { PostgreSqlContainer, type StartedPostgreSqlContainer } from '@testcontainers/postgresql';
@@ -443,6 +450,181 @@ describe('@mezon/cloud - HTTP API, Fastify, Auth & Multi-Tenant RLS Integration'
       });
       expect(listB.json<{ stores: CloudStoreDto[] }>().stores).toHaveLength(1);
       expect(listB.json<{ stores: CloudStoreDto[] }>().stores[0].id).toBe(storeB);
+    });
+  });
+
+  describe('Device Pairing, Token Lifecycle & Security (D1, D2)', () => {
+    let ownerTokenA: string;
+    let pairingCode: string;
+    let deviceToken1: string;
+    let deviceDbId: string;
+    const testDeviceId = idGen.nextId();
+
+    beforeAll(async () => {
+      const loginA = await server.inject({
+        method: 'POST',
+        url: '/api/v1/auth/login',
+        payload: { login: 'owner_a@guzar.uz', password: passwordA },
+      });
+      ownerTokenA = loginA.json<CloudLoginResponseDto>().accessToken;
+    });
+
+    it('generates pairing code under owner auth', async () => {
+      // 1. Unauthenticated -> 401
+      const unauthRes = await server.inject({
+        method: 'POST',
+        url: '/api/v1/devices/pairing-codes',
+        payload: { storeId: storeA, name: 'Kassa 1' },
+      });
+      expect(unauthRes.statusCode).toBe(401);
+
+      // 2. Owner authenticated -> 201
+      const res = await server.inject({
+        method: 'POST',
+        url: '/api/v1/devices/pairing-codes',
+        headers: { authorization: `Bearer ${ownerTokenA}` },
+        payload: { storeId: storeA, name: 'Kassa 1' },
+      });
+
+      expect(res.statusCode).toBe(201);
+      const data = res.json<CloudCreatePairingCodeResponseDto>();
+      expect(data.code).toMatch(/^[2-9A-HJ-NP-Z]{8}$/);
+      expect(data.storeName).toBe('Do‘kon A');
+      pairingCode = data.code;
+    });
+
+    it('pre-auth pairs device and rejects replay attack with 409 Conflict', async () => {
+      // 1. Invalid code (valid format but non-existent) -> 404
+      const invalidRes = await server.inject({
+        method: 'POST',
+        url: '/api/v1/devices/pair',
+        payload: {
+          code: '22222222',
+          deviceId: testDeviceId,
+          platform: 'windows',
+          appVersion: '1.0.0',
+        },
+      });
+      expect(invalidRes.statusCode).toBe(404);
+
+      // 2. Valid code -> 201
+      const pairRes = await server.inject({
+        method: 'POST',
+        url: '/api/v1/devices/pair',
+        payload: {
+          code: pairingCode,
+          deviceId: testDeviceId,
+          platform: 'windows',
+          appVersion: '1.0.0',
+        },
+      });
+
+      expect(pairRes.statusCode).toBe(201);
+      const data = pairRes.json<CloudPairDeviceResponseDto>();
+      expect(data.organizationId).toBe(orgA);
+      expect(data.storeId).toBe(storeA);
+      expect(data.organizationName).toBe('Guzar Kattaqo‘rg‘on Org A');
+      expect(data.deviceToken).toBeDefined();
+      deviceToken1 = data.deviceToken;
+
+      // 3. Replay attack with same code -> 409 Conflict
+      const replayRes = await server.inject({
+        method: 'POST',
+        url: '/api/v1/devices/pair',
+        payload: {
+          code: pairingCode,
+          deviceId: idGen.nextId(),
+          platform: 'android',
+          appVersion: '1.0.0',
+        },
+      });
+      expect(replayRes.statusCode).toBe(409);
+    });
+
+    it('authenticates device via GET /api/v1/devices/me', async () => {
+      // 1. Without auth -> 401
+      const unauthRes = await server.inject({
+        method: 'GET',
+        url: '/api/v1/devices/me',
+      });
+      expect(unauthRes.statusCode).toBe(401);
+
+      // 2. With device token -> 200
+      const res = await server.inject({
+        method: 'GET',
+        url: '/api/v1/devices/me',
+        headers: { authorization: `Bearer ${deviceToken1}` },
+      });
+
+      expect(res.statusCode).toBe(200);
+      const data = res.json<{
+        deviceId: string;
+        organizationId: string;
+        storeId: string;
+        deviceName: string;
+        status: string;
+      }>();
+      expect(data.deviceId).toBe(testDeviceId);
+      expect(data.organizationId).toBe(orgA);
+      expect(data.status).toBe('active');
+    });
+
+    it('rotates device token and maintains grace period', async () => {
+      const clientReqId = idGen.nextId();
+      const rotateRes = await server.inject({
+        method: 'POST',
+        url: '/api/v1/devices/rotate-token',
+        headers: { authorization: `Bearer ${deviceToken1}` },
+        payload: { clientRequestId: clientReqId },
+      });
+
+      expect(rotateRes.statusCode).toBe(200);
+      const data = rotateRes.json<CloudRotateDeviceTokenResponseDto>();
+      const deviceToken2 = data.deviceToken;
+      expect(deviceToken2).toBeDefined();
+      expect(deviceToken2).not.toBe(deviceToken1);
+
+      // Old token within grace period still succeeds
+      const oldCheck = await server.inject({
+        method: 'GET',
+        url: '/api/v1/devices/me',
+        headers: { authorization: `Bearer ${deviceToken1}` },
+      });
+      expect(oldCheck.statusCode).toBe(200);
+
+      // New token succeeds
+      const newCheck = await server.inject({
+        method: 'GET',
+        url: '/api/v1/devices/me',
+        headers: { authorization: `Bearer ${deviceToken2}` },
+      });
+      expect(newCheck.statusCode).toBe(200);
+    });
+
+    it('revoking device rejects subsequent device token requests with 403', async () => {
+      // Find device database ID
+      const dbRow = await adminConn.pool.query<{ id: string }>(
+        'SELECT id FROM cloud_devices WHERE organization_id = $1 AND device_id = $2',
+        [orgA, testDeviceId],
+      );
+      expect(dbRow.rows.length).toBe(1);
+      deviceDbId = dbRow.rows[0].id;
+
+      // Revoke device as owner
+      const revokeRes = await server.inject({
+        method: 'POST',
+        url: `/api/v1/devices/${deviceDbId}/revoke`,
+        headers: { authorization: `Bearer ${ownerTokenA}` },
+      });
+      expect(revokeRes.statusCode).toBe(200);
+
+      // Device request now rejected
+      const meRes = await server.inject({
+        method: 'GET',
+        url: '/api/v1/devices/me',
+        headers: { authorization: `Bearer ${deviceToken1}` },
+      });
+      expect(meRes.statusCode).toBe(403);
     });
   });
 });

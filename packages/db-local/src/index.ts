@@ -149,6 +149,7 @@ export {
   orderPayments,
   localReceiptPrints,
   localCashDrawerEvents,
+  localCloudState,
 } from './schema/index.js';
 
 export {
@@ -472,3 +473,10 @@ export {
   type BackupServiceOptions,
   SqliteBackupService,
 } from './backup-service.js';
+
+export {
+  type StoredCloudState,
+  type SaveCloudStateParams,
+  SqliteCloudStore,
+  createSqliteCloudStore,
+} from './cloud-repo.js';

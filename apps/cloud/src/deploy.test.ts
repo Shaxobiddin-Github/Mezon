@@ -21,7 +21,9 @@ describe('Deploy & Security Debt Verification (T2.1 debt)', () => {
     const content = fs.readFileSync(composePath, 'utf8');
 
     // Split cloud and migrate service blocks (indented by 2 spaces under services:)
-    const cloudBlockMatch = content.match(/\n  cloud:\s*[\s\S]*?(?=\n  [a-z0-9_-]+:|\nvolumes:|\nnetworks:|$)/);
+    const cloudBlockMatch = content.match(
+      /\n  cloud:\s*[\s\S]*?(?=\n  [a-z0-9_-]+:|\nvolumes:|\nnetworks:|$)/,
+    );
     expect(cloudBlockMatch).not.toBeNull();
     const cloudBlock = cloudBlockMatch![0];
 
@@ -32,7 +34,9 @@ describe('Deploy & Security Debt Verification (T2.1 debt)', () => {
     expect(cloudBlock).toContain('service_completed_successfully');
 
     // Migrate service must exist and contain DATABASE_ADMIN_URL
-    const migrateBlockMatch = content.match(/\n  migrate:\s*[\s\S]*?(?=\n  [a-z0-9_-]+:|\nvolumes:|\nnetworks:|$)/);
+    const migrateBlockMatch = content.match(
+      /\n  migrate:\s*[\s\S]*?(?=\n  [a-z0-9_-]+:|\nvolumes:|\nnetworks:|$)/,
+    );
     expect(migrateBlockMatch).not.toBeNull();
     const migrateBlock = migrateBlockMatch![0];
     expect(migrateBlock).toContain('DATABASE_ADMIN_URL');

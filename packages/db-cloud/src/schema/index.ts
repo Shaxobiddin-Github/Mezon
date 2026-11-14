@@ -5,4 +5,7 @@ export {
   cloudUsers,
   cloudRefreshTokens,
   cloudLoginIdentities,
+  cloudDevicePairingCodes,
+  cloudDevices,
+  cloudDeviceTokens,
 } from './tables.js';
