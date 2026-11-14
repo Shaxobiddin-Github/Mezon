@@ -1,138 +1,239 @@
-## Hisobot: T1.11 — Kassa UI (`apps/pos`, `@mezon/i18n`, `@mezon/ui`)
+## Reja: T1.12 — Printer va chek (`@mezon/drivers`, `@mezon/contracts`, `@mezon/db-local`, `apps/hub`, `apps/pos`)
 
-Branch / PR: `gemini/T1.11-pos-ui` / PR #18 (`https://github.com/Shaxobiddin-Github/Mezon/pull/18`)
-Commit: `ccffc6e`
-PR #17 (T1.10) Squash and merge SHA: `99ca0d69b0db5113e064178fef9111833f699798` (`gemini/T1.10-orders-advances` branch'i o'chirildi)
-
----
-
-### Nima qilindi
-
-1. **U1–U4 majburiy tuzatishlar to'liq bajarildi:**
-   - **U1 (Faqat mavjud Hub API'si):** Kassa UI (`apps/pos/src/api/hub-client.ts`) faqat mavjud Hub marshrutlaridan foydalanadi (`/health`, `/setup/bootstrap`, `/auth/pin-login`, `/auth/logout`, `/auth/me`, `/shifts/current`, `/shifts/open`, `/shifts/:id/cash-moves`, `/shifts/:id/close`, `/catalog/search`, `/catalog/scan`, `/carts`, `/carts/:id`, `/carts/:id/scan`, `/carts/:id/items`, `/carts/:id/items/:lineId`, `/carts/:id/quick-sale`, `/carts/:id/discount`, `/carts/:id/park`, `/carts/:id/resume`, `/carts/:id/cancel`, `/carts/:id/complete`, `/sales/:id`, `/customers`, `/promotions`). Har qanday savdo yagona `POST /carts/:id/complete` (`completeSale`) komandasi orqali o'tadi.
-   - **U2 (Kontraktda yo'q maydonlar o'ylab topilmadi):** `@mezon/contracts` sxemalariga hech qanday uydirma to'lov yoki javob maydonlari qo'shilmadi. Naqdsiz to'lovlar uchun mavjud `providerRef` maydonidan foydalanildi; chek oynasida `"SINOV — FISKAL EMAS"` yozuvi doimiy i18n satri (`t('receipt.nonFiscalBanner')`) sifatida ko'rsatiladi; rahbar tasdig'i uchun `@mezon/contracts`dagi mavjud `override: { username, pin }` va `creditOverride: { supervisorUsername, supervisorPin, reason }` maydonlari ishlatildi.
-   - **U3 (Dev CORS ishlab chiqarishda yoqilmaydi):** `createHubServer(options)` ga faqat aniq `enableDevLoopbackCors: true` uzatilgandagina (`apps/hub/src/config.ts`, `apps/hub/src/security.ts`, `apps/hub/src/server.ts`) loopback origin'lar (`http://127.0.0.1:<port>`, `http://localhost:<port>`) uchun CORS preflight (`OPTIONS`) va `Access-Control-Allow-Origin` javoblari yoqiladi. `process.env` o'zgaruvchisi orqali avtomatik yoqilmaydi va Electron worker (`apps/hub/src/electron-worker.ts`) bu bayroqni hech qachon yoqmaydi. Standart Hub konfiguratsiyasida `http://localhost:5173` origin'idan kelgan `POST /carts` so'rovi `403 FORBIDDEN_ORIGIN` bilan rad etilishi `apps/hub/src/hub.test.ts` da testlandi.
-   - **U4 (E2E Windows va Ubuntu CI'da):** `.github/workflows/ci.yml` da Playwright Chromium keshi (`actions/cache@v4`) bilan `pnpm verify` ichida `pnpm run test:e2e:pos` ham `ubuntu-latest`, ham `windows-latest` joblarida ishga tushadi va yashil o'tdi.
-
-2. **Ko'p tilli lug'at (`@mezon/i18n`) va pul/miqdor formatlash hamda mavzu yordamchilari (`@mezon/ui`):**
-   - `packages/i18n/src/locales/uz-Latn.ts` va `packages/i18n/src/index.ts`: `i18next` 27 asosida sinxron `initPosI18n()` va barcha kassa UI ekranlari, tugmalar, klaviatura qisqa yo'llari, to'lov turlari, smena va xato xabarlari uchun to'liq `uz-Latn` lug'ati yaratildi.
-   - `packages/ui/src/index.ts`: tiyin va milli-birliklar uchun `bigint`-xavfsiz formatlash/parslash funksiyalari (`formatTiyinToSom`, `parseSomInputToTiyin`, `formatMilliQuantity`, `parseDecimalToMilli`, `computeChangePreviewTiyin` — faqat `bigint` arifmetikasi, `number`/`float` ishlatilmaydi) hamda kunduzgi/tungi mavzu (`ThemeMode`: `'light' | 'dark'`) yordamchilari yozildi.
-
-3. **USB HID Skaner Detektori va DataMatrix / GS1 (`\x1d`) qo'llovi:**
-   - `packages/domain/src/catalog.ts` va `packages/contracts/src/cart.ts`: `MAX_CATALOG_BARCODE_LENGTH = 128` va `BARCODE_ALLOWED_REGEX = /^[\x1dA-Za-z0-9._+/=()-]+$/` orqali GS1 DataMatrix (`\x1d` Group Separator va qavslar/belgilar) shtrix-kodlari buzilmasdan domen va kontrakt darajasida qabul qilinishi ta'minlandi.
-   - `apps/pos/src/scanner/scanner-detector.ts`: sof TypeScript USB skaner detektori (`createScannerDetector`) yozildi:
-     - Belgilar orasidagi maksimal kechikish `maxInterKeyDelayMs = 35 ms`, o'rtacha tezlik `maxAverageIntervalMs = 25 ms`, minimal uzunlik `minLength = 4` va yakunlovchi `Enter` / `Tab`.
-     - GS1 Group Separator (`\x1d`, `GroupSeparator` yoki `Ctrl+]`) belgilarini kesib tashlamasdan buferga `\x1d` sifatida yozadi.
-     - Faol `<input>`, `<textarea>`, `[data-scanner-ignore="true"]` elementlarida oddiy yozishni (shu jumladan tez yozuvchi — ~55–80 ms/belgi bilan yozib `Enter` bosgan odamni) skaner deb qabul qilmaydi va formani buzmaydi; fokus qidiruv maydonida bo'lganda haqiqiy yuqori tezlikdagi skan oqimini (`≤ 25 ms/belgi`) aniqlab, qidiruv matnini tozalaydi va `POST /carts/:id/scan` ga yuboradi.
-
-4. **Kassa UI ekranlari, teginish va sichqonsiz klaviatura boshqaruvi (`apps/pos`):**
-   - `AuthAndShiftScreens.tsx`: birinchi ishga tushirish sehrgari (`BootstrapWizardScreen`), PIN-kod orqali kirish (`PinLoginScreen` — katta sensorli numpad + klaviatura), smena ochish (`OpenShiftScreen` — boshlang'ich naqd pul bilan).
-   - `PosWorkspaceScreen.tsx`: chap panelda savat qatorlari (`ArrowUp`/`ArrowDown` navigatsiyasi, `+`/`-` miqdor, `Delete` o'chirish, `F3` qator chegirmasi, `F4` savat chegirmasi, `F6` kechiktirish, `F7` kechiktirilgan cheklar ro'yxati va soni badge'i, `F8` tez savdo, `F9`/`F12` to'lov oynasi), o'ng panelda `F2` mahsulot qidiruv (`@tanstack/react-virtual` 3 bilan virtuallashtirilgan ro'yxat), sensorli numpad va amallar.
-   - `PosModals.tsx` va `PaymentAndShiftModals.tsx`:
-     - Tez savdo (`F8`), qator/savat chegirmasi (`F3`/`F4`) va kassir limitidan (`max_discount_pct`) oshganda rahbar (`owner`/`manager`) PIN tasdig'i (`override`).
-     - Kechiktirilgan cheklar (`F6` saqlash, `F7` ro'yxatdan davom ettirish).
-     - To'lov oynasi (`F9`/`F12`): 8 ta to'lov usuli (`cash`, `card`, `uzqr`, `payme`, `click`, `uzum`, `social_card`, `other`), tez kupura tugmalari, aralash to'lov, qisman yoki to'liq qarzga (`debt` + mijoz tanlash/yaratish + kredit limiti oshsa rahbar tasdig'i), qaytim faqat naqddan hisoblanishi, barqaror `clientRequestId` (UUIDv7) bilan idempotent qayta urinish.
-     - Chek oynasi (`ReceiptModal`): `"SINOV — FISKAL EMAS"` banneri, `receiptNo`, qatorlar, chegirma, QQS, to'lovlar, qaytim va `Enter`/`Escape` bilan yangi savatga o'tish.
-     - Smena kassa amallari (`cash_in`, `cash_out`, `expense`) va smena yopish (`CloseShiftModal`: haqiqiy sanab chiqilgan naqd pulni kiritish, yakunlanganidan so'ng kutilgan naqd, naqdsiz tushum va farq (`variance`) ko'rsatkichi).
-   - **Tannarx maxfiyligi:** UI hech qayerda `cost_price`, `cost`, `margin` yoki `profit` maydonlarini so'ramaydi va DOM'da ko'rsatmaydi (Playwright E2E da tekshirildi).
+Branch: `gemini/T1.12-printer`
+PR #18 (T1.11) Squash and merge SHA: `d8056539da0c45c8561602131dcb499462b68018` (`gemini/T1.11-pos-ui` o'chirildi)
 
 ---
 
-### O'zgargan fayllar (fayl — sabab)
+### 0. T1.11 test qarzi va mayda tuzatishlar (birinchi alohida commit)
 
-- `packages/i18n/package.json`, `packages/i18n/tsconfig.json`, `packages/i18n/tsconfig.test.json`, `packages/i18n/src/locales/uz-Latn.ts`, `packages/i18n/src/index.ts`, `packages/i18n/src/index.test.ts` — `i18next` 27 konfiguratsiyasi, `uz-Latn` kassa lug'ati va testlari.
-- `packages/ui/package.json`, `packages/ui/tsconfig.json`, `packages/ui/tsconfig.test.json`, `packages/ui/src/index.ts`, `packages/ui/src/index.test.ts` — `bigint` pul/miqdor formatlash va parslash yordamchilari, mavzu (`light`/`dark`) funksiyalari va birlik testlari.
-- `packages/domain/src/catalog.ts`, `packages/contracts/src/cart.ts` — GS1 DataMatrix (`\x1d` Group Separator va uzun shtrix-kodlar, `MAX_CATALOG_BARCODE_LENGTH = 128`) qo'llovi.
-- `apps/hub/src/config.ts`, `apps/hub/src/security.ts`, `apps/hub/src/server.ts`, `apps/hub/src/hub.test.ts` — **U3**: faqat `enableDevLoopbackCors: true` berilgandagina dev loopback CORS yoqilishi; standart Hub konfiguratsiyasida `http://localhost:5173` `403 FORBIDDEN_ORIGIN` bilan rad etilishi testi.
-- `apps/pos/package.json`, `apps/pos/tsconfig.test.json`, `apps/pos/playwright.config.mjs` — `@mezon/pos` bog'liqliklari (`@tanstack/react-query`, `@tanstack/react-virtual`, `zustand`, `i18next`, `@mezon/contracts`, `@mezon/domain`, `@mezon/i18n`, `@mezon/ui`) va Playwright E2E konfiguratsiyasi.
-- `apps/pos/src/scanner/scanner-detector.ts`, `apps/pos/src/scanner/scanner-detector.test.ts` — USB skaner detektori (EAN-13, DataMatrix, GS1 `\x1d`, tez yozuvchi inson filtri) va testlari.
-- `apps/pos/src/utils/browser-uuid.ts` — brauzerda Web Crypto (`crypto.getRandomValues`) asosida monoton UUIDv7 generatori (`clientRequestId` uchun).
-- `apps/pos/src/api/hub-client.ts` — **U1 & U2**: mavjud Hub API marshrutlari uchun tipga xavfsiz HTTP klient.
-- `apps/pos/src/store/pos-store.ts` — Zustand 5 asosida kassa UI holati, fokuslangan qator, modallar, mavzu va barqaror `paymentAttemptClientRequestId`.
-- `apps/pos/src/components/AuthAndShiftScreens.tsx`, `apps/pos/src/components/PosWorkspaceScreen.tsx`, `apps/pos/src/components/PosModals.tsx`, `apps/pos/src/components/PaymentAndShiftModals.tsx`, `apps/pos/src/App.tsx`, `apps/pos/src/App.css`, `apps/pos/src/bridge.ts`, `apps/pos/src/index.ts` — kassa UI ekranlari, klaviatura qisqa yo'llari, modallar va kunduzgi/tungi mavzu stillari.
-- `apps/pos/e2e/pos.spec.ts` — Playwright E2E testlari (to'liq savdo oqimi, skaner vs tez yozuvchi, DataMatrix `\x1d`, sichqonsiz klaviatura savdosi, kechiktirilgan chek, idempotent to'lov, smena yopish va 50 000 mahsulot qidiruv tezligi).
-- `.dependency-cruiser.cjs`, `package.json`, `.github/workflows/ci.yml`, `vitest.config.ts` — dependency-cruiser qoidasi, `test:e2e:pos` skripti va CI'da Playwright Chromium keshi.
-- `.mezon/gemini/pos-sales-screen.png` — kassa savdo va chek ekranining skrinshoti.
+T1.12 PR'ining **birinchi alohida commit'i** sifatida (`T1.11 test qarzi: skaner chegaralari, diagnostika paneli, E2E skrinshot yo'li`) quyidagilar bajariladi:
 
----
-
-### Migratsiyalar
-
-- Yo'q (`0 diff statements` — SQLite va PostgreSQL sxemalari o'zgarmadi).
+1. **Skaner minimal uzunlik testi (`apps/pos/src/scanner/scanner-detector.test.ts`):**
+   - `2` yoki `3` ta belgi juda tez (`≤ 5–10 ms` oraliqda, masalan `+`, `1`, `2` yoki klaviatura rollover'i) kelib, darhol `Enter` bosilganda `onScan` **chaqirilmasligi** (`scans.length === 0`) tekshiriladi.
+   - `scanner-detector.ts` dagi `keyCount >= minLength && buffer.length >= minLength` sharti olib tashlanganda ushbu test yiqilishi (mutatsiya) bilan isbotlanadi.
+2. **Skaner `Enter` kechikishi testi (`apps/pos/src/scanner/scanner-detector.test.ts`):**
+   - `13` ta raqam tez (`8 ms` oraliqda) kelib, yakunlovchi `Enter` `500 ms` dan keyin bosilganda (`gapToTerminator > maxInterKeyDelayMs`), bu skan **emasligi** (`onScan` chaqirilmasligi) tekshiriladi.
+   - `gapToTerminator <= maxInterKeyDelayMs` sharti olib tashlanganda ushbu test yiqilishi (mutatsiya) bilan isbotlanadi.
+3. **Diagnostika panelini kassirdan yashirish (`apps/pos/src/App.tsx`, `apps/pos/src/components/PosWorkspaceScreen.tsx`):**
+   - Savdo ekranining yuqori qatoridan T0.7 dan qolgan texnik ma'lumotlar (`Hub holati ready`, `http://127.0.0.1:…`, `Qayta ishga tushishlar`, `/health javobi`, `Sozlash kerakmi`, `"Tekshiruvni yangilash"` tugmasi) olib tashlanadi.
+   - Savdo ekranining yuqori panelida faqat kassir F.I.Sh./roli, joriy smena kodi, printer/savdo amallari, mavzu (`Kunduzgi`/`Tungi`), `F1` yordam va `Chiqish` qoladi.
+   - Texnik diagnostika ma'lumotlari faqat `owner` va `manager` rollari uchun `Ctrl+Shift+D` qisqa yo'li yoki sozlamalar tugmasi orqali ochiladigan alohida `"Tizim diagnostikasi"` modal oynasiga ko'chiriladi (kassir rolida bu tugma ham, modal ham ochilmaydi).
+4. **E2E skrinshot yo'li (`apps/pos/e2e/pos.spec.ts`):**
+   - `pos.spec.ts` ichida skrinshot `.mezon/gemini/pos-sales-screen.png` ga emas, git tomonidan e'tiborsiz qoldiriladigan `apps/pos/test-results/pos-sales-screen.png` ga yoziladi. Shunda `pnpm verify` ishchi daraxtni (`git status`) hech qachon ifloslantirmaydi.
 
 ---
 
-### Qabul mezonlari va U1–U4 dalillari
+### a) Qatlamlar va Arxitektura qarori
 
-- [x] **U1 — Faqat mavjud Hub API'si va yagona `completeSale` yo'li:** `apps/pos/src/api/hub-client.ts` faqat mavjud Hub marshrutlariga murojaat qiladi; savdo faqat `POST /carts/:id/complete` orqali yakunlanadi (`apps/pos/e2e/pos.spec.ts`).
-- [x] **U2 — Kontraktda yo'q maydonlar o'ylab topilmadi:** `@mezon/contracts` to'lov va savdo javobi o'zgartirilmadi; `"SINOV — FISKAL EMAS"` chek oynasida `t('receipt.nonFiscalBanner')` orqali ko'rsatiladi (`apps/pos/src/components/PaymentAndShiftModals.tsx`, `apps/pos/e2e/pos.spec.ts`).
-- [x] **U3 — Dev CORS ishlab chiqarishda yoqilmaydi:** `apps/hub/src/hub.test.ts` (`U3: rejects http://localhost:5173 by default with 403 FORBIDDEN_ORIGIN and only allows loopback dev CORS when enableDevLoopbackCors is explicitly true`) — standart Hub `http://localhost:5173` dan `POST /carts` so'rovini `403 FORBIDDEN_ORIGIN` bilan rad etadi.
-- [x] **U4 — E2E Windows va Ubuntu CI'da:** PR #18 (`ccffc6e`) da `Verify (ubuntu-latest)` va `Verify (windows-latest)` joblarida Playwright E2E yashil o'tdi.
-  - **Playwright E2E davomiyligi:** lokal `10.7 s` (`pos.spec.ts` test: `6.9 s`).
-  - **Skanerdan savat qatorigacha (`Scan -> Cart Line DOM`) kechikish:** `28.0 ms` (maqsad `≤ 150 ms`).
-  - **50 000 mahsulotda UI + FTS5 qidiruv kechikishi:** `46.2 ms` (maqsad `≤ 150 ms`).
-- [x] **Sichqonsiz savdo (klaviatura bilan):** `apps/pos/e2e/pos.spec.ts` da `page.mouse.click` chaqirmasdan `F2` (qidiruv) → `Enter` (savatga qo'shish) → `+` (miqdorni oshirish) → `F8` (tez savdo) → `F4` (chegirma + rahbar PIN) → `F9` (to'lov) → `Enter` (chekni yakunlash va yopish) to'liq o'tdi.
-- [x] **Tez yozgan odam skaner deb qabul qilinmaydi + DataMatrix `\x1d` buzilmaydi:** `apps/pos/src/scanner/scanner-detector.test.ts` (4 ta birlik test) va `apps/pos/e2e/pos.spec.ts` (60 ms/belgi bilan yozib `Enter` bosgan foydalanuvchi `/carts/:id/scan` ni chaqirmaydi; `010478000000012121ABC123\x1d91EE06\x1d92dGVzdA==` DataMatrix kodi `\x1d` bilan aynan uzatiladi).
-- [x] **Kechiktirilgan chek, idempotent `clientRequestId`, smena yopish, kunduzgi/tungi mavzu va tannarx maxfiyligi:** `apps/pos/e2e/pos.spec.ts` da to'liq tekshirildi.
-- [x] **Skrinshot:** `.mezon/gemini/pos-sales-screen.png` fayliga saqlandi.
+1. **Qayerda ishlaydi (Arxitektura qarori — Hub jarayonida):**
+   - Printer drayverlari va ESC/POS kodlovchi **Hub (`apps/hub`) ichida** (Electron'da `utilityProcess` ichida ishlaydigan Hub serverida) ishlaydi. Renderer (`apps/pos`) printerga hech qachon to'g'ridan-to'g'ri murojaat qilmaydi (`contextIsolation: true`, `sandbox: true`).
+   - **Asos:**
+     1. T4 (Ko'p kassa) va T1.12 talablariga ko'ra, brauzer/UI faqat Hub REST API bilan gaplashadi;
+     2. Chek ma'lumotlari (`sales`, `returns`, `shifts`, `local_hub_config`) va chop etish auditi (`receipt_prints`, `cash_drawer_events`) SQLite bazasida yashaydi — Hub bir tranzaksiyada audit yozib, printerga baytlarni yuboradi;
+     3. `apps/desktop/scripts/prepare-electron-app.mjs` allaqachon `@mezon/drivers` va `koffi` 3.3.7 ni `dist-app/node_modules` ichiga yig'adi, shuning uchun Hub `utilityProcess` (hamda dev rejimdagi Node.js Hub) `koffi` va `node:net` dan to'g'ridan-to'g'ri foydalana oladi (`packages/drivers` ga `"koffi": "3.3.7"` dependency sifatida qo'shiladi).
 
----
-
-### Test natijasi (buyruq va haqiqiy chiqish)
-
-```text
-$ pnpm verify
-$ pnpm run format:check && pnpm run build && pnpm run lint && pnpm run typecheck && pnpm run db:check && pnpm run test && pnpm run depcruise
-Checking formatting... All matched files use Prettier code style!
-Tasks: 17 successful, 17 total (build)
-$ node scripts/lint-workspaces.mjs (0 errors, 0 warnings)
-Tasks: 17 successful, 17 total (typecheck)
-PostgreSQL schema matches committed migrations (0 diff statements).
-SQLite schema matches committed migrations (0 diff statements).
-
-$ vitest run --project unit --project sqlite-hub
- Test Files  60 passed | 1 skipped (61)
-      Tests  283 passed | 2 skipped (285)
-
-$ vitest run --project perf
- Test Files  9 passed (9)
-      Tests  12 passed (12)
-
-$ pnpm --filter @mezon/pos test:e2e
-Running 1 test using 1 worker
-[PERF] Scan -> Cart Line DOM latency: 28.0 ms
-[PERF] 50 000 products UI + FTS5 search latency: 46.2 ms
-  ok 1 e2e\pos.spec.ts:161:3 › @mezon/pos Playwright E2E — Kassa UI (T1.11) › Full POS workflow: Setup -> Login -> Open Shift -> Scan (EAN-13 & DataMatrix GS) -> Human Typist vs Scanner -> Mouse-Free Keyboard Sale -> Park/Resume -> Idempotent Retry -> Shift Cash Move & Close + 50k Search Perf (6.9s)
-  1 passed (10.7s)
-
-$ depcruise --config .dependency-cruiser.cjs apps/*/src packages/*/src
-✔ no dependency violations found (318 modules, 1348 dependencies cruised)
-
-$ pnpm --filter @mezon/desktop test:e2e
-  ok 1 e2e\desktop.spec.ts:97:1 › Playwright unfused Electron against identical app.asar: app://mezon, CSP, single instance, and T1 Hub crash recovery (6.4s)
-  1 passed (7.1s)
-```
-
-GitHub Actions CI (PR #18, commit `ccffc6e`):
-- `Verify (ubuntu-latest)`: **success**
-- `Verify (windows-latest)`: **success**
-- `Verify PostgreSQL RLS (ubuntu-latest)`: **success**
-- `Detect Desktop Changes`: **success**
+2. **Paketlar bo'yicha taqsimot:**
+   - **`@mezon/drivers` (`packages/drivers/src/printer/` — sof qism, IO yo'q):**
+     - `escpos-encoder.ts`: sof funksiyalar — `ReceiptDocument`, `ReturnReceiptDocument`, `ShiftCloseReportDocument`, `TestPrintDocument` → `Uint8Array` (ESC/POS baytlar ketma-ketligi) hamda `encodeCashDrawerPulse(pin?: 0 | 1): Uint8Array`.
+     - `codepage.ts`: kod sahifasi (`'translit'` | `'cp866'` | `'cp1251'`) jadvali va o'zbek lotin/kirill matnini aniq 1-baytli kod sahifasiga yoki ASCII transliteratsiyaga o'giruvchi sof kodlovchi.
+     - `layout.ts`: `58mm` (`32` belgi/qator, Font A) va `80mm` (`48` belgi/qator, Font A) uchun so'z bo'yicha o'rash (`wordWrap`), chap/o'ng ustunlarni tekislash (`formatColumns`), chiziqli ajratkichlar (`---`, `===`) va markazlashtirish.
+     - `types.ts`: `PrinterDriver` port interfeysi, `PrinterConfig`, `PrintSendResult`, `DiscoveredWindowsPrinter` tiplari.
+     - `null-driver.ts` (`NullPrinterDriver` — printersiz rejim: muvaffaqiyatli `{ ok: true, mode: 'disabled', bytesSent: 0 }` qaytaradi, hech qanday IO bajarmaydi).
+     - `fake-driver.ts` (`FakePrinterDriver` — testlar uchun: yuborilgan barcha `Uint8Array` buferlarni, pul yashigi impulslarini xotirada saqlaydi va sozlanadigan xato rejimini (`simulateError`) qo'llab-quvvatlaydi).
+   - **`@mezon/drivers/node` (`packages/drivers/src/node/printer/` — Node/OS IO qismi):**
+     - `windows-raw-driver.ts` (`WindowsRawPrinterDriver`): `koffi` 3 orqali `winspool.drv` funksiyalari (`OpenPrinterW`, `StartDocPrinterW` (`DOC_INFO_1W`, `pDatatype = "RAW"`), `StartPagePrinter`, `WritePrinter`, `EndPagePrinter`, `EndDocPrinter`, `ClosePrinter` va printerlar ro'yxati uchun `EnumPrintersW`) bilan ishlaydi. Windows bo'lmagan OS'da chaqirilsa, aniq `PRINTER_OS_UNSUPPORTED` xatosini qaytaradi; unit testlarda esa `WinspoolBindings` interfeysi mock/stub qilinib, barcha Win32 chaqiruv tartibi va xato holatlari (`OpenPrinterW` false, `WritePrinter` partial write/error, handle cleanup `finally` blokida) tekshiriladi.
+     - `network-driver.ts` (`NetworkPrinterDriver`): Node `node:net` `Socket` orqali TCP `host:port` (standart `9100`), qat'iy `timeoutMs` (standart `3000 ms`, `1000..15000 ms`) bilan. Ulanish uzilsa yoki timeout bo'lsa soketni `destroy()` qilib, tuzilgan xato qaytaradi (unit testda lokal `net.createServer` bilan tekshiriladi).
 
 ---
 
-### Tekshirilmagan narsalar
+### b) Chek tarkibi (`58mm` = 32 ustun, `80mm` = 48 ustun)
 
-- Fizik USB shtrix-kod skaner qurilmasi (Playwright E2E va Vitest'da real `KeyboardEvent` oqimi va `timeStamp` intervallari bilan simulyatsiya qilindi).
+Barcha chek va hisobot hujjatlarida F3 gacha tepada va pastda markazlashtirilgan, qalin (`ESC E 1`) **"SINOV — FISKAL EMAS"** banneri majburiy chiqadi. Vaqt va sana do'konning `storeTimezone` (standart `'Asia/Tashkent'`) mintaqasida `YYYY-MM-DD HH:mm:ss` formatida chiqariladi. Pul qiymatlari tiyindan so'mga (`12 500` yoki kasr tiyin bo'lsa `12 500.50`), miqdorlar milli-birlikdan (`1`, `1.5`, `0.255` + birlik nomi `dona`, `kg` va h.k.) formatlanadi.
 
-### Qilingan taxminlar
+1. **Savdo cheki (`SaleReceiptDocument`):**
+   - **Sarlavha:**
+     - `"*** SINOV — FISKAL EMAS ***"` (markazda, qalin)
+     - Agar qayta chop etish bo'lsa (`copyNumber > 1` yoki `isReprint === true`): `"*** NUSXA #N (QAYTA CHOP ETILDI) ***"` (markazda, qalin)
+     - Do'kon nomi / Tashkilot nomi
+     - Chek kodi (`receiptCode`, masalan `R-000001` / `#1`), Smena kodi (`shiftCode`)
+     - Sana va vaqt (`storeTimezone` da), Kassir F.I.Sh.
+     - Agar mijoz biriktirilgan bo'lsa: Mijoz ismi
+   - **Qatorlar (`lines`):**
+     - Har bir qator uchun:
+       - `1. <Mahsulot nomi>` (`58mm` da 32 belgi, `80mm` da 48 belgiga so'z bo'yicha o'raladi; tez savdo bo'lsa `[Tez savdo]` belgisi bilan)
+       - Ikkinchi qator (o'ngga/chapga tekislangan): `   <miqdor> <birlik> x <birlik narx>` ↔ `<grossTotal>`
+       - Agar qatorda aksiya (`promoDiscount > 0`) yoki savat chegirmasi (`allocatedOrderDiscount > 0`) bo'lsa: `   Chegirma:` ↔ `-<chegirma summasi>` va yakuniy `   Qator jami:` ↔ `<finalTotal>`
+       - QQS stavkasi va summasi: `   QQS (<vatRate>%):` ↔ `<vatTotal>`
+   - **Yakuniy summalar:**
+     - `Jami (chegirmasiz):` ↔ `<subtotalGross>` (agar chegirma bo'lsa)
+     - `Aksiya chegirmasi:` ↔ `-<promoDiscountTotal>` (agar `> 0` bo'lsa)
+     - `Chegirma:` ↔ `-<orderDiscountTotal>` (agar `> 0` bo'lsa)
+     - **Qalin:** `JAMI TO'LOV:` ↔ `<totalFinal>`
+     - `Shu jumladan QQS:` ↔ `<totalVat>`
+   - **To'lovlar (`payments`):**
+     - Har bir to'lov turi (`Naqd`, `Karta`, `UzQR`, `Payme`, `Click`, `Uzum`, `Ijtimoiy karta`, `Avans`, `Boshqa`):
+       - Naqd bo'lsa: `Naqd (berildi):` ↔ `<tenderedAmount>`
+       - Boshqa bo'lsa: `<To'lov turi>:` ↔ `<amount>` (agar `providerRef` bo'lsa qavs ichida qisqa ref)
+     - Agar `changeAmount > 0`: `Qaytim (naqd):` ↔ `<changeAmount>`
+     - Agar `debtAmount > 0`: `Nasiya (qarzga):` ↔ `<debtAmount>`
+   - **Pastki qism:**
+     - `"Xaridingiz uchun rahmat!"`
+     - `"*** SINOV — FISKAL EMAS ***"`
+     - Qog'oz uzish (`GS V 66 3` — partial cut with feed).
 
-- Yo'q. Barcha yechimlar tasdiqlangan T1.11 rejasi va U1–U4 ko'rsatmalariga qat'iy amal qilgan holda bajarildi.
+2. **Qaytarish cheki (`ReturnReceiptDocument` — T1.6):**
+   - `"*** SINOV — FISKAL EMAS ***"`
+   - `"=== TOVAR QAYTARISH CHEKI ==="` (agar qayta chop etilsa: `"*** NUSXA #N ***"`)
+   - Qaytarish kodi (`returnCode`), Asl chek kodi (`saleReceiptCode`), Sana/vaqt, Kassir/Menejer, Sabab (`reason`)
+   - Qaytarilgan qatorlar (`itemName`, `qty × unitPrice`, `refundAmount`, `vatTotal`)
+   - `JAMI QAYTARILDI:` ↔ `<totalRefund>` (`Shu jumladan QQS: <totalVat>`)
+   - Qaytarish usullari (`payments`: `Naqd qaytarildi`, `Karta`, `Qarzdan ayrildi` (`debt_reduction`) va h.k.).
 
-### Takliflar
+3. **Smena yopilish hisoboti (`ShiftCloseReportDocument` — T1.9 Z-hisobot ko'rinishi):**
+   - `"*** SINOV — FISKAL EMAS ***"`
+   - `"=== SMENA YOPILISH HISOBOTI ==="` (agar qayta chop etilsa: `"*** NUSXA #N ***"`)
+   - Smena kodi (`shiftCode`), Holati (`closed`), Yopish tartib raqami (`closeSeq`), Kassir/Yopuvchi, Ochilgan va yopilgan vaqtlar
+   - Savdolar soni (`salesCount`), Qaytarishlar soni (`returnsCount`), Bekor qilinganlar (`voidsCount`)
+   - Tushum ko'rsatkichlari: `Yalpi savdo`, `Qaytarishlar`, `Sof savdo`
+   - Naqd pul harakati: `Boshlang'ich naqd`, `Naqd savdo (sof)`, `Naqd qaytarish`, `Kassa kirim (cash_in)`, `Kassa chiqim (cash_out)`, `Xarajatlar (expense)`
+   - `Kutilgan naqd pul:` ↔ `<expectedCash>`
+   - `Sanab chiqilgan naqd:` ↔ `<countedCash>`
+   - `Farq (kamomad/ortiqcha):` ↔ `<cashDiscrepancy>`
+   - Naqdsiz to'lovlar (`nonCashTotalsByMethod`: Karta, UzQR, Payme, Click, Uzum va h.k.) va `Jami naqdsiz:` ↔ `<nonCashNetTotal>`.
 
-- Keyingi T1.12 (Printer va chek) vazifasida `ReceiptModal` dagi chop etish/qayta chop etish holatlarini `PrinterDriver` bilan bog'lash.
+---
 
-### Egasi yoki Claude qarori kerak bo'lgan savollar
+### c) Kod sahifasi va o'zbek harflari siyosati
 
-- Yo'q.
+Ko'pchilik termal printerlar UTF-8 ni to'g'ridan-to'g'ri qo'llab-quvvatlamaydi va faqat 1-baytli kod sahifalarini (`ESC t n`) tushunadi.
+
+1. **Uchta kodlash rejimi (`PrinterEncodingMode = 'translit' | 'cp866' | 'cp1251'`):**
+   - Standart rejim: `'translit'` (har qanday ESC/POS printerda 100% buzilmasdan chiqadi, `ESC t 0` PC437/ASCII).
+   - `'cp866'` (`ESC t 17` — Cyrillic #2 / DOS CP866): kirill harflarini qo'llaydigan printerlar uchun.
+   - `'cp1251'` (`ESC t 73` — Windows-1251): Windows-1251 qo'llaydigan printerlar uchun.
+
+2. **Aniq normalizatsiya va transliteratsiya jadvali (`packages/drivers/src/printer/codepage.ts`):**
+   - **O'zbek maxsus apostrof va harflari (barcha rejimlarda avval normallashtiriladi):**
+     - `Oʻ`, `Oʼ`, `O‘`, `O’`, `O` + `` ` ``, `Ў` (translit rejimida) → `O'`
+     - `oʻ`, `oʼ`, `o‘`, `o’`, `o` + `` ` ``, `ў` (translit rejimida) → `o'`
+     - `Gʻ`, `Gʼ`, `G‘`, `G’`, `G` + `` ` ``, `Ғ` (translit rejimida) → `G'`
+     - `gʻ`, `gʼ`, `g‘`, `g’`, `g` + `` ` ``, `ғ` (translit rejimida) → `g'`
+     - Tutuq belgisi (`ʼ` U+02BC, `ʻ` U+02BB, `‘` U+2018, `’` U+2019, `` ` ``) → `'` (`0x27`)
+     - Uzun tire (`—` U+2014, `–` U+2013) → `-` (`0x2D`)
+     - Maxsus bo'shliqlar (`\u00A0`, `\u202F`) → oddiy bo'shliq (`0x20`)
+     - `№` → `No` (`translit` va `cp866` da `0xFC` yoki `No`, `cp1251` da `0xB9`)
+   - **`'translit'` rejimida kirill harflari kelsa (masalan mahsulot nomida `Шакар 1кг`, `Қаймоқ`, `Гўшт`, `Ҳолва`):**
+     - Standart o'zbek kirill → lotin transliteratsiya jadvali qo'llanadi:
+       `А→A, Б→B, В→V, Г→G, Ғ→G', Д→D, Е→Ye/E, Ё→Yo, Ж→J, З→Z, И→I, Й→Y, К→K, Қ→Q, Л→L, М→M, Н→N, О→O, П→P, Р→R, С→S, Т→T, У→U, Ў→O', Ф→F, Х→X, Ҳ→H, Ц→Ts, Ч→Ch, Ш→Sh, Щ→Sh, Ъ→', Ы→I, Ь→, Э→E, Ю→Yu, Я→Ya` (katta va kichik harflar uchun).
+   - **`'cp866'` va `'cp1251'` rejimlarida:**
+     - `ESC t 17` (`0x1b, 0x74, 0x11`) yoki `ESC t 73` (`0x1b, 0x74, 0x49`) komandasi chek boshida yuboriladi.
+     - Lotin ASCII (`0x20..0x7E`) o'z holicha qoladi; rus/o'zbek kirill harflari (`А..Я`, `а..я`, `Ё`, `ё`) mos CP866 / CP1251 1-baytli qiymatiga o'giriladi; CP866/CP1251 da mavjud bo'lmagan o'zbek kirill harflari (`Қ→К`, `қ→к`, `Ғ→Г`, `ғ→г`, `Ҳ→Х`, `ҳ→х`, `Ў→У`, `ў→у`) printerda `?` bo'lib qolmasligi uchun eng yaqin kirill harfiga tushiriladi.
+     - Jadvalda yo'q har qanday noma'lum Unicode belgi `?` (`0x3F`) ga tushiriladi.
+   - **Testlar:** Bayt snapshot testlari `'translit'`, `'cp866'` va `'cp1251'` rejimlarining har birini o'zbek lotin (`Oʻzbekiston, Gʻijduvon, Qahva aʼlo — 15 000 soʻm`) va kirill (`Қўқон ҳолваси, Ғиждувон гўшти`) matnlari bilan tekshiradi.
+
+---
+
+### d) Xatolar, Qayta chop etish (`receipt_prints`) va Pul yashigi (`cash_drawer`)
+
+1. **Uzluksizlik qoidasi (GEMINI.md 3.2):**
+   - Printer o'chiq bo'lishi, tarmoq timeout berishi yoki `winspool.drv` xatosi **savdoni (`completeSale`), qaytarishni (`createReturn`) va smena yopishni (`closeShift`) hech qachon to'xtatmaydi va rollback qilmaydi**.
+   - Savdo avval `completeSale` tranzaksiyasida to'liq saqlanadi. So'ng (agar `printer_auto_print_sale = true` bo'lsa yoki foydalanuvchi `"Chop etish"` tugmasini bossa) chop etish chaqiriladi. Agar printer xato bersa, savdo saqlangan holda qoladi, audit jadvaliga `status = 'failed'` va `error_message` yoziladi, UI'da esa sariq/qizil ogohlantirish banneri va **"Qayta chop etish"** tugmasi chiqadi.
+
+2. **Jadval sinfi qarori (`local_receipt_prints` va `local_cash_drawer_events` — `LOCAL`, store-scoped):**
+   - **Qaror:** Chop etish urinishlari va pul yashigini ochish auditi lokal terminal/hub qurilmasiga xos operatsion jurnal bo'lgani uchun **`LOCAL`** sinfida (`tenantScope: 'store'`) saqlanadi (`local_receipt_prints` va `local_cash_drawer_events`).
+   - **Asos:**
+     1. Qaysi chek necha marta qog'ozga chiqqani yoki qog'oz tiqilib qolgani (`status = 'failed'`) lokal fizika hodisasi bo'lib, outbox orqali bulutga va boshqa kassa terminallariga tarqatilishi shart emas (F4 da har terminalning o'z printeri bo'ladi);
+     2. Shu bilan birga, `local_receipt_prints` da `document_type` (`'sale' | 'return' | 'shift_close'`), `document_id` (UUIDv7), `print_seq` (`1, 2, 3...`), `copy_number` (`status = 'printed'` bo'lgan nechanchi nusxa ekani), `is_reprint` (`boolean`), `actor_user_id`, `status` (`'printed' | 'failed' | 'disabled'`), `printer_mode` (`'disabled' | 'windows_raw' | 'network_tcp'`), `printer_target`, `bytes_sent`, `error_code`, `error_message`, `created_at_ms` saqlanadi.
+     3. **Nusxa raqami (`copyNumber`) hisobi:**
+        - Birinchi muvaffaqiyatli chop etish (`copyNumber = 1`, `isReprint = false`) asl nusxa hisoblanadi (chekda `"NUSXA"` yozuvi chiqmaydi).
+        - Agar birinchi urinishda printer xato bergan bo'lsa (`status = 'failed'`) va kassir keyin `"Qayta chop etish"` ni bossa, hali hech bir muvaffaqiyatli nusxa chiqmagani yoki oldin chiqqaniga qarab:
+          - Agar foydalanuvchi `/sales/:id/print` (yoki `/returns/:id/print`, `/shifts/:id/print`) ni chaqirsa va oldin kamida 1 marta `status = 'printed'` bo'lgan bo'lsa → `isReprint = true`, `copyNumber = previousPrintedCount + 1` va chek tepasida **`*** NUSXA #2 (QAYTA CHOP ETILDI) ***`** chiqadi.
+          - Bundan tashqari, `reprint: true` bayrog'i aniq berilsa (masalan chek oynasidan "Nusxa chop etish" bosilsa), har doim `"*** NUSXA #N ***"` belgisi qo'yiladi.
+
+3. **Pul yashigi (`Cash Drawer`):**
+   - ESC/POS pul yashigi impulsi: `ESC p m t1 t2` (`0x1b, 0x70, 0x00, 0x19, 0xfa` — Pin 2, ~50ms on / ~500ms off).
+   - **Avtomatik ochish:** `printer_cash_drawer_auto_open = true` bo'lganda va savdo chekida naqd to'lov (`cash`) ishtirok etganda (yoki naqd qaytarishda), chek baytlari oxiriga pul yashigi impulsi qo'shiladi (yoki alohida yuboriladi).
+   - **Qo'lda ochish (`POST /printer/cash-drawer/open`):**
+     - Ruxsat: `printer:cash_drawer` (`owner` va `manager` da bor; `cashier` da esa ixtiyoriy `override: { username, pin }` orqali rahbar tasdig'i bilan).
+     - Majburiy `reason` (sabab) talab qilinadi va `local_cash_drawer_events` jadvaliga (`actor_user_id`, `override_approved_by_user_id`, `shift_id`, `reason`, `status`, `error_message`, `created_at_ms`) yoziladi.
+
+---
+
+### e) Sozlamalar, Hub API va Kassa UI
+
+1. **Ma'lumotlar bazasi (`packages/db-local` — migratsiya `0013_printer_and_receipt_prints.sql`):**
+   - `local_hub_config` jadvaliga printer sozlamalari ustunlari qo'shiladi:
+     - `printer_mode`: `text` (`'disabled' | 'windows_raw' | 'network_tcp'`), standart `'disabled'`
+     - `printer_name`: `text` (nullable, Windows printer nomi)
+     - `printer_host`: `text` (nullable, TCP IP/hostname)
+     - `printer_port`: `integer` (standart `9100`, `1..65535`)
+     - `printer_timeout_ms`: `integer` (standart `3000`, `500..30000`)
+     - `printer_paper_width_mm`: `integer` (`58 | 80`), standart `80`
+     - `printer_encoding`: `text` (`'translit' | 'cp866' | 'cp1251'`), standart `'translit'`
+     - `printer_auto_print_sale`: `integer` boolean (`0 | 1`), standart `1` (`true`)
+     - `printer_cash_drawer_auto_open`: `integer` boolean (`0 | 1`), standart `1` (`true`)
+     - `receipt_header_title`: `text` (nullable — do'kon nomi/sarlavhasi, standart `'MEZON KASSA'`)
+     - `receipt_footer_text`: `text` (nullable — pastki yozuv, standart `'Xaridingiz uchun rahmat!'`)
+   - `local_receipt_prints` (`LOCAL`, `tenantScope: 'store'`) jadvali.
+   - `local_cash_drawer_events` (`LOCAL`, `tenantScope: 'store'`) jadvali.
+
+2. **Ruxsatlar (`packages/domain/src/auth.ts`):**
+   - `printer:config` (`owner`, `manager`) — printer sozlamalarini o'zgartirish, Windows printerlar ro'yxatini ko'rish, sinov chekini chiqarish.
+   - `printer:cash_drawer` (`owner`, `manager`) — pul yashigini qo'lda ochish (`cashier` esa `override` PIN bilan chaqira oladi).
+   - Savdo, qaytarish va smena chekini chop etish / qayta chop etish (`cart:write` / `shifts:read`) kassir uchun ochiq.
+
+3. **Hub REST API marshrutlari (`apps/hub/src/printer-routes.ts`, `apps/hub/src/printer-service.ts`):**
+   - `GET /printer/settings` — joriy printer sozlamalarini olish (`auth:self` / `cart:write`).
+   - `PATCH /printer/settings` — printer sozlamalarini yangilash (`printer:config` — `owner`/`manager`).
+   - `GET /printer/windows-printers` — Windows'da mavjud printerlar ro'yxatini qaytarish (`printer:config`).
+   - `POST /printer/test-print` — sinov chekini chop etish (`printer:config`).
+   - `POST /printer/cash-drawer/open` — pul yashigini qo'lda ochish (`printer:cash_drawer` yoki kassir + `override`, majburiy `reason` va `local_cash_drawer_events` auditi bilan).
+   - `POST /sales/:id/print` — savdo chekini chop etish yoki qayta chop etish (`local_receipt_prints` ga yozadi, printer xato bersa ham `200 OK` ichida `{ status: 'failed', errorCode, errorMessage, printRecord, textPreview }` qaytaradi — savdo buzilmaydi!).
+   - `GET /sales/:id/prints` — savdo chekining chop etish tarixi.
+   - `POST /returns/:id/print` — qaytarish chekini chop etish / qayta chop etish.
+   - `POST /shifts/:id/print-close-report` — yopilgan smena hisobotini chop etish / qayta chop etish.
+
+4. **Kassa UI (`apps/pos`):**
+   - **Chek oynasi (`ReceiptModal`):**
+     - Savdo yakunlangach, agar `autoPrintSale` yoqilgan bo'lsa, avtomatik `POST /sales/:id/print` chaqiriladi.
+     - Oynada chop etish holati ko'rsatiladi: `"Chop etildi (Asl nusxa)"`, `"Printersiz rejim (SINOV)"`, yoki printer xato bersa ogohlantirish: `"Printer xatosi: <sabab>. Savdo saqlandi, chekni qayta chop etishingiz mumkin."`
+     - **"Qayta chop etish (Nusxa)"** tugmasi (`POST /sales/:id/print` → `NUSXA #2` va h.k.).
+     - Chek matnining vizual ko'rinishi (`textPreview`).
+   - **Smena yopish oynasi (`CloseShiftModal`):**
+     - Smena yopilgach, `"Smena hisobotini chop etish"` tugmasi (`POST /shifts/:id/print-close-report`).
+   - **Printer sozlamalari va Pul yashigi modali (`PrinterSettingsModal`):**
+     - `owner` va `manager` uchun: rejim (`Printersiz`, `Windows RAW printer`, `Tarmoq TCP 9100`), printer tanlash yoki `IP:port`, qog'oz kengligi (`58 mm` / `80 mm`), kod sahifasi (`Transliteratsiya`, `CP866`, `CP1251`), avtomatik chop etish, naqd savdoda pul yashigini ochish, `"Sinov chekini chop etish"` va `"Pul yashigini ochish"` tugmalari.
+
+---
+
+### f) Testlar va Real printerda sinov haqida eslatma
+
+1. **Vitest birlik va integratsiya testlari:**
+   - `packages/drivers/src/printer/escpos-encoder.test.ts`:
+     - `58mm` (32 ustun) va `80mm` (48 ustun) savdo cheki, qaytarish cheki va smena yopilish hisoboti uchun **aniq bayt va matn snapshot testlari**.
+     - `"SINOV — FISKAL EMAS"` banneri, `"NUSXA #2"` belgisi, uzun mahsulot nomlarini o'rash, QQS, chegirma, aralash to'lov, qaytim va qarz qatorlari.
+     - Kod sahifalari (`'translit'`, `'cp866'`, `'cp1251'`) va o'zbek harflari (`oʻ`, `gʻ`, `ʼ`, kirill harflari) baytma-bayt tekshiruvi.
+     - Pul yashigi ESC/POS impulsi (`0x1b, 0x70, ...`) bayt tekshiruvi.
+   - `packages/drivers/src/node/printer/drivers.test.ts`:
+     - `NetworkPrinterDriver`: lokal `node:net` TCP serverga ulanib baytlarni to'liq yuborish, ulanish rad etilganda (`ECONNREFUSED`) va javob bermaganda (`timeout`) xavfsiz xato qaytarish testi.
+     - `WindowsRawPrinterDriver`: mock `WinspoolBindings` orqali `OpenPrinterW -> StartDocPrinterW(RAW) -> StartPagePrinter -> WritePrinter -> EndPagePrinter -> EndDocPrinter -> ClosePrinter` ketma-ketligi va xato holatlarida resurslar tozalanishi testi.
+   - `apps/hub/src/printer.test.ts`:
+     - Printer xato berganda (`FakePrinterDriver` xato rejimida yoki uzoqqa ulanmagan TCP portda) `completeSale` muvaffaqiyatli yakunlanishi va savdo bazada to'liq saqlanishi.
+     - Birinchi chop etish (`copyNumber = 1`, `isReprint = false`) va ikkinchi chop etish (`copyNumber = 2`, `isReprint = true`, baytlarda `"NUSXA #2"` borligi) hamda `local_receipt_prints` audit yozuvlari.
+     - Naqd to'lovda pul yashigi avtomatik ochilishi, naqdsiz (`card`) to'lovda ochilmasligi.
+     - Qo'lda pul yashigini ochish: kassir `override`siz `403`, menejer yoki kassir+`override` bilan `200` va `local_cash_drawer_events` yozuvi.
+     - Kassir `/printer/settings` ni o'zgartira olmasligi (`403`).
+   - `apps/pos/e2e/pos.spec.ts`:
+     - T1.11 test qarzi (diagnostika paneli kassirda ko'rinmasligi, skrinshot `test-results` ga tushishi) + savdo yakunida chek chop etish va qayta chop etish (`NUSXA #2`) E2E tekshiruvi.
+
+2. **Real printerda sinov:**
+   - Hozirgi avtomatlashtirilgan muhitda fizik termal printer ulanmagan; yakuniy hisobotda **"real printerda tekshirilmagan (F1 yakunidagi bir kunlik simulyatsiyada real printerda sinaladi)"** deb aniq qayd etiladi.
+
+---
+
+### g) Doiradan tashqari
+
+- Fiskal chek, OFD QR kodi va virtual kassa integratsiyasi (F3).
+- Android Bluetooth/USB printerlari (T4.4).
+- Ko'p kassali tarmoqda har terminalning o'z lokal printeri (T4.3).

@@ -395,6 +395,9 @@ importers:
       '@mezon/domain':
         specifier: workspace:*
         version: link:../domain
+      koffi:
+        specifier: 3.3.7
+        version: 3.3.7
 
   packages/i18n: {}
 

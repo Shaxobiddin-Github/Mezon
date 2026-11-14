@@ -362,6 +362,15 @@ export function App() {
         }
       }
 
+      if (event.ctrlKey && event.shiftKey && (event.key === 'D' || event.key === 'd')) {
+        const currentUser = usePosStore.getState().user;
+        if (currentUser && (currentUser.role === 'owner' || currentUser.role === 'manager')) {
+          event.preventDefault();
+          setActiveModal('diagnostics');
+        }
+        return;
+      }
+
       if (event.key === 'Escape') {
         if (usePosStore.getState().activeModal !== 'none') {
           event.preventDefault();
@@ -575,45 +584,49 @@ export function App() {
           )}
         </div>
 
-        <div className="pos-telemetry">
-          <span className="pos-telemetry-item">
-            {t('app.hub.status')}: <strong data-testid="hub-status">{hubStatus}</strong>
-          </span>
-          <span className="pos-telemetry-item">
-            <strong data-testid="hub-url">{hubBaseUrl ?? 'kutilyapti...'}</strong>
-          </span>
-          <span className="pos-telemetry-item">
-            <strong data-testid="hub-origin">{window.location.origin}</strong>
-          </span>
-          <span className="pos-telemetry-item">
-            {t('app.hub.restarts')}:{' '}
-            <strong data-testid="hub-restart-count">{hubRestartCount}</strong>
-          </span>
-          <span className="pos-telemetry-item">
-            {t('app.hub.health')}: <strong data-testid="health-status">{healthStatus}</strong>
-          </span>
-          <span className="pos-telemetry-item">
-            {t('app.hub.needsSetup')}:{' '}
-            <strong data-testid="health-needs-setup">
-              {needsSetup === null ? 'unknown' : String(needsSetup)}
-            </strong>
-          </span>
-          <span className="pos-telemetry-item">
-            <strong data-testid="health-check-count">{healthCheckCount}</strong>
-          </span>
-        </div>
+        {screen !== 'pos' && (
+          <div className="pos-telemetry" data-testid="pos-telemetry-bar">
+            <span className="pos-telemetry-item">
+              {t('app.hub.status')}: <strong data-testid="hub-status">{hubStatus}</strong>
+            </span>
+            <span className="pos-telemetry-item">
+              <strong data-testid="hub-url">{hubBaseUrl ?? 'kutilyapti...'}</strong>
+            </span>
+            <span className="pos-telemetry-item">
+              <strong data-testid="hub-origin">{window.location.origin}</strong>
+            </span>
+            <span className="pos-telemetry-item">
+              {t('app.hub.restarts')}:{' '}
+              <strong data-testid="hub-restart-count">{hubRestartCount}</strong>
+            </span>
+            <span className="pos-telemetry-item">
+              {t('app.hub.health')}: <strong data-testid="health-status">{healthStatus}</strong>
+            </span>
+            <span className="pos-telemetry-item">
+              {t('app.hub.needsSetup')}:{' '}
+              <strong data-testid="health-needs-setup">
+                {needsSetup === null ? 'unknown' : String(needsSetup)}
+              </strong>
+            </span>
+            <span className="pos-telemetry-item">
+              <strong data-testid="health-check-count">{healthCheckCount}</strong>
+            </span>
+          </div>
+        )}
 
         <div className="pos-top-actions">
-          <button
-            type="button"
-            className="pos-btn"
-            data-testid="refresh-health-btn"
-            onClick={() => {
-              void checkHubHealth(hubBaseUrl);
-            }}
-          >
-            {t('app.hub.refresh')}
-          </button>
+          {screen !== 'pos' && (
+            <button
+              type="button"
+              className="pos-btn"
+              data-testid="refresh-health-btn"
+              onClick={() => {
+                void checkHubHealth(hubBaseUrl);
+              }}
+            >
+              {t('app.hub.refresh')}
+            </button>
+          )}
           <button
             type="button"
             className="pos-btn"
@@ -731,6 +744,71 @@ export function App() {
       )}
 
       {activeModal === 'shortcuts' && <ShortcutsModal />}
+      {activeModal === 'diagnostics' && (user?.role === 'owner' || user?.role === 'manager') && (
+        <div className="pos-modal-backdrop" data-testid="diagnostics-modal">
+          <div className="pos-modal" style={{ maxWidth: '520px' }}>
+            <div className="pos-modal-header">
+              <h3>Tizim diagnostikasi (Ctrl+Shift+D)</h3>
+              <button
+                type="button"
+                className="pos-btn"
+                data-testid="diagnostics-close-btn"
+                onClick={() => setActiveModal('none')}
+              >
+                ✕
+              </button>
+            </div>
+            <div className="pos-modal-body" style={{ display: 'grid', gap: '8px' }}>
+              <div>
+                {t('app.hub.status')}: <strong data-testid="diag-hub-status">{hubStatus}</strong>
+              </div>
+              <div>
+                Hub URL: <strong data-testid="diag-hub-url">{hubBaseUrl ?? 'kutilyapti...'}</strong>
+              </div>
+              <div>
+                Origin: <strong data-testid="diag-hub-origin">{window.location.origin}</strong>
+              </div>
+              <div>
+                {t('app.hub.restarts')}:{' '}
+                <strong data-testid="diag-hub-restart-count">{hubRestartCount}</strong>
+              </div>
+              <div>
+                {t('app.hub.health')}:{' '}
+                <strong data-testid="diag-health-status">{healthStatus}</strong>
+              </div>
+              <div>
+                {t('app.hub.needsSetup')}:{' '}
+                <strong data-testid="diag-health-needs-setup">
+                  {needsSetup === null ? 'unknown' : String(needsSetup)}
+                </strong>
+              </div>
+              <div>
+                Tekshiruvlar soni:{' '}
+                <strong data-testid="diag-health-check-count">{healthCheckCount}</strong>
+              </div>
+            </div>
+            <div className="pos-modal-footer">
+              <button
+                type="button"
+                className="pos-btn"
+                data-testid="diag-refresh-health-btn"
+                onClick={() => {
+                  void checkHubHealth(hubBaseUrl);
+                }}
+              >
+                {t('app.hub.refresh')}
+              </button>
+              <button
+                type="button"
+                className="pos-btn pos-btn-primary"
+                onClick={() => setActiveModal('none')}
+              >
+                {t('common.close')}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
       {activeModal === 'quick_sale' && <QuickSaleModal api={api} onError={handleError} />}
       {activeModal === 'edit_qty' && <EditQtyModal api={api} onError={handleError} />}
       {activeModal === 'discount' && <DiscountModal api={api} onError={handleError} />}
@@ -775,7 +853,7 @@ export function App() {
           onError={handleError}
         />
       )}
-      {activeModal === 'receipt' && <ReceiptModal />}
+      {activeModal === 'receipt' && <ReceiptModal api={api} />}
       {activeModal === 'shift_manage' && (
         <ShiftManagementModal
           api={api}

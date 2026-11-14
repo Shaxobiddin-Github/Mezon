@@ -301,6 +301,14 @@ test.describe('@mezon/pos Playwright E2E — Kassa UI (T1.11)', () => {
 
       await expect(page.getByTestId('pos-workspace')).toBeVisible();
       await expect(page.getByTestId('catalog-result-0')).toBeVisible();
+      // T1.11 test debt #3: Technical telemetry bar & refresh button must NOT be visible on the POS screen,
+      // and diagnostics modal only opens via Ctrl+Shift+D for owner/manager
+      await expect(page.getByTestId('pos-telemetry-bar')).toHaveCount(0);
+      await expect(page.getByTestId('refresh-health-btn')).toHaveCount(0);
+      await page.keyboard.press('Control+Shift+KeyD');
+      await expect(page.getByTestId('diagnostics-modal')).toBeVisible();
+      await page.getByTestId('diagnostics-close-btn').click();
+      await expect(page.getByTestId('diagnostics-modal')).toBeHidden();
 
       // 4. Scenario 3: Fast human typist in search input (~85ms interval) is NOT treated as scanner
       const searchInput = page.getByTestId('catalog-search-input');
@@ -349,11 +357,9 @@ test.describe('@mezon/pos Playwright E2E — Kassa UI (T1.11)', () => {
       await expect(page.getByTestId('receipt-non-fiscal-banner')).toHaveText('SINOV — FISKAL EMAS');
       await expect(page.getByTestId('receipt-no')).toHaveText('1');
 
-      // Save screenshot of POS workspace + receipt for visual verification
-      const screenshotPath = path.resolve(
-        currentDir,
-        '../../../.mezon/gemini/pos-sales-screen.png',
-      );
+      // Save screenshot of POS workspace + receipt into git-ignored test-results/ (never dirtying .mezon/ in git)
+      const screenshotPath = path.resolve(currentDir, '../test-results/pos-sales-screen.png');
+      fs.mkdirSync(path.dirname(screenshotPath), { recursive: true });
       await page.screenshot({ path: screenshotPath });
 
       await page.getByTestId('receipt-new-sale-btn').click();

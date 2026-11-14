@@ -12,4 +12,5 @@ export { HubCustomerService } from './customer-service.js';
 export { HubSupplierService } from './supplier-service.js';
 export { HubShiftService } from './shift-service.js';
 export { HubOrderService } from './order-service.js';
+export { HubPrinterService, type HubPrinterServiceOptions } from './printer-service.js';
 export { createHubServer, type CreateHubServerOptions, type HubServer } from './server.js';

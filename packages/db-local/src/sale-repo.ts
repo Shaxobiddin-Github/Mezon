@@ -862,6 +862,42 @@ export class SqliteSaleStore {
     return ctx;
   }
 
+  /** Read-only lookup of a completed sale (lines + payments) in the active tenant/store; `null` if absent. */
+  async getSaleById(saleId: UuidV7): Promise<StoredSaleRecord | null> {
+    const ctx = this.requireContext();
+    const validSaleId = parseUuidV7(saleId);
+    return runConnectionReadOnly(this.connection, () => {
+      const row = this.connection.db
+        .select()
+        .from(sales)
+        .where(
+          and(
+            eq(sales.id, validSaleId),
+            eq(sales.organizationId, ctx.organizationId),
+            eq(sales.storeId, ctx.storeId),
+          ),
+        )
+        .limit(1)
+        .all()[0];
+      if (!row) {
+        return Promise.resolve(null);
+      }
+      const lineRows = this.connection.db
+        .select()
+        .from(saleLines)
+        .where(eq(saleLines.saleId, row.id))
+        .orderBy(asc(saleLines.sortOrder))
+        .all();
+      const paymentRows = this.connection.db
+        .select()
+        .from(payments)
+        .where(eq(payments.saleId, row.id))
+        .orderBy(asc(payments.createdAtMs), asc(payments.id))
+        .all();
+      return Promise.resolve(toStoredSale(row, lineRows, paymentRows));
+    });
+  }
+
   async getTerminalCashBalance(deviceId?: UuidV7): Promise<Money> {
     const ctx = this.requireContext();
     const targetDeviceId = deviceId !== undefined ? parseUuidV7(deviceId) : ctx.uow.deviceId;

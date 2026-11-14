@@ -147,6 +147,8 @@ export {
   orders,
   orderLines,
   orderPayments,
+  localReceiptPrints,
+  localCashDrawerEvents,
 } from './schema/index.js';
 
 export {
@@ -318,6 +320,24 @@ export {
   SqliteShiftStore,
   createSqliteShiftStore,
 } from './shift-repo.js';
+
+export {
+  type CreateSqlitePrinterStoreOptions,
+  type PrinterRuntimeContext,
+  type ReceiptPrintDocumentType,
+  type ReceiptPrintHistorySummary,
+  type ReceiptPrintStatus,
+  type RecordCashDrawerEventInput,
+  type RecordOutcome,
+  type RecordReceiptPrintInput,
+  type StoredCashDrawerEventRow,
+  type StoredPrinterMode,
+  type StoredPrinterSettings,
+  type StoredPrinterSettingsPatch,
+  type StoredReceiptPrintRow,
+  SqlitePrinterStore,
+  createSqlitePrinterStore,
+} from './printer-repo.js';
 
 export {
   type ReturnRuntimeContext,

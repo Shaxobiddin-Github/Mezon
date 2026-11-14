@@ -68,14 +68,15 @@ module.exports = {
     {
       name: 'drivers-node-src-imports',
       comment:
-        'packages/drivers/src/node source files can only import within packages/drivers/src, packages/domain, node:fs, and node:path',
+        'packages/drivers/src/node source files can only import within packages/drivers/src, packages/domain, node:fs, node:path, node:net (TCP 9100 printer), node:module + koffi (winspool RAW, T1.12) and node:child_process (fixed PowerShell printer listing only)',
       severity: 'error',
       from: {
         path: '^packages/drivers/src/node/',
         pathNot: '\\.test\\.ts$',
       },
       to: {
-        pathNot: '^(packages/drivers/src/|packages/domain/|(node:)?(fs|path)$)',
+        pathNot:
+          '^(packages/drivers/src/|packages/domain/|(node:)?(fs|path|net|module|child_process)$|node_modules/\.pnpm/koffi@3\.3\.7/node_modules/koffi/)',
       },
     },
     {

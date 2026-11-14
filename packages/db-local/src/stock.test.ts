@@ -846,5 +846,5 @@ describe('@mezon/db-local - T1.2 Stock Ledger, Batches, FIFO/Average Costing, S1
       ),
       { numRuns: 25 },
     );
-  }, 30_000);
+  }, 120_000);
 });

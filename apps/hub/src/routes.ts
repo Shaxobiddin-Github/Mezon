@@ -26,6 +26,8 @@ import { registerShiftRoutes } from './shift-routes.js';
 import type { HubShiftService } from './shift-service.js';
 import { registerOrderRoutes } from './order-routes.js';
 import type { HubOrderService } from './order-service.js';
+import { registerPrinterRoutes } from './printer-routes.js';
+import type { HubPrinterService } from './printer-service.js';
 
 async function authorize(
   authService: HubAuthService,
@@ -49,6 +51,7 @@ export function registerHubRoutes(
   supplierService?: HubSupplierService,
   shiftService?: HubShiftService,
   orderService?: HubOrderService,
+  printerService?: HubPrinterService,
 ): void {
   app.get('/health', async () => {
     return authService.getHealth();
@@ -140,5 +143,8 @@ export function registerHubRoutes(
   }
   if (orderService) {
     registerOrderRoutes(app, authService, orderService);
+  }
+  if (printerService) {
+    registerPrinterRoutes(app, authService, printerService);
   }
 }
