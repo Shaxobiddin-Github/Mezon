@@ -648,7 +648,7 @@ export async function bootstrapSqliteHubUnitOfWork<T>(
  */
 export async function runConnectionReadOnly<T>(
   connection: LocalSqliteConnection,
-  fn: () => Promise<T>,
+  fn: () => Promise<T> | T,
 ): Promise<T> {
   const release = await getConnectionMutex(connection.sqlite).acquire();
   try {

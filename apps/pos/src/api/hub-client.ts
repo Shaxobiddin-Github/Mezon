@@ -70,6 +70,40 @@ import {
   ShiftCashMoveResponseSchema,
   type UpdateCartLineRequestDto,
   UpdateCartLineRequestSchema,
+  type DailySalesReportQueryDto,
+  type DailySalesReportResponseDto,
+  DailySalesReportResponseSchema,
+  type MonthlySalesReportQueryDto,
+  type MonthlySalesReportResponseDto,
+  MonthlySalesReportResponseSchema,
+  type ProfitReportQueryDto,
+  type ProfitReportResponseDto,
+  ProfitReportResponseSchema,
+  type DebtsReportQueryDto,
+  type DebtsReportResponseDto,
+  DebtsReportResponseSchema,
+  type LowStockReportQueryDto,
+  type LowStockReportResponseDto,
+  LowStockReportResponseSchema,
+  type ExpiringBatchesReportQueryDto,
+  type ExpiringBatchesReportResponseDto,
+  ExpiringBatchesReportResponseSchema,
+  type BackupListResponseDto,
+  BackupListResponseSchema,
+  type CreateBackupRequestDto,
+  CreateBackupRequestSchema,
+  type CreateBackupResponseDto,
+  CreateBackupResponseSchema,
+  type StageRestoreRequestDto,
+  StageRestoreRequestSchema,
+  type StageRestoreResponseDto,
+  StageRestoreResponseSchema,
+  type ExcelImportPreviewResponseDto,
+  ExcelImportPreviewResponseSchema,
+  type ExcelImportCommitRequestDto,
+  ExcelImportCommitRequestSchema,
+  type ExcelImportCommitResponseDto,
+  ExcelImportCommitResponseSchema,
 } from '@mezon/contracts';
 import type { z } from 'zod';
 import { normalizeLoopbackHubBaseUrl } from '../bridge.js';
@@ -524,6 +558,143 @@ export class HubApiClient {
       path: '/customers',
       body: validated,
       responseSchema: CustomerMutationResponseSchema,
+    });
+  }
+
+  // --- Reports (T1.13) ---
+
+  async getDailySales(query?: DailySalesReportQueryDto): Promise<DailySalesReportResponseDto> {
+    return this.request({
+      method: 'GET',
+      path: '/reports/sales/daily',
+      query: {
+        fromDate: query?.fromDate,
+        toDate: query?.toDate,
+        limit: query?.limit,
+      },
+      responseSchema: DailySalesReportResponseSchema,
+    });
+  }
+
+  async getMonthlySales(
+    query?: MonthlySalesReportQueryDto,
+  ): Promise<MonthlySalesReportResponseDto> {
+    return this.request({
+      method: 'GET',
+      path: '/reports/sales/monthly',
+      query: {
+        year: query?.year,
+        limit: query?.limit,
+      },
+      responseSchema: MonthlySalesReportResponseSchema,
+    });
+  }
+
+  async getProfitReport(query?: ProfitReportQueryDto): Promise<ProfitReportResponseDto> {
+    return this.request({
+      method: 'GET',
+      path: '/reports/profit',
+      query: {
+        fromDate: query?.fromDate,
+        toDate: query?.toDate,
+        groupBy: query?.groupBy,
+      },
+      responseSchema: ProfitReportResponseSchema,
+    });
+  }
+
+  async getDebtsReport(query?: DebtsReportQueryDto): Promise<DebtsReportResponseDto> {
+    return this.request({
+      method: 'GET',
+      path: '/reports/debts',
+      query: {
+        type: query?.type,
+      },
+      responseSchema: DebtsReportResponseSchema,
+    });
+  }
+
+  async getLowStock(query?: LowStockReportQueryDto): Promise<LowStockReportResponseDto> {
+    return this.request({
+      method: 'GET',
+      path: '/reports/low-stock',
+      query: {
+        limit: query?.limit,
+      },
+      responseSchema: LowStockReportResponseSchema,
+    });
+  }
+
+  async getExpiringBatches(
+    query?: ExpiringBatchesReportQueryDto,
+  ): Promise<ExpiringBatchesReportResponseDto> {
+    return this.request({
+      method: 'GET',
+      path: '/reports/expiring-batches',
+      query: {
+        withinDays: query?.withinDays,
+      },
+      responseSchema: ExpiringBatchesReportResponseSchema,
+    });
+  }
+
+  // --- Backups & Restore (T1.13) ---
+
+  async listBackups(): Promise<BackupListResponseDto> {
+    return this.request({
+      method: 'GET',
+      path: '/backups',
+      responseSchema: BackupListResponseSchema,
+    });
+  }
+
+  async createBackup(input?: CreateBackupRequestDto): Promise<CreateBackupResponseDto> {
+    const validated = CreateBackupRequestSchema.parse(input ?? {});
+    return this.request({
+      method: 'POST',
+      path: '/backups/create',
+      body: validated,
+      responseSchema: CreateBackupResponseSchema,
+    });
+  }
+
+  async stageRestore(
+    backupId: string,
+    input?: StageRestoreRequestDto,
+  ): Promise<StageRestoreResponseDto> {
+    const validated = StageRestoreRequestSchema.parse(input ?? {});
+    return this.request({
+      method: 'POST',
+      path: `/backups/${encodeURIComponent(backupId)}/restore`,
+      body: validated,
+      responseSchema: StageRestoreResponseSchema,
+    });
+  }
+
+  // --- Catalog Import (T1.13) ---
+
+  async previewCatalogImport(fileBase64: string): Promise<ExcelImportPreviewResponseDto> {
+    return this.request({
+      method: 'POST',
+      path: '/catalog/import/preview',
+      body: { fileBase64 },
+      responseSchema: ExcelImportPreviewResponseSchema,
+    });
+  }
+
+  async commitCatalogImport(
+    previewToken: string,
+    clientRequestId: string,
+  ): Promise<ExcelImportCommitResponseDto> {
+    const validated: ExcelImportCommitRequestDto = ExcelImportCommitRequestSchema.parse({
+      previewToken,
+      clientRequestId,
+    });
+    return this.request({
+      method: 'POST',
+      path: '/catalog/import/commit',
+      body: validated,
+      responseSchema: ExcelImportCommitResponseSchema,
     });
   }
 }

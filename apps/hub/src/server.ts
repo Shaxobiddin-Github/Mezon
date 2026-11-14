@@ -1,3 +1,4 @@
+import path from 'node:path';
 import {
   type LocalSqliteConnection,
   SqliteCartStore,
@@ -10,6 +11,8 @@ import {
   SqliteShiftStore,
   SqliteStockStore,
   SqliteSupplierStore,
+  SqliteReportStore,
+  SqliteBackupService,
   createSqliteCartStore,
   createSqliteCatalogStore,
   createSqliteCustomerStore,
@@ -20,6 +23,7 @@ import {
   createSqliteShiftStore,
   createSqliteStockStore,
   createSqliteSupplierStore,
+  createSqliteReportStore,
   migrateLocalDatabase,
   openLocalSqliteDatabase,
   createSqlitePrinterStore,
@@ -51,6 +55,8 @@ import { HubSupplierService } from './supplier-service.js';
 import { HubShiftService } from './shift-service.js';
 import { HubOrderService } from './order-service.js';
 import { HubPrinterService } from './printer-service.js';
+import { HubReportService } from './report-service.js';
+import { CatalogImportCache } from './catalog-import-cache.js';
 
 export interface CreateHubServerOptions {
   readonly dbPath: string;
@@ -103,6 +109,10 @@ export interface HubServer {
   readonly shiftService: HubShiftService;
   readonly orderService: HubOrderService;
   readonly printerService: HubPrinterService;
+  readonly reportStore: SqliteReportStore;
+  readonly reportService: HubReportService;
+  readonly backupService: SqliteBackupService;
+  readonly importCache: CatalogImportCache;
   listen(): Promise<{ readonly host: typeof DEFAULT_HUB_HOST; readonly port: number }>;
   close(): Promise<void>;
 }
@@ -121,6 +131,12 @@ export async function createHubServer(options: CreateHubServerOptions): Promise<
   const logger = createHubLogger({
     level: options.logLevel,
     stream: options.logStream,
+  });
+
+  const backupDir = path.join(path.dirname(options.dbPath), 'backups');
+  SqliteBackupService.executeStagedRestoreIfPending({
+    dbPath: options.dbPath,
+    backupDir,
   });
 
   const connection = openLocalSqliteDatabase(options.dbPath);
@@ -308,6 +324,26 @@ export async function createHubServer(options: CreateHubServerOptions): Promise<
       printerDriverFactory: options.printerDriverFactory,
       listWindowsPrintersFn: options.listWindowsPrintersFn,
     });
+    const reportStore = createSqliteReportStore({
+      connection,
+      getRuntimeContext: () => {
+        const ctx = store.getActiveRuntimeContext();
+        return ctx
+          ? {
+              uow: ctx.uow,
+              organizationId: ctx.config.organizationId,
+              storeId: ctx.config.storeId,
+            }
+          : null;
+      },
+    });
+    const reportService = new HubReportService(reportStore);
+    const backupService = new SqliteBackupService({
+      connection,
+      dbPath: options.dbPath,
+      backupDir,
+    });
+    const importCache = new CatalogImportCache();
 
     app = Fastify({
       loggerInstance: logger as unknown as FastifyBaseLogger,
@@ -329,6 +365,11 @@ export async function createHubServer(options: CreateHubServerOptions): Promise<
       shiftService,
       orderService,
       printerService,
+      reportService,
+      backupService,
+      catalogStore,
+      stockStore,
+      importCache,
     );
     options.registerExtraTestRoutes?.(app);
 
@@ -358,6 +399,10 @@ export async function createHubServer(options: CreateHubServerOptions): Promise<
       shiftService,
       orderService,
       printerService,
+      reportStore,
+      reportService,
+      backupService,
+      importCache,
       async listen() {
         await app.listen({
           host: DEFAULT_HUB_HOST,
