@@ -7,7 +7,7 @@ import {
   parseSomInputToTiyinString,
   tiyinToSomInputString,
 } from '@mezon/ui';
-import { type FormEvent, useState } from 'react';
+import { type FormEvent, useEffect, useRef, useState } from 'react';
 import { type HubApiClient, HubApiError } from '../api/hub-client.js';
 import { type InsufficientStockLineDetail, usePosStore } from '../store/pos-store.js';
 import { generateBrowserUuidV7 } from '../utils/browser-uuid.js';
@@ -499,15 +499,79 @@ export function PaymentModal({
   );
 }
 
-export function ReceiptModal() {
+type PrintUiState =
+  | { readonly kind: 'idle' }
+  | { readonly kind: 'printing' }
+  | { readonly kind: 'printed'; readonly copyNumber: number }
+  | { readonly kind: 'disabled' }
+  | { readonly kind: 'failed'; readonly message: string };
+
+/**
+ * T1.12 P3: the receipt modal never waits for the printer. Auto-print runs in the background and the
+ * cashier can start the next sale immediately. P1: one `clientRequestId` per print attempt, reused on
+ * network retry so the hub never prints the same request twice.
+ */
+export function ReceiptModal({ api }: { readonly api?: HubApiClient } = {}) {
   const lastCompletedSale = usePosStore((s) => s.lastCompletedSale);
   const setActiveModal = usePosStore((s) => s.setActiveModal);
+  const [printState, setPrintState] = useState<PrintUiState>({ kind: 'idle' });
+  const autoPrintedFor = useRef<string | null>(null);
+  const pendingReprintId = useRef<string | null>(null);
+  const saleId = lastCompletedSale?.sale.id ?? null;
+
+  const runPrint = async (clientRequestId: string, reprint: boolean): Promise<boolean> => {
+    if (!api || saleId === null) return false;
+    setPrintState({ kind: 'printing' });
+    try {
+      const res = await api.printSaleReceipt(saleId, { clientRequestId, reprint });
+      const rec = res.printRecord;
+      if (rec.status === 'printed') {
+        setPrintState({ kind: 'printed', copyNumber: rec.copyNumber });
+      } else if (rec.status === 'disabled') {
+        setPrintState({ kind: 'disabled' });
+      } else {
+        setPrintState({ kind: 'failed', message: rec.errorMessage ?? rec.errorCode ?? '' });
+      }
+      return true;
+    } catch (err) {
+      const message = err instanceof HubApiError ? err.message : String(err);
+      setPrintState({ kind: 'failed', message });
+      // Network error: keep the same id so a retry is idempotent.
+      return !(err instanceof HubApiError && err.isNetworkError);
+    }
+  };
+
+  useEffect(() => {
+    if (!api || saleId === null || autoPrintedFor.current === saleId) return;
+    autoPrintedFor.current = saleId;
+    let cancelled = false;
+    void (async () => {
+      try {
+        const settings = await api.getPrinterSettings();
+        if (cancelled || !settings.settings.autoPrintSale) return;
+        await runPrint(generateBrowserUuidV7(), false);
+      } catch {
+        /* printer problems never block the sale */
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [api, saleId]);
 
   if (!lastCompletedSale) {
     return null;
   }
 
   const { sale } = lastCompletedSale;
+
+  const onReprint = async () => {
+    if (printState.kind === 'printing') return;
+    const id = pendingReprintId.current ?? generateBrowserUuidV7();
+    pendingReprintId.current = id;
+    const settled = await runPrint(id, true);
+    if (settled) pendingReprintId.current = null;
+  };
 
   return (
     <div className="pos-modal-backdrop" data-testid="receipt-modal">
@@ -577,6 +641,33 @@ export function ReceiptModal() {
             </div>
           )}
         </div>
+
+        {printState.kind !== 'idle' && (
+          <div className="pos-totals-row" data-testid="receipt-print-status">
+            {printState.kind === 'printing' && t('receipt.printPrinting')}
+            {printState.kind === 'printed' &&
+              (printState.copyNumber > 1
+                ? t('receipt.printCopyDone', { copy: String(printState.copyNumber) })
+                : t('receipt.printDone'))}
+            {printState.kind === 'disabled' && t('receipt.printDisabled')}
+            {printState.kind === 'failed' &&
+              t('receipt.printFailed', { message: printState.message })}
+          </div>
+        )}
+
+        {api && (
+          <button
+            type="button"
+            className="pos-btn"
+            data-testid="receipt-reprint-btn"
+            disabled={printState.kind === 'printing'}
+            onClick={() => {
+              void onReprint();
+            }}
+          >
+            {t('receipt.reprintBtn')}
+          </button>
+        )}
 
         <button
           type="button"

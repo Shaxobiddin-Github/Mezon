@@ -180,6 +180,13 @@ export const UZ_LATN_MESSAGES = {
   'receipt.debtAmount': 'Qarzga yozildi',
   'receipt.changeAmount': 'Qaytim',
   'receipt.newSaleBtn': 'Yangi savdo (Enter / Esc)',
+  'receipt.reprintBtn': 'Qayta chop etish (nusxa)',
+  'receipt.printPrinting': 'Chek chop etilmoqda...',
+  'receipt.printDone': 'Chek chop etildi',
+  'receipt.printCopyDone': 'Nusxa #{copy} chop etildi',
+  'receipt.printDisabled': 'Printersiz rejim: chek faqat ekranda',
+  'receipt.printFailed':
+    'Printer xatosi: {message}. Savdo saqlandi, chekni qayta chop etishingiz mumkin.',
 
   // Keyboard Shortcuts
   'shortcuts.title': 'Klaviatura yorliqlari (F1)',

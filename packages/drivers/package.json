@@ -20,6 +20,7 @@
     "typecheck": "tsc --noEmit && tsc -p tsconfig.test.json --noEmit"
   },
   "dependencies": {
-    "@mezon/domain": "workspace:*"
+    "@mezon/domain": "workspace:*",
+    "koffi": "3.3.7"
   }
 }

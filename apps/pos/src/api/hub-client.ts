@@ -16,6 +16,12 @@ import {
   CompleteSaleRequestSchema,
   type CompleteSaleResponseDto,
   CompleteSaleResponseSchema,
+  type PrintDocumentRequestDto,
+  PrintDocumentRequestSchema,
+  type PrintDocumentResponseDto,
+  PrintDocumentResponseSchema,
+  type PrinterSettingsResponseDto,
+  PrinterSettingsResponseSchema,
   type CreateCustomerRequestDto,
   CreateCustomerRequestSchema,
   type CreateShiftCashMoveRequestDto,
@@ -465,6 +471,30 @@ export class HubApiClient {
       path: `/carts/${encodeURIComponent(cartId)}/complete`,
       body: validated,
       responseSchema: CompleteSaleResponseSchema,
+    });
+  }
+
+  // --- Printer (T1.12) ---
+
+  async getPrinterSettings(): Promise<PrinterSettingsResponseDto> {
+    return this.request({
+      method: 'GET',
+      path: '/printer/settings',
+      responseSchema: PrinterSettingsResponseSchema,
+    });
+  }
+
+  /** Same `clientRequestId` is reused on retry so the hub never prints the receipt twice (P1). */
+  async printSaleReceipt(
+    saleId: string,
+    input: z.input<typeof PrintDocumentRequestSchema>,
+  ): Promise<PrintDocumentResponseDto> {
+    const validated: PrintDocumentRequestDto = PrintDocumentRequestSchema.parse(input);
+    return this.request({
+      method: 'POST',
+      path: `/sales/${encodeURIComponent(saleId)}/print`,
+      body: validated,
+      responseSchema: PrintDocumentResponseSchema,
     });
   }
 

@@ -22,9 +22,16 @@ import {
   createSqliteSupplierStore,
   migrateLocalDatabase,
   openLocalSqliteDatabase,
+  createSqlitePrinterStore,
 } from '@mezon/db-local';
 import type { Clock, PinHasher, RandomSource } from '@mezon/domain';
-import { CryptoRandomSource, SystemClock } from '@mezon/drivers';
+import {
+  CryptoRandomSource,
+  SystemClock,
+  type DiscoveredWindowsPrinter,
+  type PrinterConfig,
+  type PrinterDriver,
+} from '@mezon/drivers';
 import Fastify, { type FastifyBaseLogger, type FastifyInstance } from 'fastify';
 import type { DestinationStream, LevelWithSilent } from 'pino';
 import { Argon2PinHasher } from './argon2-pin-hasher.js';
@@ -43,6 +50,7 @@ import { HubStockService } from './stock-service.js';
 import { HubSupplierService } from './supplier-service.js';
 import { HubShiftService } from './shift-service.js';
 import { HubOrderService } from './order-service.js';
+import { HubPrinterService } from './printer-service.js';
 
 export interface CreateHubServerOptions {
   readonly dbPath: string;
@@ -66,6 +74,8 @@ export interface CreateHubServerOptions {
   readonly maxUserFailedAttempts?: number;
   readonly maxDeviceFailedAttempts?: number;
   readonly deviceFailureWindowMs?: bigint;
+  readonly printerDriverFactory?: (config: PrinterConfig) => PrinterDriver;
+  readonly listWindowsPrintersFn?: () => Promise<readonly DiscoveredWindowsPrinter[]>;
   readonly registerExtraTestRoutes?: (app: FastifyInstance) => void;
 }
 
@@ -92,6 +102,7 @@ export interface HubServer {
   readonly supplierService: HubSupplierService;
   readonly shiftService: HubShiftService;
   readonly orderService: HubOrderService;
+  readonly printerService: HubPrinterService;
   listen(): Promise<{ readonly host: typeof DEFAULT_HUB_HOST; readonly port: number }>;
   close(): Promise<void>;
 }
@@ -133,6 +144,7 @@ export async function createHubServer(options: CreateHubServerOptions): Promise<
   let supplierService: HubSupplierService;
   let shiftService: HubShiftService;
   let orderService: HubOrderService;
+  let printerService: HubPrinterService;
   let app: FastifyInstance;
 
   try {
@@ -274,6 +286,28 @@ export async function createHubServer(options: CreateHubServerOptions): Promise<
     supplierService = new HubSupplierService(supplierStore);
     shiftService = new HubShiftService(shiftStore, authService);
     orderService = new HubOrderService(orderStore, authService);
+    const printerStore = createSqlitePrinterStore({
+      connection,
+      getRuntimeContext: () => {
+        const ctx = store.getActiveRuntimeContext();
+        return ctx
+          ? {
+              uow: ctx.uow,
+              organizationId: ctx.config.organizationId,
+              storeId: ctx.config.storeId,
+            }
+          : null;
+      },
+    });
+    printerService = new HubPrinterService({
+      printerStore,
+      authService,
+      saleStore,
+      returnStore,
+      shiftStore,
+      printerDriverFactory: options.printerDriverFactory,
+      listWindowsPrintersFn: options.listWindowsPrintersFn,
+    });
 
     app = Fastify({
       loggerInstance: logger as unknown as FastifyBaseLogger,
@@ -294,6 +328,7 @@ export async function createHubServer(options: CreateHubServerOptions): Promise<
       supplierService,
       shiftService,
       orderService,
+      printerService,
     );
     options.registerExtraTestRoutes?.(app);
 
@@ -322,6 +357,7 @@ export async function createHubServer(options: CreateHubServerOptions): Promise<
       supplierService,
       shiftService,
       orderService,
+      printerService,
       async listen() {
         await app.listen({
           host: DEFAULT_HUB_HOST,

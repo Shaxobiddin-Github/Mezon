@@ -179,6 +179,19 @@ export const localHubConfig = localSchemaRegistry.defineTable(
     maxCashDiscrepancyWithoutOverride: sqliteMoney('max_cash_discrepancy_without_override')
       .notNull()
       .default(sql`1000000`),
+    printerMode: text('printer_mode').notNull().default('disabled'),
+    printerName: text('printer_name'),
+    printerHost: text('printer_host'),
+    printerPort: sqliteInt('printer_port').notNull().default(9100),
+    printerTimeoutMs: sqliteInt('printer_timeout_ms').notNull().default(3000),
+    printerPaperWidthMm: sqliteInt('printer_paper_width_mm').notNull().default(80),
+    printerEncoding: text('printer_encoding').notNull().default('translit'),
+    printerAutoPrintSale: sqliteBoolean('printer_auto_print_sale').notNull().default(true),
+    printerCashDrawerAutoOpen: sqliteBoolean('printer_cash_drawer_auto_open')
+      .notNull()
+      .default(true),
+    receiptHeaderTitle: text('receipt_header_title').notNull().default('GUZAR KASSA'),
+    receiptFooterText: text('receipt_footer_text').notNull().default('Xaridingiz uchun rahmat!'),
   }),
   (self) => [
     uniqueIndex('uidx_local_hub_config_singleton').on(self.singletonGuard),
@@ -208,6 +221,25 @@ export const localHubConfig = localSchemaRegistry.defineTable(
       'chk_local_hub_config_max_cash_disc',
       sql`${self.maxCashDiscrepancyWithoutOverride} >= 0`,
     ),
+    check(
+      'chk_local_hub_config_printer_mode',
+      sql`${self.printerMode} IN ('disabled', 'windows_raw', 'network_tcp')`,
+    ),
+    check(
+      'chk_local_hub_config_printer_port',
+      sql`${self.printerPort} >= 1 AND ${self.printerPort} <= 65535`,
+    ),
+    check(
+      'chk_local_hub_config_printer_timeout',
+      sql`${self.printerTimeoutMs} >= 200 AND ${self.printerTimeoutMs} <= 30000`,
+    ),
+    check('chk_local_hub_config_printer_width', sql`${self.printerPaperWidthMm} IN (58, 80)`),
+    check(
+      'chk_local_hub_config_printer_enc',
+      sql`${self.printerEncoding} IN ('translit', 'cp866', 'cp1251')`,
+    ),
+    check('chk_local_hub_config_auto_print', sql`${self.printerAutoPrintSale} IN (0, 1)`),
+    check('chk_local_hub_config_drawer_auto', sql`${self.printerCashDrawerAutoOpen} IN (0, 1)`),
   ],
 );
 
@@ -2697,6 +2729,122 @@ export const orderPayments = localSchemaRegistry.defineTable(
     check(
       'chk_order_payments_refund_reason',
       sql`${self.kind} <> 'advance_refund' OR (${self.reason} IS NOT NULL AND length(trim(${self.reason})) >= 1)`,
+    ),
+  ],
+);
+
+/**
+ * Local terminal receipt print audit log (`LOCAL`, store-scoped, T1.12).
+ * Tracks every print/reprint attempt (`sale`, `return`, `shift_close`) with idempotent `client_request_id`,
+ * monotonic `print_seq`, and `copy_number` (`1` for original, `2+` for `NUSXA`).
+ */
+export const localReceiptPrints = localSchemaRegistry.defineTable(
+  {
+    name: 'local_receipt_prints',
+    tableClass: 'LOCAL',
+    tenantScope: 'store',
+  },
+  (common) => ({
+    ...common,
+    documentType: text('document_type').notNull(),
+    documentId: sqliteUuidV7('document_id').notNull(),
+    printSeq: sqliteInt('print_seq').notNull(),
+    copyNumber: sqliteInt('copy_number').notNull(),
+    isReprint: sqliteBoolean('is_reprint').notNull().default(false),
+    actorUserId: sqliteUuidV7('actor_user_id')
+      .notNull()
+      .references(() => users.id),
+    status: text('status').notNull(),
+    printerMode: text('printer_mode').notNull(),
+    printerTarget: text('printer_target'),
+    bytesSent: sqliteInt('bytes_sent').notNull().default(0),
+    errorCode: text('error_code'),
+    errorMessage: text('error_message'),
+    textPreview: text('text_preview').notNull(),
+    clientRequestId: sqliteUuidV7('client_request_id').notNull(),
+  }),
+  (self) => [
+    uniqueIndex('uidx_local_receipt_prints_org_req').on(self.organizationId, self.clientRequestId),
+    uniqueIndex('uidx_local_receipt_prints_doc_seq').on(
+      self.organizationId,
+      self.storeId,
+      self.documentType,
+      self.documentId,
+      self.printSeq,
+    ),
+    index('idx_local_receipt_prints_doc').on(
+      self.organizationId,
+      self.storeId,
+      self.documentType,
+      self.documentId,
+    ),
+    check(
+      'chk_local_receipt_prints_doc_type',
+      sql`${self.documentType} IN ('sale', 'return', 'shift_close')`,
+    ),
+    check(
+      'chk_local_receipt_prints_seq_pos',
+      sql`${self.printSeq} >= 1 AND ${self.copyNumber} >= 1`,
+    ),
+    check('chk_local_receipt_prints_reprint_bool', sql`${self.isReprint} IN (0, 1)`),
+    check(
+      'chk_local_receipt_prints_status',
+      sql`${self.status} IN ('printed', 'failed', 'disabled')`,
+    ),
+    check(
+      'chk_local_receipt_prints_mode',
+      sql`${self.printerMode} IN ('disabled', 'windows_raw', 'network_tcp')`,
+    ),
+    check('chk_local_receipt_prints_bytes_nonneg', sql`${self.bytesSent} >= 0`),
+  ],
+);
+
+/**
+ * Local terminal manual cash drawer open audit log (`LOCAL`, store-scoped, T1.12).
+ * Enforces idempotency via `client_request_id` and records `actor_user_id`, optional
+ * `override_approved_by_user_id`, `shift_id`, mandatory `reason`, and printer outcome.
+ */
+export const localCashDrawerEvents = localSchemaRegistry.defineTable(
+  {
+    name: 'local_cash_drawer_events',
+    tableClass: 'LOCAL',
+    tenantScope: 'store',
+  },
+  (common) => ({
+    ...common,
+    shiftId: sqliteUuidV7('shift_id').references(() => shifts.id),
+    actorUserId: sqliteUuidV7('actor_user_id')
+      .notNull()
+      .references(() => users.id),
+    overrideApprovedByUserId: sqliteUuidV7('override_approved_by_user_id').references(
+      () => users.id,
+    ),
+    reason: text('reason').notNull(),
+    status: text('status').notNull(),
+    printerMode: text('printer_mode').notNull(),
+    printerTarget: text('printer_target'),
+    errorCode: text('error_code'),
+    errorMessage: text('error_message'),
+    clientRequestId: sqliteUuidV7('client_request_id').notNull(),
+  }),
+  (self) => [
+    uniqueIndex('uidx_local_cash_drawer_events_org_req').on(
+      self.organizationId,
+      self.clientRequestId,
+    ),
+    index('idx_local_cash_drawer_events_store_created').on(
+      self.organizationId,
+      self.storeId,
+      self.createdAtMs,
+    ),
+    check('chk_local_cash_drawer_events_reason', sql`length(trim(${self.reason})) >= 1`),
+    check(
+      'chk_local_cash_drawer_events_status',
+      sql`${self.status} IN ('printed', 'failed', 'disabled')`,
+    ),
+    check(
+      'chk_local_cash_drawer_events_mode',
+      sql`${self.printerMode} IN ('disabled', 'windows_raw', 'network_tcp')`,
     ),
   ],
 );

@@ -853,7 +853,7 @@ export function App() {
           onError={handleError}
         />
       )}
-      {activeModal === 'receipt' && <ReceiptModal />}
+      {activeModal === 'receipt' && <ReceiptModal api={api} />}
       {activeModal === 'shift_manage' && (
         <ShiftManagementModal
           api={api}

@@ -92,6 +92,13 @@
       "when": 1794373589078,
       "tag": "0012_orders_advance",
       "breakpoints": true
+    },
+    {
+      "idx": 13,
+      "version": "6",
+      "when": 1794388382301,
+      "tag": "0013_printer_and_receipt_prints",
+      "breakpoints": true
     }
   ]
 }
