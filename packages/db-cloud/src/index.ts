@@ -95,6 +95,7 @@ export {
   orders,
   orderLines,
   orderPayments,
+  organizationTaxProfiles,
 } from './schema/index.js';
 
 export { CloudAuthStore, type CloudLoginLookupResult } from './auth-store.js';

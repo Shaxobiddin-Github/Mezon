@@ -1867,3 +1867,43 @@ export const orderPayments = cloudSchemaRegistry.defineTable(
     ),
   ],
 );
+
+/**
+ * Organization tax requisites (`ATTR`, organization scope, T3.1 / T2.3): STIR, legal name/address and VAT
+ * payer status. Synced org-wide so every hub and the cloud cabinet share one profile.
+ *
+ * Deterministic identity: `id` MUST equal `organization_id`, so two offline hubs that
+ * both create the profile produce the same entity and converge via HLC last-writer-wins instead of
+ * colliding on the per-organization uniqueness. Enforced by CHECK.
+ */
+export const organizationTaxProfiles = cloudSchemaRegistry.defineTable(
+  {
+    name: 'organization_tax_profiles',
+    tableClass: 'ATTR',
+    tenantScope: 'organization',
+  },
+  (common) => ({
+    ...common,
+    tin: text('tin').notNull(),
+    legalName: text('legal_name').notNull(),
+    legalAddress: text('legal_address').notNull(),
+    isVatPayer: pgBoolean('is_vat_payer').notNull(),
+    defaultVatRateBp: pgInt('default_vat_rate_bp').notNull().default(0),
+    updatedByUserId: pgUuidV7('updated_by_user_id')
+      .notNull()
+      .references(() => users.id),
+  }),
+  (self) => [
+    uniqueIndex('uidx_org_tax_profiles_org')
+      .on(self.organizationId)
+      .where(sql`${self.deletedAtMs} IS NULL`),
+    check('chk_org_tax_profiles_id_is_org', sql`${self.id} = ${self.organizationId}`),
+    check('chk_org_tax_profiles_tin', sql`length(${self.tin}) = 9 AND ${self.tin} ~ '^[0-9]{9}$'`),
+    check('chk_org_tax_profiles_legal_name', sql`length(trim(${self.legalName})) >= 1`),
+    check('chk_org_tax_profiles_legal_address', sql`length(trim(${self.legalAddress})) >= 1`),
+    check(
+      'chk_org_tax_profiles_default_vat',
+      sql`${self.defaultVatRateBp} >= 0 AND ${self.defaultVatRateBp} <= 10000`,
+    ),
+  ],
+);

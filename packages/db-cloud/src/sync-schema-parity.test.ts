@@ -14,7 +14,7 @@ describe('@mezon/db-cloud - Schema Registry, Foreign Keys & MONOTONE Parity (R2,
       .all()
       .filter((m) => m.tableClass !== 'LOCAL' && !m.tableName.startsWith('cloud_'));
 
-    expect(syncedTables.length).toBe(36);
+    expect(syncedTables.length).toBe(37);
 
     for (const tableMeta of syncedTables) {
       const schema = SYNC_ENTITY_PAYLOAD_SCHEMAS[tableMeta.tableName];

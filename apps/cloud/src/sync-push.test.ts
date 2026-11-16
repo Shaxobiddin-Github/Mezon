@@ -18,6 +18,7 @@ import {
   migrateCloudDatabase,
   shouldRunPgTests,
   users,
+  organizationTaxProfiles,
 } from '@mezon/db-cloud';
 import { parseUuidV7, serializeHlc, unixMsFromBigInt } from '@mezon/domain';
 import { DeterministicUuidV7Generator } from '@mezon/test-utils';
@@ -1073,10 +1074,11 @@ describePg('@mezon/cloud - Sync Push Engine (T2.3 & P1-P5)', () => {
 
     const throughput1 = await runBatch(1000, 'Batch 1');
     const throughput2 = await runBatch(2000, 'Batch 2');
-    const bestThroughput = Math.max(throughput1, throughput2);
+    const throughput3 = await runBatch(3000, 'Batch 3');
+    const bestThroughput = Math.max(throughput1, throughput2, throughput3);
 
     console.log(
-      `Sync Push Throughput Benchmark: ${BATCH_SIZE} events best throughput: ~${bestThroughput.toFixed(0)} events/sec (run1: ~${throughput1.toFixed(0)}, run2: ~${throughput2.toFixed(0)})`,
+      `Sync Push Throughput Benchmark: ${BATCH_SIZE} events best throughput: ~${bestThroughput.toFixed(0)} events/sec (run1: ~${throughput1.toFixed(0)}, run2: ~${throughput2.toFixed(0)}, run3: ~${throughput3.toFixed(0)})`,
     );
     expect(bestThroughput).toBeGreaterThan(100);
   });
@@ -1404,5 +1406,185 @@ describePg('@mezon/cloud - Sync Push Engine (T2.3 & P1-P5)', () => {
       }
     ).checkMonotoneTransition(null, { tableName: 'non_existent' }, dummyEvent, {}, orgA);
     expect(res).toBe('missing_rule');
+  });
+
+  it('handles organization_tax_profile created, updated (tombstone), and restored (deleted_at_ms = null) via LWW ATTR', async () => {
+    // 1. organization_tax_profile.created
+    const createEventId = idGen.nextId();
+    const hlc1 = serializeHlc({ physicalMs: nowMs, logical: 10, nodeId: deviceA });
+    const pushCreateRes = await server.inject({
+      method: 'POST',
+      url: '/api/v1/sync/push',
+      headers: {
+        authorization: `Bearer ${deviceTokenA}`,
+      },
+      payload: {
+        clientVersion: '1.0.0',
+        storeId: storeA,
+        deviceId: deviceA,
+        events: [
+          {
+            eventId: createEventId,
+            organizationId: orgA,
+            storeId: storeA,
+            deviceId: deviceA,
+            deviceSeq: '5001',
+            hlc: hlc1,
+            type: 'organization_tax_profile.created',
+            entity: 'organization_tax_profiles',
+            entityId: orgA, // id MUST equal organizationId
+            entityClass: 'ATTR',
+            schemaVersion: 1,
+            payload: {
+              id: orgA,
+              organizationId: orgA,
+              deviceId: deviceA,
+              hlc: hlc1,
+              createdAtMs: '1700000000000',
+              updatedAtMs: '1700000000000',
+              deletedAtMs: null,
+              tin: '123456789',
+              legalName: 'Guzar Test MCHJ',
+              legalAddress: 'Kattaqo‘rg‘on sh., Alisher Navoiy ko‘chasi 1-uy',
+              isVatPayer: true,
+              defaultVatRateBp: 1200,
+              updatedByUserId: ownerA,
+            },
+          },
+        ],
+      },
+    });
+
+    expect(pushCreateRes.statusCode).toBe(200);
+    const createBody = pushCreateRes.json<SyncPushResponseDto>();
+    expect(createBody.results[0].status).toBe('accepted');
+
+    // Verify row in domain table
+    const [createdRow] = await adminConn.db
+      .select()
+      .from(organizationTaxProfiles)
+      .where(eq(organizationTaxProfiles.id, orgA));
+    expect(createdRow).toBeDefined();
+    expect(createdRow.tin).toBe('123456789');
+    expect(createdRow.legalName).toBe('Guzar Test MCHJ');
+    expect(createdRow.isVatPayer).toBe(true);
+    expect(createdRow.defaultVatRateBp).toBe(1200);
+    expect(createdRow.deletedAtMs).toBeNull();
+
+    // 2. organization_tax_profile.updated with tombstone (soft delete)
+    const updateEventId = idGen.nextId();
+    const hlc2 = serializeHlc({ physicalMs: nowMs, logical: 20, nodeId: deviceA });
+    const pushUpdateRes = await server.inject({
+      method: 'POST',
+      url: '/api/v1/sync/push',
+      headers: {
+        authorization: `Bearer ${deviceTokenA}`,
+      },
+      payload: {
+        clientVersion: '1.0.0',
+        storeId: storeA,
+        deviceId: deviceA,
+        events: [
+          {
+            eventId: updateEventId,
+            organizationId: orgA,
+            storeId: storeA,
+            deviceId: deviceA,
+            deviceSeq: '5002',
+            hlc: hlc2,
+            type: 'organization_tax_profile.updated',
+            entity: 'organization_tax_profiles',
+            entityId: orgA,
+            entityClass: 'ATTR',
+            schemaVersion: 1,
+            payload: {
+              id: orgA,
+              organizationId: orgA,
+              deviceId: deviceA,
+              hlc: hlc2,
+              createdAtMs: '1700000000000',
+              updatedAtMs: '1700000005000',
+              deletedAtMs: '1700000005000',
+              tin: '123456789',
+              legalName: 'Guzar Test MCHJ (Updated)',
+              legalAddress: 'Kattaqo‘rg‘on sh., Alisher Navoiy ko‘chasi 1-uy',
+              isVatPayer: true,
+              defaultVatRateBp: 1200,
+              updatedByUserId: ownerA,
+            },
+          },
+        ],
+      },
+    });
+
+    expect(pushUpdateRes.statusCode).toBe(200);
+    const updateBody = pushUpdateRes.json<SyncPushResponseDto>();
+    expect(updateBody.results[0].status).toBe('accepted');
+
+    const [updatedRow] = await adminConn.db
+      .select()
+      .from(organizationTaxProfiles)
+      .where(eq(organizationTaxProfiles.id, orgA));
+    expect(updatedRow.legalName).toBe('Guzar Test MCHJ (Updated)');
+    expect(updatedRow.deletedAtMs).toBe(1700000005000n);
+
+    // 3. organization_tax_profile.restored with deletedAtMs: null
+    const restoreEventId = idGen.nextId();
+    const hlc3 = serializeHlc({ physicalMs: nowMs, logical: 30, nodeId: deviceA });
+    const pushRestoreRes = await server.inject({
+      method: 'POST',
+      url: '/api/v1/sync/push',
+      headers: {
+        authorization: `Bearer ${deviceTokenA}`,
+      },
+      payload: {
+        clientVersion: '1.0.0',
+        storeId: storeA,
+        deviceId: deviceA,
+        events: [
+          {
+            eventId: restoreEventId,
+            organizationId: orgA,
+            storeId: storeA,
+            deviceId: deviceA,
+            deviceSeq: '5003',
+            hlc: hlc3,
+            type: 'organization_tax_profile.restored',
+            entity: 'organization_tax_profiles',
+            entityId: orgA,
+            entityClass: 'ATTR',
+            schemaVersion: 1,
+            payload: {
+              id: orgA,
+              organizationId: orgA,
+              deviceId: deviceA,
+              hlc: hlc3,
+              createdAtMs: '1700000000000',
+              updatedAtMs: '1700000010000',
+              deletedAtMs: null, // Restored!
+              tin: '123456789',
+              legalName: 'Guzar Test MCHJ (Restored)',
+              legalAddress: 'Kattaqo‘rg‘on sh., Alisher Navoiy ko‘chasi 1-uy',
+              isVatPayer: false,
+              defaultVatRateBp: 0,
+              updatedByUserId: ownerA,
+            },
+          },
+        ],
+      },
+    });
+
+    expect(pushRestoreRes.statusCode).toBe(200);
+    const restoreBody = pushRestoreRes.json<SyncPushResponseDto>();
+    expect(restoreBody.results[0].status).toBe('accepted');
+
+    const [restoredRow] = await adminConn.db
+      .select()
+      .from(organizationTaxProfiles)
+      .where(eq(organizationTaxProfiles.id, orgA));
+    expect(restoredRow.legalName).toBe('Guzar Test MCHJ (Restored)');
+    expect(restoredRow.isVatPayer).toBe(false);
+    expect(restoredRow.defaultVatRateBp).toBe(0);
+    expect(restoredRow.deletedAtMs).toBeNull();
   });
 });

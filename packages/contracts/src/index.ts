@@ -763,6 +763,8 @@ export {
   type SyncPushResponseDto,
   SYNC_PAYLOAD_SCHEMAS,
   SYNC_ENTITY_PAYLOAD_SCHEMAS,
+  OrganizationTaxProfilesPayloadSchema,
+  OrganizationTaxProfilePayloadSchema,
   validateSyncEntityPayload,
   MONOTONE_TRANSITION_RULES,
   type MonotoneTransitionResult,

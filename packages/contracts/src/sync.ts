@@ -974,6 +974,24 @@ export const OrderPaymentsPayloadSchema = z
   })
   .strict();
 
+export const OrganizationTaxProfilesPayloadSchema = z
+  .object({
+    id: UuidV7Schema,
+    organizationId: UuidV7Schema,
+    deviceId: UuidV7Schema,
+    hlc: z.string().length(58),
+    createdAtMs: UnixMsPayloadSchema,
+    updatedAtMs: UnixMsPayloadSchema,
+    deletedAtMs: UnixMsPayloadSchema.nullable().optional(),
+    tin: z.string().regex(/^\d{9}$/),
+    legalName: z.string().min(1),
+    legalAddress: z.string().min(1),
+    isVatPayer: z.boolean(),
+    defaultVatRateBp: z.number().int().min(0).max(10000),
+    updatedByUserId: UuidV7Schema,
+  })
+  .strict();
+
 export const SYNC_PAYLOAD_SCHEMAS: Readonly<Record<string, z.ZodType<Record<string, unknown>>>> = {
   users: UsersPayloadSchema,
   categories: CategoriesPayloadSchema,
@@ -1011,6 +1029,7 @@ export const SYNC_PAYLOAD_SCHEMAS: Readonly<Record<string, z.ZodType<Record<stri
   orders: OrdersPayloadSchema,
   order_lines: OrderLinesPayloadSchema,
   order_payments: OrderPaymentsPayloadSchema,
+  organization_tax_profiles: OrganizationTaxProfilesPayloadSchema,
 };
 
 export const UserPayloadSchema = UsersPayloadSchema;
@@ -1047,6 +1066,7 @@ export const DayClosePayloadSchema = DayClosesPayloadSchema;
 export const OrderPayloadSchema = OrdersPayloadSchema;
 export const OrderLinePayloadSchema = OrderLinesPayloadSchema;
 export const OrderPaymentPayloadSchema = OrderPaymentsPayloadSchema;
+export const OrganizationTaxProfilePayloadSchema = OrganizationTaxProfilesPayloadSchema;
 
 export const SYNC_ENTITY_PAYLOAD_SCHEMAS = SYNC_PAYLOAD_SCHEMAS;
 
@@ -1404,4 +1424,5 @@ export const SYNC_FOREIGN_REFERENCES: Readonly<Record<string, readonly ForeignKe
     { payloadKey: 'orderId', targetEntity: 'orders' },
     { payloadKey: 'shiftId', targetEntity: 'shifts' },
   ],
+  organization_tax_profiles: [{ payloadKey: 'updatedByUserId', targetEntity: 'users' }],
 };

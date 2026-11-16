@@ -39,11 +39,12 @@ export function extractPgErrorCode(err: unknown): string | undefined {
   let curr: unknown = err;
   let depth = 0;
   while (curr && typeof curr === 'object' && depth < 10) {
-    if ('code' in curr && typeof (curr as { code: unknown }).code === 'string') {
-      return (curr as { code: string }).code;
+    const candidate = curr as Record<string, unknown>;
+    if (typeof candidate.code === 'string') {
+      return candidate.code;
     }
-    if ('cause' in curr && (curr as { cause: unknown }).cause) {
-      curr = (curr as { cause: unknown }).cause;
+    if (candidate.cause) {
+      curr = candidate.cause;
       depth++;
     } else {
       break;

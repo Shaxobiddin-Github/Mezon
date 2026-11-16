@@ -35,6 +35,34 @@ describe('Contracts: Sync Module', () => {
       expect(result.success).toBe(true);
     });
 
+    it('validates correct organization_tax_profiles payload and rejects invalid TIN or extra fields', () => {
+      const validProfile = {
+        id: dummyUuid1,
+        organizationId: dummyUuid1,
+        deviceId: dummyUuid2,
+        hlc: dummyHlc,
+        createdAtMs: '1700000000000',
+        updatedAtMs: '1700000000000',
+        deletedAtMs: null,
+        tin: '123456789',
+        legalName: 'Test MCHJ',
+        legalAddress: 'Navoiy 1',
+        isVatPayer: true,
+        defaultVatRateBp: 1200,
+        updatedByUserId: dummyUuid2,
+      };
+      const validRes = validateSyncEntityPayload('organization_tax_profiles', validProfile);
+      expect(validRes.success).toBe(true);
+
+      const invalidTin = { ...validProfile, tin: '1234' };
+      const invalidRes = validateSyncEntityPayload('organization_tax_profiles', invalidTin);
+      expect(invalidRes.success).toBe(false);
+
+      const extraField = { ...validProfile, evilProp: true };
+      const extraRes = validateSyncEntityPayload('organization_tax_profiles', extraField);
+      expect(extraRes.success).toBe(false);
+    });
+
     it('P4: rejects users payload containing forbidden extra fields like pin_hash or pin', () => {
       const evilUser = {
         id: dummyUuid1,

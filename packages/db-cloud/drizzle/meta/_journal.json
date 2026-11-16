@@ -29,6 +29,13 @@
       "when": 1794804471627,
       "tag": "0003_sync_engine",
       "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "7",
+      "when": 1794814342545,
+      "tag": "0004_organization_tax_profiles",
+      "breakpoints": true
     }
   ]
 }
