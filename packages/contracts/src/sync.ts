@@ -93,218 +93,228 @@ export type SyncPushResponseDto = z.infer<typeof SyncPushResponseSchema>;
 
 // ============================================================================
 // P4: Strict Entity Payload Schemas (for all 36 Synced Domain Tables)
-// Every schema uses .strict() to reject unapproved fields (e.g. pin_hash)
+// Every schema uses .strict() to reject unapproved fields
 // ============================================================================
 
-export const UserPayloadSchema = z
+export const UsersPayloadSchema = z
   .object({
     id: UuidV7Schema,
     organizationId: UuidV7Schema,
-    username: z.string().min(2),
-    fullName: z.string().min(1),
-    role: z.enum(['owner', 'manager', 'cashier']),
-    isActive: z.boolean(),
     deviceId: UuidV7Schema,
     hlc: z.string().length(58),
     createdAtMs: UnixMsPayloadSchema,
     updatedAtMs: UnixMsPayloadSchema,
     deletedAtMs: UnixMsPayloadSchema.nullable().optional(),
+    username: z.string(),
+    fullName: z.string(),
+    role: z.string(),
+    isActive: z.boolean(),
   })
   .strict();
 
-export const CategoryPayloadSchema = z
+export const CategoriesPayloadSchema = z
   .object({
     id: UuidV7Schema,
     organizationId: UuidV7Schema,
-    name: z.string().min(1),
+    deviceId: UuidV7Schema,
+    hlc: z.string().length(58),
+    createdAtMs: UnixMsPayloadSchema,
+    updatedAtMs: UnixMsPayloadSchema,
+    deletedAtMs: UnixMsPayloadSchema.nullable().optional(),
+    name: z.string(),
     nameSearch: z.string(),
     parentId: UuidV7Schema.nullable().optional(),
     sortOrder: z.number().int(),
+  })
+  .strict();
+
+export const ProductsPayloadSchema = z
+  .object({
+    id: UuidV7Schema,
+    organizationId: UuidV7Schema,
     deviceId: UuidV7Schema,
     hlc: z.string().length(58),
     createdAtMs: UnixMsPayloadSchema,
     updatedAtMs: UnixMsPayloadSchema,
     deletedAtMs: UnixMsPayloadSchema.nullable().optional(),
-  })
-  .strict();
-
-export const ProductPayloadSchema = z
-  .object({
-    id: UuidV7Schema,
-    organizationId: UuidV7Schema,
     categoryId: UuidV7Schema.nullable().optional(),
     sku: z.string().nullable().optional(),
     skuSearch: z.string().nullable().optional(),
-    name: z.string().min(1),
+    name: z.string(),
     nameSearch: z.string(),
-    unit: z.string().min(1),
+    unit: z.string(),
     unlimited: z.boolean(),
-    minStock: BigIntStringSchema.nullable().optional(),
+    minStock: QuantityPayloadSchema.nullable().optional(),
     hasVariants: z.boolean(),
     trackBatches: z.boolean(),
     salePrice: MoneyPayloadSchema,
     mxik: z.string().nullable().optional(),
     packageCode: z.string().nullable().optional(),
-    vatRateBp: z.number().int().min(0).max(10000),
+    vatRateBp: z.number().int(),
+  })
+  .strict();
+
+export const ProductVariantsPayloadSchema = z
+  .object({
+    id: UuidV7Schema,
+    organizationId: UuidV7Schema,
     deviceId: UuidV7Schema,
     hlc: z.string().length(58),
     createdAtMs: UnixMsPayloadSchema,
     updatedAtMs: UnixMsPayloadSchema,
     deletedAtMs: UnixMsPayloadSchema.nullable().optional(),
-  })
-  .strict();
-
-export const ProductVariantPayloadSchema = z
-  .object({
-    id: UuidV7Schema,
-    organizationId: UuidV7Schema,
     productId: UuidV7Schema,
-    variantName: z.string().min(1),
+    name: z.string(),
+    nameSearch: z.string(),
     sku: z.string().nullable().optional(),
-    barcode: z.string().nullable().optional(),
-    price: MoneyPayloadSchema.nullable().optional(),
-    costPrice: MoneyPayloadSchema.nullable().optional(),
+    skuSearch: z.string().nullable().optional(),
+    attributesJson: z.string(),
+    salePrice: MoneyPayloadSchema.nullable().optional(),
+  })
+  .strict();
+
+export const ProductBarcodesPayloadSchema = z
+  .object({
+    id: UuidV7Schema,
+    organizationId: UuidV7Schema,
     deviceId: UuidV7Schema,
     hlc: z.string().length(58),
     createdAtMs: UnixMsPayloadSchema,
     updatedAtMs: UnixMsPayloadSchema,
     deletedAtMs: UnixMsPayloadSchema.nullable().optional(),
+    productId: UuidV7Schema,
+    variantId: UuidV7Schema.nullable().optional(),
+    barcode: z.string(),
+    format: z.string(),
   })
   .strict();
 
-export const ProductBarcodePayloadSchema = z
+export const PriceChangesPayloadSchema = z
   .object({
     id: UuidV7Schema,
     organizationId: UuidV7Schema,
-    productId: UuidV7Schema,
-    variantId: UuidV7Schema.nullable().optional(),
-    barcode: z.string().min(1),
     deviceId: UuidV7Schema,
     hlc: z.string().length(58),
     createdAtMs: UnixMsPayloadSchema,
-    updatedAtMs: UnixMsPayloadSchema,
-    deletedAtMs: UnixMsPayloadSchema.nullable().optional(),
-  })
-  .strict();
-
-export const PriceChangePayloadSchema = z
-  .object({
-    id: UuidV7Schema,
-    organizationId: UuidV7Schema,
     productId: UuidV7Schema,
     variantId: UuidV7Schema.nullable().optional(),
-    oldPrice: MoneyPayloadSchema,
+    oldPrice: MoneyPayloadSchema.nullable().optional(),
     newPrice: MoneyPayloadSchema,
-    reason: z.string().min(1),
     changedByUserId: UuidV7Schema,
-    deviceId: UuidV7Schema,
-    hlc: z.string().length(58),
-    createdAtMs: UnixMsPayloadSchema,
+    reason: z.string().nullable().optional(),
   })
   .strict();
 
-export const BatchPayloadSchema = z
+export const BatchesPayloadSchema = z
   .object({
     id: UuidV7Schema,
     organizationId: UuidV7Schema,
     storeId: UuidV7Schema,
+    deviceId: UuidV7Schema,
+    hlc: z.string().length(58),
+    createdAtMs: UnixMsPayloadSchema,
     productId: UuidV7Schema,
     variantId: UuidV7Schema.nullable().optional(),
-    batchCode: z.string().min(1),
-    costPrice: MoneyPayloadSchema,
-    sellingPrice: MoneyPayloadSchema.nullable().optional(),
-    expiryDate: z.string().nullable().optional(),
-    receivedAtMs: UnixMsPayloadSchema,
-    initialQuantity: QuantityPayloadSchema,
-    deviceId: UuidV7Schema,
-    hlc: z.string().length(58),
-    createdAtMs: UnixMsPayloadSchema,
+    batchNumber: z.string().nullable().optional(),
+    expiryDateMs: UnixMsPayloadSchema.nullable().optional(),
+    initialQty: QuantityPayloadSchema,
+    initialCostValue: MoneyPayloadSchema,
+    supplierId: UuidV7Schema.nullable().optional(),
   })
   .strict();
 
-export const StockMovePayloadSchema = z
+export const StockMovesPayloadSchema = z
   .object({
     id: UuidV7Schema,
     organizationId: UuidV7Schema,
     storeId: UuidV7Schema,
+    deviceId: UuidV7Schema,
+    hlc: z.string().length(58),
+    createdAtMs: UnixMsPayloadSchema,
     productId: UuidV7Schema,
     variantId: UuidV7Schema.nullable().optional(),
     batchId: UuidV7Schema.nullable().optional(),
-    moveType: z.string().min(1),
-    quantity: QuantityPayloadSchema,
-    unitCost: MoneyPayloadSchema,
-    totalCost: MoneyPayloadSchema,
-    referenceType: z.string().min(1),
-    referenceId: UuidV7Schema.nullable().optional(),
-    performedByUserId: UuidV7Schema,
+    qtyDelta: QuantityPayloadSchema,
+    costValueDelta: MoneyPayloadSchema,
+    reason: z.string(),
+    sourceType: z.string(),
+    sourceId: UuidV7Schema,
+    createdByUserId: UuidV7Schema,
     note: z.string().nullable().optional(),
-    deviceId: UuidV7Schema,
-    hlc: z.string().length(58),
-    createdAtMs: UnixMsPayloadSchema,
   })
   .strict();
 
-export const InventoryCountPayloadSchema = z
+export const InventoryCountsPayloadSchema = z
   .object({
     id: UuidV7Schema,
     organizationId: UuidV7Schema,
     storeId: UuidV7Schema,
-    status: z.enum(['open', 'finalized', 'cancelled']),
+    deviceId: UuidV7Schema,
+    hlc: z.string().length(58),
+    createdAtMs: UnixMsPayloadSchema,
+    updatedAtMs: UnixMsPayloadSchema,
+    status: z.string(),
     startedByUserId: UuidV7Schema,
     finalizedByUserId: UuidV7Schema.nullable().optional(),
     finalizedAtMs: UnixMsPayloadSchema.nullable().optional(),
     note: z.string().nullable().optional(),
-    deviceId: UuidV7Schema,
-    hlc: z.string().length(58),
-    createdAtMs: UnixMsPayloadSchema,
-    updatedAtMs: UnixMsPayloadSchema,
   })
   .strict();
 
-export const InventoryCountLinePayloadSchema = z
+export const InventoryCountLinesPayloadSchema = z
   .object({
     id: UuidV7Schema,
     organizationId: UuidV7Schema,
     storeId: UuidV7Schema,
+    deviceId: UuidV7Schema,
+    hlc: z.string().length(58),
+    createdAtMs: UnixMsPayloadSchema,
+    updatedAtMs: UnixMsPayloadSchema,
     countId: UuidV7Schema,
     productId: UuidV7Schema,
     variantId: UuidV7Schema.nullable().optional(),
     expectedQtyAtCount: QuantityPayloadSchema.nullable().optional(),
     countedQty: QuantityPayloadSchema.nullable().optional(),
     adjustmentQty: QuantityPayloadSchema.nullable().optional(),
-    deviceId: UuidV7Schema,
-    hlc: z.string().length(58),
-    createdAtMs: UnixMsPayloadSchema,
-    updatedAtMs: UnixMsPayloadSchema,
   })
   .strict();
 
-export const PromotionPayloadSchema = z
+export const PromotionsPayloadSchema = z
   .object({
     id: UuidV7Schema,
     organizationId: UuidV7Schema,
-    name: z.string().min(1),
-    promoType: z.string().min(1),
-    discountValue: BigIntStringSchema,
-    validFromMs: UnixMsPayloadSchema,
-    validToMs: UnixMsPayloadSchema,
-    isActive: z.boolean(),
-    configJson: z.string(),
     deviceId: UuidV7Schema,
     hlc: z.string().length(58),
     createdAtMs: UnixMsPayloadSchema,
     updatedAtMs: UnixMsPayloadSchema,
     deletedAtMs: UnixMsPayloadSchema.nullable().optional(),
+    targetStoreId: UuidV7Schema.nullable().optional(),
+    name: z.string(),
+    type: z.string(),
+    scope: z.string(),
+    targetProductId: UuidV7Schema.nullable().optional(),
+    targetCategoryId: UuidV7Schema.nullable().optional(),
+    discountPercentBp: z.number().int().nullable().optional(),
+    discountAmount: QuantityPayloadSchema.nullable().optional(),
+    buyQty: z.number().int().nullable().optional(),
+    freeQty: z.number().int().nullable().optional(),
+    startsAtMs: UnixMsPayloadSchema,
+    endsAtMs: UnixMsPayloadSchema.nullable().optional(),
+    isActive: z.boolean(),
   })
   .strict();
 
-export const SalePayloadSchema = z
+export const SalesPayloadSchema = z
   .object({
     id: UuidV7Schema,
     organizationId: UuidV7Schema,
     storeId: UuidV7Schema,
-    receiptNo: BigIntStringSchema,
-    receiptCode: z.string().min(1),
+    deviceId: UuidV7Schema,
+    hlc: z.string().length(58),
+    createdAtMs: UnixMsPayloadSchema,
+    updatedAtMs: UnixMsPayloadSchema,
+    receiptNo: MoneyPayloadSchema,
+    receiptCode: z.string(),
     sourceCartId: UuidV7Schema.nullable().optional(),
     sourceOrderId: UuidV7Schema.nullable().optional(),
     cashierUserId: UuidV7Schema,
@@ -313,175 +323,195 @@ export const SalePayloadSchema = z
     shiftId: UuidV7Schema.nullable().optional(),
     shiftCashierSessionId: UuidV7Schema.nullable().optional(),
     clientRequestId: UuidV7Schema,
-    requestHash: z.string().min(6),
+    requestHash: z.string(),
     subtotalGross: MoneyPayloadSchema,
-    totalPromoDiscount: MoneyPayloadSchema,
+    totalPromoDiscount: QuantityPayloadSchema,
     subtotalAfterPromo: MoneyPayloadSchema,
     manualDiscountMode: z.string(),
-    manualDiscountValue: BigIntStringSchema,
+    manualDiscountValue: QuantityPayloadSchema,
     manualDiscountReason: z.string().nullable().optional(),
-    orderDiscountAmount: MoneyPayloadSchema,
-    totalAmount: MoneyPayloadSchema,
-    totalCost: MoneyPayloadSchema,
+    orderDiscountAmount: QuantityPayloadSchema,
+    totalFinal: MoneyPayloadSchema,
     totalNetExVat: MoneyPayloadSchema,
     totalVat: MoneyPayloadSchema,
-    paidAmount: MoneyPayloadSchema,
-    changeAmount: MoneyPayloadSchema,
+    totalPaid: MoneyPayloadSchema,
     debtAmount: MoneyPayloadSchema,
-    loyaltyPointsEarned: BigIntStringSchema,
+    changeAmount: MoneyPayloadSchema,
     overrideApprovedByUserId: UuidV7Schema.nullable().optional(),
     overrideApprovedAmount: MoneyPayloadSchema.nullable().optional(),
+    overrideApprovedAtMs: UnixMsPayloadSchema.nullable().optional(),
     voidedAtMs: UnixMsPayloadSchema.nullable().optional(),
     voidedByUserId: UuidV7Schema.nullable().optional(),
     voidReason: z.string().nullable().optional(),
     voidClientRequestId: UuidV7Schema.nullable().optional(),
     voidRequestHash: z.string().nullable().optional(),
-    deviceId: UuidV7Schema,
-    hlc: z.string().length(58),
-    createdAtMs: UnixMsPayloadSchema,
-    updatedAtMs: UnixMsPayloadSchema,
   })
   .strict();
 
-export const SaleLinePayloadSchema = z
+export const SaleLinesPayloadSchema = z
   .object({
     id: UuidV7Schema,
     organizationId: UuidV7Schema,
     storeId: UuidV7Schema,
+    deviceId: UuidV7Schema,
+    hlc: z.string().length(58),
+    createdAtMs: UnixMsPayloadSchema,
     saleId: UuidV7Schema,
-    lineNo: z.number().int(),
-    productId: UuidV7Schema,
+    sortOrder: z.number().int(),
+    lineKind: z.string(),
+    productId: UuidV7Schema.nullable().optional(),
     variantId: UuidV7Schema.nullable().optional(),
-    productNameSnapshot: z.string().min(1),
-    variantNameSnapshot: z.string().nullable().optional(),
-    skuSnapshot: z.string().nullable().optional(),
-    barcodeSnapshot: z.string().nullable().optional(),
-    unitSnapshot: z.string().min(1),
-    quantity: QuantityPayloadSchema,
-    unitPrice: MoneyPayloadSchema,
-    grossAmount: MoneyPayloadSchema,
-    linePromoDiscount: MoneyPayloadSchema,
-    amountAfterPromo: MoneyPayloadSchema,
-    appliedOrderDiscount: MoneyPayloadSchema,
-    lineTotal: MoneyPayloadSchema,
-    unitCostSnapshot: MoneyPayloadSchema,
-    totalCost: MoneyPayloadSchema,
-    vatPercentSnapshot: z.number().int().min(0).max(100),
-    vatAmount: MoneyPayloadSchema,
-    netAmountExVat: MoneyPayloadSchema,
-    mxikCodeSnapshot: z.string().nullable().optional(),
+    categoryIdSnapshot: UuidV7Schema.nullable().optional(),
+    itemName: z.string(),
+    unit: z.string(),
+    qty: QuantityPayloadSchema,
+    unitPriceSnapshot: MoneyPayloadSchema,
+    appliedPromotionId: UuidV7Schema.nullable().optional(),
+    appliedPromotionName: z.string().nullable().optional(),
+    freeUnits: QuantityPayloadSchema,
+    grossTotal: MoneyPayloadSchema,
+    promoDiscount: QuantityPayloadSchema,
+    subtotalAfterPromo: MoneyPayloadSchema,
+    allocatedOrderDiscount: QuantityPayloadSchema,
+    finalTotal: MoneyPayloadSchema,
+    vatRateBpSnapshot: z.number().int(),
+    netExVat: MoneyPayloadSchema,
+    vatTotal: MoneyPayloadSchema,
+    mxikSnapshot: z.string().nullable().optional(),
     packageCodeSnapshot: z.string().nullable().optional(),
-    deviceId: UuidV7Schema,
-    hlc: z.string().length(58),
-    createdAtMs: UnixMsPayloadSchema,
+    costValue: MoneyPayloadSchema,
   })
   .strict();
 
-export const PaymentPayloadSchema = z
+export const PaymentsPayloadSchema = z
   .object({
     id: UuidV7Schema,
     organizationId: UuidV7Schema,
     storeId: UuidV7Schema,
+    deviceId: UuidV7Schema,
+    hlc: z.string().length(58),
+    createdAtMs: UnixMsPayloadSchema,
     saleId: UuidV7Schema,
-    paymentMethod: z.string().min(1),
+    method: z.string(),
     amount: MoneyPayloadSchema,
-    referenceId: z.string().nullable().optional(),
-    shiftId: UuidV7Schema.nullable().optional(),
-    deviceId: UuidV7Schema,
-    hlc: z.string().length(58),
-    createdAtMs: UnixMsPayloadSchema,
+    tenderedAmount: MoneyPayloadSchema.nullable().optional(),
+    changeAmount: MoneyPayloadSchema,
+    providerRef: z.string().nullable().optional(),
+    providerMetaJson: z.string().nullable().optional(),
   })
   .strict();
 
-export const CashMovePayloadSchema = z
+export const CashMovesPayloadSchema = z
   .object({
     id: UuidV7Schema,
     organizationId: UuidV7Schema,
     storeId: UuidV7Schema,
-    shiftId: UuidV7Schema,
-    cashierUserId: UuidV7Schema,
-    moveType: z.enum(['cash_in', 'cash_out', 'drop']),
-    amount: MoneyPayloadSchema,
-    reason: z.string().min(1),
+    deviceId: UuidV7Schema,
+    hlc: z.string().length(58),
+    createdAtMs: UnixMsPayloadSchema,
+    shiftId: UuidV7Schema.nullable().optional(),
+    shiftCashierSessionId: UuidV7Schema.nullable().optional(),
+    type: z.string(),
+    amountDelta: MoneyPayloadSchema,
+    sourceType: z.string(),
+    sourceId: UuidV7Schema,
+    paymentId: UuidV7Schema.nullable().optional(),
     expenseCategory: z.string().nullable().optional(),
-    authorizedByUserId: UuidV7Schema.nullable().optional(),
-    deviceId: UuidV7Schema,
-    hlc: z.string().length(58),
-    createdAtMs: UnixMsPayloadSchema,
+    reason: z.string().nullable().optional(),
+    createdByUserId: UuidV7Schema,
   })
   .strict();
 
-export const ReturnPayloadSchema = z
+export const ReturnsPayloadSchema = z
   .object({
     id: UuidV7Schema,
     organizationId: UuidV7Schema,
     storeId: UuidV7Schema,
-    originalSaleId: UuidV7Schema,
-    returnNo: BigIntStringSchema,
-    returnCode: z.string().min(1),
-    cashierUserId: UuidV7Schema,
+    deviceId: UuidV7Schema,
+    hlc: z.string().length(58),
+    createdAtMs: UnixMsPayloadSchema,
+    saleId: UuidV7Schema,
     shiftId: UuidV7Schema.nullable().optional(),
-    totalRefundAmount: MoneyPayloadSchema,
-    totalCostReturned: MoneyPayloadSchema,
-    reason: z.string().min(1),
+    shiftCashierSessionId: UuidV7Schema.nullable().optional(),
+    returnNo: MoneyPayloadSchema,
+    returnCode: z.string(),
+    processedByUserId: UuidV7Schema,
+    overrideApprovedByUserId: UuidV7Schema.nullable().optional(),
+    overrideApprovedAtMs: UnixMsPayloadSchema.nullable().optional(),
+    reason: z.string(),
     clientRequestId: UuidV7Schema,
-    requestHash: z.string().min(6),
-    deviceId: UuidV7Schema,
-    hlc: z.string().length(58),
-    createdAtMs: UnixMsPayloadSchema,
+    requestHash: z.string(),
+    totalRefund: MoneyPayloadSchema,
+    totalNetExVat: MoneyPayloadSchema,
+    totalVat: MoneyPayloadSchema,
+    cashRefundAmount: MoneyPayloadSchema,
+    nonCashRefundAmount: MoneyPayloadSchema,
+    debtOffsetAmount: MoneyPayloadSchema,
   })
   .strict();
 
-export const ReturnLinePayloadSchema = z
+export const ReturnLinesPayloadSchema = z
   .object({
     id: UuidV7Schema,
     organizationId: UuidV7Schema,
     storeId: UuidV7Schema,
+    deviceId: UuidV7Schema,
+    hlc: z.string().length(58),
+    createdAtMs: UnixMsPayloadSchema,
     returnId: UuidV7Schema,
+    saleId: UuidV7Schema,
     saleLineId: UuidV7Schema,
-    productId: UuidV7Schema,
+    sortOrder: z.number().int(),
+    lineKind: z.string(),
+    productId: UuidV7Schema.nullable().optional(),
     variantId: UuidV7Schema.nullable().optional(),
-    quantity: QuantityPayloadSchema,
+    itemName: z.string(),
+    unit: z.string(),
+    qty: QuantityPayloadSchema,
+    unitPriceSnapshot: MoneyPayloadSchema,
+    vatRateBpSnapshot: z.number().int(),
+    mxikSnapshot: z.string().nullable().optional(),
+    packageCodeSnapshot: z.string().nullable().optional(),
     refundAmount: MoneyPayloadSchema,
-    costReturned: MoneyPayloadSchema,
-    vatAmountReturned: MoneyPayloadSchema,
-    deviceId: UuidV7Schema,
-    hlc: z.string().length(58),
-    createdAtMs: UnixMsPayloadSchema,
+    netExVat: MoneyPayloadSchema,
+    vatTotal: MoneyPayloadSchema,
+    costValue: MoneyPayloadSchema,
   })
   .strict();
 
-export const ReturnPaymentPayloadSchema = z
+export const ReturnPaymentsPayloadSchema = z
   .object({
     id: UuidV7Schema,
     organizationId: UuidV7Schema,
     storeId: UuidV7Schema,
-    returnId: UuidV7Schema,
-    paymentMethod: z.string().min(1),
-    amount: MoneyPayloadSchema,
     deviceId: UuidV7Schema,
     hlc: z.string().length(58),
     createdAtMs: UnixMsPayloadSchema,
+    returnId: UuidV7Schema,
+    saleId: UuidV7Schema,
+    method: z.string(),
+    amount: MoneyPayloadSchema,
+    providerRef: z.string().nullable().optional(),
   })
   .strict();
 
-export const CustomerPayloadSchema = z
+export const CustomersPayloadSchema = z
   .object({
     id: UuidV7Schema,
     organizationId: UuidV7Schema,
-    fullName: z.string().min(1),
-    phone: z.string().nullable().optional(),
-    phoneNormalized: z.string().nullable().optional(),
-    phoneDigits: z.string().nullable().optional(),
-    nameSearch: z.string(),
-    creditLimit: MoneyPayloadSchema,
-    loyaltyBalance: BigIntStringSchema,
-    note: z.string().nullable().optional(),
     deviceId: UuidV7Schema,
     hlc: z.string().length(58),
     createdAtMs: UnixMsPayloadSchema,
     updatedAtMs: UnixMsPayloadSchema,
     deletedAtMs: UnixMsPayloadSchema.nullable().optional(),
+    fullName: z.string(),
+    nameSearch: z.string(),
+    phoneNormalized: z.string().nullable().optional(),
+    phoneDigits: z.string().nullable().optional(),
+    creditLimit: MoneyPayloadSchema.nullable().optional(),
+    defaultDueDays: z.number().int().nullable().optional(),
+    note: z.string().nullable().optional(),
+    isActive: z.boolean(),
   })
   .strict();
 
@@ -490,123 +520,157 @@ export const CustomerLedgerPayloadSchema = z
     id: UuidV7Schema,
     organizationId: UuidV7Schema,
     storeId: UuidV7Schema,
-    customerId: UuidV7Schema,
-    entryType: z.string().min(1),
-    amount: MoneyPayloadSchema,
-    runningBalanceAfter: MoneyPayloadSchema,
-    referenceType: z.string().min(1),
-    referenceId: UuidV7Schema.nullable().optional(),
-    performedByUserId: UuidV7Schema,
-    note: z.string().nullable().optional(),
     deviceId: UuidV7Schema,
     hlc: z.string().length(58),
     createdAtMs: UnixMsPayloadSchema,
+    customerId: UuidV7Schema,
+    entryType: z.string(),
+    amountDelta: MoneyPayloadSchema,
+    sourceType: z.string(),
+    sourceId: UuidV7Schema,
+    saleId: UuidV7Schema.nullable().optional(),
+    paymentMethod: z.string().nullable().optional(),
+    providerRef: z.string().nullable().optional(),
+    cashMoveId: UuidV7Schema.nullable().optional(),
+    dueAtMs: UnixMsPayloadSchema.nullable().optional(),
+    reason: z.string().nullable().optional(),
+    createdByUserId: UuidV7Schema,
+    overrideApprovedByUserId: UuidV7Schema.nullable().optional(),
+    clientRequestId: UuidV7Schema.nullable().optional(),
+    requestHash: z.string().nullable().optional(),
   })
   .strict();
 
-export const SupplierPayloadSchema = z
+export const SuppliersPayloadSchema = z
   .object({
     id: UuidV7Schema,
     organizationId: UuidV7Schema,
-    name: z.string().min(1),
-    nameSearch: z.string(),
-    contactPerson: z.string().nullable().optional(),
-    phone: z.string().nullable().optional(),
-    phoneNormalized: z.string().nullable().optional(),
-    tin: z.string().nullable().optional(),
-    note: z.string().nullable().optional(),
     deviceId: UuidV7Schema,
     hlc: z.string().length(58),
     createdAtMs: UnixMsPayloadSchema,
     updatedAtMs: UnixMsPayloadSchema,
     deletedAtMs: UnixMsPayloadSchema.nullable().optional(),
+    name: z.string(),
+    nameSearch: z.string(),
+    tin: z.string().nullable().optional(),
+    phoneNormalized: z.string().nullable().optional(),
+    phoneDigits: z.string().nullable().optional(),
+    contactPerson: z.string().nullable().optional(),
+    note: z.string().nullable().optional(),
+    defaultDueDays: z.number().int().nullable().optional(),
+    isActive: z.boolean(),
   })
   .strict();
 
-export const GoodsReceivingPayloadSchema = z
+export const GoodsReceivingsPayloadSchema = z
   .object({
     id: UuidV7Schema,
     organizationId: UuidV7Schema,
     storeId: UuidV7Schema,
-    supplierId: UuidV7Schema,
-    invoiceNumber: z.string().nullable().optional(),
-    invoiceDate: z.string().nullable().optional(),
-    totalCost: MoneyPayloadSchema,
-    status: z.string().min(1),
-    receivedByUserId: UuidV7Schema,
-    clientRequestId: UuidV7Schema,
-    requestHash: z.string().min(6),
     deviceId: UuidV7Schema,
     hlc: z.string().length(58),
     createdAtMs: UnixMsPayloadSchema,
+    receivingNo: MoneyPayloadSchema,
+    receivingCode: z.string(),
+    supplierId: UuidV7Schema,
+    supplierInvoiceNo: z.string().nullable().optional(),
+    dueDays: z.number().int().nullable().optional(),
+    dueAtMs: UnixMsPayloadSchema.nullable().optional(),
+    knownCostTotal: MoneyPayloadSchema,
+    unknownCostLineCount: z.number().int(),
+    note: z.string().nullable().optional(),
+    postedByUserId: UuidV7Schema,
+    clientRequestId: UuidV7Schema,
+    requestHash: z.string(),
   })
   .strict();
 
-export const GoodsReceivingLinePayloadSchema = z
+export const GoodsReceivingLinesPayloadSchema = z
   .object({
     id: UuidV7Schema,
     organizationId: UuidV7Schema,
     storeId: UuidV7Schema,
+    deviceId: UuidV7Schema,
+    hlc: z.string().length(58),
+    createdAtMs: UnixMsPayloadSchema,
     receivingId: UuidV7Schema,
+    sortOrder: z.number().int(),
     productId: UuidV7Schema,
     variantId: UuidV7Schema.nullable().optional(),
-    quantity: QuantityPayloadSchema,
-    unitCost: MoneyPayloadSchema,
-    totalCost: MoneyPayloadSchema,
-    batchCode: z.string().nullable().optional(),
-    expiryDate: z.string().nullable().optional(),
-    deviceId: UuidV7Schema,
-    hlc: z.string().length(58),
-    createdAtMs: UnixMsPayloadSchema,
+    qty: QuantityPayloadSchema,
+    costUnknown: z.boolean(),
+    initialTotalCost: MoneyPayloadSchema,
+    vatRateBp: z.number().int().nullable().optional(),
+    vatAmount: MoneyPayloadSchema.nullable().optional(),
+    stockMoveId: UuidV7Schema,
+    batchId: UuidV7Schema.nullable().optional(),
+    batchNumber: z.string().nullable().optional(),
+    expiryDateMs: UnixMsPayloadSchema.nullable().optional(),
   })
   .strict();
 
-export const ReceivingCostConfirmationPayloadSchema = z
+export const ReceivingCostConfirmationsPayloadSchema = z
   .object({
     id: UuidV7Schema,
     organizationId: UuidV7Schema,
     storeId: UuidV7Schema,
+    deviceId: UuidV7Schema,
+    hlc: z.string().length(58),
+    createdAtMs: UnixMsPayloadSchema,
     receivingId: UuidV7Schema,
+    receivingLineId: UuidV7Schema,
+    supplierId: UuidV7Schema,
+    productId: UuidV7Schema,
+    variantId: UuidV7Schema.nullable().optional(),
+    batchId: UuidV7Schema.nullable().optional(),
+    receivedQty: QuantityPayloadSchema,
+    confirmedTotalCost: MoneyPayloadSchema,
+    dueDays: z.number().int().nullable().optional(),
+    dueAtMs: UnixMsPayloadSchema.nullable().optional(),
+    reason: z.string(),
     confirmedByUserId: UuidV7Schema,
-    confirmedAtMs: UnixMsPayloadSchema,
-    deviceId: UuidV7Schema,
-    hlc: z.string().length(58),
-    createdAtMs: UnixMsPayloadSchema,
-  })
-  .strict();
-
-export const SupplierReturnPayloadSchema = z
-  .object({
-    id: UuidV7Schema,
-    organizationId: UuidV7Schema,
-    storeId: UuidV7Schema,
-    supplierId: UuidV7Schema,
-    returnNumber: z.string().min(1),
-    totalCost: MoneyPayloadSchema,
-    reason: z.string().min(1),
-    performedByUserId: UuidV7Schema,
     clientRequestId: UuidV7Schema,
-    requestHash: z.string().min(6),
-    deviceId: UuidV7Schema,
-    hlc: z.string().length(58),
-    createdAtMs: UnixMsPayloadSchema,
+    requestHash: z.string(),
   })
   .strict();
 
-export const SupplierReturnLinePayloadSchema = z
+export const SupplierReturnsPayloadSchema = z
   .object({
     id: UuidV7Schema,
     organizationId: UuidV7Schema,
     storeId: UuidV7Schema,
-    returnId: UuidV7Schema,
+    deviceId: UuidV7Schema,
+    hlc: z.string().length(58),
+    createdAtMs: UnixMsPayloadSchema,
+    returnNo: MoneyPayloadSchema,
+    returnCode: z.string(),
+    receivingId: UuidV7Schema,
+    supplierId: UuidV7Schema,
+    reason: z.string(),
+    totalReturnCost: MoneyPayloadSchema,
+    createdByUserId: UuidV7Schema,
+    clientRequestId: UuidV7Schema,
+    requestHash: z.string(),
+  })
+  .strict();
+
+export const SupplierReturnLinesPayloadSchema = z
+  .object({
+    id: UuidV7Schema,
+    organizationId: UuidV7Schema,
+    storeId: UuidV7Schema,
+    deviceId: UuidV7Schema,
+    hlc: z.string().length(58),
+    createdAtMs: UnixMsPayloadSchema,
+    supplierReturnId: UuidV7Schema,
+    receivingLineId: UuidV7Schema,
+    sortOrder: z.number().int(),
     productId: UuidV7Schema,
     variantId: UuidV7Schema.nullable().optional(),
-    quantity: QuantityPayloadSchema,
-    unitCost: MoneyPayloadSchema,
-    totalCost: MoneyPayloadSchema,
-    deviceId: UuidV7Schema,
-    hlc: z.string().length(58),
-    createdAtMs: UnixMsPayloadSchema,
+    batchId: UuidV7Schema.nullable().optional(),
+    stockMoveId: UuidV7Schema,
+    qty: QuantityPayloadSchema,
+    returnCostValue: MoneyPayloadSchema,
   })
   .strict();
 
@@ -615,28 +679,39 @@ export const SupplierLedgerPayloadSchema = z
     id: UuidV7Schema,
     organizationId: UuidV7Schema,
     storeId: UuidV7Schema,
-    supplierId: UuidV7Schema,
-    entryType: z.string().min(1),
-    amount: MoneyPayloadSchema,
-    runningBalanceAfter: MoneyPayloadSchema,
-    referenceType: z.string().min(1),
-    referenceId: UuidV7Schema.nullable().optional(),
-    performedByUserId: UuidV7Schema,
-    note: z.string().nullable().optional(),
     deviceId: UuidV7Schema,
     hlc: z.string().length(58),
     createdAtMs: UnixMsPayloadSchema,
+    supplierId: UuidV7Schema,
+    entryType: z.string(),
+    amountDelta: MoneyPayloadSchema,
+    sourceType: z.string(),
+    sourceId: UuidV7Schema,
+    receivingId: UuidV7Schema.nullable().optional(),
+    supplierReturnId: UuidV7Schema.nullable().optional(),
+    paymentMethod: z.string().nullable().optional(),
+    providerRef: z.string().nullable().optional(),
+    cashMoveId: UuidV7Schema.nullable().optional(),
+    dueAtMs: UnixMsPayloadSchema.nullable().optional(),
+    reason: z.string().nullable().optional(),
+    createdByUserId: UuidV7Schema,
+    clientRequestId: UuidV7Schema.nullable().optional(),
+    requestHash: z.string().nullable().optional(),
   })
   .strict();
 
-export const ShiftPayloadSchema = z
+export const ShiftsPayloadSchema = z
   .object({
     id: UuidV7Schema,
     organizationId: UuidV7Schema,
     storeId: UuidV7Schema,
-    shiftNo: BigIntStringSchema,
-    shiftCode: z.string().min(1),
-    status: z.enum(['open', 'closed']),
+    deviceId: UuidV7Schema,
+    hlc: z.string().length(58),
+    createdAtMs: UnixMsPayloadSchema,
+    updatedAtMs: UnixMsPayloadSchema,
+    shiftNo: MoneyPayloadSchema,
+    shiftCode: z.string(),
+    status: z.string(),
     openedByUserId: UuidV7Schema,
     closedByUserId: UuidV7Schema.nullable().optional(),
     openingCash: MoneyPayloadSchema,
@@ -648,28 +723,28 @@ export const ShiftPayloadSchema = z
     openedAtMs: UnixMsPayloadSchema,
     closedAtMs: UnixMsPayloadSchema.nullable().optional(),
     openClientRequestId: UuidV7Schema,
-    openRequestHash: z.string().min(6),
+    openRequestHash: z.string(),
     closeClientRequestId: UuidV7Schema.nullable().optional(),
     closeRequestHash: z.string().nullable().optional(),
-    deviceId: UuidV7Schema,
-    hlc: z.string().length(58),
-    createdAtMs: UnixMsPayloadSchema,
-    updatedAtMs: UnixMsPayloadSchema,
   })
   .strict();
 
-export const ShiftCashierSessionPayloadSchema = z
+export const ShiftCashierSessionsPayloadSchema = z
   .object({
     id: UuidV7Schema,
     organizationId: UuidV7Schema,
     storeId: UuidV7Schema,
+    deviceId: UuidV7Schema,
+    hlc: z.string().length(58),
+    createdAtMs: UnixMsPayloadSchema,
+    updatedAtMs: UnixMsPayloadSchema,
     shiftId: UuidV7Schema,
     sessionSeq: z.number().int(),
     cashierUserId: UuidV7Schema,
-    status: z.enum(['active', 'closed']),
+    status: z.string(),
     openingFloat: MoneyPayloadSchema,
     expectedCash: MoneyPayloadSchema.nullable().optional(),
-    countedCash: MoneyPayloadSchema.nullable().optional(),
+    countedCash: QuantityPayloadSchema.nullable().optional(),
     discrepancy: MoneyPayloadSchema.nullable().optional(),
     discrepancyReason: z.string().nullable().optional(),
     denominationsJson: z.string().nullable().optional(),
@@ -678,108 +753,141 @@ export const ShiftCashierSessionPayloadSchema = z
     note: z.string().nullable().optional(),
     startedAtMs: UnixMsPayloadSchema,
     endedAtMs: UnixMsPayloadSchema.nullable().optional(),
+    handoffClientRequestId: UuidV7Schema.nullable().optional(),
+    handoffRequestHash: z.string().nullable().optional(),
+  })
+  .strict();
+
+export const ShiftClosuresPayloadSchema = z
+  .object({
+    id: UuidV7Schema,
+    organizationId: UuidV7Schema,
+    storeId: UuidV7Schema,
+    deviceId: UuidV7Schema,
+    hlc: z.string().length(58),
+    createdAtMs: UnixMsPayloadSchema,
+    shiftId: UuidV7Schema,
+    closureSeq: z.number().int(),
+    isReclose: z.boolean(),
+    reason: z.string().nullable().optional(),
+    closedByUserId: UuidV7Schema,
+    overrideApprovedByUserId: UuidV7Schema.nullable().optional(),
+    clientRequestId: UuidV7Schema,
+    requestHash: z.string(),
+    expectedCash: MoneyPayloadSchema,
+    countedCash: QuantityPayloadSchema,
+    discrepancy: MoneyPayloadSchema,
+    denominationsJson: z.string().nullable().optional(),
+    salesCount: z.number().int(),
+    returnsCount: z.number().int(),
+    voidsCount: z.number().int(),
+    grossSalesTotal: MoneyPayloadSchema,
+    returnsTotal: MoneyPayloadSchema,
+    netSalesTotal: MoneyPayloadSchema,
+    orderAdvanceCashTotal: MoneyPayloadSchema,
+    orderAdvanceNonCashTotal: MoneyPayloadSchema,
+    orderAdvanceRefundTotal: MoneyPayloadSchema,
+  })
+  .strict();
+
+export const ShiftClosureMethodTotalsPayloadSchema = z
+  .object({
+    id: UuidV7Schema,
+    organizationId: UuidV7Schema,
+    storeId: UuidV7Schema,
+    deviceId: UuidV7Schema,
+    hlc: z.string().length(58),
+    createdAtMs: UnixMsPayloadSchema,
+    shiftClosureId: UuidV7Schema,
+    method: z.string(),
+    salesAmount: MoneyPayloadSchema,
+    returnsAmount: MoneyPayloadSchema,
+    netAmount: MoneyPayloadSchema,
+  })
+  .strict();
+
+export const ShiftClosureCashiersPayloadSchema = z
+  .object({
+    id: UuidV7Schema,
+    organizationId: UuidV7Schema,
+    storeId: UuidV7Schema,
+    deviceId: UuidV7Schema,
+    hlc: z.string().length(58),
+    createdAtMs: UnixMsPayloadSchema,
+    shiftClosureId: UuidV7Schema,
+    sessionId: UuidV7Schema,
+    cashierUserId: UuidV7Schema,
+    sessionSeq: z.number().int(),
+    openingFloat: MoneyPayloadSchema,
+    expectedCash: MoneyPayloadSchema,
+    countedCash: QuantityPayloadSchema,
+    discrepancy: MoneyPayloadSchema,
+    salesCount: z.number().int(),
+    returnsCount: z.number().int(),
+    salesTotal: MoneyPayloadSchema,
+    returnsTotal: MoneyPayloadSchema,
+    cashInTotal: MoneyPayloadSchema,
+    cashOutTotal: MoneyPayloadSchema,
+  })
+  .strict();
+
+export const DayClosesPayloadSchema = z
+  .object({
+    id: UuidV7Schema,
+    organizationId: UuidV7Schema,
+    storeId: UuidV7Schema,
+    deviceId: UuidV7Schema,
+    hlc: z.string().length(58),
+    createdAtMs: UnixMsPayloadSchema,
+    businessDate: z.string(),
+    closeSeq: z.number().int(),
+    closeCode: z.string(),
+    closedByUserId: UuidV7Schema,
+    clientRequestId: UuidV7Schema,
+    requestHash: z.string(),
+    note: z.string().nullable().optional(),
+    shiftsCount: z.number().int(),
+    salesCount: z.number().int(),
+    returnsCount: z.number().int(),
+    voidsCount: z.number().int(),
+    grossSalesTotal: MoneyPayloadSchema,
+    returnsTotal: MoneyPayloadSchema,
+    netSalesTotal: MoneyPayloadSchema,
+    expectedCashTotal: MoneyPayloadSchema,
+    countedCashTotal: QuantityPayloadSchema,
+    discrepancyTotal: MoneyPayloadSchema,
+    methodTotalsJson: z.string(),
+    includedClosureIdsJson: z.string(),
+    fiscalStatus: z.string(),
+    fiscalReportNo: z.string().nullable().optional(),
+  })
+  .strict();
+
+export const OrdersPayloadSchema = z
+  .object({
+    id: UuidV7Schema,
+    organizationId: UuidV7Schema,
+    storeId: UuidV7Schema,
     deviceId: UuidV7Schema,
     hlc: z.string().length(58),
     createdAtMs: UnixMsPayloadSchema,
     updatedAtMs: UnixMsPayloadSchema,
-  })
-  .strict();
-
-export const ShiftClosurePayloadSchema = z
-  .object({
-    id: UuidV7Schema,
-    organizationId: UuidV7Schema,
-    storeId: UuidV7Schema,
-    shiftId: UuidV7Schema,
-    closedByUserId: UuidV7Schema,
-    closedAtMs: UnixMsPayloadSchema,
-    systemExpectedCash: MoneyPayloadSchema,
-    actualCountedCash: MoneyPayloadSchema,
-    cashDiscrepancy: MoneyPayloadSchema,
-    cashDiscrepancyReason: z.string().nullable().optional(),
-    denominationsJson: z.string().nullable().optional(),
-    note: z.string().nullable().optional(),
-    deviceId: UuidV7Schema,
-    hlc: z.string().length(58),
-    createdAtMs: UnixMsPayloadSchema,
-  })
-  .strict();
-
-export const ShiftClosureMethodTotalPayloadSchema = z
-  .object({
-    id: UuidV7Schema,
-    organizationId: UuidV7Schema,
-    storeId: UuidV7Schema,
-    closureId: UuidV7Schema,
-    paymentMethod: z.string().min(1),
-    totalAmount: MoneyPayloadSchema,
-    transactionCount: z.number().int(),
-    deviceId: UuidV7Schema,
-    hlc: z.string().length(58),
-    createdAtMs: UnixMsPayloadSchema,
-  })
-  .strict();
-
-export const ShiftClosureCashierPayloadSchema = z
-  .object({
-    id: UuidV7Schema,
-    organizationId: UuidV7Schema,
-    storeId: UuidV7Schema,
-    closureId: UuidV7Schema,
-    cashierUserId: UuidV7Schema,
-    totalSales: MoneyPayloadSchema,
-    totalReturns: MoneyPayloadSchema,
-    totalDiscounts: MoneyPayloadSchema,
-    deviceId: UuidV7Schema,
-    hlc: z.string().length(58),
-    createdAtMs: UnixMsPayloadSchema,
-  })
-  .strict();
-
-export const DayClosePayloadSchema = z
-  .object({
-    id: UuidV7Schema,
-    organizationId: UuidV7Schema,
-    storeId: UuidV7Schema,
-    dayCloseNo: BigIntStringSchema,
-    periodStartMs: UnixMsPayloadSchema,
-    periodEndMs: UnixMsPayloadSchema,
-    closedByUserId: UuidV7Schema,
-    totalGrossSales: MoneyPayloadSchema,
-    totalDiscounts: MoneyPayloadSchema,
-    totalReturns: MoneyPayloadSchema,
-    totalNetSales: MoneyPayloadSchema,
-    totalVat: MoneyPayloadSchema,
-    totalCost: MoneyPayloadSchema,
-    zReportNumber: z.string().nullable().optional(),
-    fiscalDocId: z.string().nullable().optional(),
-    deviceId: UuidV7Schema,
-    hlc: z.string().length(58),
-    createdAtMs: UnixMsPayloadSchema,
-  })
-  .strict();
-
-export const OrderPayloadSchema = z
-  .object({
-    id: UuidV7Schema,
-    organizationId: UuidV7Schema,
-    storeId: UuidV7Schema,
     originDeviceId: UuidV7Schema,
-    orderNo: BigIntStringSchema,
-    orderCode: z.string().min(1),
-    status: z.enum(['draft', 'confirmed', 'ready', 'delivered', 'cancelled']),
+    orderNo: MoneyPayloadSchema,
+    orderCode: z.string(),
+    status: z.string(),
     customerId: UuidV7Schema.nullable().optional(),
-    customerName: z.string().min(1),
+    customerName: z.string(),
     customerPhoneNormalized: z.string().nullable().optional(),
     dueAtMs: UnixMsPayloadSchema.nullable().optional(),
     note: z.string().nullable().optional(),
     subtotalGross: MoneyPayloadSchema,
-    totalPromoDiscount: MoneyPayloadSchema,
+    totalPromoDiscount: QuantityPayloadSchema,
     subtotalAfterPromo: MoneyPayloadSchema,
     manualDiscountMode: z.string(),
-    manualDiscountValue: BigIntStringSchema,
+    manualDiscountValue: QuantityPayloadSchema,
     manualDiscountReason: z.string().nullable().optional(),
-    orderDiscountAmount: MoneyPayloadSchema,
+    orderDiscountAmount: QuantityPayloadSchema,
     totalAmount: MoneyPayloadSchema,
     totalNetExVat: MoneyPayloadSchema,
     totalVat: MoneyPayloadSchema,
@@ -794,98 +902,153 @@ export const OrderPayloadSchema = z
     cancelledByUserId: UuidV7Schema.nullable().optional(),
     cancelReason: z.string().nullable().optional(),
     createClientRequestId: UuidV7Schema,
-    createRequestHash: z.string().min(6),
-    deviceId: UuidV7Schema,
-    hlc: z.string().length(58),
-    createdAtMs: UnixMsPayloadSchema,
-    updatedAtMs: UnixMsPayloadSchema,
+    createRequestHash: z.string(),
+    confirmClientRequestId: UuidV7Schema.nullable().optional(),
+    confirmRequestHash: z.string().nullable().optional(),
+    readyClientRequestId: UuidV7Schema.nullable().optional(),
+    readyRequestHash: z.string().nullable().optional(),
+    deliverClientRequestId: UuidV7Schema.nullable().optional(),
+    deliverRequestHash: z.string().nullable().optional(),
+    cancelClientRequestId: UuidV7Schema.nullable().optional(),
+    cancelRequestHash: z.string().nullable().optional(),
   })
   .strict();
 
-export const OrderLinePayloadSchema = z
+export const OrderLinesPayloadSchema = z
   .object({
     id: UuidV7Schema,
     organizationId: UuidV7Schema,
     storeId: UuidV7Schema,
+    deviceId: UuidV7Schema,
+    hlc: z.string().length(58),
+    createdAtMs: UnixMsPayloadSchema,
     orderId: UuidV7Schema,
-    lineNo: z.number().int(),
-    productId: UuidV7Schema,
+    sortOrder: z.number().int(),
+    lineKind: z.string(),
+    productId: UuidV7Schema.nullable().optional(),
     variantId: UuidV7Schema.nullable().optional(),
-    productNameSnapshot: z.string().min(1),
-    variantNameSnapshot: z.string().nullable().optional(),
-    skuSnapshot: z.string().nullable().optional(),
-    unitSnapshot: z.string().min(1),
-    quantity: QuantityPayloadSchema,
-    unitPrice: MoneyPayloadSchema,
-    grossAmount: MoneyPayloadSchema,
-    linePromoDiscount: MoneyPayloadSchema,
-    amountAfterPromo: MoneyPayloadSchema,
-    appliedOrderDiscount: MoneyPayloadSchema,
-    lineTotal: MoneyPayloadSchema,
-    vatPercentSnapshot: z.number().int().min(0).max(100),
-    vatAmount: MoneyPayloadSchema,
-    netAmountExVat: MoneyPayloadSchema,
-    deviceId: UuidV7Schema,
-    hlc: z.string().length(58),
-    createdAtMs: UnixMsPayloadSchema,
+    categoryIdSnapshot: UuidV7Schema.nullable().optional(),
+    itemName: z.string(),
+    unit: z.string(),
+    qty: QuantityPayloadSchema,
+    unitPriceSnapshot: MoneyPayloadSchema,
+    appliedPromotionId: UuidV7Schema.nullable().optional(),
+    appliedPromotionName: z.string().nullable().optional(),
+    freeUnits: QuantityPayloadSchema,
+    grossTotal: MoneyPayloadSchema,
+    promoDiscount: QuantityPayloadSchema,
+    subtotalAfterPromo: MoneyPayloadSchema,
+    allocatedOrderDiscount: QuantityPayloadSchema,
+    finalTotal: MoneyPayloadSchema,
+    vatRateBpSnapshot: z.number().int(),
+    netExVat: MoneyPayloadSchema,
+    vatTotal: MoneyPayloadSchema,
+    mxikSnapshot: z.string().nullable().optional(),
+    packageCodeSnapshot: z.string().nullable().optional(),
   })
   .strict();
 
-export const OrderPaymentPayloadSchema = z
+export const OrderPaymentsPayloadSchema = z
   .object({
     id: UuidV7Schema,
     organizationId: UuidV7Schema,
     storeId: UuidV7Schema,
-    orderId: UuidV7Schema,
-    paymentMethod: z.string().min(1),
-    amount: MoneyPayloadSchema,
-    referenceId: z.string().nullable().optional(),
-    shiftId: UuidV7Schema.nullable().optional(),
     deviceId: UuidV7Schema,
     hlc: z.string().length(58),
     createdAtMs: UnixMsPayloadSchema,
+    orderId: UuidV7Schema,
+    shiftId: UuidV7Schema,
+    shiftCashierSessionId: UuidV7Schema,
+    kind: z.string(),
+    method: z.string(),
+    amount: MoneyPayloadSchema,
+    tenderedAmount: MoneyPayloadSchema.nullable().optional(),
+    changeAmount: MoneyPayloadSchema,
+    providerRef: z.string().nullable().optional(),
+    reason: z.string().nullable().optional(),
+    createdByUserId: UuidV7Schema,
+    overrideApprovedByUserId: UuidV7Schema.nullable().optional(),
+    seq: z.number().int(),
+    clientRequestId: UuidV7Schema,
+    requestHash: z.string(),
   })
   .strict();
 
-// Map of all 36 Synced Table Payload Schemas
 export const SYNC_PAYLOAD_SCHEMAS: Readonly<Record<string, z.ZodType<Record<string, unknown>>>> = {
-  users: UserPayloadSchema,
-  categories: CategoryPayloadSchema,
-  products: ProductPayloadSchema,
-  product_variants: ProductVariantPayloadSchema,
-  product_barcodes: ProductBarcodePayloadSchema,
-  price_changes: PriceChangePayloadSchema,
-  batches: BatchPayloadSchema,
-  stock_moves: StockMovePayloadSchema,
-  inventory_counts: InventoryCountPayloadSchema,
-  inventory_count_lines: InventoryCountLinePayloadSchema,
-  promotions: PromotionPayloadSchema,
-  sales: SalePayloadSchema,
-  sale_lines: SaleLinePayloadSchema,
-  payments: PaymentPayloadSchema,
-  cash_moves: CashMovePayloadSchema,
-  returns: ReturnPayloadSchema,
-  return_lines: ReturnLinePayloadSchema,
-  return_payments: ReturnPaymentPayloadSchema,
-  customers: CustomerPayloadSchema,
+  users: UsersPayloadSchema,
+  categories: CategoriesPayloadSchema,
+  products: ProductsPayloadSchema,
+  product_variants: ProductVariantsPayloadSchema,
+  product_barcodes: ProductBarcodesPayloadSchema,
+  price_changes: PriceChangesPayloadSchema,
+  batches: BatchesPayloadSchema,
+  stock_moves: StockMovesPayloadSchema,
+  inventory_counts: InventoryCountsPayloadSchema,
+  inventory_count_lines: InventoryCountLinesPayloadSchema,
+  promotions: PromotionsPayloadSchema,
+  sales: SalesPayloadSchema,
+  sale_lines: SaleLinesPayloadSchema,
+  payments: PaymentsPayloadSchema,
+  cash_moves: CashMovesPayloadSchema,
+  returns: ReturnsPayloadSchema,
+  return_lines: ReturnLinesPayloadSchema,
+  return_payments: ReturnPaymentsPayloadSchema,
+  customers: CustomersPayloadSchema,
   customer_ledger: CustomerLedgerPayloadSchema,
-  suppliers: SupplierPayloadSchema,
-  goods_receivings: GoodsReceivingPayloadSchema,
-  goods_receiving_lines: GoodsReceivingLinePayloadSchema,
-  receiving_cost_confirmations: ReceivingCostConfirmationPayloadSchema,
-  supplier_returns: SupplierReturnPayloadSchema,
-  supplier_return_lines: SupplierReturnLinePayloadSchema,
+  suppliers: SuppliersPayloadSchema,
+  goods_receivings: GoodsReceivingsPayloadSchema,
+  goods_receiving_lines: GoodsReceivingLinesPayloadSchema,
+  receiving_cost_confirmations: ReceivingCostConfirmationsPayloadSchema,
+  supplier_returns: SupplierReturnsPayloadSchema,
+  supplier_return_lines: SupplierReturnLinesPayloadSchema,
   supplier_ledger: SupplierLedgerPayloadSchema,
-  shifts: ShiftPayloadSchema,
-  shift_cashier_sessions: ShiftCashierSessionPayloadSchema,
-  shift_closures: ShiftClosurePayloadSchema,
-  shift_closure_method_totals: ShiftClosureMethodTotalPayloadSchema,
-  shift_closure_cashiers: ShiftClosureCashierPayloadSchema,
-  day_closes: DayClosePayloadSchema,
-  orders: OrderPayloadSchema,
-  order_lines: OrderLinePayloadSchema,
-  order_payments: OrderPaymentPayloadSchema,
+  shifts: ShiftsPayloadSchema,
+  shift_cashier_sessions: ShiftCashierSessionsPayloadSchema,
+  shift_closures: ShiftClosuresPayloadSchema,
+  shift_closure_method_totals: ShiftClosureMethodTotalsPayloadSchema,
+  shift_closure_cashiers: ShiftClosureCashiersPayloadSchema,
+  day_closes: DayClosesPayloadSchema,
+  orders: OrdersPayloadSchema,
+  order_lines: OrderLinesPayloadSchema,
+  order_payments: OrderPaymentsPayloadSchema,
 };
+
+export const UserPayloadSchema = UsersPayloadSchema;
+export const CategoryPayloadSchema = CategoriesPayloadSchema;
+export const ProductPayloadSchema = ProductsPayloadSchema;
+export const ProductVariantPayloadSchema = ProductVariantsPayloadSchema;
+export const ProductBarcodePayloadSchema = ProductBarcodesPayloadSchema;
+export const PriceChangePayloadSchema = PriceChangesPayloadSchema;
+export const BatchPayloadSchema = BatchesPayloadSchema;
+export const StockMovePayloadSchema = StockMovesPayloadSchema;
+export const InventoryCountPayloadSchema = InventoryCountsPayloadSchema;
+export const InventoryCountLinePayloadSchema = InventoryCountLinesPayloadSchema;
+export const PromotionPayloadSchema = PromotionsPayloadSchema;
+export const SalePayloadSchema = SalesPayloadSchema;
+export const SaleLinePayloadSchema = SaleLinesPayloadSchema;
+export const PaymentPayloadSchema = PaymentsPayloadSchema;
+export const CashMovePayloadSchema = CashMovesPayloadSchema;
+export const ReturnPayloadSchema = ReturnsPayloadSchema;
+export const ReturnLinePayloadSchema = ReturnLinesPayloadSchema;
+export const ReturnPaymentPayloadSchema = ReturnPaymentsPayloadSchema;
+export const CustomerPayloadSchema = CustomersPayloadSchema;
+export const SupplierPayloadSchema = SuppliersPayloadSchema;
+export const GoodsReceivingPayloadSchema = GoodsReceivingsPayloadSchema;
+export const GoodsReceivingLinePayloadSchema = GoodsReceivingLinesPayloadSchema;
+export const ReceivingCostConfirmationPayloadSchema = ReceivingCostConfirmationsPayloadSchema;
+export const SupplierReturnPayloadSchema = SupplierReturnsPayloadSchema;
+export const SupplierReturnLinePayloadSchema = SupplierReturnLinesPayloadSchema;
+export const ShiftPayloadSchema = ShiftsPayloadSchema;
+export const ShiftCashierSessionPayloadSchema = ShiftCashierSessionsPayloadSchema;
+export const ShiftClosurePayloadSchema = ShiftClosuresPayloadSchema;
+export const ShiftClosureMethodTotalPayloadSchema = ShiftClosureMethodTotalsPayloadSchema;
+export const ShiftClosureCashierPayloadSchema = ShiftClosureCashiersPayloadSchema;
+export const DayClosePayloadSchema = DayClosesPayloadSchema;
+export const OrderPayloadSchema = OrdersPayloadSchema;
+export const OrderLinePayloadSchema = OrderLinesPayloadSchema;
+export const OrderPaymentPayloadSchema = OrderPaymentsPayloadSchema;
+
+export const SYNC_ENTITY_PAYLOAD_SCHEMAS = SYNC_PAYLOAD_SCHEMAS;
 
 export function validateSyncEntityPayload(
   entity: string,
@@ -922,6 +1085,7 @@ export type MonotoneTransitionResult = 'accepted' | 'duplicate' | 'rejected';
 export interface MonotoneTransitionRule {
   readonly stateColumn: string;
   readonly isMonotone: true;
+  readonly allowableUpdateColumns: readonly string[];
   checkTransition(
     existingRow: Record<string, unknown>,
     incomingPayload: Record<string, unknown>,
@@ -938,6 +1102,15 @@ export const MONOTONE_TRANSITION_RULES: Readonly<Record<string, MonotoneTransiti
   sales: {
     stateColumn: 'voided_at_ms',
     isMonotone: true,
+    allowableUpdateColumns: [
+      'voidedAtMs',
+      'voidedByUserId',
+      'voidReason',
+      'voidClientRequestId',
+      'voidRequestHash',
+      'hlc',
+      'updatedAtMs',
+    ],
     checkTransition(existing, incoming) {
       const existingVoid = existing.voided_at_ms ?? existing.voidedAtMs;
       const incomingVoid = incoming.voided_at_ms ?? incoming.voidedAtMs;
@@ -967,6 +1140,18 @@ export const MONOTONE_TRANSITION_RULES: Readonly<Record<string, MonotoneTransiti
   orders: {
     stateColumn: 'status',
     isMonotone: true,
+    allowableUpdateColumns: [
+      'status',
+      'confirmedAtMs',
+      'readyAtMs',
+      'deliveredAtMs',
+      'deliveredSaleId',
+      'cancelledAtMs',
+      'cancelledByUserId',
+      'cancelReason',
+      'hlc',
+      'updatedAtMs',
+    ],
     checkTransition(existing, incoming) {
       const currentStatus = toSafeString(existing.status);
       const newStatus = toSafeString(incoming.status);
@@ -993,6 +1178,15 @@ export const MONOTONE_TRANSITION_RULES: Readonly<Record<string, MonotoneTransiti
   shifts: {
     stateColumn: 'status',
     isMonotone: true,
+    allowableUpdateColumns: [
+      'status',
+      'closedAtMs',
+      'closedByUserId',
+      'closeClientRequestId',
+      'closeRequestHash',
+      'hlc',
+      'updatedAtMs',
+    ],
     checkTransition(existing, incoming) {
       const currentStatus = toSafeString(existing.status);
       const newStatus = toSafeString(incoming.status);
@@ -1011,6 +1205,15 @@ export const MONOTONE_TRANSITION_RULES: Readonly<Record<string, MonotoneTransiti
   shift_cashier_sessions: {
     stateColumn: 'status',
     isMonotone: true,
+    allowableUpdateColumns: [
+      'status',
+      'endedAtMs',
+      'expectedCash',
+      'countedCash',
+      'discrepancy',
+      'hlc',
+      'updatedAtMs',
+    ],
     checkTransition(existing, incoming) {
       const currentStatus = toSafeString(existing.status);
       const newStatus = toSafeString(incoming.status);
@@ -1029,6 +1232,16 @@ export const MONOTONE_TRANSITION_RULES: Readonly<Record<string, MonotoneTransiti
   inventory_counts: {
     stateColumn: 'status',
     isMonotone: true,
+    allowableUpdateColumns: [
+      'status',
+      'finalizedAtMs',
+      'finalizedByUserId',
+      'cancelledAtMs',
+      'cancelledByUserId',
+      'cancelReason',
+      'hlc',
+      'updatedAtMs',
+    ],
     checkTransition(existing, incoming) {
       const currentStatus = toSafeString(existing.status);
       const newStatus = toSafeString(incoming.status);
@@ -1047,6 +1260,13 @@ export const MONOTONE_TRANSITION_RULES: Readonly<Record<string, MonotoneTransiti
   inventory_count_lines: {
     stateColumn: 'expected_qty_at_count',
     isMonotone: true,
+    allowableUpdateColumns: [
+      'expectedQtyAtCount',
+      'countedQty',
+      'adjustmentQty',
+      'hlc',
+      'updatedAtMs',
+    ],
     checkTransition(existing, incoming) {
       // Lines cannot be moved to a different count
       const existingCountId = existing.count_id ?? existing.countId;

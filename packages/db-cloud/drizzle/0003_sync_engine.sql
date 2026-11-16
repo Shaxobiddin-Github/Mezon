@@ -1856,7 +1856,11 @@ ALTER TABLE "cloud_sync_parked" FORCE ROW LEVEL SECURITY;
 --> statement-breakpoint
 REVOKE ALL ON TABLE "cloud_sync_parked" FROM mezon_app;
 --> statement-breakpoint
-GRANT SELECT, INSERT, UPDATE ON TABLE "cloud_sync_parked" TO mezon_app;
+GRANT SELECT, INSERT, UPDATE, DELETE ON TABLE "cloud_sync_parked" TO mezon_app;
+--> statement-breakpoint
+GRANT SELECT ON TABLE "cloud_sync_events" TO mezon_auth_owner;
+--> statement-breakpoint
+CREATE POLICY "cloud_sync_events_auth_owner" ON "cloud_sync_events" AS PERMISSIVE FOR SELECT TO "mezon_auth_owner" USING (true);
 --> statement-breakpoint
 CREATE OR REPLACE FUNCTION sync_check_cross_tenant_entity(
   p_entity text,
@@ -1877,5 +1881,9 @@ BEGIN
   );
 END;
 $$;
+--> statement-breakpoint
+ALTER FUNCTION sync_check_cross_tenant_entity(text, uuid, uuid) OWNER TO mezon_auth_owner;
+--> statement-breakpoint
+REVOKE ALL ON FUNCTION sync_check_cross_tenant_entity(text, uuid, uuid) FROM PUBLIC;
 --> statement-breakpoint
 GRANT EXECUTE ON FUNCTION sync_check_cross_tenant_entity(text, uuid, uuid) TO mezon_app;

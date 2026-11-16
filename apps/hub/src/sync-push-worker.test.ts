@@ -248,6 +248,36 @@ describe('HubSyncPushWorker', () => {
     expect(worker.isRunning()).toBe(false);
   });
 
+  it('R6: 403 without revoked code does NOT revoke device and applies backoff', async () => {
+    appendTestEvent('products', { name: 'P1' });
+
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: false,
+      status: 403,
+      json: () =>
+        Promise.resolve({
+          error: 'Forbidden',
+          message: 'Rate limit or WAF block',
+        }),
+    });
+
+    const worker = new HubSyncPushWorker({
+      outboxStore,
+      cloudStore,
+      safeStorage,
+      getDeviceId: () => deviceId,
+      clock,
+      idGen,
+      fetchFn: fetchMock,
+    });
+
+    const res = await worker.pushBatch();
+    expect(res.status).toBe('backoff');
+
+    const state = await cloudStore.getCloudState();
+    expect(state?.status).toBe('paired'); // NOT revoked!
+  });
+
   it('P5: handles 401 with TOKEN_EXPIRED by rotating token and resuming', async () => {
     appendTestEvent('products', { name: 'P1' });
 

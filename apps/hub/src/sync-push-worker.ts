@@ -219,11 +219,12 @@ export class HubSyncPushWorker {
 
       // P5: Differentiated 401 / 403 handling
       if (response.status === 401 || response.status === 403) {
-        if (
+        const isRevokedCode =
           body.code === 'DEVICE_REVOKED' ||
           body.code === 'DEVICE_BLOCKED' ||
-          response.status === 403
-        ) {
+          body.code === 'DEVICE_TOKEN_REUSE';
+
+        if (isRevokedCode) {
           await this.cloudStore.updateCloudStatus('revoked', nowMs);
           this.stop();
           return {

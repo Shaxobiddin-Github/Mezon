@@ -123,6 +123,21 @@ export class SqliteCloudStore {
     txn();
   }
 
+  async updateEncryptedDeviceToken(encryptedDeviceToken: string, nowMs: UnixMs): Promise<void> {
+    await Promise.resolve();
+    const txn = this.connection.sqlite.transaction(() => {
+      this.connection.db
+        .update(localCloudState)
+        .set({
+          encryptedDeviceToken,
+          updatedAtMs: nowMs,
+        })
+        .where(eq(localCloudState.singletonGuard, 1))
+        .run();
+    });
+    txn();
+  }
+
   private writeCloudStateSync(
     db: BetterSQLite3Database<Record<string, unknown>>,
     params: SaveCloudStateParams,

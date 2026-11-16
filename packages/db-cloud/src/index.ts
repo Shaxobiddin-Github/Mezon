@@ -26,9 +26,12 @@ export {
   type PgTableDefinitionOptions,
   type PgTableMetadata,
   type PgCommonColumns,
+  type CloudForeignKeyRef,
   PgSchemaValidationError,
   PgSchemaRegistry,
   validatePgSchemaRegistry,
+  snakeToCamel,
+  buildDrizzleForeignReferencesMap,
 } from './registry.js';
 
 export {

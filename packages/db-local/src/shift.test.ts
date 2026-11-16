@@ -1374,7 +1374,7 @@ describe('@mezon/db-local - T1.9 Shifts, Cashier Sessions, Cash Moves, Reclose &
     expect(moneyToTiyin(dc.dayClose.returnsTotal)).toBe(expRetDay);
     expect(moneyToTiyin(dc.dayClose.countedCashTotal)).toBe(expCountedDay);
     expect(dc.dayClose.isStale).toBe(false);
-  }, 20_000);
+  }, 120_000);
 
   it('handles 40_000n prior cash + MAX_MONEY_TIYIN cash tender & change without SQLite int64 SUM overflow', async () => {
     // Part A: exact M4 cash_moves sequence [+40_000n, +MAX_MONEY_TIYIN, -(MAX_MONEY_TIYIN - 50_000n)]

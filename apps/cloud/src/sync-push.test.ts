@@ -10,6 +10,7 @@ import {
   CloudDeviceStore,
   CloudSyncPushStore,
   CloudTenantStore,
+  categories,
   cloudStoreSyncPositions,
   cloudSyncEvents,
   cloudSyncParked,
@@ -648,6 +649,15 @@ describePg('@mezon/cloud - Sync Push Engine (T2.3 & P1-P5)', () => {
 
     const bodyChild2 = pushChild2.json<SyncPushResponseDto>();
     expect(bodyChild2.results[0].status).toBe('accepted');
+
+    // R5: Verify parked row in cloud_sync_parked is deleted upon accepted
+    const parkedAfterAccepted = await adminConn.db
+      .select()
+      .from(cloudSyncParked)
+      .where(
+        and(eq(cloudSyncParked.organizationId, orgA), eq(cloudSyncParked.eventId, childEventId)),
+      );
+    expect(parkedAfterAccepted).toHaveLength(0);
   });
 
   // --------------------------------------------------------------------------
@@ -832,6 +842,42 @@ describePg('@mezon/cloud - Sync Push Engine (T2.3 & P1-P5)', () => {
     const body3 = res3.json<SyncPushResponseDto>();
     expect(body3.results[0].status).toBe('rejected');
     expect(body3.results[0].reason).toBe('INVALID_MONOTONE_TRANSITION');
+
+    // 5. R2: Mutation of immutable field (e.g. totalAmount on confirmed order) -> rejected (IMMUTABLE_FIELD_CHANGED)
+    const mutateImmutableEventId = idGen.nextId();
+    const resMutate = await server.inject({
+      method: 'POST',
+      url: '/api/v1/sync/push',
+      headers: { authorization: `Bearer ${deviceTokenA}` },
+      payload: {
+        clientVersion: '1.0.0',
+        storeId: storeA,
+        deviceId: deviceA,
+        events: [
+          {
+            eventId: mutateImmutableEventId,
+            organizationId: orgA,
+            storeId: storeA,
+            deviceId: deviceA,
+            deviceSeq: '505',
+            hlc: '001700000000000:00004:018bcfe5-6800-7000-8000-000000000111',
+            type: 'orders.status_changed',
+            entity: 'orders',
+            entityId: orderId,
+            entityClass: 'MONOTONE',
+            schemaVersion: 1,
+            payload: {
+              ...confirmedPayload,
+              totalAmount: '999999', // MUTATING IMMUTABLE FIELD!
+              hlc: '001700000000000:00004:018bcfe5-6800-7000-8000-000000000111',
+            },
+          },
+        ],
+      },
+    });
+    const bodyMutate = resMutate.json<SyncPushResponseDto>();
+    expect(bodyMutate.results[0].status).toBe('rejected');
+    expect(bodyMutate.results[0].reason).toBe('IMMUTABLE_FIELD_CHANGED');
   });
 
   // --------------------------------------------------------------------------
@@ -945,6 +991,14 @@ describePg('@mezon/cloud - Sync Push Engine (T2.3 & P1-P5)', () => {
     expect(eventRow.hlcAdjusted).toBe(true);
     // Effective HLC must be clamped to nowMs physical timestamp
     expect(eventRow.hlc.startsWith(`00${nowMs}`)).toBe(true);
+
+    // R4: Assert domain table row itself also received the clamped HLC, not raw futureHlc
+    const [catRow] = await adminConn.db
+      .select()
+      .from(categories)
+      .where(and(eq(categories.organizationId, orgA), eq(categories.id, catId)));
+    expect(catRow.hlc).toBe(eventRow.hlc);
+    expect(catRow.hlc).not.toBe(futureHlc);
   });
 
   // --------------------------------------------------------------------------
@@ -1022,6 +1076,204 @@ describePg('@mezon/cloud - Sync Push Engine (T2.3 & P1-P5)', () => {
     console.log(
       `Sync Push Throughput Benchmark: ${BATCH_SIZE} events processed in ${elapsedMs.toFixed(2)}ms (~${throughput.toFixed(0)} events/sec)`,
     );
-    expect(throughput).toBeGreaterThan(25); // Generous lower bound for CI environments and concurrent runs
+    expect(throughput).toBeGreaterThan(100);
+  });
+
+  // --------------------------------------------------------------------------
+  // Test 11 (R1 Envelope vs Payload ID Mismatch):
+  // --------------------------------------------------------------------------
+  it('R1: rejects events where envelope entityId does not match payload id (ENVELOPE_PAYLOAD_MISMATCH)', async () => {
+    const eventId = idGen.nextId();
+    const catId1 = idGen.nextId();
+    const catId2 = idGen.nextId();
+
+    const pushRes = await server.inject({
+      method: 'POST',
+      url: '/api/v1/sync/push',
+      headers: { authorization: `Bearer ${deviceTokenA}` },
+      payload: {
+        clientVersion: '1.0.0',
+        storeId: storeA,
+        deviceId: deviceA,
+        events: [
+          {
+            eventId,
+            organizationId: orgA,
+            storeId: storeA,
+            deviceId: deviceA,
+            deviceSeq: '1101',
+            hlc: '001700000000000:00000:018bcfe5-6800-7000-8000-000000000111',
+            type: 'categories.created',
+            entity: 'categories',
+            entityId: catId1, // Mismatched envelope entityId!
+            entityClass: 'ATTR',
+            schemaVersion: 1,
+            payload: makeCategoryPayload(catId2, 'Mismatched Envelope Cat'), // payload.id is catId2
+          },
+        ],
+      },
+    });
+
+    const body = pushRes.json<SyncPushResponseDto>();
+    expect(body.results[0].status).toBe('rejected');
+    expect(body.results[0].reason).toBe('ENVELOPE_PAYLOAD_MISMATCH');
+  });
+
+  // --------------------------------------------------------------------------
+  // Test 12 (R1 Store Mismatch for store-scoped table):
+  // --------------------------------------------------------------------------
+  it('R1: rejects events where store-scoped payload storeId does not match device store context (STORE_MISMATCH)', async () => {
+    const eventId = idGen.nextId();
+    const orderId = idGen.nextId();
+
+    const orderPayload = {
+      id: orderId,
+      organizationId: orgA,
+      storeId: storeB, // Illegal store context: storeB when authenticated for storeA!
+      originDeviceId: deviceA,
+      orderNo: '101',
+      orderCode: 'ORD-101',
+      status: 'draft',
+      customerId: null,
+      customerName: 'Alisher Navoiy',
+      customerPhoneNormalized: null,
+      dueAtMs: null,
+      note: null,
+      subtotalGross: '50000',
+      totalPromoDiscount: '0',
+      subtotalAfterPromo: '50000',
+      manualDiscountMode: 'none',
+      manualDiscountValue: '0',
+      manualDiscountReason: null,
+      orderDiscountAmount: '0',
+      totalAmount: '50000',
+      totalNetExVat: '44643',
+      totalVat: '5357',
+      overrideApprovedByUserId: null,
+      overrideApprovedAmount: null,
+      createdByUserId: ownerA,
+      confirmedAtMs: null,
+      readyAtMs: null,
+      deliveredAtMs: null,
+      deliveredSaleId: null,
+      cancelledAtMs: null,
+      cancelledByUserId: null,
+      cancelReason: null,
+      createClientRequestId: idGen.nextId(),
+      createRequestHash: 'hash123456',
+      confirmClientRequestId: null,
+      confirmRequestHash: null,
+      readyClientRequestId: null,
+      readyRequestHash: null,
+      deliverClientRequestId: null,
+      deliverRequestHash: null,
+      cancelClientRequestId: null,
+      cancelRequestHash: null,
+      deviceId: deviceA,
+      hlc: '001700000000000:00000:018bcfe5-6800-7000-8000-000000000111',
+      createdAtMs: '1700000000000',
+      updatedAtMs: '1700000000000',
+    };
+
+    const pushRes = await server.inject({
+      method: 'POST',
+      url: '/api/v1/sync/push',
+      headers: { authorization: `Bearer ${deviceTokenA}` },
+      payload: {
+        clientVersion: '1.0.0',
+        storeId: storeA,
+        deviceId: deviceA,
+        events: [
+          {
+            eventId,
+            organizationId: orgA,
+            storeId: storeA,
+            deviceId: deviceA,
+            deviceSeq: '1102',
+            hlc: '001700000000000:00000:018bcfe5-6800-7000-8000-000000000111',
+            type: 'orders.created',
+            entity: 'orders',
+            entityId: orderId,
+            entityClass: 'MONOTONE',
+            schemaVersion: 1,
+            payload: orderPayload,
+          },
+        ],
+      },
+    });
+
+    const body = pushRes.json<SyncPushResponseDto>();
+    expect(body.results[0].status).toBe('rejected');
+    expect(body.results[0].reason).toBe('STORE_MISMATCH');
+  });
+
+  // --------------------------------------------------------------------------
+  // Test 13 (R5 Dependency Unresolved Conflict):
+  // --------------------------------------------------------------------------
+  it('R5: marks parked event as conflict and returns rejected: DEPENDENCY_UNRESOLVED after 20 attempts', async () => {
+    const parentCatId = idGen.nextId();
+    const childProdId = idGen.nextId();
+    const childEventId = idGen.nextId();
+    const unresolvedPayload = makeProductPayload(childProdId, parentCatId, 'Unresolved Product');
+
+    // Seed 20 attempts directly in cloudSyncParked
+    await adminConn.db.insert(cloudSyncParked).values({
+      id: idGen.nextId(),
+      organizationId: orgA,
+      storeId: storeA,
+      deviceId: deviceA,
+      eventId: childEventId,
+      entity: 'products',
+      entityId: childProdId,
+      missingRefEntity: 'categories',
+      missingRefId: parentCatId,
+      attempts: 20,
+      eventPayload: JSON.stringify(unresolvedPayload),
+      status: 'parked',
+      createdAtMs: nowMs,
+      updatedAtMs: nowMs,
+    });
+
+    // 21st attempt -> exceeds 20 attempts threshold!
+    const pushRes = await server.inject({
+      method: 'POST',
+      url: '/api/v1/sync/push',
+      headers: { authorization: `Bearer ${deviceTokenA}` },
+      payload: {
+        clientVersion: '1.0.0',
+        storeId: storeA,
+        deviceId: deviceA,
+        events: [
+          {
+            eventId: childEventId,
+            organizationId: orgA,
+            storeId: storeA,
+            deviceId: deviceA,
+            deviceSeq: '1103',
+            hlc: '001700000000000:00000:018bcfe5-6800-7000-8000-000000000111',
+            type: 'products.created',
+            entity: 'products',
+            entityId: childProdId,
+            entityClass: 'ATTR',
+            schemaVersion: 1,
+            payload: makeProductPayload(childProdId, parentCatId, 'Unresolved Product'),
+          },
+        ],
+      },
+    });
+
+    const body = pushRes.json<SyncPushResponseDto>();
+    expect(body.results[0].status).toBe('rejected');
+    expect(body.results[0].reason).toBe('DEPENDENCY_UNRESOLVED');
+
+    // Verify row status is updated to 'conflict'
+    const [parkedRow] = await adminConn.db
+      .select()
+      .from(cloudSyncParked)
+      .where(
+        and(eq(cloudSyncParked.organizationId, orgA), eq(cloudSyncParked.eventId, childEventId)),
+      );
+    expect(parkedRow.status).toBe('conflict');
+    expect(parkedRow.attempts).toBe(21);
   });
 });
