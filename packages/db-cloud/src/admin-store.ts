@@ -67,7 +67,7 @@ export interface CloudReceiptItem {
 
 export interface CloudReceiptLine {
   readonly id: UuidV7;
-  readonly productId: UuidV7;
+  readonly productId: UuidV7 | null;
   readonly productName: string;
   readonly sku: string | null;
   readonly barcode: string | null;
@@ -518,26 +518,27 @@ export class AdminReadStore {
 
       const linesSql = `
         SELECT
-          id,
-          product_id,
-          item_name,
-          sku,
-          barcode,
-          unit,
-          qty,
-          unit_price_snapshot,
-          final_total,
-          vat_rate_bp_snapshot,
-          vat_total,
-          promo_discount,
-          mxik_snapshot
-        FROM sale_lines
-        WHERE organization_id = $1 AND sale_id = $2
-        ORDER BY sort_order ASC
+          l.id,
+          l.product_id,
+          l.item_name,
+          p.sku,
+          NULL::text AS barcode,
+          l.unit,
+          l.qty,
+          l.unit_price_snapshot,
+          l.final_total,
+          l.vat_rate_bp_snapshot,
+          l.vat_total,
+          l.promo_discount,
+          l.mxik_snapshot
+        FROM sale_lines l
+        LEFT JOIN products p ON p.id = l.product_id AND p.organization_id = l.organization_id
+        WHERE l.organization_id = $1 AND l.sale_id = $2
+        ORDER BY l.sort_order ASC
       `;
       const linesRes = await client.query<{
         id: string;
-        product_id: string;
+        product_id: string | null;
         item_name: string;
         sku: string | null;
         barcode: string | null;
@@ -553,7 +554,7 @@ export class AdminReadStore {
 
       const lines: CloudReceiptLine[] = linesRes.rows.map((l) => ({
         id: parseUuidV7(l.id),
-        productId: parseUuidV7(l.product_id),
+        productId: l.product_id ? parseUuidV7(l.product_id) : null,
         productName: l.item_name,
         sku: l.sku,
         barcode: l.barcode,

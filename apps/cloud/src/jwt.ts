@@ -4,7 +4,7 @@ import { SignJWT, jwtVerify } from 'jose';
 export interface CloudJwtPayload {
   readonly sub: UuidV7;
   readonly org: UuidV7;
-  readonly role: 'owner' | 'manager';
+  readonly role: 'owner' | 'manager' | 'cashier';
   readonly name: string;
 }
 
@@ -39,7 +39,7 @@ export class CloudJwtService {
     if (
       typeof payload.sub !== 'string' ||
       typeof payload.org !== 'string' ||
-      (payload.role !== 'owner' && payload.role !== 'manager') ||
+      (payload.role !== 'owner' && payload.role !== 'manager' && payload.role !== 'cashier') ||
       typeof payload.name !== 'string'
     ) {
       throw new Error('Invalid JWT claims');
@@ -48,7 +48,7 @@ export class CloudJwtService {
     return {
       sub: parseUuidV7(payload.sub),
       org: parseUuidV7(payload.org),
-      role: payload.role,
+      role: payload.role as 'owner' | 'manager' | 'cashier',
       name: payload.name,
     };
   }

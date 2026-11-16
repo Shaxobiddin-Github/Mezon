@@ -95,7 +95,7 @@ export type AdminReceiptsResponseDto = z.infer<typeof AdminReceiptsResponseSchem
 export const AdminReceiptLineSchema = z
   .object({
     id: UuidV7Schema,
-    productId: UuidV7Schema,
+    productId: UuidV7Schema.nullable(),
     productName: z.string(),
     sku: z.string().nullable(),
     barcode: z.string().nullable(),

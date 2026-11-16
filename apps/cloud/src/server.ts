@@ -22,6 +22,7 @@ import {
   type CloudUserDto,
 } from '@mezon/contracts';
 import {
+  AdminReadStore,
   CloudAuthStore,
   CloudDeviceStore,
   CloudSyncPushStore,
@@ -30,6 +31,7 @@ import {
   type VerifiedDeviceContext,
   assertNonSuperuserNonBypassRls,
 } from '@mezon/db-cloud';
+import { registerAdminRoutes } from './admin-routes.js';
 import {
   MIN_CLIENT_VERSION,
   SyncPushRequestSchema,
@@ -67,6 +69,7 @@ export interface BuildServerOptions {
   readonly tenantStore?: CloudTenantStore;
   readonly deviceStore?: CloudDeviceStore;
   readonly syncPushStore?: CloudSyncPushStore;
+  readonly adminStore?: AdminReadStore;
   readonly idGen?: { nextId(): UuidV7 };
   readonly clock?: { nowMs(): UnixMs };
 }
@@ -85,6 +88,7 @@ export async function buildCloudServer(options: BuildServerOptions): Promise<Fas
   const tenantStore = options.tenantStore ?? new CloudTenantStore(conn.pool);
   const deviceStore = options.deviceStore ?? new CloudDeviceStore(conn.pool);
   const syncPushStore = options.syncPushStore ?? new CloudSyncPushStore(conn.pool);
+  const adminStore = options.adminStore ?? new AdminReadStore({ pool: conn.pool });
   const defaultIdGen: IdGenerator = new MonotonicUuidV7Generator({
     clock: { now: () => unixMsFromBigInt(BigInt(Date.now())) },
     random: { nextBytes: (n: number) => randomBytes(n) },
@@ -389,7 +393,7 @@ export async function buildCloudServer(options: BuildServerOptions): Promise<Fas
       id: auth.sub,
       organizationId: auth.org,
       username: auth.name,
-      role: auth.role,
+      role: auth.role as 'owner' | 'manager',
     };
 
     return reply.code(200).send({ user });
@@ -829,6 +833,16 @@ export async function buildCloudServer(options: BuildServerOptions): Promise<Fas
     });
 
     return reply.code(200).send(result);
+  });
+
+  // Admin Cabinet API routes (T2.7a)
+  await registerAdminRoutes(app, {
+    config,
+    conn,
+    jwtService,
+    authStore,
+    adminStore,
+    clock,
   });
 
   return app;
