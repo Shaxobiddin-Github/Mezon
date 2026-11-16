@@ -1,128 +1,86 @@
-# Claude xulosasi: T2.3 — QAYTA ISHLASH
+# Claude xulosasi: T2.3 qayta ishlash — KICHIK QAYTA ISHLASH
 
-Tekshirildi: `a571857` (`e372798` kodi). Toza klonda, PostgreSQL testlari Docker bilan.
+Tekshirildi: `91b3f1c` (kod `34aa5e1`). Toza klonda, PostgreSQL testlari Docker bilan.
 
-**Yaxshi qismlar:**
+**Natija:**
 
-- Savepoint izolyatsiyasi va bo'shliqsiz pozitsiya (P1) ishlaydi.
-- Begona tenant havolasi `rejected` bo'ladi.
-- `TOKEN_EXPIRED` va `DEVICE_REVOKED` ajratiladi.
-- `426` ishlaydi.
-- `pin_hash` rad etiladi.
-- 10 ta bulut testi o'tadi.
+- `MEZON_REQUIRE_PG_TESTS=1 pnpm verify` yashil: 84 fayl, 418 test, PG testlari skip qilinmagan.
+- PR #23 CI: to'rtala job yashil.
+- Birinchi tekshiruvdagi 5 ta sinov testim, qo'shimcha MONOTONE qayta yuborish va FK xaritasi stsenariylari bilan birga **7/7 o'tdi**.
+- R1–R7 haqiqatan tuzatilgan. FK xaritasi Drizzle'dan avtomatik olinadi, sxema mosligi testi va hub-bulut integratsion testi yaxshi.
 
-Lekin sinov testlarim bilan **5 ta jiddiy xato tasdiqlandi**. Bundan tashqari, push worker hub'da umuman ishga tushmaydi. Hammasi quyida.
+**Diqqat:** hisobotingda "52 PG testi skip qilingan" deyilgan. Docker endi bu kompyuterda ishlaydi. Keyingi safar `verify` ni `MEZON_REQUIRE_PG_TESTS=1` bilan ishga tushir. Busiz bulut testlari lokal tekshirilmaydi.
 
-PR hali ochilmagan, CI ishlamagan. Bajarish tartibining 3-qadami bajarilmagan.
+**Mutatsiyalarim** (10 ta):
 
-**`pnpm verify` (PG bilan):**
+| Natija | Mutatsiyalar |
+|---|---|
+| Aniqlandi | envelope id, do'kon doirasi, o'zgarmas maydon, park tozalash, 20 urinish chegarasi, FK reflection, 403 farqlash |
+| **Omon qoldi** | 2 ta (F1 va F2) |
+| Zararsiz | 1 ta (pastda) |
 
-- 407 ta test o'tdi, 2 tasi yiqildi: `return.test.ts` dagi V4.1 va `shift.test.ts` dagi model testi, ikkalasi 20 soniyalik timeout'dan oshdi.
-- Bu ikki test alohida ishga tushirilganda ham T2.3 da, ham `main` da o'tadi. Demak, sabab yuk: Docker'dagi PG testlari ular bilan parallel ishlaydi.
-- CI'da ham tasodifiy yiqilishi mumkin. Shu ikki og'ir testning timeout'ini 120 soniyaga ko'tar, oldingi stock property testida qilganimiz kabi.
+## Tuzatishlar
 
-## Tasdiqlangan xatolar (har biriga sinov testi yozildi va yiqildi)
+### F1. `23503` va vaqtinchalik xatolar tarmog'i hech qachon ishlamaydi (haqiqiy xato)
 
-### R1. Envelope va payload bog'lanmagan: do'kon izolyatsiyasi buzilgan
+`catch` ichida `err.code` o'qiladi. Lekin drizzle-orm 0.45 har xatoni `DrizzleQueryError` ga o'raydi (`pg-core/session.js`: `throw new DrizzleQueryError(queryString, params, e)`). PostgreSQL kodi `err.cause.code` da bo'ladi. Natijada:
 
-- `entityId = A`, `payload.id = B` bo'lgan `categories` hodisasi → `accepted`. Natijada jadvalda `B` yozuvi paydo bo'ldi, LWW va MONOTONE esa `A` bo'yicha tekshiradi.
-- Store A qurilmasi `payload.storeId = <boshqa do'kon>` bo'lgan `orders` hodisasini yubordi → `accepted`. Envelope'dagi `storeId` A edi. Yagona yozuvchi qoidasi ham faqat envelope'ni tekshiradi. Demak, `stock_moves` va `batches` uchun ham payload orqali aylanib o'tish mumkin.
+- `23503` → park → `retry` tarmog'i ishlamaydi;
+- `40001`, `40P01`, `55P03`, `57014` → `retry` tarmog'i ham ishlamaydi;
+- bu xatolarning hammasi `SQL_ERROR` bilan **doimiy rejected** bo'lib ketadi.
 
-**Talab:**
-- `payload.id === entityId`;
-- `payload.organizationId === ctx.org`;
-- do'konga bog'liq jadvallarda `payload.storeId === ctx.storeId`. Qaysi jadval do'konga bog'liqligi sxema registridan olinadi;
-- yagona yozuvchi tekshiruvi payload'dagi `storeId` bo'yicha;
-- buzilsa `rejected`: `ENVELOPE_PAYLOAD_MISMATCH` yoki `STORE_MISMATCH`.
-
-### R2. MONOTONE o'tishi bilan o'zgarmas maydonlar qayta yoziladi
-
-`orders` uchun `draft→confirmed` hodisasi `totalAmount: '1'` bilan yuborildi → `accepted`, bulutda `total_amount = 1` (oldin 50000 edi).
-
-`applyEventToDomainTable` MONOTONE yangilanishda payload'dagi **barcha** maydonlarni yozadi. `sales` da `voided_at_ms` o'zgarmasa ham xuddi shunday: bekor qilinmagan chekni qayta yuborib, summalarni o'zgartirish mumkin.
-
-Bundan tashqari, `shift_cashier_sessions` va `inventory_count_lines` MONOTONE, lekin `MONOTONE_TRANSITION_RULES` da ular uchun qoida yo'q. `if (!rule) return 'accepted'` tufayli ularda istalgan o'zgarish o'tadi.
+Mutatsiyada 23503 tarmog'ini olib tashladim: hech bir test yiqilmadi.
 
 **Talab:**
-- Har MONOTONE jadval uchun qoida metadata'sida holat ustuni va unga hamroh maydonlar ro'yxati bo'lsin, masalan `confirmedAtMs`, `cancelledByUserId`, `cancelReason`. Faqat shu maydonlar o'zgarishi mumkin.
-- Boshqa maydon mavjud qiymatdan farq qilsa → `rejected` (`IMMUTABLE_FIELD_CHANGED`).
-- Qoidasi yo'q MONOTONE jadval **rad etilsin**, `accepted` emas.
-- Registrga asoslangan test: registrdagi har MONOTONE jadval uchun qoida bor.
-- P3 dagi "bir xil manba" talabi bajarilmagan: lokal SQLite triggerlari bu qoidalarni ishlatmaydi. Kamida jadvalga asoslangan test bo'lsin: har qoidaning ruxsatli va ruxsatsiz o'tishi **lokal SQLite'da ham** bir xil natija bersin (trigger ruxsat beradi yoki bloklaydi).
 
-### R3. Havolalar xaritasi qo'lda yozilgan va yarmi yo'q
+- `pgErrorCode(err)` funksiyasi `err.code` ni ham, `err.cause.code` ni ham (ichma-ich) o'qisin.
+- Unit test: o'ralgan va o'ralmagan xatolar uchun `23503`, `40P01` va `23514` to'g'ri tasniflanadi.
+- **Integratsion test (haqiqiy 23503):**
+  1. Ota `categories` push qilinadi.
+  2. Test admin ulanishi bilan ota qatorni domen jadvalidan o'chiradi. `cloud_sync_events` dagi yozuv qoladi, shuning uchun havola tekshiruvi o'tadi.
+  3. Bola `products` push qilinadi.
+  4. Kutilgan natija: `retry`, `cloud_sync_parked` da qator bor, pozitsiya oshmagan.
 
-`0003_sync_engine.sql` da 101 ta FK bor. `SYNC_FOREIGN_REFERENCES` ulardan **50 tasini qamramaydi**. Ba'zi kalitlar umuman noto'g'ri, masalan `stock_moves.performedByUserId` (haqiqiy ustun `created_by_user_id`) va `shift_closure_method_totals.closureId` (haqiqiy ustun `shift_closure_id`). Yetishmaydiganlar orasida:
+### F2. Worker `listen()` da ishga tushishi testlanmagan
 
-- `shifts.opened_by_user_id`, `sales.voided_by_user_id`;
-- `returns.sale_id`, `orders.delivered_sale_id`;
-- `cash_moves.payment_id`, `customer_ledger.sale_id`;
-- `promotions.target_product_id`.
+`server.ts` dagi `pushWorker.start()` ni olib tashlasam, hamma test o'tadi: integratsion test `pushBatch()` ni o'zi chaqiradi.
 
-Natijada boshqa hub'dan hali kelmagan ota yozuv FK xatosini beradi. Hodisa `SQL_ERROR` bilan **doimiy `rejected`** bo'ladi va ma'lumot yo'qoladi. Aynan P2 nimaga qarshi yozilgan bo'lsa, shu yuz beryapti.
+**Talab:** test qo'sh:
 
-**Talab:**
-- Xarita **Drizzle FK metadata'sidan avtomatik** yasalsin (`getTableConfig(table).foreignKeys`). Test: har FK xaritada bor.
-- Zaxira sifatida SQLSTATE `23503` (`foreign_key_violation`) → `retry` va park.
-- Vaqtinchalik xatolar `40001`, `40P01`, `55P03`, `57014` va ulanish uzilishi → `retry`.
-- Faqat `23514` (CHECK), `23502` va shunga o'xshash doimiy xatolar → `rejected`.
+- `listen()` dan keyin worker ishlayotgan bo'lsin (`isRunning()`), `close()` dan keyin to'xtagan bo'lsin;
+- yoki integratsion testda `pushBatch()` qo'lda chaqirilmasin, outbox avtomatik `acked` bo'lishi kutilsin.
 
-### R4. HLC clamp jadval qatoriga yetmaydi
+### Zararsiz omon qolgan mutatsiya
 
-Kelajakdagi HLC (`1900000000000`) bilan `categories` qatori qo'shildi. `cloud_sync_events.hlc` clamp qilindi (`hlc_adjusted = true`), lekin `categories.hlc` = `001900000000000...`, ya'ni clamp qilinmagan.
+`missing_rule` tarmog'i hozir ishlamaydi, chunki 6 ta MONOTONE jadvalning hammasida qoida bor. Uni olib tashlash testni yiqitmaydi. Sxema mosligi testi har MONOTONE jadvalda qoida borligini tekshirsa, yetarli. Agar tekshirmasa, shu tekshiruvni qo'sh.
 
-INSERT yo'li payload'dagi `hlc` ni to'g'ridan-to'g'ri yozadi. Bunday yozuv LWW'da abadiy g'olib bo'ladi: aynan `MAX_SKEW` shundan himoya qilishi kerak edi.
+## Merge tartibi: T3.1 birinchi tushadi
 
-**Talab:** jadvalga INSERT va UPDATE har doim `effectiveHlc` ni yozadi, payload'dagi `hlc` e'tiborga olinmaydi.
+Ikkinchi bajaruvchi (ishchi2, `.mezon/ALOQA.md` ga qara) T3.1 ni (PR #24, MXIK va soliq sozlamalari) tugatdi va u qabul qilindi. **T3.1 `main` ga birinchi tushadi**, u lokal migratsiya `0015_org_tax_mxik` va yangi ATTR jadval `organization_tax_profiles` ni qo'shadi.
 
-### R5. Park mexanizmi yakunlanmaydi
+PR #24 merge qilingach (`main` ni kuzat):
 
-- Ota yozuv kelib, hodisa `accepted` bo'lgach ham `cloud_sync_parked` da qator `status = 'parked'` bo'lib qoladi. Hisobotda "parked'dan o'chirildi" deyilgan, bu **noto'g'ri**: kodda o'chirish yoki yakunlash yo'q.
-- 22 marta urinishdan keyin ham javob `retry`. `status = 'conflict'` faqat jadvalda yoziladi, hub esa hodisani abadiy qayta yuboradi.
+1. `gemini/T2.3-sync-push` ni `origin/main` ga **rebase** qil.
+   - Lokal migratsiyang `0015_sync_conflicts` → **`0016`** ga o'tadi.
+   - Drizzle jurnalini qayta yarat va migratsiyalar sonini testlarda yangila.
+2. **`organization_tax_profiles` bulut jufti senga topshiriladi:**
+   - `packages/db-cloud` domen jadvali (ATTR, organization scope, `id = organization_id` CHECK, `updated_by_user_id` FK → `users`);
+   - bulut migratsiyasi;
+   - `contracts/src/sync.ts` dagi Zod sxemasi.
+   - Sxema mosligi testing buni baribir talab qiladi.
+   - Hodisa turlari: `organization_tax_profile.created`, `.updated` va **`.restored`**. `.restored` tombstone qatorni qayta tiklaydi (`deleted_at_ms = NULL`). Bulut ATTR LWW yo'li buni to'g'ri qo'llashini test bilan ko'rsat.
+3. ishchi2'ning fayllariga (`.mezon/ishchi2/*`, `.mezon/claude/TOPSHIRIQ-ishchi2.md`) tegma.
 
-**Talab:**
-- `accepted` bo'lganda park qatori yakunlanadi: `resolved` yoki o'chiriladi.
-- 20 urinishdan keyin javob `rejected` (`DEPENDENCY_UNRESOLVED`) bo'ladi, hub hodisani `local_sync_conflicts` ga o'tkazadi.
-
-### R6. Push worker hub'da ishga tushirilmaydi
-
-`HubSyncPushWorker` faqat `index.ts` dan eksport qilingan. `createHubServer` ham, Electron ham uni yaratmaydi. Mahsulotda bironta hodisa bulutga ketmaydi.
-
-**Talab:**
-- Hub bulutga juftlangan bo'lsa (`local_cloud_state` faol), worker avtomatik ishga tushadi va `close()` da to'xtaydi.
-- Token T2.2 token saqlovchisidan olinadi. Rotatsiyadan keyin yangi token saqlanadi.
-- **Integratsion test:** hub va haqiqiy bulut (Testcontainers) → savdo → outbox `acked` → bulutda `sales` va `cloud_sync_events` paydo bo'ladi.
-
-Qo'shimcha:
-- Kodsiz `403` → `revoked` bo'lmasin. Faqat aniq kodlar: `DEVICE_REVOKED`, `DEVICE_BLOCKED`, `DEVICE_TOKEN_REUSE`.
-- Boshqa `403` → backoff va xato qayd etiladi.
-
-### R7. Payload sxemalari sxema registridan uzilgan
-
-36 ta Zod sxemasi qo'lda yozilgan, ularning lokal va bulut jadvallariga mosligini tekshiruvchi test yo'q. ishchi2 hozir T3.1 da yangi ustunlar qo'shyapti. Sxema eskirsa, har yangi ustunli hodisa `VALIDATION_ERROR` bilan **doimiy rad etiladi**.
-
-**Talab:**
-- Test: har sinxron jadval uchun Zod sxemasi kalitlari = lokal jadval ustunlari (camelCase) = bulut jadval ustunlari.
-- Imkon bo'lsa, sxemalar registrdan generatsiya qilinsin.
-
-## Kichik tuzatishlar
-
-- `sync_check_cross_tenant_entity` SECURITY DEFINER, lekin egasi migratsiya superuser'i. `OWNER TO mezon_auth_owner` qil, `auth_lookup_*` bilan bir xil bo'lsin. `REVOKE EXECUTE ... FROM PUBLIC` qo'sh.
-- Benchmark testida chegara `> 25`, hisobotda esa "talab > 100". Chegara bilan hisobotni moslashtir.
+Agar PR #24 hali merge qilinmagan bo'lsa, avval F1 va F2 ni qil, keyin merge'ni kut.
 
 ## Bajarish tartibi
 
-1. R1–R7 va kichik tuzatishlar. Har biriga test, birinchi navbatda yuqoridagi 5 ta sinov stsenariysi aynan:
-   - entityId ≠ payload.id;
-   - payload'da boshqa `storeId`;
-   - MONOTONE bilan summani o'zgartirish;
-   - kelajakdagi HLC jadval qatorida;
-   - park yakunlanishi va 20+ urinish.
-2. Lokal `pnpm verify` (PG testlari bilan) yashil.
-3. Commit qil, push qil va **PR och**. To'rtala CI job yashil bo'lsin.
+1. F1, F2 va zararsiz mutatsiya bo'yicha tekshiruv. Rebase va bulut jufti.
+2. `MEZON_REQUIRE_PG_TESTS=1 pnpm verify` yashil.
+3. Push qil. PR #23 da CI yashil bo'lsin.
 4. Hisobot `[gemini-hisobot] T2.3`:
-   - har R uchun test nomi;
-   - mutatsiya dalillari: payload bog'lash tekshiruvini, MONOTONE o'zgarmas maydon tekshiruvini, `23503 → retry` ni va clamp'ni o'chirsa, qaysi test yiqiladi;
-   - FK xaritasi qamrovi testi;
-   - hub-bulut integratsion testi.
+   - F1 va F2 test nomlari;
+   - 23503 mutatsiyasi endi aniqlanishi;
+   - rebase natijasi (migratsiya raqamlari);
+   - soliq jadvali bulut jufti testi.
 5. `node .mezon/kutish.mjs` ni ishga tushir. Merge qilma.
