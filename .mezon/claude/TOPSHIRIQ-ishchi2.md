@@ -1,112 +1,65 @@
-# Nazoratchi xulosasi (ishchi2): T3.1 — QABUL. Keyingi: T3.2 rejasi
+# Nazoratchi xulosasi (ishchi2): T3.2 rejasi — T3.2a TASDIQLANDI (tuzatishlar bilan)
 
-## T3.1 — QABUL
+**T3.1 merge tekshiruvi:**
 
-Tekshirildi: `54b3618` (kod `520ce31`).
+- `main` = `19118df`, daraxt `5704ed0` ga teng.
+- `main` dagi CI yashil.
+- `ishchi2/T3.1-mxik` branch'ini **o'chirishga ruxsat**: `git push origin --delete ishchi2/T3.1-mxik`. Bundan keyin merge qilingan branch'larni o'zing o'chirasan (§3.6).
 
-- **K1:** buyurtma yo'li testi MU1 va MU2 ni ushlaydi.
-- **K2:** tombstone qatorni tiklash to'g'ri tanlov. CHECK sinxron orqali kelgan tombstone'ni SQL xatosiga aylantirgan bo'lardi. `restoreAttr` faqat `allowTombstoned` bayrog'i bilan ishlaydi, boshqa writer'lar o'zgarmagan.
-- `restored` hodisa turini bulut tomoni ham qabul qilishi kerak. Buni Gemini'ga yetkazaman.
+Reja juda kuchli:
 
-### Merge ko'rsatmasi
+- haqiqiy qoida ma'lumoti paketda, kodda faqat sintetik qiymatlar;
+- `keyId` imzo ichida;
+- rollback himoyasi;
+- har yuklashda qayta tekshiruv;
+- UI'da imzo tekshiruvi yo'q, ishonch chegarasi hub;
+- bitta `completeSaleCoreInTxSync` nuqtasi;
+- PII maskalash.
 
-1. PR #24 ning **oxirgi commit'idagi** to'rtala CI job yashil bo'lishini kut. Desktop installer skip bo'lsa, bu normal.
-2. Qizil job bo'lsa, merge qilma. Tuzat va hisobotda yoz.
-3. Yashil bo'lsa:
-   ```
-   gh pr merge 24 --squash --subject "T3.1: MXIK va soliq sozlamalari"
-   ```
-4. Keyin:
-   ```
-   git checkout main
-   git pull --ff-only
-   ```
-   `main` daraxti PR'ning oxirgi commit daraxtiga teng ekanini tekshir: `git diff <oxirgi-commit> main --stat` bo'sh chiqishi kerak.
-5. `main` dan yangi branch och: `git checkout -b ishchi2/T3.2-rules`.
+## Nazoratchi qarorlari
 
-## T3.2 — Qoidalar dvigateli: REJA
+- **S12: ha, ikkiga bo'lamiz.**
+  - **T3.2a hozir:** paket formati, kanonik serializatsiya, imzo, import va saqlash, holatlar (8-bo'lim), `evaluate` karkasi, paketsiz qoidalar (`EXPIRED_GOODS`, `SOCIAL_CARD_DATA_REQUIRED`), `completeSale` va `deliver` integratsiyasi, `rules-check`, UI paneli, imzolash CLI'si.
+  - **T3.2b:** `CASH_FORBIDDEN_MXIK`, `MIXED_RECEIPT_CASHLESS`, `MXIK_CASH_LIMIT`, `PRESCRIPTION_REQUIRED`. Egasining S1, S3–S5, S7 va S8 javoblaridan keyin bajariladi. Paket formatidagi maydonlar T3.2a dayoq bo'lsin, lekin ularning semantikasi T3.2b ga qoladi.
+- **S11: port.** `db-local` qoidalarni bilmaydi. `completeSaleCoreInTxSync` `rulesEvaluator` portini oladi. Hub ikkala yo'l uchun bitta evaluator beradi.
+  - Port **majburiy** parametr bo'lsin, ixtiyoriy emas. Shunda yangi savdo yo'li qo'shilsa, evaluator'siz kompilyatsiya bo'lmaydi.
+  - Mutatsiya: evaluator `noop` ga almashtirilsa, testlar yiqiladi.
+- **S10: ha.** Fiskal rejimda paket `missing` yoki `invalid` bo'lsa → block. Fiskal rejim T3.3 gacha faqat testlarda yoqiladi.
+- **S9: o'zing qo'shasan, lekin T2.3 `main` ga tushgandan keyin.**
+  - T2.3 (Gemini, PR #23) deyarli tayyor, tez orada merge bo'ladi. Shundan keyin `main` da sxema mosligi testi va namunalar bo'ladi.
+  - Ruxsat faqat **o'z yangi sinxron ustunlaring yoki jadvallaring uchun**:
+    - `packages/db-cloud/src/schema/domain-tables.ts` ga ustun yoki jadval;
+    - bulut migratsiyasi;
+    - `packages/contracts/src/sync.ts` dagi payload sxemasi.
+  - `sync-push-store.ts`, worker va sinxron mantig'iga tegilmaydi.
+  - T2.3 merge bo'lguncha lokal qism ustida ishla. Rebase'dan keyin bulut juftini qo'sh.
+- **Rollback himoyasi va zaxira nusxa:** `max_rule_package_version` `local_hub_config` da. T1.13 dagi zaxiradan tiklashda u ham eskirib qolishi mumkin. Tiklashdan keyin import qilingan paketlar (`local_rule_packages`) dan maksimal versiyani qayta hisobla. Test bilan ko'rsat: tiklashdan keyin ham eski versiya rad etiladi.
 
-Hozir **faqat reja** yoz.
+## Qo'shimcha talablar
 
-Avval qayta o'qi:
+1. **Migratsiya raqami.** Gemini T2.3 da lokal migratsiyani `0016` ga ko'chiryapti. Sen PR ochishdan oldin `origin/main` ga rebase qil va **keyingi bo'sh raqamni** ol (ehtimol `0017`).
+2. **`trustedRuleKeys` faqat test va DI uchun.**
+   - Prod kodida (Electron worker) bu opsiya hech qachon berilmasligini test yoki depcruise bilan ko'rsat.
+   - `NODE_ENV=production` da opsiya berilsa, `createHubServer` xato tashlasin.
+3. **Faol paket o'zgarishi.** Import tranzaksiyasi: eski paketni nofaol qilish va yangisini faol qilish bitta tranzaksiyada bo'lsin. Parallel ikki import testi.
+4. **CLI.** `rules-sign.mjs keygen` repo ichidagi yo'lni rad etadi, testi bilan. Yangi kalitning fayl ruxsati iloji boricha cheklangan bo'lsin.
+5. **UI paneli.** Block bo'lsa, "Yakunlash" tugmasi o'chadi va sabab i18n orqali ko'rsatiladi. Final tekshiruv baribir hub'da: UI'ni chetlab o'tgan to'g'ridan-to'g'ri API so'rovi ham 422 oladi. Bu integratsion testda bo'lsin.
 
-- `GEMINI.md` 10-bo'limi: talablar jadvali va T3.2;
-- 3-bo'lim: §3.3 API o'ylab topmaslik qoidasi.
+## Egasiga yuborilgan savollar
 
-### Vazifa (GEMINI.md)
+S1–S8 egasiga yuborildi. Javoblar kelganda T3.2b topshirig'ida beraman. T3.2a ularni kutmaydi.
 
-`packages/rules`: `evaluate(cart, payments, context) → { block[], warn[] }`.
+S6 (ijtimoiy karta formati) T3.2a ga ta'sir qiladi. Javob kelguncha:
 
-- Qoidalar paketi imzolangan (Ed25519), versiyalangan va oflayn ishlaydi.
-- Qoidalar:
-  - naqd pul bloki;
-  - aralash chek;
-  - 25 mln limiti va istisnolar;
-  - retsept;
-  - ijtimoiy karta;
-  - yaroqlilik muddati.
-- UI va hub bir xil kodni ishlatadi. Yakuniy tekshiruv `completeSale` ichida.
-- Eskirgan paket ogohlantirish beradi.
+- uchala maydon majburiy, faqat bo'sh emasligi va uzunligi tekshiriladi;
+- raqam faqat maskalangan holda saqlanadi (oxirgi 4 raqam).
 
-**Mezonlar:**
+S2 (prod kalit) kelguncha prod ro'yxati bo'sh qoladi, ya'ni `missing` holati. Rejadagidek.
 
-- chegara qiymatli jadval testlari;
-- imzosiz paket rad etiladi;
-- API, bot va buyurtma yo'llari ham bloklanadi.
+## Bajarish tartibi
 
-### Rejada bo'lishi kerak
-
-1. **Paket formati.**
-   - JSON sxemasi (Zod): versiya, `issuedAt`, `validUntil`, qoidalar ma'lumotlari. Ma'lumotlar: taqiqlangan MXIK ro'yxati yoki prefikslari, retseptli MXIK'lar, ijtimoiy karta qoidalari, limitlar va istisnolar.
-   - Kanonik serializatsiya: imzo qaysi baytlarga qo'yiladi va qanday qilib deterministik bo'ladi.
-   - Muhim: **qoidalarning haqiqiy ma'lumoti (qaysi MXIK taqiqlangan) o'ylab topilmaydi**. Testlarda faqat sintetik ma'lumot ishlatiladi. Haqiqiy ro'yxat manbasi egasiga savol bo'ladi.
-2. **Imzo va kalitlar.**
-   - Ochiq kalit qayerda turadi: kodda, bir nechta kalit va rotatsiya bilan.
-   - Test kaliti va prod kaliti qanday ajratiladi.
-   - Prod maxfiy kaliti repoga **hech qachon** kirmaydi. Kim imzolaydi (bulut yoki egasining CLI'si) — egasiga savol.
-   - Imzolash CLI'si `scripts/` ga.
-   - Ed25519 uchun `node:crypto` yetarlimi, yangi kutubxona kerakmi? Brauzerda (POS UI) qanday tekshiriladi?
-3. **Paketni yetkazish.**
-   - T2.4 (pull) hali yo'q. Hozircha hub'ga fayl yoki endpoint orqali import qilinadi (faqat owner yoki manager).
-   - Saqlash: LOCAL jadval yoki fayl. Bir vaqtda faqat bitta faol versiya bo'ladi.
-   - Versiyani orqaga qaytarish taqiqlanadi (rollback himoyasi).
-4. **`evaluate` API.**
-   - Kirish ma'lumotlari: savat qatorlari (MXIK snapshot, miqdor, summa, partiya va yaroqlilik muddati), to'lovlar (usul, summa), kontekst (vaqt, paket, tashkilot sozlamalari).
-   - `block` va `warn` elementlarining tuzilishi: kod, qator, i18n kaliti.
-   - Toza funksiya bo'ladi: vaqt va soat parametr sifatida kiradi.
-5. **Har qoida uchun aniq semantika:**
-   - aralash chek: bitta taqiqlangan tovar bo'lsa, butun chek naqdsiz bo'ladi;
-   - 25 mln limiti **bitta chekdagi bitta MXIK** bo'yicha;
-   - qisman naqd to'lov qanday hisoblanadi;
-   - qaytarish va bekor qilish qoidalarga qanday ta'sir qiladi.
-   - Noaniq joyni **taxmin qilma**, egasiga savol qilib yoz.
-6. **Retsept va ijtimoiy karta ma'lumotlarini kiritish.**
-   - Qaysi maydonlar: karta turi, raqami, tranzaksiya raqami.
-   - Qayerda saqlanadi va PII qanday himoyalanadi: log'da maskalanadi, hisobotlarda ko'rinmaydi.
-   - Kassa UI'ga ta'siri.
-7. **Integratsiya nuqtalari:**
-   - `completeSale` dagi yakuniy tekshiruv;
-   - buyurtmani `deliver` qilish;
-   - API to'g'ridan-to'g'ri chaqirilganda;
-   - savat (UI ogohlantirishi).
-   - Hammasi bitta kodni ishlatishi isbotlansin.
-8. **Paket holatlari:**
-   - paket yo'q;
-   - muddati o'tgan (eskirgan);
-   - imzo buzilgan;
-   - versiya eskiroq.
-   - Har holatda savdo bloklanadimi yoki faqat ogohlantirish chiqadimi? Rejada asoslab ber. Fiskal rejim T3.3 da: hozir bayroq bilan.
-9. **Testlar.**
-   - Chegara jadvali: 25 mln − 1 / 25 mln / 25 mln + 1 tiyin, aralash, retsept, muddat chegarasi (aynan bugun yoki kecha).
-   - Property testlari.
-   - Imzo hujumlari: bir bayt o'zgartirilgan, boshqa kalit, eski versiya.
-   - Mutatsiya rejasi.
-10. **Bog'liqliklar.** `packages/rules` qaysi paketlarni import qiladi? depcruise qoidalari. Hub ham, POS ham ishlata olishi uchun domen-toza bo'lsin.
-
-### Bajarish tartibi
-
-1. Rejani `.mezon/ishchi2/HISOBOT.md` ga yoz. `[ishchi2-reja] T3.2` bilan commit qil va `ishchi2/T3.2-rules` ga push qil.
-2. Kutish skripti joriy branch'ni kuzatadi. Shuning uchun uni yangi branch'da ishga tushir:
-   ```
-   node .mezon/kutish.mjs 120 .mezon/claude/TOPSHIRIQ-ishchi2.md
-   ```
+1. T3.2a kodi va testlari. Mutatsiya rejasidagi, T3.2a ga tegishli bandlar.
+2. `pnpm verify` yashil.
+3. Push qil, PR och va CI yashil bo'lsin.
+4. Hisobot `[ishchi2-hisobot] T3.2a`.
+5. `node .mezon/kutish.mjs 120 .mezon/claude/TOPSHIRIQ-ishchi2.md`. Merge qilma.
