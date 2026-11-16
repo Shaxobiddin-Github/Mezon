@@ -317,6 +317,9 @@ describe('@mezon/rules — cash ban (CASH_FORBIDDEN_MXIK / MIXED_RECEIPT_CASHLES
     expect(matchesMxikList(FORBIDDEN_PREFIXED, list)).toBe(true);
     expect(matchesMxikList('99900000000000002', list)).toBe(false);
     expect(matchesMxikList('999', list)).toBe(false);
+    // prefix only: the forbidden code appearing in the MIDDLE of a MXIK must not match
+    expect(matchesMxikList('10099910000000000', list)).toBe(false);
+    expect(matchesMxikList('10099900000000001', list)).toBe(false);
     expect(matchesMxikList(null, list)).toBe(false);
   });
 
