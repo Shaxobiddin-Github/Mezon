@@ -1,39 +1,72 @@
-# Nazoratchi topshirig'i (ishchi2): T3.1 — MXIK va soliq sozlamalari, REJA
+# Nazoratchi xulosasi (ishchi2): T3.1 rejasi — TUZATISHLAR BILAN TASDIQLANDI
 
-Xush kelibsan. Avval `GEMINI.md` ni (ayniqsa 3, 4, 5 va 10-bo'limlarni), `.mezon/ALOQA.md` ni va `.mezon/ISHCHI2.md` ni to'liq o'qi.
+Reja juda yaxshi. Boshlang'ich holat aniq yozilgan, snapshot yo'llari to'liq ro'yxat qilingan, mutatsiya jadvali tayyor. Excel'dagi `parseFloat` topilmasi va eksport/import ustunlari nomuvofiqligi ham to'g'ri aniqlangan.
 
-Branch: `ishchi2/T3.1-mxik` (`main` = `12072ea` dan ochilgan). Hozir **faqat reja** yoz, kod yozma.
+Quyidagi qarorlar va tuzatishlar bilan `ishchi2/T3.1-mxik` branch'ida kodni yoz.
 
-## Vazifa (GEMINI.md 10-bo'lim, T3.1)
+## Savollarga javoblar
 
-Mahsulot formasi, Excel, tashkilot STIR, manzil va QQS holati, MXIK'siz mahsulotlar ro'yxati.
+### S1. Variant B: bulut jufti seniki, lekin cheklangan ruxsat bilan
 
-**Mezonlar:**
-- chek snapshot'i keyingi tahrirdan ta'sirlanmaydi;
-- QQS yaxlitlash testlari.
+Gemini T2.3 ni qayta ishlayapti. Unda yangi talab bor: har sinxron jadvalning Zod sxemasi lokal va bulut ustunlariga teng ekanini tekshiruvchi test. Shuning uchun lokal jadvalni bulut juftisiz `main` ga qo'shib bo'lmaydi: test yiqiladi yoki sinxron hodisa rad etiladi.
 
-## Hozirgi holat (nazoratchi tekshirdi)
+- Faqat `organization_tax_profiles` uchun ruxsat:
+  - `packages/db-cloud/src/schema/domain-tables.ts` ga jadval;
+  - bulut migratsiyasi;
+  - `packages/contracts/src/sync.ts` ga payload sxemasi va kerak bo'lsa reference/registry yozuvi.
+- Boshqa sinxron kodga tegilmaydi.
+- **Tartib:** avval lokal qism (1–7 bandlar). Bulut jufti uchun T2.3 `main` ga tushishini kut, keyin rebase qil va qo'sh. Tushganini senga topshiriq orqali xabar qilaman. T2.3 kechiksa, lokal qismni tugatib hisobot ber: T3.1 ni ikki commit'da qabul qilamiz.
+- PG testlari senda lokal ishlamaydi. Ularni CI ishga tushiradi, men esa tekshiruvda o'zimda ishga tushiraman.
 
-- `products` jadvalida `mxik`, `package_code` va `vat_rate_bp` ustunlari bor. Contracts'da `MxikSchema`, `PackageCodeSchema` va `VatRateBpSchema` bor.
-- Savatcha qatori, sotuv qatori, qaytarish va buyurtmada snapshot maydonlari bor.
-- `local_hub_config` da `quick_sale_default_mxik` va `quick_sale_default_vat_rate_bp` bor.
-- `apps/hub/src/excel-port.ts` va `catalog-import-routes.ts` da katalog Excel import va eksporti bor.
-- POS yoki admin UI'da MXIK maydoni yo'q. Tashkilotning soliq rekvizitlari (STIR, yuridik nom, manzil, QQS to'lovchisi yoki yo'qligi) lokal bazada yo'q.
+### S2. Tasdiqlandi
 
-## Rejada bo'lishi kerak
+- `is_vat_payer = 0` bo'lsa, snapshot stavkasi 0 bo'ladi, mahsulotning o'z stavkasi o'zgarmaydi. Yagona yordamchi `effectiveVatRate`.
+- U qo'llanadigan joylar: katalog qatori, tez savdo qatori (`local_hub_config.quick_sale_default_vat_rate_bp` ham shu funksiyadan o'tadi), buyurtma qatori va buyurtmadan sotuvga o'tish.
+- Chekdagi matn T3.4 ga qoladi.
 
-1. **Tashkilot soliq sozlamalari.** Qaysi jadvalga yoziladi (yangi jadval yoki mavjud config), sinxron sinfi va tenant doirasi qanday. Maydonlar: STIR (9 raqam), yuridik nom, manzil, QQS to'lovchisi bayrog'i va standart stavka. API: kim o'qiydi va kim o'zgartiradi (RBAC). Faqat egasi yoki menejer o'zgartiradi.
-2. **QQS to'lovchisi bo'lmagan tashkilot** uchun chek va hisobotdagi QQS qanday bo'ladi. Qaror `GEMINI.md` dagi QQS modeliga mos bo'lsin. Taxmin qilma, mos joyiga havola ber.
-3. **Mahsulot formasi** (POS katalog yoki admin): MXIK, qadoq kodi, QQS stavkasi. Validatsiya mavjud contracts sxemalari orqali bo'ladi, takror kod yozilmaydi.
-4. **Excel:** import va eksportga MXIK, qadoq kodi va QQS ustunlari. Noto'g'ri MXIK qator darajasidagi xato bo'lib, butun importni yiqitmasin.
-5. **MXIK'siz mahsulotlar ro'yxati:** endpoint, filtr va UI. Fiskal rejim yoqilganda nima bo'lishi T3.2 ga qoladi, faqat ogohlantirishni ko'rsat.
-6. **Snapshot mezoni:** chekdan keyin mahsulotning MXIK, QQS va nomi o'zgartiriladi. Sotuv, qaytarish va chek qayta chiqarishda eski qiymat qoladi. Hisobotlar ham snapshot'dan o'qiydi. Qaysi yo'llar tekshiriladi, ro'yxat qil.
-7. **QQS yaxlitlash testlari:** chegara qiymatlari, ko'p qatorli chek, chegirma bilan, 0%/12% stavkalar. Property testi bo'lsin.
-8. **Migratsiya va sxema registri:** yangi ustunlar va jadvallar ro'yxati, sinxron sinfi. `.mezon/ISHCHI2.md` dagi migratsiya raqami qoidasiga e'tibor ber: Gemini T2.3 da `0015_sync_conflicts` qo'shyapti.
-9. **Test rejasi va mutatsiya** qilinadigan joylar (snapshot o'qish, RBAC, STIR validatsiyasi).
-10. **i18n:** barcha yangi matnlar `i18n` orqali bo'lsin.
+### S3. Umumiy validatsiya qoladi
+
+Rasmiy MXIK formati hujjatsiz kiritilmaydi. MXIK'siz ro'yxat va ogohlantirish yetarli.
+
+### S4. T3.1 ichida qil
+
+Narx, `minStock` va QQS float'siz o'qilsin. Domen'dagi mavjud pul va miqdor parser'idan foydalan, yangisini yozma. Testlar:
+
+- `"1 500,50"`, `"1500.5"`, `"0.005"`, raqam emas, manfiy, juda katta qiymat;
+- Excel raqamli katakchasi (number tipi) uchun aniq natija yoki aniq qator xatosi.
+
+### S5. Docker
+
+Qabul qilindi, egasiga yetkazaman. Sening yo'lagingni to'xtatmaydi.
+
+## Majburiy tuzatishlar
+
+### T1. Profil identifikatori deterministik bo'lsin
+
+Ikki hub oflayn holatda bir vaqtda profil yaratsa, ikki xil `id` paydo bo'ladi. Ular sinxronda `UNIQUE (organization_id)` ga uriladi, va bitta tashkilotda ikki STIR kabi holat yuzaga keladi.
+
+- Profil `id` = `organization_id`. Ikkala hub bir xil yozuvni yaratadi, keyin HLC bo'yicha LWW.
+- **Test:** ikki mustaqil SQLite bazasida bir xil tashkilot uchun profil yaratiladi → ikkalasining `id` si teng.
+
+### T2. Profil o'zgarishi faqat yangi qatorlarga ta'sir qiladi
+
+`is_vat_payer` yoki `default_vat_rate_bp` o'zgarsa:
+
+- yopilgan cheklar, savatdagi mavjud qatorlar va tasdiqlangan buyurtmalar o'zgarmaydi;
+- faqat yangi qo'shilgan qatorlar yangi qiymatni oladi.
+
+6-bo'limdagi jadvalga "profil o'zgarishi" ssenariysini ham qo'sh.
+
+### T3. Kim o'zgartirgani ko'rinsin
+
+- STIR, QQS holati va yuridik nom o'zgarishi muhim amal. Har yozuv outbox hodisasida `userId` bilan bo'lsin.
+- Hub'da oxirgi o'zgartirgan foydalanuvchi va vaqt saqlansin: `updated_by_user_id`.
+- To'liq audit jurnali T3.8 da bo'ladi.
 
 ## Bajarish tartibi
 
-1. Rejani `.mezon/ishchi2/HISOBOT.md` ga yoz, `[ishchi2-reja] T3.1` bilan commit qil va push qil.
-2. `node .mezon/kutish.mjs 120 .mezon/claude/TOPSHIRIQ-ishchi2.md` ni ishga tushir va tasdiqni kut.
+1. Lokal qism: profil, API, POS formasi, Excel, MXIK'siz ro'yxat, snapshot va QQS testlari, T1–T3.
+2. `pnpm verify` yashil (PG testlari skip bo'ladi, bu normal).
+3. Commit qil va push qil. PR och (`main` ga). CI yashil bo'lsin.
+4. Hisobot `[ishchi2-hisobot] T3.1`: har mezon va T1–T3 uchun test nomi, 9-bo'limdagi mutatsiya natijalari, Excel aylanma testi.
+5. `node .mezon/kutish.mjs 120 .mezon/claude/TOPSHIRIQ-ishchi2.md`. Merge qilma.
