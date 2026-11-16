@@ -2,6 +2,7 @@ import type {
   CloudPairDeviceResponseDto,
   SyncEventEnvelopeDto,
   SyncPushRequestDto,
+  SyncPushResponseDto,
   SyncPullResponseDto,
 } from '@mezon/contracts';
 import {
@@ -125,6 +126,105 @@ describePg('@mezon/cloud - Sync Pull Engine (T2.4)', () => {
       overrideApprovedByUserId: null,
       clientRequestId: null,
       requestHash: null,
+    };
+  }
+
+  function makeProductPayload(prodId: string, categoryId: string | null, name: string) {
+    const hlc = makeHlc(3, deviceA1);
+    return {
+      id: prodId,
+      organizationId: orgA,
+      categoryId,
+      sku: null,
+      skuSearch: null,
+      name,
+      nameSearch: name.toLowerCase(),
+      unit: 'dona',
+      unlimited: false,
+      minStock: null,
+      hasVariants: false,
+      trackBatches: false,
+      salePrice: '1000',
+      mxik: null,
+      packageCode: null,
+      vatRateBp: 1200,
+      deviceId: deviceA1,
+      hlc,
+      createdAtMs: '1700000000000',
+      updatedAtMs: '1700000000000',
+      deletedAtMs: null,
+    };
+  }
+
+  function makeStockMovePayload(
+    moveId: string,
+    productId: string,
+    qtyDelta: string,
+    costValueDelta: string,
+  ) {
+    const hlc = makeHlc(4, deviceA1);
+    return {
+      id: moveId,
+      organizationId: orgA,
+      storeId: storeA1,
+      deviceId: deviceA1,
+      hlc,
+      createdAtMs: '1700000000000',
+      productId,
+      variantId: null,
+      batchId: null,
+      qtyDelta,
+      costValueDelta,
+      reason: 'initial',
+      sourceType: 'stock_entry',
+      sourceId: idGen.nextId(),
+      createdByUserId: ownerA,
+      note: 'Initial stock move',
+    };
+  }
+
+  function makeSalePayload(saleId: string, receiptNo: string) {
+    const hlc = makeHlc(5, deviceA1);
+    return {
+      id: saleId,
+      organizationId: orgA,
+      storeId: storeA1,
+      deviceId: deviceA1,
+      hlc,
+      createdAtMs: '1700000000000',
+      updatedAtMs: '1700000000000',
+      receiptNo,
+      receiptCode: `RCP-${receiptNo}`,
+      sourceCartId: null,
+      sourceOrderId: null,
+      cashierUserId: ownerA,
+      completedByUserId: ownerA,
+      customerId: null,
+      shiftId: null,
+      shiftCashierSessionId: null,
+      clientRequestId: idGen.nextId(),
+      requestHash: 'hash-abc12345',
+      subtotalGross: '10000',
+      totalPromoDiscount: '0',
+      subtotalAfterPromo: '10000',
+      manualDiscountMode: 'none',
+      manualDiscountValue: '0',
+      manualDiscountReason: null,
+      orderDiscountAmount: '0',
+      totalFinal: '10000',
+      totalNetExVat: '8929',
+      totalVat: '1071',
+      totalPaid: '10000',
+      debtAmount: '0',
+      changeAmount: '0',
+      overrideApprovedByUserId: null,
+      overrideApprovedAmount: null,
+      overrideApprovedAtMs: null,
+      voidedAtMs: null,
+      voidedByUserId: null,
+      voidReason: null,
+      voidClientRequestId: null,
+      voidRequestHash: null,
     };
   }
 
@@ -510,6 +610,179 @@ describePg('@mezon/cloud - Sync Pull Engine (T2.4)', () => {
     const foundLedger = pullA2Data.events.find((e) => e.entityId === ledgerId);
     expect(foundLedger).toBeDefined();
     expect(foundLedger?.entity).toBe('customer_ledger');
+  });
+
+  it('store-scoped isolation (Y1 / G7): storeA1 pushes sales and stock_moves; storeA2 pull does NOT receive them; storeA2 DOES receive customer_ledger', async () => {
+    // 1. Seed a product so stock_moves has a valid foreign key reference
+    const prodId = idGen.nextId();
+    const prodEventId = idGen.nextId();
+    const prodPush: SyncPushRequestDto = {
+      clientVersion: '1.0.0',
+      storeId: storeA1,
+      deviceId: deviceA1,
+      events: [
+        {
+          eventId: prodEventId,
+          organizationId: orgA,
+          storeId: storeA1,
+          deviceId: deviceA1,
+          deviceSeq: '20',
+          hlc: makeHlc(20, deviceA1),
+          type: 'products.created',
+          entity: 'products',
+          entityId: prodId,
+          entityClass: 'ATTR',
+          schemaVersion: 1,
+          payload: makeProductPayload(prodId, null, 'Do‘kon A1 Mahsulot'),
+        },
+      ],
+    };
+    const prodRes = await server.inject({
+      method: 'POST',
+      url: '/api/v1/sync/push',
+      headers: { Authorization: `Bearer ${deviceTokenA1}` },
+      payload: prodPush,
+    });
+    expect(prodRes.statusCode).toBe(200);
+    expect(prodRes.json<SyncPushResponseDto>().results[0].status).toBe('accepted');
+
+    // 2. Seed a customer so customer_ledger has a valid customer reference
+    const custId = idGen.nextId();
+    const custEventId = idGen.nextId();
+    const custPush: SyncPushRequestDto = {
+      clientVersion: '1.0.0',
+      storeId: storeA1,
+      deviceId: deviceA1,
+      events: [
+        {
+          eventId: custEventId,
+          organizationId: orgA,
+          storeId: storeA1,
+          deviceId: deviceA1,
+          deviceSeq: '21',
+          hlc: makeHlc(21, deviceA1),
+          type: 'customers.created',
+          entity: 'customers',
+          entityId: custId,
+          entityClass: 'ATTR',
+          schemaVersion: 1,
+          payload: makeCustomerPayload(custId, 'Mijoz Dilshod'),
+        },
+      ],
+    };
+    const custRes = await server.inject({
+      method: 'POST',
+      url: '/api/v1/sync/push',
+      headers: { Authorization: `Bearer ${deviceTokenA1}` },
+      payload: custPush,
+    });
+    expect(custRes.statusCode).toBe(200);
+    expect(custRes.json<SyncPushResponseDto>().results[0].status).toBe('accepted');
+
+    // 3. Device A1 pushes store-scoped events (stock_moves, sales) AND org-scoped event (customer_ledger)
+    const moveId = idGen.nextId();
+    const moveEventId = idGen.nextId();
+    const saleId = idGen.nextId();
+    const saleEventId = idGen.nextId();
+    const ledgerId = idGen.nextId();
+    const ledgerEventId = idGen.nextId();
+
+    const batchPush: SyncPushRequestDto = {
+      clientVersion: '1.0.0',
+      storeId: storeA1,
+      deviceId: deviceA1,
+      events: [
+        {
+          eventId: moveEventId,
+          organizationId: orgA,
+          storeId: storeA1,
+          deviceId: deviceA1,
+          deviceSeq: '22',
+          hlc: makeHlc(22, deviceA1),
+          type: 'stock_moves.created',
+          entity: 'stock_moves',
+          entityId: moveId,
+          entityClass: 'FACT',
+          schemaVersion: 1,
+          payload: makeStockMovePayload(moveId, prodId, '5000', '50000'),
+        },
+        {
+          eventId: saleEventId,
+          organizationId: orgA,
+          storeId: storeA1,
+          deviceId: deviceA1,
+          deviceSeq: '23',
+          hlc: makeHlc(23, deviceA1),
+          type: 'sales.completed',
+          entity: 'sales',
+          entityId: saleId,
+          entityClass: 'MONOTONE',
+          schemaVersion: 1,
+          payload: makeSalePayload(saleId, '101'),
+        },
+        {
+          eventId: ledgerEventId,
+          organizationId: orgA,
+          storeId: storeA1,
+          deviceId: deviceA1,
+          deviceSeq: '24',
+          hlc: makeHlc(24, deviceA1),
+          type: 'customer_ledger.created',
+          entity: 'customer_ledger',
+          entityId: ledgerId,
+          entityClass: 'FACT',
+          schemaVersion: 1,
+          payload: makeCustomerLedgerPayload(ledgerId, custId, '75000'),
+        },
+      ],
+    };
+
+    const batchRes = await server.inject({
+      method: 'POST',
+      url: '/api/v1/sync/push',
+      headers: { Authorization: `Bearer ${deviceTokenA1}` },
+      payload: batchPush,
+    });
+    expect(batchRes.statusCode).toBe(200);
+    const batchResults = batchRes.json<SyncPushResponseDto>().results;
+    expect(batchResults.map((r) => r.status)).toEqual(['accepted', 'accepted', 'accepted']);
+
+    // 4. Device A2 (belonging to Store A2) pulls from cloud:
+    // MUST receive customer_ledger (org-scoped).
+    // MUST NOT receive stock_moves or sales from Store A1 (store-scoped isolation!).
+    const pullResA2 = await server.inject({
+      method: 'GET',
+      url: '/api/v1/sync/pull?limit=200',
+      headers: { Authorization: `Bearer ${deviceTokenA2}` },
+    });
+    expect(pullResA2.statusCode).toBe(200);
+    const pullA2Data = pullResA2.json<SyncPullResponseDto>();
+
+    // Assert customer_ledger is received by Store A2
+    const pulledLedgerByA2 = pullA2Data.events.find((e) => e.entityId === ledgerId);
+    expect(pulledLedgerByA2).toBeDefined();
+    expect(pulledLedgerByA2?.entity).toBe('customer_ledger');
+
+    // Assert store-scoped events from Store A1 are NOT received by Store A2
+    const pulledMoveByA2 = pullA2Data.events.find((e) => e.entityId === moveId);
+    expect(pulledMoveByA2).toBeUndefined();
+
+    const pulledSaleByA2 = pullA2Data.events.find((e) => e.entityId === saleId);
+    expect(pulledSaleByA2).toBeUndefined();
+
+    // 5. Device A1 (belonging to Store A1) pulls from cloud:
+    // MUST receive its own store-scoped events (stock_moves, sales) AND customer_ledger
+    const pullResA1 = await server.inject({
+      method: 'GET',
+      url: '/api/v1/sync/pull?limit=200',
+      headers: { Authorization: `Bearer ${deviceTokenA1}` },
+    });
+    expect(pullResA1.statusCode).toBe(200);
+    const pullA1Data = pullResA1.json<SyncPullResponseDto>();
+
+    expect(pullA1Data.events.some((e) => e.entityId === moveId)).toBe(true);
+    expect(pullA1Data.events.some((e) => e.entityId === saleId)).toBe(true);
+    expect(pullA1Data.events.some((e) => e.entityId === ledgerId)).toBe(true);
   });
 
   it('respects limit, hasMore, and cursor pagination across batches', async () => {
