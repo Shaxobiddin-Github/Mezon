@@ -116,4 +116,7 @@ export {
   extractPgErrorCode,
 } from './sync-push-store.js';
 
+export { AdminReadStore, type AdminStoreOptions } from './admin-store.js';
+export { resolveIntlDateKey } from './timezone.js';
+
 export { isDockerAvailable, shouldRunPgTests } from './pg-test-helper.js';
