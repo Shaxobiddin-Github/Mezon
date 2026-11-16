@@ -220,6 +220,59 @@ export const UZ_LATN_MESSAGES = {
   'error.AUTH_INVALID_CREDENTIALS': 'Login yoki PIN kod notoʻgʻri.',
   'error.AUTH_FORBIDDEN': 'Ushbu amalni bajarish uchun ruxsatingiz yoʻq.',
   'error.CART_EMPTY': 'Savat boʻsh.',
+
+  // T3.1 Catalog management (MXIK, qadoq kodi, QQS)
+  'catalog.openButton': 'Mahsulotlar',
+  'catalog.title': 'Mahsulotlar katalogi',
+  'catalog.searchPlaceholder': 'Nomi yoki artikul boʻyicha qidirish',
+  'catalog.filterMissingMxik': 'MXIKʼsiz ({count})',
+  'catalog.filterAll': 'Hammasi',
+  'catalog.missingMxikWarning':
+    '{count} ta mahsulotda MXIK kodi yoʻq. Fiskal chek uchun MXIK kerak boʻladi.',
+  'catalog.empty': 'Mahsulot topilmadi',
+  'catalog.createButton': 'Yangi mahsulot',
+  'catalog.editButton': 'Tahrirlash',
+  'catalog.form.createTitle': 'Yangi mahsulot',
+  'catalog.form.editTitle': 'Mahsulotni tahrirlash',
+  'catalog.form.name': 'Nomi',
+  'catalog.form.unit': 'Oʻlchov birligi',
+  'catalog.form.salePrice': 'Sotish narxi (soʻm)',
+  'catalog.form.mxik': 'MXIK kodi',
+  'catalog.form.packageCode': 'Qadoq kodi',
+  'catalog.form.vatPercent': 'QQS stavkasi (%)',
+  'catalog.form.invalidMxik': 'MXIK kodi notoʻgʻri',
+  'catalog.form.invalidPackageCode': 'Qadoq kodi notoʻgʻri',
+  'catalog.form.invalidVat': 'QQS stavkasi 0 dan 100 gacha boʻlishi kerak',
+  'catalog.form.invalidPrice': 'Narx notoʻgʻri',
+  'catalog.form.invalidName': 'Nomi kiritilishi shart',
+  'catalog.col.name': 'Nomi',
+  'catalog.col.price': 'Narx',
+  'catalog.col.mxik': 'MXIK',
+  'catalog.col.vat': 'QQS',
+  'catalog.noMxik': 'yoʻq',
+
+  // T3.1 Organization tax settings
+  'taxSettings.tabTitle': 'Soliq sozlamalari',
+  'taxSettings.tin': 'STIR',
+  'taxSettings.legalName': 'Yuridik nomi',
+  'taxSettings.legalAddress': 'Yuridik manzili',
+  'taxSettings.isVatPayer': 'QQS toʻlovchisi',
+  'taxSettings.defaultVatPercent': 'Standart QQS stavkasi (%)',
+  'taxSettings.notConfigured': 'Soliq rekvizitlari hali kiritilmagan',
+  'taxSettings.saved': 'Soliq sozlamalari saqlandi',
+  'taxSettings.nonPayerNote':
+    'QQS toʻlovchisi boʻlmasa, yangi cheklarda QQS 0 boʻladi. Avvalgi cheklar oʻzgarmaydi.',
+  'taxSettings.invalidTin': 'STIR 9 ta raqamdan iborat boʻlishi kerak',
+  'taxSettings.invalidText': 'Maydon toʻldirilishi shart',
+
+  // T3.1 Excel import row errors
+  'excelImport.error.nameMissing': 'Mahsulot nomi kiritilmagan',
+  'excelImport.error.invalidPrice': 'Sotish narxi notoʻgʻri',
+  'excelImport.error.invalidMinStock': 'Minimal zaxira notoʻgʻri',
+  'excelImport.error.invalidMxik': 'MXIK kodi notoʻgʻri',
+  'excelImport.error.invalidPackageCode': 'Qadoq kodi notoʻgʻri',
+  'excelImport.error.invalidVat': 'QQS stavkasi notoʻgʻri',
+  'excelImport.error.invalidRow': 'Notoʻgʻri qator',
 } as const;
 
 export type I18nKey = keyof typeof UZ_LATN_MESSAGES;

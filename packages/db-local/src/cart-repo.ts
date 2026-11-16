@@ -36,6 +36,7 @@ import {
 import { and, asc, desc, eq, inArray, isNull } from 'drizzle-orm';
 import type { BetterSQLite3Database } from 'drizzle-orm/better-sqlite3';
 import type { LocalSqliteConnection } from './connection.js';
+import { effectiveVatRateBp, readEffectiveVatSettingsSync } from './tax-settings-repo.js';
 import {
   categories,
   localCartLines,
@@ -1280,7 +1281,11 @@ export class SqliteCartStore {
       unitPriceSnapshot: moneyFromTiyin(unitPrice),
       mxikSnapshot: prod.mxik,
       packageCodeSnapshot: prod.packageCode,
-      vatRateBpSnapshot: prod.vatRateBp,
+      // T3.1 (S2): non-VAT-payer organizations snapshot 0; product's own rate is untouched.
+      vatRateBpSnapshot: effectiveVatRateBp(
+        prod.vatRateBp,
+        readEffectiveVatSettingsSync(this.connection.db, organizationId).isVatPayer,
+      ),
     };
   }
 
@@ -1355,7 +1360,10 @@ export class SqliteCartStore {
             ? normalizeFiscalCode(input.mxik, 'MXIK')
             : settings.quickSaleDefaultMxik;
         const pkgSnap = normalizeFiscalCode(input.packageCode, 'Package code');
-        const vatBp = input.vatRateBp ?? settings.quickSaleDefaultVatRateBp ?? 0;
+        const vatBp = effectiveVatRateBp(
+          input.vatRateBp ?? settings.quickSaleDefaultVatRateBp ?? 0,
+          readEffectiveVatSettingsSync(session.db, ctx.organizationId).isVatPayer,
+        );
 
         session.db
           .insert(localCartLines)
@@ -1553,7 +1561,12 @@ export class SqliteCartStore {
             unitPriceSnapshot: nextPrice,
             mxikSnapshot: prod.mxik,
             packageCodeSnapshot: prod.packageCode,
-            vatRateBpSnapshot: prod.vatRateBp,
+            // Explicit user-initiated refresh re-reads the catalog (price, MXIK) and so also
+            // re-applies the current effective VAT rate; a profile change alone never touches lines.
+            vatRateBpSnapshot: effectiveVatRateBp(
+              prod.vatRateBp,
+              readEffectiveVatSettingsSync(session.db, ctx.organizationId).isVatPayer,
+            ),
             updatedAtMs: nowMs,
           })
           .where(eq(localCartLines.id, line.id))

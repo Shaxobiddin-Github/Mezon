@@ -31,8 +31,14 @@ import type { HubPrinterService } from './printer-service.js';
 import { registerReportRoutes } from './report-routes.js';
 import type { HubReportService } from './report-service.js';
 import { registerBackupRoutes } from './backup-routes.js';
-import type { SqliteBackupService, SqliteCatalogStore, SqliteStockStore } from '@mezon/db-local';
+import type {
+  SqliteBackupService,
+  SqliteCatalogStore,
+  SqliteTaxSettingsStore,
+  SqliteStockStore,
+} from '@mezon/db-local';
 import { registerCatalogImportRoutes } from './catalog-import-routes.js';
+import { registerTaxSettingsRoutes } from './tax-settings-routes.js';
 import { CatalogImportCache } from './catalog-import-cache.js';
 import { registerCloudRoutes } from './cloud-routes.js';
 import type { HubCloudService } from './cloud-service.js';
@@ -66,6 +72,7 @@ export function registerHubRoutes(
   stockStore?: SqliteStockStore,
   importCache?: CatalogImportCache,
   cloudService?: HubCloudService,
+  taxSettingsStore?: SqliteTaxSettingsStore,
 ): void {
   app.get('/health', async () => {
     return authService.getHealth();
@@ -168,9 +175,19 @@ export function registerHubRoutes(
     registerBackupRoutes(app, authService, backupService);
   }
   if (catalogStore && stockStore && importCache) {
-    registerCatalogImportRoutes(app, authService, catalogStore, stockStore, importCache);
+    registerCatalogImportRoutes(
+      app,
+      authService,
+      catalogStore,
+      stockStore,
+      importCache,
+      taxSettingsStore,
+    );
   }
   if (cloudService) {
     registerCloudRoutes(app, cloudService, authService);
+  }
+  if (taxSettingsStore) {
+    registerTaxSettingsRoutes(app, authService, taxSettingsStore);
   }
 }

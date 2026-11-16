@@ -269,6 +269,9 @@ export const ExcelImportPreviewRowSchema = z
     costPrice: BigIntStringSchema.nullable(),
     minStockMilli: BigIntStringSchema.nullable(),
     initialStockMilli: BigIntStringSchema.nullable(),
+    mxik: z.string().nullable(),
+    packageCode: z.string().nullable(),
+    vatRateBp: z.number().int().min(0).max(10_000),
   })
   .strict();
 
@@ -278,6 +281,8 @@ export const ExcelImportIssueSchema = z
   .object({
     rowNumber: z.number().int().min(1),
     field: z.string().optional(),
+    /** T3.1: stable i18n key for the row error (UI translates); `message` stays human-readable. */
+    code: z.string().optional(),
     message: z.string(),
   })
   .strict();

@@ -1,4 +1,15 @@
 import {
+  type CreateProductRequestDto,
+  MissingMxikCountResponseSchema,
+  type MissingMxikCountResponseDto,
+  ProductDetailResponseSchema,
+  type ProductDetailResponseDto,
+  ProductResponseSchema,
+  type ProductResponseDto,
+  TaxProfileResponseSchema,
+  type TaxProfileResponseDto,
+  type UpdateProductRequestDto,
+  type UpdateTaxProfileRequestDto,
   type AddCartLineRequestDto,
   AddCartLineRequestSchema,
   ApiErrorEnvelopeSchema,
@@ -359,8 +370,57 @@ export class HubApiClient {
         categoryId: query.categoryId,
         limit: query.limit,
         offset: query.offset,
+        missingMxik: query.missingMxik === true ? 'true' : undefined,
       },
       responseSchema: ListProductsResponseSchema,
+    });
+  }
+
+  // --- T3.1 Catalog management & tax settings ---
+
+  async countProductsMissingMxik(): Promise<MissingMxikCountResponseDto> {
+    return this.request({
+      method: 'GET',
+      path: '/products/missing-mxik/count',
+      responseSchema: MissingMxikCountResponseSchema,
+    });
+  }
+
+  async createProduct(input: CreateProductRequestDto): Promise<ProductDetailResponseDto> {
+    return this.request({
+      method: 'POST',
+      path: '/products',
+      body: input,
+      responseSchema: ProductDetailResponseSchema,
+    });
+  }
+
+  async updateProduct(
+    productId: string,
+    input: UpdateProductRequestDto,
+  ): Promise<ProductResponseDto> {
+    return this.request({
+      method: 'PATCH',
+      path: `/products/${encodeURIComponent(productId)}`,
+      body: input,
+      responseSchema: ProductResponseSchema,
+    });
+  }
+
+  async getTaxProfile(): Promise<TaxProfileResponseDto> {
+    return this.request({
+      method: 'GET',
+      path: '/settings/tax',
+      responseSchema: TaxProfileResponseSchema,
+    });
+  }
+
+  async updateTaxProfile(input: UpdateTaxProfileRequestDto): Promise<TaxProfileResponseDto> {
+    return this.request({
+      method: 'PUT',
+      path: '/settings/tax',
+      body: input,
+      responseSchema: TaxProfileResponseSchema,
     });
   }
 

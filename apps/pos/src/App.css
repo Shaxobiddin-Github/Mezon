@@ -408,3 +408,12 @@ body {
   border-bottom: 1px solid var(--border-color);
   padding-bottom: 8px;
 }
+
+/* T3.1 catalog: non-blocking "MXIK'siz" warning */
+.pos-warning-banner {
+  padding: 8px 12px;
+  border-radius: 6px;
+  background: #fff4d6;
+  color: #6b4e00;
+  border: 1px solid #f0c75e;
+}

@@ -66,6 +66,12 @@ export function registerCatalogRoutes(
     return catalogService.listProducts(query);
   });
 
+  // T3.1: badge count for the "MXIK'siz mahsulotlar" warning (no blocking; fiscal mode is T3.2).
+  app.get('/products/missing-mxik/count', async (request) => {
+    await authorize(authService, request, 'catalog:read');
+    return catalogService.countProductsMissingMxik();
+  });
+
   app.get('/products/:id', async (request) => {
     await authorize(authService, request, 'catalog:read');
     const params = ProductIdParamsSchema.parse(request.params);

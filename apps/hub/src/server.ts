@@ -3,6 +3,7 @@ import {
   type LocalSqliteConnection,
   SqliteCartStore,
   SqliteCatalogStore,
+  SqliteTaxSettingsStore,
   SqliteCustomerStore,
   SqliteHubAuthStore,
   SqliteOrderStore,
@@ -15,6 +16,7 @@ import {
   SqliteBackupService,
   createSqliteCartStore,
   createSqliteCatalogStore,
+  createSqliteTaxSettingsStore,
   createSqliteCustomerStore,
   createSqliteHubAuthStore,
   createSqliteOrderStore,
@@ -103,6 +105,7 @@ export interface HubServer {
   readonly connection: LocalSqliteConnection;
   readonly store: SqliteHubAuthStore;
   readonly catalogStore: SqliteCatalogStore;
+  readonly taxSettingsStore: SqliteTaxSettingsStore;
   readonly stockStore: SqliteStockStore;
   readonly cartStore: SqliteCartStore;
   readonly saleStore: SqliteSaleStore;
@@ -158,6 +161,7 @@ export async function createHubServer(options: CreateHubServerOptions): Promise<
   const connection = openLocalSqliteDatabase(options.dbPath);
   let store: SqliteHubAuthStore;
   let catalogStore: SqliteCatalogStore;
+  let taxSettingsStore: SqliteTaxSettingsStore;
   let stockStore: SqliteStockStore;
   let cartStore: SqliteCartStore;
   let saleStore: SqliteSaleStore;
@@ -195,6 +199,13 @@ export async function createHubServer(options: CreateHubServerOptions): Promise<
       deviceFailureWindowMs: options.deviceFailureWindowMs,
     });
     catalogStore = createSqliteCatalogStore({
+      connection,
+      getRuntimeContext: () => {
+        const ctx = store.getActiveRuntimeContext();
+        return ctx ? { uow: ctx.uow, organizationId: ctx.config.organizationId } : null;
+      },
+    });
+    taxSettingsStore = createSqliteTaxSettingsStore({
       connection,
       getRuntimeContext: () => {
         const ctx = store.getActiveRuntimeContext();
@@ -429,6 +440,7 @@ export async function createHubServer(options: CreateHubServerOptions): Promise<
       stockStore,
       importCache,
       cloudService,
+      taxSettingsStore,
     );
     options.registerExtraTestRoutes?.(app);
 
@@ -439,6 +451,7 @@ export async function createHubServer(options: CreateHubServerOptions): Promise<
       connection,
       store,
       catalogStore,
+      taxSettingsStore,
       stockStore,
       cartStore,
       saleStore,

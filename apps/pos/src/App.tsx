@@ -14,6 +14,7 @@ import {
 } from './scanner/scanner-detector.js';
 import { SetupScreen, LoginScreen, OpenShiftScreen } from './components/AuthAndShiftScreens.js';
 import { PosWorkspaceScreen } from './components/PosWorkspaceScreen.js';
+import { CatalogScreen } from './components/CatalogScreen.js';
 import {
   ShortcutsModal,
   QuickSaleModal,
@@ -645,6 +646,16 @@ export function App() {
               >
                 {t('pos.shortcutsBtn')}
               </button>
+              {(user?.role === 'owner' || user?.role === 'manager') && (
+                <button
+                  type="button"
+                  className="pos-btn"
+                  data-testid="topbar-catalog-btn"
+                  onClick={() => setActiveModal('catalog')}
+                >
+                  {t('catalog.openButton')}
+                </button>
+              )}
               <button
                 type="button"
                 className="pos-btn"
@@ -744,6 +755,9 @@ export function App() {
       )}
 
       {activeModal === 'shortcuts' && <ShortcutsModal />}
+      {activeModal === 'catalog' && (user?.role === 'owner' || user?.role === 'manager') && (
+        <CatalogScreen api={api} onClose={() => setActiveModal('none')} onError={handleError} />
+      )}
       {activeModal === 'diagnostics' && (user?.role === 'owner' || user?.role === 'manager') && (
         <div className="pos-modal-backdrop" data-testid="diagnostics-modal">
           <div className="pos-modal" style={{ maxWidth: '520px' }}>

@@ -1,5 +1,5 @@
 import { ExcelImportCommitRequestSchema } from '@mezon/contracts';
-import type { SqliteCatalogStore, SqliteStockStore } from '@mezon/db-local';
+import type { SqliteCatalogStore, SqliteStockStore, SqliteTaxSettingsStore } from '@mezon/db-local';
 import { DomainError, type HubPermission, parseProductUnit } from '@mezon/domain';
 import type { FastifyInstance, FastifyRequest } from 'fastify';
 import type { HubAuthService } from './auth-service.js';
@@ -22,6 +22,7 @@ export function registerCatalogImportRoutes(
   catalogStore: SqliteCatalogStore,
   stockStore: SqliteStockStore,
   importCache: CatalogImportCache,
+  taxSettingsStore?: SqliteTaxSettingsStore,
 ): void {
   // 1. Preview Excel Import (R4: parses, validates, caches preview with previewToken)
   app.post('/catalog/import/preview', async (request) => {
@@ -49,7 +50,10 @@ export function registerCatalogImportRoutes(
       throw new DomainError('VALIDATION_ERROR', 'Fayl hajmi 10 MB dan oshmasligi kerak');
     }
 
-    const parsed = await ExcelPort.parseImportWorkbook(buffer);
+    const vatSettings = taxSettingsStore ? await taxSettingsStore.getEffectiveVatSettings() : null;
+    const parsed = await ExcelPort.parseImportWorkbook(buffer, {
+      defaultVatRateBp: vatSettings?.defaultVatRateBp ?? 0,
+    });
 
     // Check conflicts with existing products in catalog
     const conflicts: {
@@ -91,6 +95,7 @@ export function registerCatalogImportRoutes(
       updatesCount: 0,
       errors: parsed.invalidRows.map((inv) => ({
         rowNumber: inv.rowNumber,
+        ...(inv.errorCode !== undefined ? { code: inv.errorCode } : {}),
         message: inv.error ?? 'Notoʻgʻri qator',
       })),
       conflicts,
@@ -106,6 +111,9 @@ export function registerCatalogImportRoutes(
         costPrice: r.costPriceTiyin ? r.costPriceTiyin.toString() : null,
         minStockMilli: r.minStockMilli ? r.minStockMilli.toString() : null,
         initialStockMilli: null,
+        mxik: r.mxik ?? null,
+        packageCode: r.packageCode ?? null,
+        vatRateBp: r.vatRateBp ?? 0,
       })),
     };
   });
@@ -143,7 +151,13 @@ export function registerCatalogImportRoutes(
         sku: row.sku ?? null,
         unit: parseProductUnit(row.unit),
         salePrice: row.salePriceTiyin.toString(),
-        minStock: row.minStockMilli ? row.minStockMilli.toString() : null,
+        minStock:
+          row.minStockMilli !== null && row.minStockMilli !== undefined
+            ? row.minStockMilli.toString()
+            : null,
+        mxik: row.mxik ?? null,
+        packageCode: row.packageCode ?? null,
+        vatRateBp: row.vatRateBp ?? 0,
         barcodes,
       });
 
@@ -168,8 +182,10 @@ export function registerCatalogImportRoutes(
 
     // List all catalog products
     const listRes = await catalogStore.listProducts({ limit: 5000 });
+    const barcodeByProductId = await catalogStore.listPrimaryBarcodesByProduct();
     const buffer = await ExcelPort.generateCatalogWorkbook(listRes.products, {
       includeCost: isOwner,
+      barcodeByProductId,
     });
 
     return reply

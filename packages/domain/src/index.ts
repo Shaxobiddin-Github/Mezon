@@ -59,6 +59,7 @@ export {
   type VatIncludedResult,
   calculateVatExcluded,
   calculateVatIncluded,
+  effectiveVatRate,
 } from './vat.js';
 
 export {

@@ -1,5 +1,21 @@
 import ExcelJS from 'exceljs';
-import { moneyToTiyin, quantityToMilli } from '@mezon/domain';
+import {
+  DomainError,
+  MAX_MONEY_TIYIN,
+  formatMoneyDecimal,
+  formatQuantityDecimal,
+  moneyFromTiyin,
+  type ProductUnit,
+  isProductUnit,
+  moneyToTiyin,
+  normalizeFiscalCode,
+  parseMoneyDecimal,
+  parseQuantityDecimal,
+  quantityFromMilli,
+  quantityToMilli,
+  validateQuantityForUnit,
+  vatRateFromBasisPoints,
+} from '@mezon/domain';
 import type {
   DailySalesReportResult,
   DebtsReportResult,
@@ -15,7 +31,76 @@ export interface ExcelImportParsedRow {
   readonly salePriceTiyin: bigint;
   readonly costPriceTiyin?: bigint | null;
   readonly minStockMilli?: bigint | null;
+  /** T3.1 fiscal columns (7: MXIK, 8: Qadoq kodi, 9: QQS %). */
+  readonly mxik?: string | null;
+  readonly packageCode?: string | null;
+  readonly vatRateBp?: number;
   readonly error?: string;
+  /** Stable i18n key for row errors (`excelImport.error.*`). */
+  readonly errorCode?: string;
+}
+
+export interface ParseImportWorkbookOptions {
+  /** VAT basis points applied when the QQS cell is empty (organization default, else 0). */
+  readonly defaultVatRateBp?: number;
+}
+
+/** Column order shared by catalog import AND export so an exported file re-imports unchanged. */
+export const CATALOG_SHEET_COLUMNS = [
+  { header: 'Nomi', key: 'name', width: 30 },
+  { header: 'Artikul (SKU)', key: 'sku', width: 16 },
+  { header: 'Shtrix-kod', key: 'barcode', width: 18 },
+  { header: 'Oʻlchov birligi', key: 'unit', width: 15 },
+  { header: 'Sotish narxi (soʻm)', key: 'salePrice', width: 18 },
+  { header: 'Minimal zaxira', key: 'minStock', width: 15 },
+  { header: 'MXIK', key: 'mxik', width: 22 },
+  { header: 'Qadoq kodi', key: 'packageCode', width: 14 },
+  { header: 'QQS (%)', key: 'vatPercent', width: 10 },
+] as const;
+
+class ImportRowError extends Error {
+  constructor(
+    readonly code: string,
+    message: string,
+  ) {
+    super(message);
+  }
+}
+
+/**
+ * Normalizes a spreadsheet decimal cell into the strict domain decimal syntax WITHOUT floats:
+ * removes (narrow) no-break and regular spaces used as thousands separators and turns a single
+ * decimal comma into a dot. Mixed comma+dot input is ambiguous and left for the parser to reject.
+ */
+export function normalizeSpreadsheetDecimal(raw: string): string {
+  const compact = raw.replace(/[\s\u00A0\u202F]/g, '');
+  if (compact.includes(',') && !compact.includes('.')) {
+    const parts = compact.split(',');
+    if (parts.length === 2) {
+      return `${parts[0] ?? ''}.${parts[1] ?? ''}`;
+    }
+  }
+  return compact;
+}
+
+/** Parses a spreadsheet money cell ("1 500,50", "1500.5") into tiyin using the domain parser. */
+export function parseSpreadsheetMoneyTiyin(raw: string): bigint {
+  return moneyToTiyin(parseMoneyDecimal(normalizeSpreadsheetDecimal(raw)));
+}
+
+/** Parses a spreadsheet quantity cell into milli-units using the domain parser. */
+export function parseSpreadsheetQuantityMilli(raw: string): bigint {
+  return quantityToMilli(parseQuantityDecimal(normalizeSpreadsheetDecimal(raw)));
+}
+
+/**
+ * Parses a VAT percent cell ("12", "12%", "12,5") into basis points without floats: a percent with
+ * up to 2 decimals has exactly the scale of tiyin, so the domain money parser yields bp directly.
+ */
+export function parseSpreadsheetVatPercentBp(raw: string): number {
+  const trimmed = normalizeSpreadsheetDecimal(raw).replace(/%$/, '');
+  const bp = moneyToTiyin(parseMoneyDecimal(trimmed));
+  return Number(vatRateFromBasisPoints(bp));
 }
 
 export interface ParseImportWorkbookResult {
@@ -142,31 +227,34 @@ export class ExcelPort {
    */
   public static async generateCatalogWorkbook(
     products: readonly StoredProductRecord[],
-    _options: { readonly includeCost: boolean },
+    _options: {
+      readonly includeCost: boolean;
+      readonly barcodeByProductId?: ReadonlyMap<string, string>;
+    },
   ): Promise<Buffer> {
     const workbook = new ExcelJS.Workbook();
     workbook.creator = 'Guzar Hub';
     workbook.created = new Date();
 
     const sheet = workbook.addWorksheet('Mahsulotlar');
-    const cols: Partial<ExcelJS.Column>[] = [
-      { header: 'Nomi', key: 'name', width: 30 },
-      { header: 'Artikul (SKU)', key: 'sku', width: 16 },
-      { header: 'Oʻlchov birligi', key: 'unit', width: 15 },
-      { header: 'Sotish narxi (soʻm)', key: 'salePrice', width: 18 },
-      { header: 'Minimal zaxira', key: 'minStock', width: 15 },
-    ];
+    const cols: Partial<ExcelJS.Column>[] = CATALOG_SHEET_COLUMNS.map((c) => ({ ...c }));
 
     sheet.columns = cols;
     sheet.getRow(1).font = { bold: true };
 
     for (const p of products) {
-      const rowData: Record<string, string | number> = {
+      // T3.1: exact decimal TEXT cells (no float/truncation) in import column order so the
+      // exported workbook re-imports to identical values.
+      const rowData: Record<string, string> = {
         name: p.name,
         sku: p.sku ?? '',
+        barcode: _options.barcodeByProductId?.get(p.id) ?? '',
         unit: p.unit,
-        salePrice: Number(moneyToTiyin(p.salePrice) / 100n),
-        minStock: p.minStock ? Number(quantityToMilli(p.minStock) / 1000n) : '',
+        salePrice: formatMoneyDecimal(p.salePrice),
+        minStock: p.minStock ? formatQuantityDecimal(p.minStock) : '',
+        mxik: p.mxik ?? '',
+        packageCode: p.packageCode ?? '',
+        vatPercent: formatMoneyDecimal(moneyFromTiyin(BigInt(p.vatRateBp))),
       };
 
       sheet.addRow(rowData);
@@ -190,7 +278,10 @@ export class ExcelPort {
   /**
    * Parses uploaded Excel workbook for product import (max 5000 rows).
    */
-  public static async parseImportWorkbook(buffer: Buffer): Promise<ParseImportWorkbookResult> {
+  public static async parseImportWorkbook(
+    buffer: Buffer,
+    options: ParseImportWorkbookOptions = {},
+  ): Promise<ParseImportWorkbookResult> {
     const workbook = new ExcelJS.Workbook();
     await workbook.xlsx.load(buffer as unknown as ArrayBuffer);
 
@@ -251,6 +342,9 @@ export class ExcelPort {
       const unitRaw = getCellString(4).toLowerCase();
       const priceRaw = getCellString(5);
       const minStockRaw = getCellString(6);
+      const mxikRaw = getCellString(7);
+      const packageCodeRaw = getCellString(8);
+      const vatRaw = getCellString(9);
 
       if (!name) {
         invalidRows.push({
@@ -259,51 +353,102 @@ export class ExcelPort {
           unit: unitRaw || 'dona',
           salePriceTiyin: 0n,
           error: 'Mahsulot nomi kiritilmagan',
+          errorCode: 'excelImport.error.nameMissing',
         });
         return;
       }
 
-      const validUnits = ['dona', 'kg', 'g', 'litr', 'metr', 'm2', 'qadoq'];
-      const unit = validUnits.includes(unitRaw) ? unitRaw : 'dona';
+      const unit: ProductUnit = isProductUnit(unitRaw) ? unitRaw : 'dona';
+      const barcode = barcodeRaw ? ExcelPort.normalizeBarcode(barcodeRaw) : null;
 
-      // Price parsing
-      const cleanPrice = priceRaw.replace(/[^0-9.]/g, '');
-      const priceNum = parseFloat(cleanPrice);
-      if (isNaN(priceNum) || priceNum <= 0) {
+      try {
+        // Price: strict decimal (≤ 2 fraction digits), positive, within signed int64 tiyin.
+        let salePriceTiyin: bigint;
+        try {
+          salePriceTiyin = parseSpreadsheetMoneyTiyin(priceRaw);
+        } catch {
+          throw new ImportRowError('excelImport.error.invalidPrice', 'Sotish narxi notoʻgʻri');
+        }
+        if (salePriceTiyin <= 0n || salePriceTiyin > MAX_MONEY_TIYIN) {
+          throw new ImportRowError('excelImport.error.invalidPrice', 'Sotish narxi notoʻgʻri');
+        }
+
+        let minStockMilli: bigint | null = null;
+        if (minStockRaw) {
+          try {
+            minStockMilli = parseSpreadsheetQuantityMilli(minStockRaw);
+          } catch {
+            throw new ImportRowError(
+              'excelImport.error.invalidMinStock',
+              'Minimal zaxira notoʻgʻri',
+            );
+          }
+          if (minStockMilli < 0n) {
+            throw new ImportRowError(
+              'excelImport.error.invalidMinStock',
+              'Minimal zaxira notoʻgʻri',
+            );
+          }
+          try {
+            validateQuantityForUnit(unit, quantityFromMilli(minStockMilli), { allowZero: true });
+          } catch {
+            throw new ImportRowError(
+              'excelImport.error.invalidMinStock',
+              'Minimal zaxira notoʻgʻri',
+            );
+          }
+        }
+
+        let mxik: string | null;
+        try {
+          mxik = normalizeFiscalCode(mxikRaw, 'MXIK');
+        } catch {
+          throw new ImportRowError('excelImport.error.invalidMxik', 'MXIK kodi notoʻgʻri');
+        }
+
+        let packageCode: string | null;
+        try {
+          packageCode = normalizeFiscalCode(packageCodeRaw, 'Package code');
+        } catch {
+          throw new ImportRowError('excelImport.error.invalidPackageCode', 'Qadoq kodi notoʻgʻri');
+        }
+
+        let vatRateBp = options.defaultVatRateBp ?? 0;
+        if (vatRaw) {
+          try {
+            vatRateBp = parseSpreadsheetVatPercentBp(vatRaw);
+          } catch {
+            throw new ImportRowError('excelImport.error.invalidVat', 'QQS stavkasi notoʻgʻri');
+          }
+        }
+
+        validRows.push({
+          rowNumber,
+          name,
+          sku: skuRaw || null,
+          barcode,
+          unit,
+          salePriceTiyin,
+          minStockMilli,
+          mxik,
+          packageCode,
+          vatRateBp,
+        });
+      } catch (err) {
+        if (!(err instanceof ImportRowError) && !(err instanceof DomainError)) {
+          throw err;
+        }
         invalidRows.push({
           rowNumber,
           name,
           sku: skuRaw || null,
-          barcode: barcodeRaw || null,
+          barcode,
           unit,
           salePriceTiyin: 0n,
-          error: 'Sotish narxi notoʻgʻri',
+          error: err.message,
+          errorCode: err instanceof ImportRowError ? err.code : 'excelImport.error.invalidRow',
         });
-        return;
       }
-      const salePriceTiyin = BigInt(Math.round(priceNum * 100));
-
-      // Min stock parsing
-      let minStockMilli: bigint | null = null;
-      if (minStockRaw) {
-        const cleanStock = minStockRaw.replace(/[^0-9.]/g, '');
-        const stockNum = parseFloat(cleanStock);
-        if (!isNaN(stockNum) && stockNum >= 0) {
-          minStockMilli = BigInt(Math.round(stockNum * 1000));
-        }
-      }
-
-      const barcode = barcodeRaw ? ExcelPort.normalizeBarcode(barcodeRaw) : null;
-
-      validRows.push({
-        rowNumber,
-        name,
-        sku: skuRaw || null,
-        barcode,
-        unit,
-        salePriceTiyin,
-        minStockMilli,
-      });
     });
 
     return {

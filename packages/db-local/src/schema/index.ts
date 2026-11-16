@@ -398,6 +398,10 @@ export const products = localSchemaRegistry.defineTable(
     index('idx_products_org_category')
       .on(self.organizationId, self.categoryId)
       .where(sql`${self.deletedAtMs} IS NULL`),
+    // T3.1: "MXIK'siz mahsulotlar" list/count without scanning the whole catalog.
+    index('idx_products_org_missing_mxik')
+      .on(self.organizationId, self.nameSearch, self.id)
+      .where(sql`${self.mxik} IS NULL AND ${self.deletedAtMs} IS NULL`),
     index('idx_products_active_join')
       .on(self.id, self.organizationId, self.categoryId)
       .where(sql`${self.deletedAtMs} IS NULL`),
@@ -2877,5 +2881,51 @@ export const localCloudState = localSchemaRegistry.defineTable(
     uniqueIndex('uidx_local_cloud_state_singleton').on(self.singletonGuard),
     check('chk_local_cloud_state_singleton', sql`${self.singletonGuard} = 1`),
     check('chk_local_cloud_state_status', sql`${self.status} IN ('unpaired', 'paired', 'revoked')`),
+  ],
+);
+
+/**
+ * Organization tax requisites (`ATTR`, organization scope, T3.1): STIR, legal name/address and VAT
+ * payer status. Synced org-wide so every hub and the cloud cabinet share one profile.
+ *
+ * Deterministic identity (nazoratchi T1): `id` MUST equal `organization_id`, so two offline hubs that
+ * both create the profile produce the same entity and converge via HLC last-writer-wins instead of
+ * colliding on the per-organization uniqueness. Enforced by CHECK below.
+ *
+ * Changes affect only NEW cart/order lines; existing snapshots are never recomputed (nazoratchi T2).
+ */
+export const organizationTaxProfiles = localSchemaRegistry.defineTable(
+  {
+    name: 'organization_tax_profiles',
+    tableClass: 'ATTR',
+    tenantScope: 'organization',
+  },
+  (common) => ({
+    ...common,
+    tin: text('tin').notNull(),
+    legalName: text('legal_name').notNull(),
+    legalAddress: text('legal_address').notNull(),
+    isVatPayer: sqliteBoolean('is_vat_payer').notNull(),
+    defaultVatRateBp: sqliteInt('default_vat_rate_bp').notNull().default(0),
+    updatedByUserId: sqliteUuidV7('updated_by_user_id')
+      .notNull()
+      .references(() => users.id),
+  }),
+  (self) => [
+    uniqueIndex('uidx_org_tax_profiles_org')
+      .on(self.organizationId)
+      .where(sql`${self.deletedAtMs} IS NULL`),
+    check('chk_org_tax_profiles_id_is_org', sql`${self.id} = ${self.organizationId}`),
+    check(
+      'chk_org_tax_profiles_tin',
+      sql`length(${self.tin}) = 9 AND ${self.tin} NOT GLOB '*[^0-9]*'`,
+    ),
+    check('chk_org_tax_profiles_legal_name', sql`length(trim(${self.legalName})) >= 1`),
+    check('chk_org_tax_profiles_legal_address', sql`length(trim(${self.legalAddress})) >= 1`),
+    check('chk_org_tax_profiles_is_vat_payer', sql`${self.isVatPayer} IN (0, 1)`),
+    check(
+      'chk_org_tax_profiles_default_vat',
+      sql`${self.defaultVatRateBp} >= 0 AND ${self.defaultVatRateBp} <= 10000`,
+    ),
   ],
 );

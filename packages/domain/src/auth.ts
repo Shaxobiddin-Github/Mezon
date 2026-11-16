@@ -39,7 +39,9 @@ export type HubPermission =
   | 'orders:write'
   | 'orders:cancel'
   | 'printer:config'
-  | 'printer:cash_drawer';
+  | 'printer:cash_drawer'
+  | 'tax:read'
+  | 'tax:write';
 
 const ROLE_PERMISSION_TABLE: Readonly<Record<UserRole, ReadonlySet<HubPermission>>> = {
   owner: new Set<HubPermission>([
@@ -79,6 +81,8 @@ const ROLE_PERMISSION_TABLE: Readonly<Record<UserRole, ReadonlySet<HubPermission
     'orders:cancel',
     'printer:config',
     'printer:cash_drawer',
+    'tax:read',
+    'tax:write',
   ]),
   manager: new Set<HubPermission>([
     'auth:self',
@@ -114,6 +118,8 @@ const ROLE_PERMISSION_TABLE: Readonly<Record<UserRole, ReadonlySet<HubPermission
     'orders:cancel',
     'printer:config',
     'printer:cash_drawer',
+    'tax:read',
+    'tax:write',
   ]),
   cashier: new Set<HubPermission>([
     'auth:self',
