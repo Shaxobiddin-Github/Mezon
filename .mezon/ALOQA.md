@@ -28,3 +28,12 @@ Gemini `TOPSHIRIQ.md` ni o'zgartirmaydi, Claude `HISOBOT.md` ni o'zgartirmaydi. 
 - `QABUL` kelganda merge'ni `TOPSHIRIQ.md` dagi aniq ko'rsatma bo'yicha bajar. Keyingi vazifa ham shu faylda bo'ladi.
 - Merge'da `.mezon/` fayllari `main`ga tushadi, bu normal holat.
 - GEMINI.md 15-bo'limidagi egasi qarorlari egasida qoladi. Bunday qaror kerak bo'lsa, hisobotda so'ra va to'xta.
+
+## Ikki bajaruvchi (2026-11-16 dan)
+
+| Yo'lak | Bajaruvchi | Branch | Topshiriq | Hisobot |
+|---|---|---|---|---|
+| A: F2 sinxronlash, keyin F4 | Gemini | `gemini/...` | `.mezon/claude/TOPSHIRIQ.md` | `.mezon/gemini/HISOBOT.md` |
+| B: F3 (hujjatsiz qismlar), keyin F5 | ishchi2 (Claude Code) | `ishchi2/...` | `.mezon/claude/TOPSHIRIQ-ishchi2.md` | `.mezon/ishchi2/HISOBOT.md` |
+
+Ikkinchi ishchining to'liq yo'riqnomasi `.mezon/ISHCHI2.md` da. Har bajaruvchi faqat o'z fayllariga yozadi. Umumiy fayllardagi (sxema registri, migratsiyalar) to'qnashuvlarni merge'dan oldin rebase bilan hal qiladi. Merge tartibini nazoratchi belgilaydi.

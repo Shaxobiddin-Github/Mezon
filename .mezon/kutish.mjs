@@ -1,8 +1,10 @@
-// Claude'ning yangi topshirig'ini kutadi: node .mezon/kutish.mjs [daqiqa]
-// Joriy branch'da `.mezon/claude/TOPSHIRIQ.md` ni o'zgartirgan yangi commit paydo bo'lishini kuzatadi.
+// Claude'ning yangi topshirig'ini kutadi: node .mezon/kutish.mjs [daqiqa] [fayl]
+// Joriy branch'da topshiriq faylini o'zgartirgan yangi commit paydo bo'lishini kuzatadi.
+// Fayl standart holatda `.mezon/claude/TOPSHIRIQ.md` (Gemini).
+// Ikkinchi ishchi: node .mezon/kutish.mjs 120 .mezon/claude/TOPSHIRIQ-ishchi2.md
 import { execFileSync } from 'node:child_process';
 
-const FILE = '.mezon/claude/TOPSHIRIQ.md';
+const FILE = process.argv[3] ?? '.mezon/claude/TOPSHIRIQ.md';
 const maxMinutes = Number(process.argv[2] ?? 120);
 
 function git(...args) {
