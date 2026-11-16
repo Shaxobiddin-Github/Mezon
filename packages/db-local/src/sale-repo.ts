@@ -38,12 +38,18 @@ import {
 } from './cart-repo.js';
 import type { LocalSqliteConnection } from './connection.js';
 import {
+  type SaleRulesCheckLine,
+  type SaleRulesEvaluator,
+  maskSocialCardNumber,
+} from './sale-rules-port.js';
+import {
   type StoredCashMoveRecord,
   prepareCustomerForSaleInTxSync,
   recordSaleDebtInTxSync,
 } from './customer-repo.js';
 import { advanceReceiptSeqSync } from './device-state.js';
 import {
+  batches,
   cashMoves,
   localCarts,
   payments,
@@ -92,6 +98,8 @@ export interface SaleStoreTestHooks {
 export interface CreateSqliteSaleStoreOptions {
   readonly connection: LocalSqliteConnection;
   readonly getRuntimeContext: () => SaleRuntimeContext | null;
+  /** T3.2 REQUIRED rules evaluator (final legal check inside the sale transaction). */
+  readonly rulesEvaluator: SaleRulesEvaluator;
   /** Test-only hook object (`C1`). Must never be wired in Hub/Electron production code. */
   readonly __testHooks?: SaleStoreTestHooks;
 }
@@ -408,6 +416,8 @@ export interface SaleCoreEvaluatedLine {
 }
 
 export interface CompleteSaleCoreInTxInput {
+  /** T3.2 REQUIRED: final legal rules check for every sale path (S11 port). */
+  readonly rulesEvaluator: SaleRulesEvaluator;
   readonly organizationId: UuidV7;
   readonly storeId: UuidV7;
   readonly deviceId: UuidV7;
@@ -695,9 +705,11 @@ export function completeSaleCoreInTxSync(
   // Deduct stock (for tracked catalog lines) and insert immutable `sale_lines` (`FACT`)
   const allWarnings: StockMoveWarningRecord[] = [];
   const insertedLines: (typeof saleLines.$inferSelect)[] = [];
+  const rulesLines: SaleRulesCheckLine[] = [];
 
   for (const line of evaluated.lines) {
     let lineCostTiyin = 0n;
+    const lineLegs: { expiryDateMs: bigint | null; qtyMilli: bigint }[] = [];
 
     if (line.lineKind === 'catalog' && line.productId !== null) {
       const prod = input.productsById.get(line.productId)!;
@@ -719,6 +731,18 @@ export function completeSaleCoreInTxSync(
         });
         for (const m of stockOut.moves) {
           lineCostTiyin += -moneyToTiyin(m.costValueDelta);
+          if (m.batchId !== null) {
+            const b = session.db
+              .select({ expiryDateMs: batches.expiryDateMs })
+              .from(batches)
+              .where(eq(batches.id, m.batchId))
+              .limit(1)
+              .all()[0];
+            lineLegs.push({
+              expiryDateMs: b?.expiryDateMs ?? null,
+              qtyMilli: -quantityToMilli(m.qtyDelta),
+            });
+          }
         }
         allWarnings.push(...stockOut.warnings);
       }
@@ -757,6 +781,40 @@ export function completeSaleCoreInTxSync(
       schemaVersion: 1,
     });
     insertedLines.push(lineWrite.row);
+    rulesLines.push({
+      lineId: lineWrite.entityId,
+      lineKind: line.lineKind,
+      mxik: line.mxikSnapshot,
+      qtyMilli: quantityToMilli(line.qty),
+      finalTotalTiyin: moneyToTiyin(line.finalTotal),
+      batchExpiries: lineLegs,
+    });
+  }
+
+  // T3.2 FINAL legal rules check (single choke point for cart complete AND order deliver).
+  // Runs after FIFO legs are known (expiry) and before payments/cash moves; any block aborts the
+  // whole transaction (receipt_no, stock moves, lines, outbox all roll back).
+  const rulesResult = input.rulesEvaluator({
+    nowMs: input.nowMs,
+    lines: rulesLines,
+    payments: resolvedPayments.payments.map((p) => ({
+      method: p.method,
+      amountTiyin: moneyToTiyin(p.amount),
+      socialCard: p.socialCard ?? null,
+    })),
+  });
+  if (rulesResult.block.length > 0) {
+    throw new DomainError(
+      'RULES_BLOCKED',
+      `Sale blocked by legal rules: ${rulesResult.block.map((f) => f.code).join(', ')}`,
+      {
+        details: {
+          block: rulesResult.block,
+          warn: rulesResult.warn,
+          packageVersion: rulesResult.packageVersion,
+        },
+      },
+    );
   }
 
   // Insert immutable `payments` (`FACT`) & atomic `cash_moves` (`FACT`) — `'advance'` NEVER emits `cash_moves`
@@ -772,7 +830,17 @@ export function completeSaleCoreInTxSync(
         tenderedAmount: item.tenderedAmount,
         changeAmount: item.changeAmount,
         providerRef: item.providerRef,
-        providerMetaJson: null,
+        // T3.2: social-card details persisted MASKED only (full number never stored).
+        providerMetaJson:
+          item.socialCard !== undefined && item.socialCard !== null
+            ? JSON.stringify({
+                socialCard: {
+                  cardType: item.socialCard.cardType.trim(),
+                  cardNumberMasked: maskSocialCardNumber(item.socialCard.cardNumber),
+                  transactionId: item.socialCard.transactionId.trim(),
+                },
+              })
+            : null,
       },
       eventType: 'payment.created',
       schemaVersion: 1,
@@ -847,11 +915,13 @@ export class SqliteSaleStore {
   private readonly connection: LocalSqliteConnection;
   private readonly getRuntimeContext: () => SaleRuntimeContext | null;
   private readonly testHooks?: SaleStoreTestHooks;
+  private readonly rulesEvaluator: SaleRulesEvaluator;
 
   constructor(options: CreateSqliteSaleStoreOptions) {
     this.connection = options.connection;
     this.getRuntimeContext = options.getRuntimeContext;
     this.testHooks = options.__testHooks;
+    this.rulesEvaluator = options.rulesEvaluator;
   }
 
   private requireContext(): SaleRuntimeContext {
@@ -1047,6 +1117,7 @@ export class SqliteSaleStore {
 
       const negativeStockPolicy = parseNegativeStockPolicy(hubConfig.negativeStockPolicy);
       const { sale, warnings } = completeSaleCoreInTxSync(session, {
+        rulesEvaluator: this.rulesEvaluator,
         organizationId: ctx.organizationId,
         storeId: ctx.storeId,
         deviceId: ctx.uow.deviceId,

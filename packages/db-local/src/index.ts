@@ -162,6 +162,7 @@ export {
   localCloudState,
   organizationTaxProfiles,
   localSyncConflicts,
+  localRulePackages,
 } from './schema/index.js';
 
 export {
@@ -484,6 +485,9 @@ export {
   type PostRestoreRebuildResult,
   type BackupServiceOptions,
   SqliteBackupService,
+  RULES_HWM_AFTER_RESTORE_FILE,
+  readRuleMaxVersionRaw,
+  consumeRulesHwmAfterRestore,
 } from './backup-service.js';
 
 export {
@@ -506,3 +510,25 @@ export {
   SqliteTaxSettingsStore,
   createSqliteTaxSettingsStore,
 } from './tax-settings-repo.js';
+
+export {
+  type RulesRuntimeContext,
+  type CreateSqliteRulesStoreOptions,
+  type StoredRulePackageRecord,
+  type VerifiedRulePackageImport,
+  type RulePackageImportOutcome,
+  readMaxRulePackageVersionSync,
+  readFiscalModeEnabledSync,
+  SqliteRulesStore,
+  createSqliteRulesStore,
+} from './rules-repo.js';
+
+export {
+  type SaleRulesCheckLine,
+  type SaleRulesCheckPayment,
+  type SaleRulesCheckInput,
+  type SaleRulesFinding,
+  type SaleRulesCheckResult,
+  type SaleRulesEvaluator,
+  maskSocialCardNumber,
+} from './sale-rules-port.js';

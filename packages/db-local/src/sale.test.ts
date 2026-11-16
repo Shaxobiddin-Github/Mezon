@@ -19,7 +19,7 @@ import {
   serializeHlc,
   unixMsFromBigInt,
 } from '@mezon/domain';
-import { FixedClock, SeededRandomSource } from '@mezon/test-utils';
+import { FixedClock, SeededRandomSource, allowAllSaleRulesEvaluator } from '@mezon/test-utils';
 import { and, asc, eq } from 'drizzle-orm';
 import fc from 'fast-check';
 import { afterEach, describe, expect, it } from 'vitest';
@@ -135,6 +135,7 @@ async function setupSaleEnv(dbPath = createTempDbPath()) {
   });
   const saleStore: SqliteSaleStore = createSqliteSaleStore({
     connection,
+    rulesEvaluator: allowAllSaleRulesEvaluator,
     getRuntimeContext: getStoreCtx,
   });
   const shiftStore: SqliteShiftStore = createSqliteShiftStore({
@@ -741,6 +742,7 @@ describe('@mezon/db-local - T1.4 completeSale atomic TX, receipts, stock policy,
         'const auth = await createSqliteHubAuthStore({ connection: conn, clock, random });',
         'const saleStore = createSqliteSaleStore({',
         '  connection: conn,',
+        '  rulesEvaluator: () => ({ block: [], warn: [], packageVersion: null }),',
         '  getRuntimeContext: () => {',
         '    const ctx = auth.getActiveRuntimeContext();',
         '    return ctx ? { uow: ctx.uow, organizationId: ctx.config.organizationId, storeId: ctx.config.storeId } : null;',
@@ -1700,7 +1702,11 @@ describe('@mezon/db-local - T1.4 completeSale atomic TX, receipts, stock policy,
         clientRequestId: parseUuidV7('01950000-0000-7000-8000-a00000000099'),
         openingCash: ZERO_MONEY,
       });
-      const saleStore = createSqliteSaleStore({ connection: conn, getRuntimeContext: getStoreCtx });
+      const saleStore = createSqliteSaleStore({
+        connection: conn,
+        rulesEvaluator: allowAllSaleRulesEvaluator,
+        getRuntimeContext: getStoreCtx,
+      });
       const cart3 = await cartStore.openCart(cashier.id);
       const detail3 = await cartStore.addLine(cart3.id, {
         kind: 'catalog',
@@ -2234,6 +2240,10 @@ async function setupSaleEnvReadExisting(dbPath: string) {
     connection,
     deviceId: ctx0.config.deviceId,
     stockStore: createSqliteStockStore({ connection, getRuntimeContext: getStoreCtx }),
-    saleStore: createSqliteSaleStore({ connection, getRuntimeContext: getStoreCtx }),
+    saleStore: createSqliteSaleStore({
+      connection,
+      rulesEvaluator: allowAllSaleRulesEvaluator,
+      getRuntimeContext: getStoreCtx,
+    }),
   };
 }

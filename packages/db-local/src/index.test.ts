@@ -193,6 +193,7 @@ describe('@mezon/db-local - Schema foundation, registry, pragmas, and bigint saf
       ['local_cloud_state', 'LOCAL'],
       ['organization_tax_profiles', 'ATTR'],
       ['local_sync_conflicts', 'LOCAL'],
+      ['local_rule_packages', 'LOCAL'],
     ]);
     expect(() =>
       validateSqliteSchemaRegistry(

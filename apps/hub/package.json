@@ -15,6 +15,7 @@
     "@mezon/domain": "workspace:*",
     "@mezon/drivers": "workspace:*",
     "@mezon/sync": "workspace:*",
+    "@mezon/rules": "workspace:*",
     "@node-rs/argon2": "2.2.2",
     "exceljs": "4.4.0",
     "fastify": "5.12.8",

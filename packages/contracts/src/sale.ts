@@ -67,11 +67,28 @@ const ProviderRefInputSchema = z
   .nullable()
   .optional();
 
-export const NonCashSalePaymentInputSchema = z.strictObject({
-  method: NonCashPaymentMethodSchema,
-  amount: PositiveBoundedMoneyStringSchema,
-  providerRef: ProviderRefInputSchema,
+/** T3.2: social-card details (S6 interim — non-empty, length-bounded; format not invented). */
+export const SocialCardInputSchema = z.strictObject({
+  cardType: z.string().trim().min(1).max(64),
+  cardNumber: z.string().trim().min(4).max(32),
+  transactionId: z.string().trim().min(1).max(128),
 });
+export type SocialCardInputDto = z.infer<typeof SocialCardInputSchema>;
+
+export const NonCashSalePaymentInputSchema = z
+  .strictObject({
+    method: NonCashPaymentMethodSchema,
+    amount: PositiveBoundedMoneyStringSchema,
+    providerRef: ProviderRefInputSchema,
+    socialCard: SocialCardInputSchema.nullable().optional(),
+  })
+  .refine(
+    (v) => v.socialCard === undefined || v.socialCard === null || v.method === 'social_card',
+    {
+      message: 'socialCard is only allowed for social_card payments',
+      path: ['socialCard'],
+    },
+  );
 export type NonCashSalePaymentInputDto = z.infer<typeof NonCashSalePaymentInputSchema>;
 
 export const SalePaymentInputSchema = z.union([

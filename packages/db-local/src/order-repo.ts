@@ -61,6 +61,7 @@ import {
   toPromotionRule,
 } from './cart-repo.js';
 import type { LocalSqliteConnection } from './connection.js';
+import type { SaleRulesEvaluator } from './sale-rules-port.js';
 import { effectiveVatRateBp, readEffectiveVatSettingsSync } from './tax-settings-repo.js';
 import { advanceOrderSeqSync } from './device-state.js';
 import { type StoredSaleRecord, completeSaleCoreInTxSync, toStoredSale } from './sale-repo.js';
@@ -98,6 +99,8 @@ export interface OrderStoreTestHooks {
 export interface CreateSqliteOrderStoreOptions {
   readonly connection: LocalSqliteConnection;
   readonly getRuntimeContext: () => OrderRuntimeContext | null;
+  /** T3.2 REQUIRED rules evaluator used by `deliverOrder` → `completeSaleCoreInTxSync`. */
+  readonly rulesEvaluator: SaleRulesEvaluator;
   readonly __testHooks?: OrderStoreTestHooks;
 }
 
@@ -513,11 +516,13 @@ export class SqliteOrderStore {
   private readonly connection: LocalSqliteConnection;
   private readonly getRuntimeContext: () => OrderRuntimeContext | null;
   private readonly testHooks?: OrderStoreTestHooks;
+  private readonly rulesEvaluator: SaleRulesEvaluator;
 
   constructor(options: CreateSqliteOrderStoreOptions) {
     this.connection = options.connection;
     this.getRuntimeContext = options.getRuntimeContext;
     this.testHooks = options.__testHooks;
+    this.rulesEvaluator = options.rulesEvaluator;
   }
 
   private requireContext(): OrderRuntimeContext {
@@ -1603,6 +1608,7 @@ export class SqliteOrderStore {
       // 5) Shared `completeSaleCoreInTxSync` writes `sales` (sourceOrderId), `sale_lines`, `payments` ('advance' + tender),
       //    `stock_moves`, `cash_moves` (NO cash_move for 'advance'), `customer_ledger`, & `local_outbox`
       const coreResult = completeSaleCoreInTxSync(session, {
+        rulesEvaluator: this.rulesEvaluator,
         organizationId: ctx.organizationId,
         storeId: ctx.storeId,
         deviceId: ctx.uow.deviceId,
