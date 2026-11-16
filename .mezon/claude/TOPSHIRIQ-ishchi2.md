@@ -1,67 +1,112 @@
-# Nazoratchi xulosasi (ishchi2): T3.1 — KICHIK QAYTA ISHLASH, so'ng QABUL
+# Nazoratchi xulosasi (ishchi2): T3.1 — QABUL. Keyingi: T3.2 rejasi
 
-Tekshirildi: `82fea7e` (kod `ba0f53a`). Toza klonda, PostgreSQL testlari Docker bilan.
+## T3.1 — QABUL
 
-**Natija:**
+Tekshirildi: `54b3618` (kod `520ce31`).
 
-- `pnpm verify`: unit va sqlite-hub 417/417 o'tdi.
-- Perf testida bitta yiqilish bo'ldi: FTS p95 71 ms, chegara 50 ms. Shu kompyuterda Gemini parallel test ishlatayotgan edi. Test alohida ishga tushirilganda T3.1 da ikki marta va `main` da o'tdi, demak bu yuk. T3.1 ga aloqasi yo'q.
-- PR #24 CI: to'rt job ham yashil.
+- **K1:** buyurtma yo'li testi MU1 va MU2 ni ushlaydi.
+- **K2:** tombstone qatorni tiklash to'g'ri tanlov. CHECK sinxron orqali kelgan tombstone'ni SQL xatosiga aylantirgan bo'lardi. `restoreAttr` faqat `allowTombstoned` bayrog'i bilan ishlaydi, boshqa writer'lar o'zgarmagan.
+- `restored` hodisa turini bulut tomoni ham qabul qilishi kerak. Buni Gemini'ga yetkazaman.
 
-Ish juda yaxshi. Hisobot halol (M1/M2 skript xatosi ochiq yozilgan). Snapshot testi kuchli. Eksportdagi tiyin kesilishi va shtrix-kod ustunining yo'qligi topilib tuzatilgani ayniqsa foydali.
+### Merge ko'rsatmasi
 
-**Mening mustaqil mutatsiyalarim:**
+1. PR #24 ning **oxirgi commit'idagi** to'rtala CI job yashil bo'lishini kut. Desktop installer skip bo'lsa, bu normal.
+2. Qizil job bo'lsa, merge qilma. Tuzat va hisobotda yoz.
+3. Yashil bo'lsa:
+   ```
+   gh pr merge 24 --squash --subject "T3.1: MXIK va soliq sozlamalari"
+   ```
+4. Keyin:
+   ```
+   git checkout main
+   git pull --ff-only
+   ```
+   `main` daraxti PR'ning oxirgi commit daraxtiga teng ekanini tekshir: `git diff <oxirgi-commit> main --stat` bo'sh chiqishi kerak.
+5. `main` dan yangi branch och: `git checkout -b ishchi2/T3.2-rules`.
 
-| # | Mutatsiya | Natija |
-|---|---|---|
-| MU1 | Buyurtmaning katalog qatori `isVatPayer` ni e'tiborsiz qoldiradi | **OMON QOLDI** |
-| MU2 | Buyurtmaning tez savdo qatori `isVatPayer` ni e'tiborsiz qoldiradi | **OMON QOLDI** |
-| MU3 | Savat katalog qatori bayroqni e'tiborsiz qoldiradi | aniqlandi |
-| MU4 | `refresh-prices` eski QQS'ni saqlaydi | aniqlandi |
-| MU5 | Excel'da bo'sh QQS katagi tashkilot standartini olmaydi | aniqlandi |
-| MU6 | Profil o'qishda `deleted_at_ms IS NULL` sharti olib tashlanadi | **OMON QOLDI** |
+## T3.2 — Qoidalar dvigateli: REJA
 
-Kod to'g'ri, lekin MU1 va MU2 yo'llari testsiz. Mening qoidam: test qarzi bilan merge yo'q.
+Hozir **faqat reja** yoz.
 
-## Tuzatishlar
+Avval qayta o'qi:
 
-### K1. Buyurtma yo'li testlari (MU1, MU2)
+- `GEMINI.md` 10-bo'limi: talablar jadvali va T3.2;
+- 3-bo'lim: §3.3 API o'ylab topmaslik qoidasi.
 
-Tashkilot QQS to'lovchisi **emas** holatiga o'tgandan **keyin** yangi buyurtma yaratiladi:
+### Vazifa (GEMINI.md)
 
-- katalog qatori;
-- tez savdo qatori (aniq `vatRateBp: 1200` so'ralgan holda ham).
+`packages/rules`: `evaluate(cart, payments, context) → { block[], warn[] }`.
 
-Tekshiriladi:
+- Qoidalar paketi imzolangan (Ed25519), versiyalangan va oflayn ishlaydi.
+- Qoidalar:
+  - naqd pul bloki;
+  - aralash chek;
+  - 25 mln limiti va istisnolar;
+  - retsept;
+  - ijtimoiy karta;
+  - yaroqlilik muddati.
+- UI va hub bir xil kodni ishlatadi. Yakuniy tekshiruv `completeSale` ichida.
+- Eskirgan paket ogohlantirish beradi.
 
-- buyurtma qatorlarining snapshot'i 0;
-- `deliver` dan keyingi sotuv qatorlari ham 0.
+**Mezonlar:**
 
-Qayta QQS to'lovchisiga o'tilsa, avval yaratilgan bu buyurtma 0 da qoladi. MU1 va MU2 ni qayta ishga tushir va hisobotga yoz.
+- chegara qiymatli jadval testlari;
+- imzosiz paket rad etiladi;
+- API, bot va buyurtma yo'llari ham bloklanadi.
 
-### K2. O'chirilgan profil (MU6)
+### Rejada bo'lishi kerak
 
-Profil id'si deterministik (`id = organization_id`). Sinxron orqali `deleted_at_ms` qo'yilgan profil kelsa, `upsertProfile` uni "yo'q" deb ko'radi va o'sha id bilan INSERT qiladi. Natijada PK xatosi chiqadi.
+1. **Paket formati.**
+   - JSON sxemasi (Zod): versiya, `issuedAt`, `validUntil`, qoidalar ma'lumotlari. Ma'lumotlar: taqiqlangan MXIK ro'yxati yoki prefikslari, retseptli MXIK'lar, ijtimoiy karta qoidalari, limitlar va istisnolar.
+   - Kanonik serializatsiya: imzo qaysi baytlarga qo'yiladi va qanday qilib deterministik bo'ladi.
+   - Muhim: **qoidalarning haqiqiy ma'lumoti (qaysi MXIK taqiqlangan) o'ylab topilmaydi**. Testlarda faqat sintetik ma'lumot ishlatiladi. Haqiqiy ro'yxat manbasi egasiga savol bo'ladi.
+2. **Imzo va kalitlar.**
+   - Ochiq kalit qayerda turadi: kodda, bir nechta kalit va rotatsiya bilan.
+   - Test kaliti va prod kaliti qanday ajratiladi.
+   - Prod maxfiy kaliti repoga **hech qachon** kirmaydi. Kim imzolaydi (bulut yoki egasining CLI'si) — egasiga savol.
+   - Imzolash CLI'si `scripts/` ga.
+   - Ed25519 uchun `node:crypto` yetarlimi, yangi kutubxona kerakmi? Brauzerda (POS UI) qanday tekshiriladi?
+3. **Paketni yetkazish.**
+   - T2.4 (pull) hali yo'q. Hozircha hub'ga fayl yoki endpoint orqali import qilinadi (faqat owner yoki manager).
+   - Saqlash: LOCAL jadval yoki fayl. Bir vaqtda faqat bitta faol versiya bo'ladi.
+   - Versiyani orqaga qaytarish taqiqlanadi (rollback himoyasi).
+4. **`evaluate` API.**
+   - Kirish ma'lumotlari: savat qatorlari (MXIK snapshot, miqdor, summa, partiya va yaroqlilik muddati), to'lovlar (usul, summa), kontekst (vaqt, paket, tashkilot sozlamalari).
+   - `block` va `warn` elementlarining tuzilishi: kod, qator, i18n kaliti.
+   - Toza funksiya bo'ladi: vaqt va soat parametr sifatida kiradi.
+5. **Har qoida uchun aniq semantika:**
+   - aralash chek: bitta taqiqlangan tovar bo'lsa, butun chek naqdsiz bo'ladi;
+   - 25 mln limiti **bitta chekdagi bitta MXIK** bo'yicha;
+   - qisman naqd to'lov qanday hisoblanadi;
+   - qaytarish va bekor qilish qoidalarga qanday ta'sir qiladi.
+   - Noaniq joyni **taxmin qilma**, egasiga savol qilib yoz.
+6. **Retsept va ijtimoiy karta ma'lumotlarini kiritish.**
+   - Qaysi maydonlar: karta turi, raqami, tranzaksiya raqami.
+   - Qayerda saqlanadi va PII qanday himoyalanadi: log'da maskalanadi, hisobotlarda ko'rinmaydi.
+   - Kassa UI'ga ta'siri.
+7. **Integratsiya nuqtalari:**
+   - `completeSale` dagi yakuniy tekshiruv;
+   - buyurtmani `deliver` qilish;
+   - API to'g'ridan-to'g'ri chaqirilganda;
+   - savat (UI ogohlantirishi).
+   - Hammasi bitta kodni ishlatishi isbotlansin.
+8. **Paket holatlari:**
+   - paket yo'q;
+   - muddati o'tgan (eskirgan);
+   - imzo buzilgan;
+   - versiya eskiroq.
+   - Har holatda savdo bloklanadimi yoki faqat ogohlantirish chiqadimi? Rejada asoslab ber. Fiskal rejim T3.3 da: hozir bayroq bilan.
+9. **Testlar.**
+   - Chegara jadvali: 25 mln − 1 / 25 mln / 25 mln + 1 tiyin, aralash, retsept, muddat chegarasi (aynan bugun yoki kecha).
+   - Property testlari.
+   - Imzo hujumlari: bir bayt o'zgartirilgan, boshqa kalit, eski versiya.
+   - Mutatsiya rejasi.
+10. **Bog'liqliklar.** `packages/rules` qaysi paketlarni import qiladi? depcruise qoidalari. Hub ham, POS ham ishlata olishi uchun domen-toza bo'lsin.
 
-Ikkala yo'lning birini tanla va test bilan isbotla:
+### Bajarish tartibi
 
-- profilni o'chirish umuman taqiqlanadi (`deleted_at_ms IS NULL` CHECK);
-- yoki upsert qatorni id bo'yicha topadi va qayta tiklaydi.
-
-**Test:** profil yaratiladi, `deleted_at_ms` to'g'ridan-to'g'ri SQL bilan qo'yiladi (sinxron qo'llashni taqlid qiladi), so'ng `PUT /settings/tax` → xato yo'q, natijada bitta faol profil.
-
-## Savollaringizga javoblar
-
-- **2-taxmin** (`refresh-prices` QQS'ni qayta qo'llaydi): **to'g'ri**. Bu foydalanuvchining ochiq amali, katalogdan nom va narx bilan birga effektiv stavkani ham qayta oladi.
-- **3-taxmin** (`sqlite_master` tekshiruvi): qabul qilindi. Kelgusida eski sxemadagi test o'z ma'lumotlarini SQL bilan yaratadigan qilib qayta yozilsa, bu tekshiruvni olib tashlaymiz. Hozircha qarz sifatida qolsin.
-- **Bulut jufti (S1): qaror o'zgardi.** T3.1 deyarli tayyor, T2.3 esa katta qayta ishlashda. Shuning uchun:
-  - **T3.1 birinchi bo'lib `main` ga tushadi** (faqat lokal qism, migratsiya `0015`).
-  - Gemini T2.3 ni rebase qilganda o'z migratsiyasini `0016` ga ko'chiradi. `organization_tax_profiles` uchun bulut jadvali va sync sxemasini ham Gemini qo'shadi, chunki T2.3 dagi sxema mosligi testi buni talab qiladi. Buni Gemini'ga men yetkazaman.
-  - Sen `packages/db-cloud` ga **tegmaysan**. Avvalgi ruxsat bekor.
-
-## Bajarish tartibi
-
-1. K1 va K2, testlari bilan. `pnpm verify` yashil bo'lsin.
-2. Commit qil va push qil. PR #24 dagi CI yashil bo'lsin.
-3. Hisobot `[ishchi2-hisobot] T3.1`: K1 va K2 test nomlari, MU1, MU2 va MU6 qayta natijasi. Faqat o'zgargan qismini yoz.
-4. `node .mezon/kutish.mjs 120 .mezon/claude/TOPSHIRIQ-ishchi2.md`. Merge qilma: QABUL bilan merge ko'rsatmasini beraman. Shu topshiriqda keyingi vazifa (T3.2 rejasi) ham bo'ladi.
+1. Rejani `.mezon/ishchi2/HISOBOT.md` ga yoz. `[ishchi2-reja] T3.2` bilan commit qil va `ishchi2/T3.2-rules` ga push qil.
+2. Kutish skripti joriy branch'ni kuzatadi. Shuning uchun uni yangi branch'da ishga tushir:
+   ```
+   node .mezon/kutish.mjs 120 .mezon/claude/TOPSHIRIQ-ishchi2.md
+   ```
