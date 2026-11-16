@@ -18,6 +18,7 @@
     "@mezon/contracts": "workspace:*",
     "@mezon/db-cloud": "workspace:*",
     "@mezon/domain": "workspace:*",
+    "@mezon/sync": "workspace:*",
     "@node-rs/argon2": "2.2.2",
     "fastify": "5.12.8",
     "jose": "^6.2.17",
@@ -28,6 +29,7 @@
     "@mezon/test-utils": "workspace:*",
     "@testcontainers/postgresql": "^12.2.1",
     "@types/node": "^26.6.6",
+    "drizzle-orm": "0.45.4",
     "testcontainers": "^12.2.1"
   }
 }

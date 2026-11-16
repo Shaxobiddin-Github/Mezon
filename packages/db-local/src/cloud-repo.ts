@@ -93,6 +93,36 @@ export class SqliteCloudStore {
     }
   }
 
+  async updateLastSyncAt(nowMs: UnixMs): Promise<void> {
+    await Promise.resolve();
+    const txn = this.connection.sqlite.transaction(() => {
+      this.connection.db
+        .update(localCloudState)
+        .set({
+          lastSyncAtMs: nowMs,
+          updatedAtMs: nowMs,
+        })
+        .where(eq(localCloudState.singletonGuard, 1))
+        .run();
+    });
+    txn();
+  }
+
+  async updateCloudStatus(status: 'unpaired' | 'paired' | 'revoked', nowMs: UnixMs): Promise<void> {
+    await Promise.resolve();
+    const txn = this.connection.sqlite.transaction(() => {
+      this.connection.db
+        .update(localCloudState)
+        .set({
+          status,
+          updatedAtMs: nowMs,
+        })
+        .where(eq(localCloudState.singletonGuard, 1))
+        .run();
+    });
+    txn();
+  }
+
   private writeCloudStateSync(
     db: BetterSQLite3Database<Record<string, unknown>>,
     params: SaveCloudStateParams,

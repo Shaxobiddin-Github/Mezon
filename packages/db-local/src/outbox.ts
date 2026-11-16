@@ -14,7 +14,7 @@ import type Database from 'better-sqlite3';
 import { asc, eq } from 'drizzle-orm';
 import type { BetterSQLite3Database } from 'drizzle-orm/better-sqlite3';
 import { type SqliteSessionDbAccess, advanceDeviceSeqAndStateSync } from './device-state.js';
-import { localOutbox } from './schema/index.js';
+import { localOutbox, localSyncConflicts } from './schema/index.js';
 
 export function serializeOutboxJsonValue(value: unknown): unknown {
   if (value === null || typeof value === 'string' || typeof value === 'boolean') {
@@ -300,5 +300,146 @@ export class SqliteOutboxRepository implements OutboxRepository<SqliteSessionDbA
       .all();
 
     return Promise.resolve(rows.map(mapOutboxRow));
+  }
+}
+
+export function markOutboxAckedSync(
+  db: BetterSQLite3Database,
+  eventId: UuidV7,
+  nowMs: UnixMs,
+): void {
+  db.update(localOutbox)
+    .set({
+      status: 'acked',
+      pushedAtMs: nowMs,
+      updatedAtMs: nowMs,
+    })
+    .where(eq(localOutbox.id, eventId))
+    .run();
+}
+
+export function markOutboxRejectedSync(
+  db: BetterSQLite3Database,
+  eventId: UuidV7,
+  error: string,
+  nowMs: UnixMs,
+): void {
+  db.update(localOutbox)
+    .set({
+      status: 'rejected',
+      lastError: error,
+      updatedAtMs: nowMs,
+    })
+    .where(eq(localOutbox.id, eventId))
+    .run();
+}
+
+export function markOutboxRetrySync(
+  db: BetterSQLite3Database,
+  eventId: UuidV7,
+  error: string,
+  nowMs: UnixMs,
+): void {
+  const existing = db
+    .select({ attempts: localOutbox.attempts })
+    .from(localOutbox)
+    .where(eq(localOutbox.id, eventId))
+    .get();
+
+  const nextAttempts = (existing?.attempts ?? 0) + 1;
+  db.update(localOutbox)
+    .set({
+      attempts: nextAttempts,
+      lastError: error,
+      updatedAtMs: nowMs,
+    })
+    .where(eq(localOutbox.id, eventId))
+    .run();
+}
+
+export interface RecordSyncConflictParams {
+  readonly id: UuidV7;
+  readonly organizationId: UuidV7;
+  readonly storeId: UuidV7 | null;
+  readonly eventId: UuidV7;
+  readonly entity: string;
+  readonly entityId: UuidV7;
+  readonly reason: string;
+  readonly error?: string | null;
+  readonly payload: Record<string, unknown> | string;
+  readonly nowMs: UnixMs;
+}
+
+export function recordSyncConflictSync(
+  db: BetterSQLite3Database,
+  params: RecordSyncConflictParams,
+): void {
+  const payloadStr =
+    typeof params.payload === 'string'
+      ? params.payload
+      : JSON.stringify(serializeOutboxJsonValue(params.payload));
+
+  db.insert(localSyncConflicts)
+    .values({
+      id: params.id,
+      organizationId: params.organizationId,
+      storeId: params.storeId,
+      eventId: params.eventId,
+      entity: params.entity,
+      entityId: params.entityId,
+      reason: params.reason,
+      error: params.error ?? null,
+      payload: payloadStr,
+      resolvedAtMs: null,
+      createdAtMs: params.nowMs,
+      updatedAtMs: params.nowMs,
+    })
+    .run();
+}
+
+export function listSyncConflictsSync(
+  db: BetterSQLite3Database,
+  limit: number = 100,
+): readonly (typeof localSyncConflicts.$inferSelect)[] {
+  return db
+    .select()
+    .from(localSyncConflicts)
+    .orderBy(asc(localSyncConflicts.createdAtMs))
+    .limit(limit)
+    .all();
+}
+
+export class SqliteOutboxSyncStore {
+  constructor(private readonly connection: { db: BetterSQLite3Database }) {}
+
+  getPendingBatch(limit: number = 100): readonly PersistedOutboxRecord[] {
+    return this.connection.db
+      .select()
+      .from(localOutbox)
+      .where(eq(localOutbox.status, 'pending'))
+      .orderBy(asc(localOutbox.deviceSeq))
+      .limit(limit)
+      .all()
+      .map(mapOutboxRow);
+  }
+
+  markAcked(eventId: UuidV7, nowMs: UnixMs): void {
+    markOutboxAckedSync(this.connection.db, eventId, nowMs);
+  }
+
+  markRejected(eventId: UuidV7, error: string, nowMs: UnixMs): void {
+    markOutboxRejectedSync(this.connection.db, eventId, error, nowMs);
+  }
+
+  markRetry(eventId: UuidV7, error: string, nowMs: UnixMs): void {
+    markOutboxRetrySync(this.connection.db, eventId, error, nowMs);
+  }
+
+  recordConflict(params: Omit<RecordSyncConflictParams, 'nowMs'>, nowMs: UnixMs): void {
+    recordSyncConflictSync(this.connection.db, { ...params, nowMs });
+  }
+
+  listConflicts(limit: number = 100): readonly (typeof localSyncConflicts.$inferSelect)[] {
+    return listSyncConflictsSync(this.connection.db, limit);
   }
 }

@@ -303,7 +303,7 @@ describePg('@mezon/db-cloud - Device Pairing, Concurrency & Token Lifecycle (D1,
 
     // 8. Device is now BLOCKED and all tokens are revoked!
     await expect(deviceStore.verifyDeviceToken(token2, tAfterGrace)).rejects.toThrowError(
-      /DEVICE_REVOKED/,
+      /DEVICE_BLOCKED|DEVICE_REVOKED/,
     );
   });
 

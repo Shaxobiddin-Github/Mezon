@@ -53,6 +53,45 @@ export {
   cloudDevicePairingCodes,
   cloudDevices,
   cloudDeviceTokens,
+  cloudSyncEvents,
+  cloudStoreSyncPositions,
+  cloudSyncParked,
+  users,
+  categories,
+  products,
+  productVariants,
+  productBarcodes,
+  priceChanges,
+  batches,
+  stockMoves,
+  inventoryCounts,
+  inventoryCountLines,
+  promotions,
+  sales,
+  saleLines,
+  payments,
+  cashMoves,
+  returns,
+  returnLines,
+  returnPayments,
+  customers,
+  customerLedger,
+  suppliers,
+  goodsReceivings,
+  goodsReceivingLines,
+  receivingCostConfirmations,
+  supplierReturns,
+  supplierReturnLines,
+  supplierLedger,
+  shifts,
+  shiftCashierSessions,
+  shiftClosures,
+  shiftClosureMethodTotals,
+  shiftClosureCashiers,
+  dayCloses,
+  orders,
+  orderLines,
+  orderPayments,
 } from './schema/index.js';
 
 export { CloudAuthStore, type CloudLoginLookupResult } from './auth-store.js';
@@ -65,5 +104,11 @@ export {
   type DeviceOwnerLookup,
   type VerifiedDeviceContext,
 } from './device-store.js';
+
+export {
+  CloudSyncPushStore,
+  type ForeignRefCheckResult,
+  type MissingReferenceInfo,
+} from './sync-push-store.js';
 
 export { isDockerAvailable, shouldRunPgTests } from './pg-test-helper.js';

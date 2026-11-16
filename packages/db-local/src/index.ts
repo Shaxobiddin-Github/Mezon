@@ -44,6 +44,7 @@ export {
 export {
   type SqliteSessionDbAccess,
   readDeviceStateRowSync,
+  ensureDeviceStateRowSync,
   advanceReceiptSeqSync,
   readReceiptSeqSync,
   advanceReturnSeqSync,
@@ -66,6 +67,14 @@ export {
   formatOutboxRecordForDebug,
   listAllOutboxRecordsSync,
   SqliteOutboxRepository,
+  SqliteOutboxSyncStore,
+  appendOutboxEventSync,
+  markOutboxAckedSync,
+  markOutboxRejectedSync,
+  markOutboxRetrySync,
+  recordSyncConflictSync,
+  listSyncConflictsSync,
+  type RecordSyncConflictParams,
 } from './outbox.js';
 
 export {
@@ -152,6 +161,7 @@ export {
   localCashDrawerEvents,
   localCloudState,
   organizationTaxProfiles,
+  localSyncConflicts,
 } from './schema/index.js';
 
 export {

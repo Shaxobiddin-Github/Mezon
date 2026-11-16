@@ -24,11 +24,18 @@ import {
 import {
   CloudAuthStore,
   CloudDeviceStore,
+  CloudSyncPushStore,
   CloudTenantStore,
   type CloudPgConnection,
   type VerifiedDeviceContext,
   assertNonSuperuserNonBypassRls,
 } from '@mezon/db-cloud';
+import {
+  MIN_CLIENT_VERSION,
+  SyncPushRequestSchema,
+  type SyncPushRequestDto,
+  type SyncPushResponseDto,
+} from '@mezon/sync';
 import {
   DomainError,
   type IdGenerator,
@@ -59,6 +66,7 @@ export interface BuildServerOptions {
   readonly authStore?: CloudAuthStore;
   readonly tenantStore?: CloudTenantStore;
   readonly deviceStore?: CloudDeviceStore;
+  readonly syncPushStore?: CloudSyncPushStore;
   readonly idGen?: { nextId(): UuidV7 };
   readonly clock?: { nowMs(): UnixMs };
 }
@@ -76,6 +84,7 @@ export async function buildCloudServer(options: BuildServerOptions): Promise<Fas
   const authStore = options.authStore ?? new CloudAuthStore(conn.pool);
   const tenantStore = options.tenantStore ?? new CloudTenantStore(conn.pool);
   const deviceStore = options.deviceStore ?? new CloudDeviceStore(conn.pool);
+  const syncPushStore = options.syncPushStore ?? new CloudSyncPushStore(conn.pool);
   const defaultIdGen: IdGenerator = new MonotonicUuidV7Generator({
     clock: { now: () => unixMsFromBigInt(BigInt(Date.now())) },
     random: { nextBytes: (n: number) => randomBytes(n) },
@@ -486,13 +495,21 @@ export async function buildCloudServer(options: BuildServerOptions): Promise<Fas
           });
           throw new Error('DEVICE_TOKEN_REUSE');
         }
-        if (err.code === 'DEVICE_REVOKED') {
+        if (err.code === 'DEVICE_REVOKED' || err.code === 'DEVICE_BLOCKED') {
           void reply.code(403).send({
             error: 'Forbidden',
-            code: 'DEVICE_REVOKED',
+            code: err.code,
             message: 'Device has been revoked or blocked',
           });
-          throw new Error('DEVICE_REVOKED');
+          throw new Error(err.code);
+        }
+        if (err.code === 'TOKEN_EXPIRED') {
+          void reply.code(401).send({
+            error: 'Unauthorized',
+            code: 'TOKEN_EXPIRED',
+            message: 'Device token has expired',
+          });
+          throw new Error('TOKEN_EXPIRED');
         }
         if (err.code === 'AUTH_UNAUTHORIZED') {
           void reply.code(401).send({
@@ -766,5 +783,61 @@ export async function buildCloudServer(options: BuildServerOptions): Promise<Fas
     }
   });
 
+  // POST /api/v1/sync/push (Hub outbox sync push engine)
+  app.post<{ Body: SyncPushRequestDto }>('/api/v1/sync/push', async (req, reply) => {
+    let auth: { device: VerifiedDeviceContext; token: string };
+    try {
+      auth = await requireDeviceAuth(req, reply);
+    } catch {
+      return;
+    }
+
+    const parseResult = SyncPushRequestSchema.safeParse(req.body);
+    if (!parseResult.success) {
+      return reply.code(400).send({
+        error: 'Validation Error',
+        details: parseResult.error.flatten(),
+      });
+    }
+
+    const { clientVersion, storeId, deviceId, events } = parseResult.data;
+
+    // Version check: Clients below MIN_CLIENT_VERSION receive 426 Upgrade Required
+    if (!isVersionSupported(clientVersion, MIN_CLIENT_VERSION)) {
+      return reply.code(426).send({
+        error: 'Upgrade Required',
+        code: 'CLIENT_VERSION_UNSUPPORTED',
+        message: `Client version ${clientVersion} is unsupported; minimum required is ${MIN_CLIENT_VERSION}`,
+        minVersion: MIN_CLIENT_VERSION,
+      });
+    }
+
+    // Verify requesting store and device match token context
+    if (storeId !== auth.device.storeId || deviceId !== auth.device.deviceId) {
+      return reply.code(403).send({
+        error: 'Forbidden',
+        code: 'DEVICE_STORE_MISMATCH',
+        message: 'Push payload storeId or deviceId does not match authenticated token',
+      });
+    }
+
+    const nowMs = clock.nowMs();
+    const result: SyncPushResponseDto = await syncPushStore.processSyncPushBatch({
+      context: auth.device,
+      events,
+      nowMs,
+    });
+
+    return reply.code(200).send(result);
+  });
+
   return app;
+}
+
+function isVersionSupported(clientVersion: string, minVersion: string): boolean {
+  const [cMaj = 0, cMin = 0, cPatch = 0] = clientVersion.split('.').map(Number);
+  const [mMaj = 0, mMin = 0, mPatch = 0] = minVersion.split('.').map(Number);
+  if (cMaj !== mMaj) return cMaj > mMaj;
+  if (cMin !== mMin) return cMin > mMin;
+  return cPatch >= mPatch;
 }
