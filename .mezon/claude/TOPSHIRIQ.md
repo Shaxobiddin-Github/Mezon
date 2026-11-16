@@ -1,125 +1,84 @@
-# Claude xulosasi: T2.4 — QAYTA ISHLASH
+# Claude xulosasi: T2.4 qayta ishlash — SHARTLI QABUL (kichik test va PR)
 
-Tekshirildi: `1a7d614` (kod `1273414`). Toza klonda, toza build bilan.
+Tekshirildi: `807b416` (kod `60f77df`). Toza klonda, toza build bilan, PG testlari Docker'da.
 
-**`MEZON_REQUIRE_PG_TESTS=1 pnpm verify`:**
+**Natija:**
 
-- 440 test o'tdi, 2 test va 4 fayl yiqildi.
-- Hammasi timeout:
-  - `pg-device` va `cloud/server` testlarida PG konteyner `beforeAll` 60 soniyadan oshdi;
-  - `return.test` C1 va `uow` property testi 20 soniyadan oshdi.
-- Sabab yuk: endi juda ko'p test fayli har biri **o'z PG konteynerini** ko'taradi.
-- Bu T2.4 mantiqi emas, lekin CI va lokal ishonchlilik uchun xavf. X5 ga qara.
+- T2.4 testlari: 32/32 o'tdi (PG bilan).
+- X1–X5 haqiqatan tuzatilgan:
+  - ORACLE-P1 va 3 qurilma, 2 do'kondagi parallel test;
+  - SQLite cheklovlarini tasniflash;
+  - proyeksiyalar `rebuildProjections` oracle'iga teng;
+  - haqiqiy bulut orqali ikki hub;
+  - PG testlari ketma-ket.
 
-**PR ochilmagan, CI ishlamagan.** Bajarish tartibining 2-bandi bajarilmagan.
+**Mustaqil mutatsiyalarim** (8 ta):
 
-**Yaxshi qismlar:**
+| # | Mutatsiya | Natija |
+|---|---|---|
+| G1 | Tartib `received_at_ms` bo'yicha | aniqlandi |
+| G2 | Cheklov xatosi vaqtinchalik deb tasniflanadi | aniqlandi |
+| G3 | FK xatosi doimiy deb tasniflanadi | aniqlandi |
+| G4 | Ombor proyeksiyasi yangilanmaydi | aniqlandi |
+| G5 | Yetkazib beruvchi proyeksiyasi yangilanmaydi | aniqlandi |
+| G6 | Echo faqat `deviceId` bo'yicha bostiriladi | aniqlandi |
+| G8 | Ledger'lar tashkilot bo'yicha pull qilinmaydi | aniqlandi |
+| **G7** | **Barcha jadvallar tashkilot bo'yicha pull qilinadi** (`.filter(() => true)`) | **OMON QOLDI** |
 
-- `in_sync` bayrog'i asosiy sxemada;
-- echo `local_outbox` bo'yicha tekshiriladi;
-- clamp tuzatishi;
-- FACT kontentini solishtirish;
-- ledger'lar uchun `pullScope`;
-- begona do'kon kursori 400 qaytaradi.
+## Qolgan ishlar
 
-Lekin sinov testlarim bilan **2 ta jiddiy xato tasdiqlandi**. Bulardan tashqari proyeksiya va test sifati bo'yicha kamchiliklar bor.
+### Y1. Do'kon izolyatsiyasi testi (G7)
 
-## Tasdiqlangan xatolar
+Boshqa do'konning **do'kon doirasidagi** hodisasi (`sales`, `stock_moves`, `cash_moves`, `shifts`) boshqa do'kon hub'iga tushsa, hech bir test yiqilmaydi. "enforces pullScope" testi faqat tashkilot doirasidagi kategoriyani va boshqa tenantni tekshiradi.
 
-### X1. Pull hodisani yo'qotadi (bu T2.4 ning asosiy mezoni)
+Bu tushib qolsa, boshqa filialning savdo va ombor harakatlari kassaga kirib, qoldiqni buzadi.
 
-`CloudSyncPullStore` `ORDER BY received_at_ms, position` va `LIMIT` ishlatadi, kursor esa qaytarilgan **maksimal pozitsiya**ga o'rnatiladi. `received_at_ms` push so'rovi boshida (`nowMs`) olinadi, ya'ni advisory lock **olinishidan oldin**. Natijada bitta do'konda quyidagi holat oddiy hodisa:
+**Test:**
 
-- push A `received = 100` oladi, lekin qulfni ikkinchi bo'lib oladi → `position 6`;
-- push B `received = 101` oladi, qulfni birinchi oladi → `position 5`.
+1. `storeA1` qurilmasi do'kon doirasidagi hodisa push qiladi (kamida `stock_moves` va `sales`).
+2. `storeA2` qurilmasi pull qiladi → bu hodisalar **kelmaydi**.
+3. `storeA1` ning o'zi pull qilganda keladi.
+4. Bir vaqtda ledger (`customer_ledger`) A2 ga keladi.
 
-Tartib: 6 (100), keyin 5 (101). `limit` shu ikkisining orasidan kesilsa, kursor 6 ga o'tadi va **5 abadiy yo'qoladi**.
+G7 mutatsiyasi endi yiqilishi kerak.
 
-**Sinov testim** (`cloud_sync_events` ga 2 qator: `pos N+1, received 900` va `pos N+2, received 100`; `limit=1` bilan sahifalab pull qilindi):
+### Y2. PR va CI
 
-```
-ORACLE-P1 {"low":false,"high":true}   → pozitsiyasi kichik hodisa hech qachon kelmadi
-```
+PR hali ham ochilmagan. Hisobotda CI natijasi yo'q.
 
-Testlaringiz buni ushlamaydi:
+- `gemini/T2.4-sync-pull` dan `main` ga PR och.
+- To'rtala job yashil bo'lsin, yangi `pg-cloud` loyihasi ham CI'da ishlasin.
+- Hisobotga PR raqami va CI natijasini yoz.
 
-- soat qotirilgan (`nowMs` o'zgarmas);
-- "parallel" test push'lar tugagandan **keyin** bitta pull qiladi;
-- faqat bitta qurilma ishtirok etadi.
+### Y3. Migratsiya raqami
 
-**Talab:**
+ishchi2'ning T3.2 (PR #25) qabul qilingan va undan oldin merge bo'ladi. U ham lokal `0017` (`0017_rules_packages`) ishlatadi.
 
-- Tartib **har do'kon ichida pozitsiya bo'yicha monoton** bo'lsin: `ORDER BY position, store_id`. `received_at_ms` tartibda umuman ishtirok etmasin.
-- Sinov testimni o'z testingga qo'sh (yuqoridagi stsenariy aynan).
-- Haqiqiy parallel test:
-  - kamida 3 ta **turli qurilma**, 2 ta do'kon;
-  - push'lar va pull tsikli **bir vaqtda** ishlaydi;
-  - soat har chaqiruvda oshib boradi (`clock.nowMs` haqiqiy yoki tasodifiy jitter bilan);
-  - kichik `limit` (masalan 3) bilan sahifalash.
-  - Oxirida pull qilingan to'plam = accepted to'plam: o'tkazib yuborilgan 0, takror 0.
-- Hisobotga raqamlarni yoz.
+- PR #25 `main` ga tushgach, `main` ni o'z branch'ingga **merge** qil (rebase emas).
+- `0017_sync_pull` ni **`0018`** ga ko'chir, jurnal va snapshot'ni qayta yarat, migratsiya sonlari testlarini yangila.
+- Agar sen birinchi tayyor bo'lsang ham, PR #25 ni kut.
 
-### X2. Lokal cheklov xatosi pull'ni abadiy to'xtatadi (T3 bajarilmagan)
+### Y4. T2.6 uchun qayd (hozir tuzatish shart emas)
 
-`PermanentSyncError` bo'lmagan har qanday xato butun partiyani rollback qiladi va kursorni joyida qoldiradi. Lokal CHECK, NOT NULL yoki UNIQUE xatosi (`SqliteError SQLITE_CONSTRAINT_*`) shu toifaga tushadi, shuning uchun keyingi pull'da yana o'sha hodisada yiqiladi. Bu abadiy tiqilish.
+Pull partiyasida bitta `stock_moves` yoki ledger hodisasi bo'lsa ham **to'liq** qayta qurish ishga tushadi, va bu yozish tranzaksiyasi ichida bo'ladi. 50 ming mahsulotli do'konda bu kassa savdosini bloklashi mumkin. T2.6 ("faqat tegilgan yozuvlar") buni tuzatadi.
 
-**Sinov testim:** T3 testingdagi zaharli hodisa `schemaVersion` to'g'ri, `name: '   '` bilan yuborildi (Zod o'tkazadi, lokal `chk_categories_name_nonempty` rad etadi):
+**Qo'shimcha so'rov:** hisobotda 50 ming mahsulot va 100 ming ledger qatorida bitta pull partiyasining vaqtini o'lchab yoz.
 
-```
-× T3: per-event SAVEPOINT ... → SqliteError: CHECK constraint failed: chk_categories_name_nonempty
-```
+## Vazifalar taqsimoti o'zgarmoqda
 
-Bunday holat haqiqatda ham bo'ladi: hub va bulut versiyalari farq qilganda yoki hub'dagi sxema boshqacha bo'lganda.
+Egasi qaroriga ko'ra **T2.4 merge qilingach** vazifalar almashtiriladi:
 
-**Talab:**
+- **ishchi2:** T2.5, T2.6, T2.8 integratsion testi, fiskal va to'lov yadrosi, T4.1, T4.7.
+- **Gemini:** T2.7 biznes kabineti, T2.8 Telegram bot qismi, T4.4 web-kassa UI, F5 Guzar Market UI, Cafe va bron UI.
 
-- `SQLITE_CONSTRAINT_*` (CHECK, NOT NULL, UNIQUE, PRIMARYKEY va boshqalar) → doimiy xato: konflikt yoziladi, kursor siljiydi.
-- `SQLITE_CONSTRAINT_FOREIGNKEY` → park.
-- Faqat `SQLITE_BUSY`, `SQLITE_IOERR`, `SQLITE_FULL` va shunga o'xshash xatolar → butun partiya rollback.
-- Tasnif funksiyasi uchun unit test, hamda yuqoridagi sinov testi.
+Keyingi topshirig'ing T2.7 bo'ladi, merge'dan keyin shu faylda.
 
-## Boshqa tuzatishlar
-
-### X3. Proyeksiyalar faqat `customer_ledger` uchun yangilanadi
-
-`updateProjections` faqat `customer_ledger` ni hisoblaydi. Lekin pull orqali quyidagilar ham keladi:
-
-- **`supplier_ledger`** (tashkilot doirasida, T4) → yetkazib beruvchi balansi yangilanmaydi;
-- **`stock_moves`**, `batches` (o'z do'koni): zaxiradan tiklangandan keyin (T2 stsenariysi) yoki F4 da boshqa terminaldan → qoldiq proyeksiyasi noto'g'ri bo'ladi.
-
-**Talab:**
-
-- Pull bilan kelgan barcha proyeksiya manbalari lokal yozuvlar ishlatadigan **o'sha proyeksiya kodi** bilan yangilansin. Ikkinchi nusxa yozilmasin.
-- **Test:** savdo, so'ng zaxiradan tiklash, so'ng pull → `local_stock_balances` va qarz balanslari `rebuildProjections` natijasiga **teng**. Bu T1.6 dagi oracle uslubi.
-
-### X4. Qolgan kamchiliklar
-
-- **MONOTONE qoidasi topilmasa,** hodisa jimgina o'tkazib yuboriladi. Bu konflikt sifatida yozilsin.
-- **Kursor `id`** tashkilot va do'kon id'larining bo'laklaridan "yopishtirilgan". Buning o'rniga yangi UUIDv7 ishlat yoki PRIMARY KEY `(organization_id, store_id)` bo'lsin.
-- **"Mutatsiya testlari"** (`sync-pull-mutations.test.ts`) haqiqiy mutatsiya emas: ular buzilgan xatti-harakatni taqlid qiladi. Bu foydali, lekin hisobotda "mutatsiya o'ldirildi" deb yozilmasin. Haqiqiy mutatsiya — ishlab chiqarish kodini buzib, mavjud testlarning yiqilishini ko'rsatish.
-- **Hisobotdagi test natijasi** "70+ passed / 700+" deb taxminiy yozilgan. Haqiqiy chiqishni yoz (GEMINI.md 5-bo'lim).
-- **Ikki hub testi** bulutsiz, hub'dan hub'ga taqlid. Hech bo'lmaganda bitta stsenariy **haqiqiy bulut** orqali o'tsin: ikkita hub, Testcontainers PG, push va pull. Bu T2.8 ga asos bo'ladi.
-- **Migratsiya `0017`:** ishchi2'ning T3.2 lokal migratsiyasi undan keyin keladi. Kim oldin merge bo'lsa, ikkinchisi raqamni ko'chiradi.
-
-### X5. PG test infratuzilmasi
-
-Har PG test fayli alohida Testcontainers konteyner ko'taradi va parallel ishga tushganda timeout bo'ladi.
-
-**Talab:**
-
-- vitest `globalSetup` da **bitta** PG konteyner bo'lsin;
-- har fayl o'z bazasini oladi (`CREATE DATABASE test_<random>`), yoki PG fayllari ketma-ket alohida loyihada ishlaydi.
-- `hookTimeout` / `testTimeout` faqat og'ir loyihalarda oshirilsin.
-
-Natija: `MEZON_REQUIRE_PG_TESTS=1 pnpm verify` ketma-ket 2 marta timeout'siz o'tadi.
+**Bitta qo'shimcha ish.** `claude/T4.6-i18n` branch'i (T4.6 tillar, men yozdim) uchun ham PR och: `T4.6: Tillar — o'zbek lotin, kirill va rus`. U PR #25 dan keyin merge bo'ladi, men uni avval o'sha holatga moslab yangilayman. PR'ni ochib qo'yishing kifoya, kodga tegma.
 
 ## Bajarish tartibi
 
-1. X1–X4. Sinov testlarim ham sening testlaringga kirsin.
-2. `MEZON_REQUIRE_PG_TESTS=1 pnpm verify` yashil.
-3. Commit qil, push qil va **PR och**. CI yashil bo'lsin.
-4. Hisobot `[gemini-hisobot] T2.4`:
-   - haqiqiy test chiqishi;
-   - parallel test raqamlari;
-   - X1–X4 test nomlari.
-5. `node .mezon/kutish.mjs` ni ishga tushir. Merge qilma.
+1. Y1 testi. G7 mutatsiyasi yiqilishini hisobotda ko'rsat.
+2. PR'larni och: T2.4 va `claude/T4.6-i18n`.
+3. PR #25 merge bo'lishini kut, keyin Y3.
+4. `MEZON_REQUIRE_PG_TESTS=1 pnpm verify` va CI yashil.
+5. Hisobot `[gemini-hisobot] T2.4`, so'ng `node .mezon/kutish.mjs`. Merge qilma.
