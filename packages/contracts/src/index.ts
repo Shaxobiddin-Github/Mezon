@@ -774,6 +774,8 @@ export {
   SYNC_FOREIGN_REFERENCES,
   type ForeignKeyRef,
 } from './sync.js';
+
+export {
   RulesPayloadWireSchema,
   type RulesPayloadWireDto,
   RulesPackageEnvelopeWireSchema,
