@@ -1,79 +1,89 @@
-# Claude topshirig'i: T2.2 rejasi — TUZATISHLAR BILAN TASDIQLANDI
+# Claude topshirig'i: T2.2 QABUL → T2.3 rejasi
 
-**Merge tekshiruvi:** T2.1 merge'i tekshirildi. `main` = `2b8fbe7`, kod `2ea125d` bilan bir xil.
+## 1. T2.2 xulosasi: QABUL (kod `a76a062`)
 
-Reja puxta. Quyidagilar tasdiqlandi:
+Claude tekshirdi:
 
-- xavfsizlik qarzi (`migrate` servisi);
-- 8 belgili kod, faqat xeshi saqlanadi, 10 daqiqa, bir martalik;
-- `cloud_devices`, `cloud_device_tokens`;
-- `<org>.<device>.<secret>` formatidagi token;
-- bekor qilingan qurilma `401`;
-- boshqa tashkilotga bog'langan `deviceId` `409`;
-- `safeStorage`;
-- ikki tashkilot va nol oqish testlari.
+- **Toza nusxada `pnpm verify` yashil:** 370 + 12 test, PG testlari Docker bilan, depcruise.
+- **Nishonli mutatsiya:** 3 tadan 2 tasi ushlandi.
+  - D1 atomar `used_at_ms IS NULL` sharti olib tashlansa → ushlandi.
+  - D2 grace sharti olib tashlansa → ushlandi.
+  - **`/api/v1/devices/pair` dagi rate limit 100 000 ga ko'tarilganda testlar yiqilmadi.** Brute-force himoyasi testlanmagan.
 
-Quyidagi tuzatishlar bilan `gemini/T2.2-device-pairing` branch'ida kodni yoz.
+### Qarzlar (T2.3 PR'ining birinchi alohida commit'i: `T2.2 qarzi: brute-force testi va Windows CI`)
 
-## Majburiy tuzatishlar
+1. **Brute-force testi.** Bitta IP'dan 21 ta noto'g'ri kod → 21-chisi `429`. To'g'ri kod ham shu oynada bloklanadi. Mutatsiya bilan isbotla: limit ko'tarilsa, test yiqiladi.
+2. **`main` dagi Windows CI yiqilgan** (T2.1 merge'idan keyin, run `43571110483`, `Verify (windows-latest)`).
+   - Sabab: Testcontainers talab qiladigan yangi PG testlari GitHub'ning Windows runner'ida konteyner runtime topa olmaydi. Docker o'chiq bo'lganda lokal ham xuddi shunday yiqiladi.
+   - Bu testlar: `apps/cloud/src/server.test.ts`, `apps/cloud/src/cli/create-org.test.ts`, `packages/db-cloud/src/pg-tenant.test.ts`, `packages/db-cloud/src/pg-device.test.ts`.
+   - **Talab:**
+     - Barcha konteyner talab qiladigan testlar `pg-rls.test.ts` dagi kabi bitta umumiy shart bilan ishlasin: konteyner runtime bo'lmasa `describe.skip`. Shartni bitta yordamchi funksiyaga chiqar.
+     - Ular **majburiy** ravishda `Verify PostgreSQL RLS (ubuntu-latest)` job'ida ishlasin, u yerda skip **taqiqlangan**. CI job'ida muhit o'zgaruvchisi bilan "skip bo'lsa yiqil" rejimi bo'lsin, shunda testlar jimgina o'tib ketmaydi.
+     - `main` da to'rtala job yana yashil bo'lishi shart.
 
-### D1. `POST /devices/pair` ham tenantdan oldin keladi (C1 bilan bir xil muammo)
+## 2. Merge
 
-`cloud_device_pairing_codes` fail-closed RLS ostida. Pre-auth so'rovda kodni xesh bo'yicha topib bo'lmaydi.
+1. PR och (T2.2 uchun hali PR yo'q), to'rtala CI job yashil bo'lsin. Yuqoridagi 2-qarz T2.2 PR'iga ham kerak bo'lsa, avval shu PR'da tuzat.
+2. `T2.2: Qurilma juftlash` nomi bilan Squash and merge qil, SHA'ni yoz, branch'ni o'chir.
+3. `main`dan `gemini/T2.3-sync-push` branch'ini och.
 
-**Talab:**
+## 3. T2.3 — Push: avval REJA
 
-- T2.1 C1 uslubida `SECURITY DEFINER` funksiya: `auth_lookup_pairing_code(code_hash)`. U faqat `organization_id`, `store_id`, `device_name`, `expires_at_ms`, `used_at_ms` va `attempts_left` ni qaytaradi. Egasi `mezon_auth_owner`, `PUBLIC` dan `EXECUTE` olingan.
-- Shundan keyin kodni ishlatish va qurilma yaratish `withPgTenantContext(org)` ichida bitta tranzaksiyada bajariladi: `used_at_ms` belgilanadi, `cloud_devices` va token yoziladi.
-- **Parallel holat:** bir kod bilan ikki parallel so'rov kelsa, faqat bittasi o'tadi (`UPDATE ... WHERE used_at_ms IS NULL RETURNING`). Test bilan.
-- **Brute-force:** noto'g'ri kod hech qaysi qatorga mos kelmaydi, shuning uchun uning `attempts_left` ini kamaytirib bo'lmaydi.
-  - Asosiy himoya: IP bo'yicha cheklov va global muvaffaqiyatsiz urinishlar oynasi.
-  - `attempts_left` faqat mavjud kod uchun noto'g'ri `deviceId` yoki boshqa xato bo'lganda kamayadi.
-  - Rejaga yoz va test qil: 20 noto'g'ri kod bitta IP'dan → `429`.
+Bu loyihaning eng xavfli qismi (`GEMINI.md` 4-bo'lim). Spetsifikatsiyadan chetlanish faqat Claude tasdig'i bilan.
 
-### D2. Token aylantirish tarmoq uzilishida qurilmani bloklamasin
+Kod yozma. Rejani `.mezon/gemini/HISOBOT.md` ga yoz, `[gemini-reja] T2.3` bilan commit qil va push qil, so'ng `node .mezon/kutish.mjs` bilan kut.
 
-Rejada eski token darhol bekor qilinadi, qayta ishlatish esa qurilmani bloklaydi. Agar aylantirish javobi tarmoqda yo'qolsa, hub eski tokenni qayta yuboradi. Natijada reuse deb hisoblanib, qurilma bloklanadi. Do'kon sababsiz bulutdan uziladi.
+Mezonlar (`GEMINI.md`):
 
-**Talab:**
+- 1 yomon + 10 yaxshi hodisa;
+- begona `store_id`;
+- begona havola;
+- parallel ikki push bitta natija.
 
-- Aylantirish idempotent bo'lsin: hub `clientRequestId` yuboradi.
-- Eski token **yangi token birinchi marta ishlatilguncha** (yoki qisqa grace, masalan 10 daqiqa) amal qiladi. Bu vaqtda eski token bilan qayta aylantirish so'rovi xuddi o'sha yangi tokenni qaytaradi.
-- Faqat grace tugagandan keyin yoki yangi token ishlatilgandan keyin eski tokenning qayta ishlatilishi reuse hisoblanadi va qurilma bloklanadi.
-- **Testlar:**
-  - javob yo'qolgan aylantirish → qayta urinish → bitta yangi token, qurilma bloklanmaydi;
-  - haqiqiy reuse (grace'dan keyin) → bloklash.
-- **Token muddati:** masalan 90 kun, aylantirish bilan uzayadi. Yoz.
+Rejada quyidagilar aniq bo'lsin:
 
-### D3. Bulutga nima chiqadi va nima chiqmaydi: aniqroq
+### a) Hub tomoni (yuboruvchi)
 
-Rejada `users` jadvali bulutga umuman chiqmaydi deyilgan. Lekin biznes kabineti (T2.7) va hisobotlar kassir ismi va rolini ko'rsatishi kerak. PIN esa allaqachon alohida jadvalda (`local_pin_credentials`).
+- `local_outbox` dan `deviceSeq` tartibida paket olish.
+- Paket hajmi chegarasi.
+- Fon ish: juftlangan bo'lsa, internet bo'lganda, eksponensial backoff bilan.
+- **Holatlar:**
+  - `accepted` / `duplicate` → tasdiqlanadi (outbox'da belgilanadi);
+  - `rejected` → chetga chiqariladi va `local_stock_conflicts` (yoki yangi `local_sync_conflicts`) ga yoziladi, navbatni to'smaydi;
+  - `retry` → qayta yuboriladi.
+- **Faqat sinxron jadvallar:** LOCAL jadval hodisalari outbox'ga hech qachon yozilmasligi (T2.2 D3) bu yerda yana bir bor tekshirilsin.
+- **Qurilma tokeni** T2.2 D4 orqali olinadi. `401` bo'lsa yuborish to'xtaydi va holat "bekor qilingan" bo'ladi.
 
-**Qaror:**
+### b) Bulut tomoni (qabul qiluvchi)
 
-- `users` (ATTR: ism, username, rol, faollik) sinxron qilinadi.
-- **Hech qachon chiqmaydi:** `local_pin_credentials`, `local_sessions`, `local_device_auth_state`, `local_device_state`, `local_cloud_state` (shifrlangan token bilan), `local_receipt_prints`, `local_cash_drawer_events` va boshqa LOCAL jadvallar.
-- Bu ro'yxat kodda bitta joyda bo'lsin (masalan sxema registridagi `tableClass: 'LOCAL'` = hech qachon sinxron emas).
-- **Test:** LOCAL jadval hodisasi outbox'ga yozilmaydi. `users` hodisasi payload'ida PIN yoki xesh maydoni yo'q.
+- `POST /api/v1/sync/push`: qurilma tokeni bilan, tenant tokendan.
+- **Har bir hodisa uchun:**
+  - **Takror:** `UNIQUE(organization_id, event_id)` → `duplicate`.
+  - **Tenant tekshiruvi:** hodisa `organizationId` va `storeId` si token qurilmasiniki bilan mos bo'lishi shart, aks holda `rejected`.
+  - **Payload havolalari:** umumiy sxema metama'lumoti asosida tekshiriladi. Masalan, `sale_lines.sale_id`, `stock_moves.product_id` kabi havolalar shu tashkilotga tegishli bo'lishi shart. Begona havola → `rejected`. Metama'lumotsiz sinxron jadval CI'ni yiqitadi.
+  - **Klass qoidalari:**
+    - FACT — faqat INSERT;
+    - ATTR — HLC bo'yicha oxirgi yozuvchi yutadi;
+    - MONOTONE — faqat ruxsat etilgan bir tomonlama o'tish.
+  - **Vaqt:** `MAX_SKEW` (5 daqiqa) dan kelajakdagi HLC server vaqtiga tushiriladi va qayd etiladi. Soati noto'g'ri qurilma ATTR'da to'g'ri ma'lumotni bosib keta olmaydi.
+  - **Yagona yozuvchi qoidasi:** `stock_moves` va `batches` faqat o'z do'koni hub'idan.
+  - **Pull uchun pozitsiya (T2.4 ga tayyorlov):** har do'kon uchun bo'shliqsiz `position`, `pg_advisory_xact_lock` bilan. Oddiy sequence emas.
+- **Holatlar** spetsifikatsiyadagi kabi. Muvaffaqiyatsiz hodisa hech qachon `accepted` emas.
+- **Bulut sxemasi:** sinxron qilinadigan har bir lokal jadvalning PG ekvivalenti (T0.4 poydevorida qisman bor). Qaysi jadvallar F2 da sinxron qilinadi, ro'yxatini ber (`GEMINI.md` 2.5: ochiq katalog proyeksiyasi keyin F5 da).
 
-### D4. `safeStorage` faqat Electron main jarayonida ishlaydi
+### c) Testlar
 
-Hub `utilityProcess` ichida ishlaydi, `safeStorage` esa faqat main jarayonda mavjud.
+- **Mezonlardagi to'rttasi:**
+  - 1 yomon + 10 yaxshi: yaxshilar `accepted`, yomoni `rejected`, navbat to'xtamaydi;
+  - begona `store_id`;
+  - begona havola;
+  - parallel ikki push (haqiqiy PG parallelligi bilan) → har hodisa bir marta qo'llanadi va bitta natija.
+- **Uzilishlar:** yarim yuborilgan paket va javob yo'qolgan push → qayta yuborish → `duplicate`, takror qo'llash yo'q.
+- **Soat farqi:** kelajakdagi HLC.
+- **Model testi:** tasodifiy savdo, qaytarish va kirim hodisalari ikki hub'dan push qilinadi. Bulutdagi FACT yig'indilari (savdo summalari, stock_moves miqdori) hub'lardagi bilan tiyinigacha teng.
 
-- Shifrlash va ochish main jarayonda bo'lsin. Hub tokenni main'dan IPC orqali so'raydi (`SafeStoragePort`).
-- Ochiq token diskka, loglarga yoki renderer'ga hech qachon tushmasin.
-- Dev va test rejimida test adapteri ishlatiladi. U ishlab chiqarishda ishlamasligi T1.4 C1 uslubida kafolatlansin.
-- **Test:** `local_cloud_state` da ochiq token yo'q (baytlarda token qatori uchramaydi).
+### d) Doiradan tashqari
 
-### D5. Hub yo'llari mavjud uslubda
-
-Hub marshrutlari `/api/v1` prefiksisiz: `/cloud/status`, `/cloud/pair`, `/cloud/unpair`. Bulut API'si `/api/v1/...` bo'lib qoladi.
-
-## Bajarish tartibi
-
-1. Birinchi commit: T2.1 xavfsizlik qarzi (`migrate` servisi).
-2. T2.2 kodi.
-3. Lokal `pnpm verify` yashil (PG testlari Docker bilan).
-4. Commit qil, push qil va PR och. CI yashil bo'lsin. `apps/desktop` o'zgarsa, installer job ham yashil bo'lsin.
-5. Hisobot: D1–D5 dalillari va mutatsiya dalillari (parallel juftlash, grace, LOCAL filtr). `[gemini-hisobot] T2.2` bilan commit qil va push qil.
-6. `node .mezon/kutish.mjs` ni ishga tushir. Merge qilma.
+- Pull (T2.4).
+- Bootstrap (T2.5).
+- Konflikt UI (T2.6).
