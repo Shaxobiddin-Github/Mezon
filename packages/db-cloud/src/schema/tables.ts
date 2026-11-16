@@ -1,4 +1,4 @@
-import { text, uniqueIndex } from 'drizzle-orm/pg-core';
+import { index, text, uniqueIndex } from 'drizzle-orm/pg-core';
 import { pgBigint, pgBoolean, pgInt } from '../columns.js';
 import { cloudSchemaRegistry } from './registry-instance.js';
 
@@ -85,5 +85,70 @@ export const cloudLoginIdentities = cloudSchemaRegistry.defineTable(
   (self) => [
     uniqueIndex('uidx_cloud_login_identities_login').on(self.login),
     uniqueIndex('uidx_cloud_login_identities_user').on(self.orgId, self.userId),
+  ],
+);
+
+export const cloudDevicePairingCodes = cloudSchemaRegistry.defineTable(
+  {
+    name: 'cloud_device_pairing_codes',
+    tableClass: 'LOCAL',
+    tenantScope: 'organization',
+  },
+  (common) => ({
+    ...common,
+    storeId: text('store_id').notNull(),
+    deviceName: text('device_name').notNull(),
+    codeHash: text('code_hash').notNull(),
+    attemptsLeft: pgInt('attempts_left').notNull().default(5),
+    expiresAtMs: pgBigint('expires_at_ms').notNull(),
+    usedAtMs: pgBigint('used_at_ms'),
+  }),
+  (self) => [
+    uniqueIndex('uidx_cloud_device_pairing_codes_hash').on(self.codeHash),
+    index('idx_cloud_device_pairing_codes_org_store').on(self.organizationId, self.storeId),
+  ],
+);
+
+export const cloudDevices = cloudSchemaRegistry.defineTable(
+  {
+    name: 'cloud_devices',
+    tableClass: 'LOCAL',
+    tenantScope: 'organization',
+  },
+  (common) => ({
+    ...common,
+    storeId: text('store_id').notNull(),
+    deviceId: text('device_id').notNull(),
+    name: text('name').notNull(),
+    platform: text('platform').notNull(), // 'windows' | 'android' | 'linux'
+    appVersion: text('app_version').notNull(),
+    status: text('status').notNull().default('active'), // 'active' | 'blocked' | 'revoked'
+    lastSeenAtMs: pgBigint('last_seen_at_ms').notNull(),
+  }),
+  (self) => [
+    uniqueIndex('uidx_cloud_devices_org_device').on(self.organizationId, self.deviceId),
+    index('idx_cloud_devices_device_id').on(self.deviceId),
+  ],
+);
+
+export const cloudDeviceTokens = cloudSchemaRegistry.defineTable(
+  {
+    name: 'cloud_device_tokens',
+    tableClass: 'LOCAL',
+    tenantScope: 'organization',
+  },
+  (common) => ({
+    ...common,
+    deviceId: text('device_id').notNull(),
+    tokenHash: text('token_hash').notNull(),
+    clientRequestId: text('client_request_id'),
+    expiresAtMs: pgBigint('expires_at_ms').notNull(),
+    revokedAtMs: pgBigint('revoked_at_ms'),
+    graceUntilMs: pgBigint('grace_until_ms'),
+    replacedByTokenId: text('replaced_by_token_id'),
+  }),
+  (self) => [
+    uniqueIndex('uidx_cloud_device_tokens_hash').on(self.organizationId, self.tokenHash),
+    index('idx_cloud_device_tokens_client_req').on(self.organizationId, self.clientRequestId),
   ],
 );

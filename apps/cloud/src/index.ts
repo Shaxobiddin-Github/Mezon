@@ -1,4 +1,4 @@
-import { createCloudPgPool, migrateCloudDatabase } from '@mezon/db-cloud';
+import { createCloudPgPool } from '@mezon/db-cloud';
 import { loadCloudConfig } from './config.js';
 import { buildCloudServer } from './server.js';
 
@@ -9,18 +9,6 @@ export * from './server.js';
 export async function startCloudServer(): Promise<void> {
   const config = loadCloudConfig();
   console.log(`Starting @mezon/cloud API on ${config.host}:${config.port}...`);
-
-  if (config.databaseAdminUrl) {
-    console.log('Running PostgreSQL migrations with DATABASE_ADMIN_URL...');
-    const adminConn = createCloudPgPool({
-      connectionString: config.databaseAdminUrl,
-    });
-    try {
-      await migrateCloudDatabase(adminConn.db);
-    } finally {
-      await adminConn.close();
-    }
-  }
 
   const conn = createCloudPgPool({
     connectionString: config.databaseUrl,

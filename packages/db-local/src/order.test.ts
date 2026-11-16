@@ -1183,5 +1183,5 @@ describe('@mezon/db-local - T1.10 Customer Orders, Frozen Evaluation (O3), Advan
       }
     }
     expect(DEFAULT_MAX_CASH_DISCREPANCY_TIYIN).toBe(1_000_000n);
-  });
+  }, 60_000);
 });

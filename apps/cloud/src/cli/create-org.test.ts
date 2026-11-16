@@ -1,10 +1,17 @@
 import { PostgreSqlContainer, type StartedPostgreSqlContainer } from '@testcontainers/postgresql';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import { PG_APP_ROLE_NAME, createCloudPgPool, CloudAuthStore } from '@mezon/db-cloud';
+import {
+  PG_APP_ROLE_NAME,
+  createCloudPgPool,
+  CloudAuthStore,
+  shouldRunPgTests,
+} from '@mezon/db-cloud';
 import { provisionAppRole } from '../../../../packages/db-cloud/ops/provision-app-role.mjs';
 import { runCreateOrgCli } from './create-org.js';
 
-describe('@mezon/cloud - CLI org:create (C4)', () => {
+const describePg = shouldRunPgTests() ? describe : describe.skip;
+
+describePg('@mezon/cloud - CLI org:create (C4)', () => {
   let container: StartedPostgreSqlContainer;
   let adminConn: ReturnType<typeof createCloudPgPool>;
 

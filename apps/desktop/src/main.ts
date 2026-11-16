@@ -6,6 +6,7 @@ import {
   ipcMain,
   powerMonitor,
   protocol,
+  safeStorage,
   session,
   utilityProcess,
 } from 'electron';
@@ -255,6 +256,24 @@ if (singleInstanceLockAcquired) {
             status: 'starting',
           }
         );
+      });
+
+      // D4: safeStorage IPC handlers for secure token storage
+      ipcMain.handle('mezon:safe-storage-is-available', () => {
+        return safeStorage.isEncryptionAvailable();
+      });
+      ipcMain.handle('mezon:safe-storage-encrypt', (_event, plainText: string) => {
+        if (!safeStorage.isEncryptionAvailable()) {
+          throw new Error('safeStorage encryption is not available on this platform');
+        }
+        return safeStorage.encryptString(plainText).toString('base64');
+      });
+      ipcMain.handle('mezon:safe-storage-decrypt', (_event, base64Cipher: string) => {
+        if (!safeStorage.isEncryptionAvailable()) {
+          throw new Error('safeStorage encryption is not available on this platform');
+        }
+        const buffer = Buffer.from(base64Cipher, 'base64');
+        return safeStorage.decryptString(buffer);
       });
 
       let resolveInitialHubReady: (() => void) | null = null;

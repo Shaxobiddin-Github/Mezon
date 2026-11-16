@@ -40,7 +40,7 @@ export async function runCreateOrgCli(argv: string[] = process.argv.slice(2)): P
 
   console.log(`[org:create] Connecting to database...`);
   const conn = createCloudPgPool({
-    connectionString: config.databaseAdminUrl ?? config.databaseUrl,
+    connectionString: process.env.DATABASE_ADMIN_URL ?? config.databaseUrl,
   });
 
   try {

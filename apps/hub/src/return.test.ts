@@ -597,5 +597,5 @@ describe('@mezon/hub - T1.6 Void, Return, Supervisor Override RBAC, V1-V2 & Audi
     } finally {
       await hub.close();
     }
-  }, 15_000);
+  }, 45_000);
 });

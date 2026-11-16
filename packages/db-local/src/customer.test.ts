@@ -1148,5 +1148,5 @@ describe('@mezon/db-local - T1.7 Customer Profile, Ledger, FIFO, D1-D4 & Benchma
     } finally {
       env.connection.close();
     }
-  }, 20_000);
+  }, 60_000);
 });

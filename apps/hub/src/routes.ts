@@ -34,6 +34,8 @@ import { registerBackupRoutes } from './backup-routes.js';
 import type { SqliteBackupService, SqliteCatalogStore, SqliteStockStore } from '@mezon/db-local';
 import { registerCatalogImportRoutes } from './catalog-import-routes.js';
 import { CatalogImportCache } from './catalog-import-cache.js';
+import { registerCloudRoutes } from './cloud-routes.js';
+import type { HubCloudService } from './cloud-service.js';
 
 async function authorize(
   authService: HubAuthService,
@@ -63,6 +65,7 @@ export function registerHubRoutes(
   catalogStore?: SqliteCatalogStore,
   stockStore?: SqliteStockStore,
   importCache?: CatalogImportCache,
+  cloudService?: HubCloudService,
 ): void {
   app.get('/health', async () => {
     return authService.getHealth();
@@ -166,5 +169,8 @@ export function registerHubRoutes(
   }
   if (catalogStore && stockStore && importCache) {
     registerCatalogImportRoutes(app, authService, catalogStore, stockStore, importCache);
+  }
+  if (cloudService) {
+    registerCloudRoutes(app, cloudService, authService);
   }
 }

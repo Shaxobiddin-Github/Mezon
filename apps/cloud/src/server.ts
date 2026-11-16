@@ -1,5 +1,8 @@
 import { createHash, randomBytes } from 'node:crypto';
 import {
+  type CloudCreatePairingCodeRequestDto,
+  CloudCreatePairingCodeRequestSchema,
+  type CloudCreatePairingCodeResponseDto,
   type CloudCreateStoreRequestDto,
   CloudCreateStoreRequestSchema,
   type CloudLoginRequestDto,
@@ -7,15 +10,23 @@ import {
   type CloudLoginResponseDto,
   type CloudLogoutRequestDto,
   CloudLogoutRequestSchema,
+  type CloudPairDeviceRequestDto,
+  CloudPairDeviceRequestSchema,
+  type CloudPairDeviceResponseDto,
   type CloudRefreshRequestDto,
   CloudRefreshRequestSchema,
+  type CloudRotateDeviceTokenRequestDto,
+  CloudRotateDeviceTokenRequestSchema,
+  type CloudRotateDeviceTokenResponseDto,
   type CloudStoreDto,
   type CloudUserDto,
 } from '@mezon/contracts';
 import {
   CloudAuthStore,
+  CloudDeviceStore,
   CloudTenantStore,
   type CloudPgConnection,
+  type VerifiedDeviceContext,
   assertNonSuperuserNonBypassRls,
 } from '@mezon/db-cloud';
 import {
@@ -37,6 +48,7 @@ import { type CloudJwtPayload, CloudJwtService } from './jwt.js';
 declare module 'fastify' {
   interface FastifyRequest {
     user?: CloudJwtPayload;
+    device?: VerifiedDeviceContext;
   }
 }
 
@@ -46,6 +58,7 @@ export interface BuildServerOptions {
   readonly jwtService?: CloudJwtService;
   readonly authStore?: CloudAuthStore;
   readonly tenantStore?: CloudTenantStore;
+  readonly deviceStore?: CloudDeviceStore;
   readonly idGen?: { nextId(): UuidV7 };
   readonly clock?: { nowMs(): UnixMs };
 }
@@ -62,6 +75,7 @@ export async function buildCloudServer(options: BuildServerOptions): Promise<Fas
   const jwtService = options.jwtService ?? new CloudJwtService(config.jwtSecret);
   const authStore = options.authStore ?? new CloudAuthStore(conn.pool);
   const tenantStore = options.tenantStore ?? new CloudTenantStore(conn.pool);
+  const deviceStore = options.deviceStore ?? new CloudDeviceStore(conn.pool);
   const defaultIdGen: IdGenerator = new MonotonicUuidV7Generator({
     clock: { now: () => unixMsFromBigInt(BigInt(Date.now())) },
     random: { nextBytes: (n: number) => randomBytes(n) },
@@ -442,6 +456,314 @@ export async function buildCloudServer(options: BuildServerOptions): Promise<Fas
     };
 
     return reply.code(201).send({ store: dto });
+  });
+
+  async function requireDeviceAuth(
+    req: FastifyRequest,
+    reply: FastifyReply,
+  ): Promise<{ readonly device: VerifiedDeviceContext; readonly token: string }> {
+    const authHeader = req.headers.authorization;
+    if (!authHeader || !authHeader.startsWith('Bearer ')) {
+      void reply.code(401).send({ error: 'Unauthorized', message: 'Device token required' });
+      throw new Error('DEVICE_AUTH_REQUIRED');
+    }
+
+    const token = authHeader.slice(7).trim();
+    try {
+      const verified = await deviceStore.verifyDeviceToken(token, clock.nowMs());
+      if (!verified) {
+        void reply.code(401).send({ error: 'Unauthorized', message: 'Invalid device token' });
+        throw new Error('DEVICE_AUTH_REQUIRED');
+      }
+      return { device: verified, token };
+    } catch (err) {
+      if (err instanceof DomainError) {
+        if (err.code === 'DEVICE_TOKEN_REUSE') {
+          void reply.code(401).send({
+            error: 'Unauthorized',
+            code: 'DEVICE_TOKEN_REUSE',
+            message: 'Device token reuse detected; device blocked',
+          });
+          throw new Error('DEVICE_TOKEN_REUSE');
+        }
+        if (err.code === 'DEVICE_REVOKED') {
+          void reply.code(403).send({
+            error: 'Forbidden',
+            code: 'DEVICE_REVOKED',
+            message: 'Device has been revoked or blocked',
+          });
+          throw new Error('DEVICE_REVOKED');
+        }
+        if (err.code === 'AUTH_UNAUTHORIZED') {
+          void reply.code(401).send({
+            error: 'Unauthorized',
+            code: 'AUTH_UNAUTHORIZED',
+            message: err.message,
+          });
+          throw new Error('AUTH_UNAUTHORIZED');
+        }
+      }
+      void reply.code(401).send({ error: 'Unauthorized', message: 'Device authentication failed' });
+      throw new Error('DEVICE_AUTH_REQUIRED');
+    }
+  }
+
+  // POST /api/v1/devices/pairing-codes (Cabinet owner)
+  app.post<{ Body: CloudCreatePairingCodeRequestDto }>(
+    '/api/v1/devices/pairing-codes',
+    async (req, reply) => {
+      let auth: CloudJwtPayload;
+      try {
+        auth = requireAuth(req, reply);
+      } catch {
+        return;
+      }
+
+      if (auth.role !== 'owner') {
+        return reply.code(403).send({
+          error: 'Forbidden',
+          message: 'Only owner can generate pairing codes',
+        });
+      }
+
+      const parseResult = CloudCreatePairingCodeRequestSchema.safeParse(req.body);
+      if (!parseResult.success) {
+        return reply.code(400).send({
+          error: 'Validation Error',
+          details: parseResult.error.flatten(),
+        });
+      }
+
+      const { storeId, name } = parseResult.data;
+      const nowMs = clock.nowMs();
+
+      try {
+        const created = await deviceStore.createPairingCode({
+          organizationId: auth.org,
+          storeId: parseUuidV7(storeId),
+          deviceName: name,
+          idGen,
+          nowMs,
+        });
+
+        const response: CloudCreatePairingCodeResponseDto = {
+          code: created.code,
+          expiresAtMs: Number(created.expiresAtMs),
+          storeId: created.storeId,
+          storeName: created.storeName,
+        };
+
+        return reply.code(201).send(response);
+      } catch (err) {
+        if (err instanceof DomainError && err.code === 'STORE_NOT_FOUND') {
+          return reply.code(404).send({ error: 'Not Found', message: err.message });
+        }
+        throw err;
+      }
+    },
+  );
+
+  // POST /api/v1/devices/pair (Pre-auth endpoint, rate-limited: max 20 per minute)
+  app.post<{ Body: CloudPairDeviceRequestDto }>(
+    '/api/v1/devices/pair',
+    {
+      config: {
+        rateLimit: {
+          max: 20,
+          timeWindow: '1 minute',
+        },
+      },
+    },
+    async (req, reply) => {
+      const parseResult = CloudPairDeviceRequestSchema.safeParse(req.body);
+      if (!parseResult.success) {
+        return reply.code(400).send({
+          error: 'Validation Error',
+          details: parseResult.error.flatten(),
+        });
+      }
+
+      const { code, deviceId, platform, appVersion } = parseResult.data;
+      const nowMs = clock.nowMs();
+
+      const lookup = await deviceStore.lookupPairingCode(code);
+      if (!lookup) {
+        return reply.code(404).send({
+          error: 'Not Found',
+          code: 'PAIRING_CODE_NOT_FOUND',
+          message: 'Invalid pairing code',
+        });
+      }
+
+      if (lookup.usedAtMs !== null) {
+        return reply.code(409).send({
+          error: 'Conflict',
+          code: 'PAIRING_ALREADY_USED',
+          message: 'Pairing code has already been used',
+        });
+      }
+
+      if (lookup.expiresAtMs < BigInt(nowMs)) {
+        return reply.code(400).send({
+          error: 'Bad Request',
+          code: 'PAIRING_CODE_EXPIRED',
+          message: 'Pairing code has expired',
+        });
+      }
+
+      try {
+        const paired = await deviceStore.pairDevice({
+          pairingLookup: lookup,
+          deviceId: parseUuidV7(deviceId),
+          platform,
+          appVersion,
+          idGen,
+          nowMs,
+        });
+
+        const response: CloudPairDeviceResponseDto = {
+          deviceToken: paired.deviceToken,
+          organizationId: paired.organizationId,
+          storeId: paired.storeId,
+          storeName: paired.storeName,
+          organizationName: paired.organizationName,
+        };
+
+        return reply.code(201).send(response);
+      } catch (err) {
+        if (err instanceof DomainError) {
+          if (err.code === 'PAIRING_ALREADY_USED') {
+            return reply.code(409).send({
+              error: 'Conflict',
+              code: 'PAIRING_ALREADY_USED',
+              message: err.message,
+            });
+          }
+          if (err.code === 'DEVICE_ALREADY_REGISTERED') {
+            return reply.code(409).send({
+              error: 'Conflict',
+              code: 'DEVICE_ALREADY_REGISTERED',
+              message: err.message,
+            });
+          }
+          if (err.code === 'STORE_NOT_FOUND') {
+            return reply.code(404).send({
+              error: 'Not Found',
+              code: 'STORE_NOT_FOUND',
+              message: err.message,
+            });
+          }
+        }
+        throw err;
+      }
+    },
+  );
+
+  // POST /api/v1/devices/rotate-token (Authenticated device)
+  app.post<{ Body: CloudRotateDeviceTokenRequestDto }>(
+    '/api/v1/devices/rotate-token',
+    async (req, reply) => {
+      let authResult: { device: VerifiedDeviceContext; token: string };
+      try {
+        authResult = await requireDeviceAuth(req, reply);
+      } catch {
+        return;
+      }
+
+      const parseResult = CloudRotateDeviceTokenRequestSchema.safeParse(req.body);
+      if (!parseResult.success) {
+        return reply.code(400).send({
+          error: 'Validation Error',
+          details: parseResult.error.flatten(),
+        });
+      }
+
+      const { clientRequestId } = parseResult.data;
+      const nowMs = clock.nowMs();
+
+      try {
+        const rotated = await deviceStore.rotateDeviceToken({
+          currentToken: authResult.token,
+          clientRequestId: parseUuidV7(clientRequestId),
+          idGen,
+          nowMs,
+        });
+
+        const response: CloudRotateDeviceTokenResponseDto = {
+          deviceToken: rotated.deviceToken,
+          expiresAtMs: rotated.expiresAtMs,
+        };
+
+        return reply.code(200).send(response);
+      } catch (err) {
+        if (err instanceof DomainError && err.code === 'DEVICE_TOKEN_REUSE') {
+          return reply.code(401).send({
+            error: 'Unauthorized',
+            code: 'DEVICE_TOKEN_REUSE',
+            message: 'Token reuse detected; device blocked',
+          });
+        }
+        throw err;
+      }
+    },
+  );
+
+  // GET /api/v1/devices/me (Authenticated device)
+  app.get('/api/v1/devices/me', async (req, reply) => {
+    let authResult: { device: VerifiedDeviceContext; token: string };
+    try {
+      authResult = await requireDeviceAuth(req, reply);
+    } catch {
+      return;
+    }
+
+    return reply.code(200).send({
+      deviceId: authResult.device.deviceId,
+      organizationId: authResult.device.organizationId,
+      storeId: authResult.device.storeId,
+      deviceName: authResult.device.deviceName,
+      status: authResult.device.status,
+    });
+  });
+
+  // POST /api/v1/devices/:id/revoke (Cabinet owner)
+  app.post<{ Params: { id: string } }>('/api/v1/devices/:id/revoke', async (req, reply) => {
+    let auth: CloudJwtPayload;
+    try {
+      auth = requireAuth(req, reply);
+    } catch {
+      return;
+    }
+
+    if (auth.role !== 'owner') {
+      return reply.code(403).send({
+        error: 'Forbidden',
+        message: 'Only owner can revoke devices',
+      });
+    }
+
+    let deviceDbId: UuidV7;
+    try {
+      deviceDbId = parseUuidV7(req.params.id);
+    } catch {
+      return reply.code(400).send({ error: 'Bad Request', message: 'Invalid device id' });
+    }
+
+    const nowMs = clock.nowMs();
+    try {
+      await deviceStore.revokeDevice({
+        organizationId: auth.org,
+        deviceDbId,
+        nowMs,
+      });
+
+      return reply.code(200).send({ success: true, status: 'revoked' });
+    } catch (err) {
+      if (err instanceof DomainError && err.code === 'DEVICE_NOT_FOUND') {
+        return reply.code(404).send({ error: 'Not Found', message: err.message });
+      }
+      throw err;
+    }
   });
 
   return app;

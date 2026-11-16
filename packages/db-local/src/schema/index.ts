@@ -2848,3 +2848,34 @@ export const localCashDrawerEvents = localSchemaRegistry.defineTable(
     ),
   ],
 );
+
+/**
+ * Local Cloud pairing state and credentials (`LOCAL`, D3, D4).
+ * Stores encrypted device token, pairing status, and cloud connection metadata.
+ * Strictly local - never synced.
+ */
+export const localCloudState = localSchemaRegistry.defineTable(
+  {
+    name: 'local_cloud_state',
+    tableClass: 'LOCAL',
+    tenantScope: 'none',
+  },
+  (common) => ({
+    ...common,
+    singletonGuard: sqliteInt('singleton_guard').notNull().default(1),
+    status: text('status').notNull().default('unpaired'), // 'unpaired' | 'paired' | 'revoked'
+    cloudUrl: text('cloud_url'),
+    cloudOrganizationId: sqliteUuidV7('cloud_organization_id'),
+    cloudOrganizationName: text('cloud_organization_name'),
+    cloudStoreId: sqliteUuidV7('cloud_store_id'),
+    cloudStoreName: text('cloud_store_name'),
+    encryptedDeviceToken: text('encrypted_device_token'), // Base64 encrypted string (D4 safeStorage)
+    pairedAtMs: sqliteUnixMs('paired_at_ms'),
+    lastSyncAtMs: sqliteUnixMs('last_sync_at_ms'),
+  }),
+  (self) => [
+    uniqueIndex('uidx_local_cloud_state_singleton').on(self.singletonGuard),
+    check('chk_local_cloud_state_singleton', sql`${self.singletonGuard} = 1`),
+    check('chk_local_cloud_state_status', sql`${self.status} IN ('unpaired', 'paired', 'revoked')`),
+  ],
+);

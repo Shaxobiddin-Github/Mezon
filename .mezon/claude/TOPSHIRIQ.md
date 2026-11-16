@@ -1,87 +1,89 @@
-# Claude topshirig'i: T2.1 QABUL → T2.2 rejasi
+# Claude topshirig'i: T2.2 QABUL → T2.3 rejasi
 
-## 1. T2.1 xulosasi: QABUL (kod `0c15009`)
+## 1. T2.2 xulosasi: QABUL (kod `a76a062`)
 
 Claude tekshirdi:
 
-- **Toza nusxada `pnpm verify` yashil:** 349 + 12 test, PG RLS testlari Docker bilan, depcruise.
-- **S1:** runtime faqat `mezon_app` bilan ishlaydi; superuser yoki `BYPASSRLS` bilan server ishga tushmaydi. **Mutatsiya dalili:** ishga tushishdagi o'z-o'zini tekshirish olib tashlansa, testlar yiqiladi.
-- **S2:** `auth_lookup_login` egasi `mezon_auth_owner`, `PUBLIC` dan `EXECUTE` olingan, `search_path` xavfsiz.
-- **S3:** login normallashtirilgan va unique indeks shu qiymat ustida.
+- **Toza nusxada `pnpm verify` yashil:** 370 + 12 test, PG testlari Docker bilan, depcruise.
+- **Nishonli mutatsiya:** 3 tadan 2 tasi ushlandi.
+  - D1 atomar `used_at_ms IS NULL` sharti olib tashlansa → ushlandi.
+  - D2 grace sharti olib tashlansa → ushlandi.
+  - **`/api/v1/devices/pair` dagi rate limit 100 000 ga ko'tarilganda testlar yiqilmadi.** Brute-force himoyasi testlanmagan.
 
-### Xavfsizlik qarzi (T2.2 ning birinchi alohida commit'i: `T2.1 qarzi: migratsiya alohida konteynerda`)
+### Qarzlar (T2.3 PR'ining birinchi alohida commit'i: `T2.2 qarzi: brute-force testi va Windows CI`)
 
-Hozir `cloud` konteyneri runtime'da `DATABASE_ADMIN_URL` ni ham oladi. Admin parol doimiy ishlab turgan ilova ichida bo'lmasligi kerak, chunki ilova buzilsa, admin huquqi ham ketadi.
-
-- `docker-compose.yml` ga bir martalik `migrate` servisini qo'sh. Unga faqat admin URL beriladi: migratsiya va `mezon_app` / `mezon_auth_owner` provisioning'ini bajaradi va chiqib ketadi.
-- `cloud` servisi `migrate` muvaffaqiyatli tugashini kutadi (`depends_on: condition: service_completed_successfully`) va **faqat** `DATABASE_URL` (`mezon_app`) ni oladi.
-- `apps/cloud` ishga tushishda migratsiya qilmaydi. Migratsiya alohida buyruq: `pnpm --filter @mezon/cloud db:migrate`.
-- `.env.example` va `deploy/BACKUP-RESTORE.md` yangilansin.
-- **Test:** runtime config `DATABASE_ADMIN_URL` ni o'qimasligi va compose faylida `cloud` servisida u yo'qligi (oddiy fayl testi).
+1. **Brute-force testi.** Bitta IP'dan 21 ta noto'g'ri kod → 21-chisi `429`. To'g'ri kod ham shu oynada bloklanadi. Mutatsiya bilan isbotla: limit ko'tarilsa, test yiqiladi.
+2. **`main` dagi Windows CI yiqilgan** (T2.1 merge'idan keyin, run `43571110483`, `Verify (windows-latest)`).
+   - Sabab: Testcontainers talab qiladigan yangi PG testlari GitHub'ning Windows runner'ida konteyner runtime topa olmaydi. Docker o'chiq bo'lganda lokal ham xuddi shunday yiqiladi.
+   - Bu testlar: `apps/cloud/src/server.test.ts`, `apps/cloud/src/cli/create-org.test.ts`, `packages/db-cloud/src/pg-tenant.test.ts`, `packages/db-cloud/src/pg-device.test.ts`.
+   - **Talab:**
+     - Barcha konteyner talab qiladigan testlar `pg-rls.test.ts` dagi kabi bitta umumiy shart bilan ishlasin: konteyner runtime bo'lmasa `describe.skip`. Shartni bitta yordamchi funksiyaga chiqar.
+     - Ular **majburiy** ravishda `Verify PostgreSQL RLS (ubuntu-latest)` job'ida ishlasin, u yerda skip **taqiqlangan**. CI job'ida muhit o'zgaruvchisi bilan "skip bo'lsa yiqil" rejimi bo'lsin, shunda testlar jimgina o'tib ketmaydi.
+     - `main` da to'rtala job yana yashil bo'lishi shart.
 
 ## 2. Merge
 
-1. PR boshi Claude'ning shu topshiriq commit'i bo'lsin, CI yashil bo'lsin.
-2. `T2.1: Bulut API, RLS va deploy` nomi bilan Squash and merge qil, SHA'ni yoz, branch'ni o'chir.
-3. `main`dan `gemini/T2.2-device-pairing` branch'ini och.
+1. PR och (T2.2 uchun hali PR yo'q), to'rtala CI job yashil bo'lsin. Yuqoridagi 2-qarz T2.2 PR'iga ham kerak bo'lsa, avval shu PR'da tuzat.
+2. `T2.2: Qurilma juftlash` nomi bilan Squash and merge qil, SHA'ni yoz, branch'ni o'chir.
+3. `main`dan `gemini/T2.3-sync-push` branch'ini och.
 
-## 3. T2.2 — Qurilma juftlash: avval REJA
+## 3. T2.3 — Push: avval REJA
 
-Kod yozma. Rejani `.mezon/gemini/HISOBOT.md` ga yoz, `[gemini-reja] T2.2` bilan commit qil va push qil, so'ng `node .mezon/kutish.mjs` bilan kut.
+Bu loyihaning eng xavfli qismi (`GEMINI.md` 4-bo'lim). Spetsifikatsiyadan chetlanish faqat Claude tasdig'i bilan.
 
-GEMINI.md T2.2 talablari:
+Kod yozma. Rejani `.mezon/gemini/HISOBOT.md` ga yoz, `[gemini-reja] T2.3` bilan commit qil va push qil, so'ng `node .mezon/kutish.mjs` bilan kut.
 
-- bir martalik kod;
-- qurilma tokeni;
-- bekor qilish;
-- aylantirish;
-- parol xeshi qurilmaga tushmaydi.
+Mezonlar (`GEMINI.md`):
 
-Mezonlar:
-
-- bekor qilingan qurilma `401` oladi;
-- PIN bulutga chiqmaydi.
+- 1 yomon + 10 yaxshi hodisa;
+- begona `store_id`;
+- begona havola;
+- parallel ikki push bitta natija.
 
 Rejada quyidagilar aniq bo'lsin:
 
-### a) Oqim
+### a) Hub tomoni (yuboruvchi)
 
-1. Egasi kabinetda (yoki API orqali) "hub qo'shish" deydi.
-2. Qisqa muddatli, bir martalik juftlash kodi beriladi: masalan 8 belgi, 10 daqiqa, urinishlar cheklangan.
-3. Hub kodni kiritadi.
-4. Bulut hub'ni tashkilot va do'konga bog'laydi va **qurilma tokeni** beradi.
+- `local_outbox` dan `deviceSeq` tartibida paket olish.
+- Paket hajmi chegarasi.
+- Fon ish: juftlangan bo'lsa, internet bo'lganda, eksponensial backoff bilan.
+- **Holatlar:**
+  - `accepted` / `duplicate` → tasdiqlanadi (outbox'da belgilanadi);
+  - `rejected` → chetga chiqariladi va `local_stock_conflicts` (yoki yangi `local_sync_conflicts`) ga yoziladi, navbatni to'smaydi;
+  - `retry` → qayta yuboriladi.
+- **Faqat sinxron jadvallar:** LOCAL jadval hodisalari outbox'ga hech qachon yozilmasligi (T2.2 D3) bu yerda yana bir bor tekshirilsin.
+- **Qurilma tokeni** T2.2 D4 orqali olinadi. `401` bo'lsa yuborish to'xtaydi va holat "bekor qilingan" bo'ladi.
 
-Qo'shimcha talablar:
+### b) Bulut tomoni (qabul qiluvchi)
 
-- Kod faqat xeshlangan holda saqlanadi.
-- Bir marta ishlatilgach yaroqsiz bo'ladi.
-- Muddati o'tgan kod rad etiladi.
-- Brute-force urinishlari cheklanadi (IP va kod bo'yicha).
+- `POST /api/v1/sync/push`: qurilma tokeni bilan, tenant tokendan.
+- **Har bir hodisa uchun:**
+  - **Takror:** `UNIQUE(organization_id, event_id)` → `duplicate`.
+  - **Tenant tekshiruvi:** hodisa `organizationId` va `storeId` si token qurilmasiniki bilan mos bo'lishi shart, aks holda `rejected`.
+  - **Payload havolalari:** umumiy sxema metama'lumoti asosida tekshiriladi. Masalan, `sale_lines.sale_id`, `stock_moves.product_id` kabi havolalar shu tashkilotga tegishli bo'lishi shart. Begona havola → `rejected`. Metama'lumotsiz sinxron jadval CI'ni yiqitadi.
+  - **Klass qoidalari:**
+    - FACT — faqat INSERT;
+    - ATTR — HLC bo'yicha oxirgi yozuvchi yutadi;
+    - MONOTONE — faqat ruxsat etilgan bir tomonlama o'tish.
+  - **Vaqt:** `MAX_SKEW` (5 daqiqa) dan kelajakdagi HLC server vaqtiga tushiriladi va qayd etiladi. Soati noto'g'ri qurilma ATTR'da to'g'ri ma'lumotni bosib keta olmaydi.
+  - **Yagona yozuvchi qoidasi:** `stock_moves` va `batches` faqat o'z do'koni hub'idan.
+  - **Pull uchun pozitsiya (T2.4 ga tayyorlov):** har do'kon uchun bo'shliqsiz `position`, `pg_advisory_xact_lock` bilan. Oddiy sequence emas.
+- **Holatlar** spetsifikatsiyadagi kabi. Muvaffaqiyatsiz hodisa hech qachon `accepted` emas.
+- **Bulut sxemasi:** sinxron qilinadigan har bir lokal jadvalning PG ekvivalenti (T0.4 poydevorida qisman bor). Qaysi jadvallar F2 da sinxron qilinadi, ro'yxatini ber (`GEMINI.md` 2.5: ochiq katalog proyeksiyasi keyin F5 da).
 
-### b) Qurilma tokeni
+### c) Testlar
 
-- **Tur:** uzoq muddatli, aylanadigan maxfiy qiymat. Bulutda faqat xeshi saqlanadi.
-- **Hub'da saqlanishi:** Electron'da OS kalit omboriga (`safeStorage`) shifrlab yoziladi. SQLite'ga ochiq matn holida yozilmaydi.
-- **Tenant konteksti:** token prefiksida `organizationId` bo'lsin, T2.1 dagi C2 uslubida.
-- **Aylantirish:** qurilma tokenni yangilay oladi. Eski token qisqa muddat ishlaydi, keyin bekor bo'ladi. Qayta ishlatish aniqlansa, qurilma bloklanadi.
-- **Bekor qilish:** egasi qurilmani o'chiradi. Keyingi har qanday so'rov `401` oladi. Test bilan.
+- **Mezonlardagi to'rttasi:**
+  - 1 yomon + 10 yaxshi: yaxshilar `accepted`, yomoni `rejected`, navbat to'xtamaydi;
+  - begona `store_id`;
+  - begona havola;
+  - parallel ikki push (haqiqiy PG parallelligi bilan) → har hodisa bir marta qo'llanadi va bitta natija.
+- **Uzilishlar:** yarim yuborilgan paket va javob yo'qolgan push → qayta yuborish → `duplicate`, takror qo'llash yo'q.
+- **Soat farqi:** kelajakdagi HLC.
+- **Model testi:** tasodifiy savdo, qaytarish va kirim hodisalari ikki hub'dan push qilinadi. Bulutdagi FACT yig'indilari (savdo summalari, stock_moves miqdori) hub'lardagi bilan tiyinigacha teng.
 
-### c) Hub va bulut bog'lanishi
+### d) Doiradan tashqari
 
-- `cloud_devices` jadvali (RLS bilan): `store_id`, nomi, platformasi, `device_id`, oxirgi ko'rinishi, holati.
-- **Hub `device_id` si:** T0.3 dagi lokal `device_id` bulutdagi qurilma yozuviga bog'lanadi. Bitta lokal qurilma ikki tashkilotga juftlanmaydi.
-- **Bulutga chiqmaydigan narsalar:** hub foydalanuvchilarining PIN xeshlari va lokal sessiyalar (mezon). Sinxron (T2.3) bilan ham ular chiqmaydi. Bu bo'yicha qaysi jadvallar sinxron qilinmasligini sanab ber.
-- **Hub tomonidagi o'zgarishlar:** "bulutga ulanish" sozlamasi va holati (ulangan, ulanmagan, bekor qilingan). Faqat `owner`.
-
-### d) Testlar
-
-- Juftlash: to'g'ri kod, eskirgan kod, qayta ishlatilgan kod, brute-force cheklovi.
-- Bekor qilingan qurilma `401`.
-- Token aylantirish va reuse.
-- PIN xeshi va lokal sessiya ma'lumotlari hech qanday bulut so'rovida yo'qligi: hub → bulut so'rovlarini ushlab tekshiruvchi test.
-- Ikki tashkilot: bir tashkilot kodi bilan boshqasiga juftlab bo'lmaydi.
-
-### e) Doiradan tashqari
-
-- Hodisalarni push va pull qilish (T2.3–T2.4).
-- Kabinet UI (T2.7).
+- Pull (T2.4).
+- Bootstrap (T2.5).
+- Konflikt UI (T2.6).

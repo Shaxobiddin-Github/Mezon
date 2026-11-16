@@ -4,7 +4,6 @@ export const CloudConfigSchema = z.object({
   host: z.string().default('0.0.0.0'),
   port: z.coerce.number().int().positive().default(4000),
   databaseUrl: z.string().min(1, 'DATABASE_URL is required'),
-  databaseAdminUrl: z.string().optional(),
   jwtSecret: z.string().min(32, 'JWT_SECRET must be at least 32 characters'),
   corsOrigins: z
     .string()
@@ -21,7 +20,6 @@ export function loadCloudConfig(env: NodeJS.ProcessEnv = process.env): CloudConf
     host: env.HOST,
     port: env.PORT,
     databaseUrl: env.DATABASE_URL,
-    databaseAdminUrl: env.DATABASE_ADMIN_URL,
     jwtSecret: env.JWT_SECRET,
     corsOrigins: env.CORS_ORIGINS,
     nodeEnv: env.NODE_ENV,
