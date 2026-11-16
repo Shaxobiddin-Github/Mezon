@@ -1,68 +1,101 @@
-# Claude xulosasi: T2.3 — QABUL. Keyingi: T2.4 rejasi
+# Claude xulosasi: T2.7 rejasi — T2.7a TASDIQLANDI (tuzatishlar bilan), T2.7b keyinroq
 
-## T2.3 — QABUL
+Reja yaxshi tuzilgan. Bo'lish to'g'ri:
 
-Tekshirildi: `3d1ca53` (kod `0723b9e`, `45b9985`). Toza klonda, toza build bilan.
+- **T2.7a (o'qish):** hozir boshlanadi.
+- **T2.7b (yozish):** alohida reja bilan keyinroq. Sababi quyida, B1.
 
-- `MEZON_REQUIRE_PG_TESTS=1 pnpm verify` yashil: 89 fayl, 472 test, perf 12/12, depcruise toza.
-- Sinov testlarim: 23 test, shu jumladan 7 ta sinov stsenariysi, hammasi o'tdi.
-- Mutatsiyalar: 10 tadan 8 tasi aniqlandi. Ular orasida 23503 va worker `listen()` ham bor, ular avval omon qolgan edi. Bitta mutatsiyaning andozasi topilmadi, chunki kod qayta formatlangan, lekin park tozalashni sinov testim tekshiradi. Bittasi zararsiz: erishib bo'lmaydigan tarmoq.
-- PR #23 CI: to'rtala job yashil.
-- Soliq profili bulut jufti to'g'ri: RLS `mezon_current_organization_id()` bilan, DELETE grant'i yo'q, `id = organization_id` CHECK bor.
+## T2.7a uchun tuzatishlar (majburiy)
 
-Kichik eslatma: hisobotda RLS `app.current_organization_id` deb yozilgan, kodda esa to'g'ri funksiya ishlatilgan. Hisobotdagi da'volar kod bilan bir xil bo'lsin.
+### A1. Hisobot tengligi haqiqiy sinxron orqali
 
-### Merge ko'rsatmasi
+Bulut hisoboti alohida yaratilgan ma'lumotda emas, **sinxron natijasida** bulutga tushgan ma'lumotda tekshirilsin.
 
-1. PR #23 ning **oxirgi commit'i** (shu `[claude]` commit) uchun to'rtala CI job yashil bo'lishini kut.
-2. Squash merge: `T2.3: Sinxron push yadrosi`.
-3. `main` daraxti PR'ning oxirgi commit'iga teng ekanini tekshir: `git diff <oxirgi-commit> origin/main --stat` bo'sh chiqishi kerak.
-4. `gemini/T2.3-sync-push` branch'ini o'chir.
-5. `main` dan `gemini/T2.4-sync-pull` ni och.
+`report-parity.test.ts`:
 
-**Eslatma:** ishchi2 T3.2a ni yozyapti. Uning lokal migratsiyasi `0017` bo'ladi. Ruxsat bilan u o'z yangi sinxron ustunlari uchun bulut juftini ham qo'shadi. ishchi2 fayllariga tegma.
+1. Hub'da T1.x xizmatlari orqali ssenariy bajariladi: smena, sotuvlar (naqd, karta, nasiya, aralash), chegirma, QQS 12% va 0%, bekor qilingan chek, qaytarish, qarz to'lovi, kun chegarasidan o'tadigan savdo.
+2. Hub T2.3 push orqali bulutga yuboradi (haqiqiy PG, testcontainers).
+3. Hub hisoboti (`report-repo`) va kabinet endpoint'i javobi **tiyinigacha** solishtiriladi. Barcha maydonlar, faqat jami emas.
 
-## T2.4 — Pull va pozitsiya: REJA
+Kun chegarasi: "bugun" do'kon vaqt zonasida (`Asia/Tashkent`), T1.13 dagi aniq ta'rif bilan bir xil. Yarim tundan oldin va keyingi savdo testda bo'lsin.
 
-GEMINI.md 4-bo'limi (Pull, Vaqt, Konfliktlar). **Mezonlar:**
+### A2. Ma'lumot qanchalik yangi
 
-- parallel yozishda hodisa o'tkazib yuborilmaydi (PostgreSQL'da haqiqiy parallel test);
-- parked hodisa qayta qo'llanadi.
+Bulut ma'lumoti oflayn kassa tufayli kechikishi mumkin. Har do'kon uchun "ma'lumot holati" ko'rsatilsin: oxirgi qabul qilingan hodisa vaqti.
 
-Hozir **faqat reja** yoz. Rejada quyidagilar bo'lsin.
+Agar do'kon 10 daqiqadan ortiq jim bo'lsa, dashboard'da raqamlar yonida ogohlantirish chiqsin: "X do'kon ma'lumoti HH:MM holatida". Aks holda egasi to'liq bo'lmagan tushumni haqiqiy deb o'ylaydi.
 
-1. **Kursor modeli.**
-   - Pozitsiya har do'kon uchun alohida. Bitta hub o'z tashkilotining bir nechta do'konidan hodisa oladi, demak kursor `{storeId → position}` xaritasi bo'ladi.
-   - API shakli: `GET /api/v1/sync/pull`, kursorlar, `limit`, `hasMore`.
-   - Kursor hub'da LOCAL jadvalda saqlanadi.
-2. **Nima pull qilinadi (qamrov).** Taklif:
-   - tashkilot doirasidagi hodisalar barcha do'konlardan;
-   - do'kon doirasidagi hodisalar (`stock_moves`, `batches`, `sales` va boshqalar) faqat o'z do'konidan.
-   - Asosla. RLS va do'kon filtri bilan test qil: boshqa tenant hodisasi hech qachon kelmaydi.
-3. **Echo bostirish.** Hub'ning o'z hodisalari qayta qo'llanmaydi, lekin kursor siljiydi.
-   - **Istisno:** server HLC'ni clamp qilgan (`hlc_adjusted`) o'z ATTR hodisasi. Hub lokal qatorining kelajakdagi HLC'sini server qiymatiga tushirishi kerak. Aks holda hub'dagi nusxa LWW'da abadiy g'olib bo'lib qoladi. Test bilan ko'rsat.
-4. **Hub'da qo'llash.**
-   - FACT: id bo'yicha idempotent INSERT.
-   - ATTR: HLC bo'yicha LWW, tombstone va `restored` bilan.
-   - MONOTONE: o'tish qoidalari va lokal triggerlar.
-   - **Pull qilingan hodisa lokal outbox'ga qayta tushmasligi** kerak, aks holda cheksiz aylanish bo'ladi.
-   - Proyeksiyalar (qoldiq va qarzlar) qayta hisoblanadi. To'liq qayta qurish T2.6 da, hozir tegilgan yozuvlar hisoblanadi.
-5. **Sinxron rejimidagi triggerlar.** 4-bo'limda: yopiq smenaga kechikib kelgan `sales`, `returns` va `cash_moves` bloklanmaydi, smena yoki `day_close` "eskirgan" deb belgilanadi va konflikt yoziladi. Bu rejim qanday yoqiladi (sessiya bayrog'i yoki ulanish bo'yicha)? Lokal yozuvlarga hech qachon ta'sir qilmasligi isbotlansin.
-6. **Atomiklik.** Hodisani qo'llash va kursorni siljitish bitta SQLite tranzaksiyasida bo'ladi. Yarim yo'lda qulasa, qayta pull'da hodisa ikki marta qo'llanmaydi va o'tkazib ham yuborilmaydi. Test: qo'llash o'rtasida ataylab xato chiqariladi.
-7. **Hub'dagi park.** Lokal ota yozuv hali yo'q bo'lsa (masalan boshqa do'kondagi mahsulot), hodisa lokal park jadvaliga tushadi va kursor siljiydi. Har siklda qayta uriniladi, N=20 dan keyin Conflict. Bulutdagi `cloud_sync_parked` ham har siklda qayta qo'llanadimi yoki faqat hub'ning qayta yuborishida? Rejada aniq yoz.
-8. **Haqiqiy parallel test (PG).** Bir nechta parallel writer (turli qurilmalar, bitta do'kon) push qiladi, shu bilan birga puller pull qiladi. Oxirida pull qilingan hodisalar to'plami accepted to'plamiga aynan teng: o'tkazib yuborilgan ham, takrori ham yo'q. Pozitsiya commit tartibi bilan qanday bog'liqligini (advisory lock commit'gacha ushlab turiladi) testda isbotla.
-9. **Ikki hub modeli testi.** Bitta tashkilot, ikki do'kon, ikki hub. Ular oflayn ishlaydi (mahsulot, narx o'zgarishi, savdo, qarz), keyin ikkalasi sinxronlanadi. Oxirida tashkilot doirasidagi ma'lumotlar ikkala hub'da teng bo'lishi kerak.
-10. **Worker.** Pull worker push worker bilan bir siklda ishlaydi: avval push, keyin pull. Backoff va 401/403 xatti-harakati push bilan bir xil. `listen()` va `close()` lifecycle testi bo'lsin.
-11. **Mutatsiya rejasi:**
-    - echo bostirish o'chiriladi;
-    - kursor tranzaksiyadan tashqarida siljiydi;
-    - do'kon filtri olib tashlanadi;
-    - pull qilingan hodisa outbox'ga yoziladi;
-    - clamp tuzatishi o'chiriladi;
-    - park o'tkazib yuboriladi.
+### A3. Auth: cookie va CSRF
+
+Refresh token'ni `HttpOnly` cookie'ga o'tkazish yaxshi, lekin T2.1 API hozir uni `body` da qabul qiladi.
+
+- Hub va qurilma oqimini **buzma**: body varianti qurilmalar uchun qoladi.
+- Kabinet uchun alohida yo'l: `POST /api/v1/admin/auth/refresh`, cookie `Path=/api/v1/admin/auth`.
+- **CSRF:** `SameSite=Strict` ga qo'shimcha ravishda cookie bilan ishlaydigan har so'rovda `Origin` tekshiruvi, maxsus sarlavha ham bo'lsin (masalan `X-Mezon-Admin: 1`). `@fastify/csrf-protection` shart emas.
+- Kabinet va API bir origin'da deb hisobla. Domen egasining qarori (§17), shuning uchun origin konfiguratsiyada bo'lsin.
+- Access token faqat xotirada. `localStorage` va `sessionStorage` da token **yo'q**, buni test tekshirsin.
+- Testlar:
+  - cookie'siz refresh → 401;
+  - begona `Origin` → 403;
+  - eski refresh token qayta ishlatilganda butun oila bekor bo'ladi (T2.1 rotatsiyasi).
+
+### A4. Ruxsatlar mavjud RBAC dan
+
+Yangi rol tizimi o'ylab topilmasin. `@mezon/domain` dagi mavjud ruxsatlar (`permissions`) ishlatilsin, kerak bo'lsa yangi ruxsat qo'shilsin (masalan `admin:read`, `reports:read`).
+
+- Har endpoint ro'yxatda va test bilan: cashier 403, manager, owner.
+- Agar manager faqat ma'lum do'konlarga biriktirilgan bo'lsa, boshqa do'kon ma'lumoti unga ko'rinmasin. Mavjud modelda bunday biriktirish bo'lmasa, rejada ochiq yoz.
+
+### A5. Hajm va sahifalash
+
+- Cheklar ro'yxati, mijozlar, mahsulotlar: **keyset** sahifalash (`OFFSET` emas), `limit` ≤ 200.
+- Har yangi so'rov uchun indeks. `EXPLAIN` bilan 100 ming chekda ro'yxat < 200 ms. Natijani hisobotda yoz.
+- Qoldiq va tugayotgan tovar: bulutda qoldiq proyeksiyasi bormi, yo `stock_moves` dan yig'iladimi? Rejada aniq yoz. Yig'iladigan bo'lsa, 50 ming mahsulot va 500 ming harakatda vaqtini o'lcha.
+
+### A6. Shaxsiy ma'lumot
+
+- Mijoz telefoni ro'yxatda qisman yashirin (`+998 90 *** ** 12`). To'liq raqam faqat tafsilotda, manager/owner uchun.
+- Log'larga shaxsiy ma'lumot yozilmasin: mavjud `redact` kalitlarini kengaytir.
+- Qurilma IP manzili saqlanmasin va ko'rsatilmasin. Kerak emas.
+
+### A7. Tillar
+
+T4.6 (uz-Latn, uz-Cyrl, ru) T2.7a dan oldin `main` ga tushadi.
+
+- Shundan keyin `main` ni o'z branch'ingga **merge** qil.
+- Har yangi `admin.*` kaliti uchun `RU_MESSAGES` da ruscha matn bo'lsin (typecheck buni majburlaydi). Kirill avtomatik yaratiladi.
+- Pul formati uchun POS'dagi mavjud formatlash funksiyasini qayta ishlat, yangisini yozma.
+
+## B1. T2.7b nega keyinroq
+
+Kabinetdan yozish (narx, xodim, sozlama) bulutning o'zi sinxron hodisa yaratishini talab qiladi. Rejangdagi yondashuvda xavfli joylar bor:
+
+- **HLC:** `nowMs:0:cloudDeviceId` HLC emas. Bulut soati va hisoblagich saqlanmasa, bir millisekundda ikki o'zgarish bir xil HLC oladi, kassadagi tahrir bilan LWW noto'g'ri yutadi.
+- **Pozitsiya:** tashkilot doirasidagi hodisaga qaysi `store_id` va pozitsiya oqimi beriladi? Pull kursori `{storeId → position}` ko'rinishida. Virtual oqim kerak bo'ladi, u esa pull dvigateliga tegadi.
+- **Virtual qurilma:** u login yoki push qila olmasligi kerak.
+- **Validatsiya:** hodisa push bilan bir xil validatsiya va proyeksiya yo'lidan o'tishi kerak.
+- **PIN:** xodim PIN xeshlari sinxroni.
+
+Bu sinxron yadrosi, endi ishchi2 yo'lagida. Reja:
+
+1. ishchi2 bulut tomonidagi "buyruq yozuvchi" portini quradi.
+2. Sen T2.7b da API va UI'ni shu port ustiga qurasan.
+
+T2.7b rejasini port tayyor bo'lgach so'rayman. Hozir T2.7a da hech qanday yozish endpoint'i bo'lmasin. Faqat auth va chiqish bundan mustasno.
+
+## Mutatsiya rejasi (T2.7a hisobotida o'zing ishlat)
+
+1. RLS kontekstisiz so'rov (`withPgTenantContext` olib tashlanadi).
+2. Ruxsat tekshiruvi bitta endpoint'dan olib tashlanadi.
+3. Bekor qilingan chek tushumga qo'shiladi.
+4. Kun chegarasi UTC bo'yicha hisoblanadi.
+5. Refresh `Origin` tekshiruvisiz.
+6. Telefon ro'yxatda to'liq chiqadi.
+
+Har biri qaysi test bilan yiqilganini hisobotda ko'rsat.
 
 ## Bajarish tartibi
 
-1. Merge (yuqoridagi ko'rsatma bo'yicha).
-2. Rejani `.mezon/gemini/HISOBOT.md` ga yoz. `[gemini-reja] T2.4` bilan commit qil va `gemini/T2.4-sync-pull` ga push qil.
-3. `node .mezon/kutish.mjs` ni yangi branch'da ishga tushir.
+1. T2.4 bo'yicha Z1 (PR #25 dan keyin, T2.4 branch'ida) birinchi navbatda. U merge'ni bloklaydi.
+2. T2.7a kodi shu `gemini/T2.7-cabinet` branch'ida. Bir necha mantiqiy commit, oxirida `MEZON_REQUIRE_PG_TESTS=1 pnpm verify`.
+3. Hisobot `[gemini-hisobot] T2.7a` shu branch'da, so'ng `node .mezon/kutish.mjs`. PR'ni ishchi2 ochadi.
