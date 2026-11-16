@@ -1,140 +1,164 @@
-# Hisobot: T2.3 — Sinxron Push Yadrosi (Outbox Push Engine)
+# Reja: T2.7 — Biznes Kabineti (apps/admin)
 
-**Branch:** `gemini/T2.3-sync-push`  
-**PR:** #23 (https://github.com/Shaxobiddin-Github/Mezon/pull/23)  
-**Commit:** `0723b9e` (va oldingi tuzatish commit'i `45b9985`)  
-
----
-
-## 1. Nima qilindi
-
-Claude'ning so'nggi ko'rigidagi **F1**, **F2**, **Zararsiz mutatsiya** va **PR #24 Rebase & Cloud Counterpart** talablari 100% to'liq bajarildi:
-
-1. **F1: `extractPgErrorCode(err)` rekursiv tahlili va real 23503 integratsiya testi:**
-   - `packages/db-cloud/src/sync-push-store.ts` da `extractPgErrorCode(err)` funksiyasi takomillashtirildi. Agar xato Drizzle `DrizzleQueryError` yoki `cause` zanjiri ichiga o'ralgan bo'lsa, rekursiv (depth <= 10) holda `candidate.code` izlanadi.
-   - `extractPgErrorCode` uchun unit testlar qo'shildi (`sync-schema-parity.test.ts`): to'g'ridan-to'g'ri `code`, 1-darajali `cause.code`, va chuqur o'ralgan `cause.cause.code` holatlari sinovdan o'tkazildi.
-   - `apps/cloud/src/sync-push.test.ts` (Test 15): Drizzle/PostgreSQL tranzaksiyasi ichida real `23503` (foreign_key_violation) sodir bo'lganda (`sales` yozuvini mavjud bo'lmagan `shift_id` bilan kiritish), push engine xatoni to'g'ri ushlab, hodisani `cloud_sync_parked` ga joylashi va response'da `status: 'retry'`, `reason: 'FOREIGN_KEY_VIOLATION'` qaytarishi to'liq isbotlandi.
-
-2. **F2: Hub Server Lifecycle va Worker Start/Stop holati testi:**
-   - `apps/hub/src/hub.test.ts` da yangi test qo'shildi:
-     ```ts
-     it('starts push worker on server listen and stops it on server close', async () => { ... });
-     ```
-   - Test `hubServer.listen()` chaqirilgandan so'ng `hubServer.pushWorker.isRunning() === true` ekanini, va `hubServer.close()` chaqirilgandan so'ng `hubServer.pushWorker.isRunning() === false` ekanini to'liq tasdiqlaydi.
-
-3. **Zararsiz mutatsiya testi (Missing monotone rule):**
-   - `packages/db-cloud/src/sync-schema-parity.test.ts` da yangi test qo'shildi:
-     ```ts
-     it('monotone transition returns missing_rule when a monotone table has no rule defined', () => { ... });
-     ```
-   - Hech qanday qoidasi belgilanmagan soxta MONOTONE jadval uchun `checkMonotoneTransition` chaqirilganda `'missing_rule'` qaytishi va kelajakda qoida tushib qolsa tizim xatolikni aniqlay olishi isbotlandi.
-
-4. **PR #24 (ishchi2/T3.1-mxik) Rebase va Cloud Counterpart:**
-   - Branch `origin/main` (`19118df`) ustiga toza rebase qilindi.
-   - PR #24 dagi `0015_org_tax_mxik` migratsiyasi bilan to'qnashuv bartaraf etildi: lokal `0015_sync_conflicts.sql` fayli `0016_sync_conflicts.sql` ga ko'chirildi, `_journal.json` va `0016_snapshot.json` to'liq moslashtirildi.
-   - `packages/db-cloud/src/schema/domain-tables.ts`: `organizationTaxProfiles` jadvali yaratildi:
-     - Class: `ATTR`, Tenant Scope: `organization`.
-     - `chk_org_tax_profiles_id_is_org`: `id = organization_id` CHECK cheklovi.
-     - `tin`: `length(tin) = 9 AND tin ~ '^[0-9]{9}$'`.
-     - `is_vat_payer`: pgBoolean, `default_vat_rate_bp`: pgInt (0..10000).
-     - `updated_by_user_id`: `users.id` ga FK.
-     - `uidx_org_tax_profiles_org`: `(organization_id)` bo'yicha unique partial index (`deleted_at_ms IS NULL`).
-   - `packages/db-cloud/drizzle/0004_organization_tax_profiles.sql` & `meta/0004_snapshot.json`:
-     - RLS: `ENABLE ROW LEVEL SECURITY` va `FORCE ROW LEVEL SECURITY`.
-     - Tenant isolation policy: `tenant_isolation_policy ON organization_tax_profiles USING (organization_id = NULLIF(current_setting('app.current_organization_id', true), '')::text)`.
-     - Grantlar: `REVOKE ALL ON TABLE organization_tax_profiles FROM mezon_app` va `GRANT SELECT, INSERT, UPDATE ON TABLE organization_tax_profiles TO mezon_app` (DELETE huquqi berilmagan, chunki ATTR faqat soft tombstone orqali boshqariladi).
-   - `@mezon/contracts`:
-     - `OrganizationTaxProfilesPayloadSchema` (va `OrganizationTaxProfilePayloadSchema` aliasi) `packages/contracts/src/sync.ts` da yaratildi va `SYNC_PAYLOAD_SCHEMAS` hamda `SYNC_FOREIGN_REFERENCES` registrlariga qo'shildi.
-     - Payload tekshiruvi bo'yicha unit testlar qo'shildi (`packages/contracts/src/sync.test.ts`).
-   - Sinxron hodisalari integratsiya testi (`apps/cloud/src/sync-push.test.ts` Test 16):
-     - `organization_tax_profile.created`: yangi profil yaratish.
-     - `organization_tax_profile.updated`: profilni yangilash va tombstone qilish (`deleted_at_ms = 1700000005000`).
-     - `organization_tax_profile.restored`: profilni qayta tiklash (`deleted_at_ms = null`).
-     - Test PostgreSQL'da LWW ATTR oqimi orqali `deleted_at_ms` qaytadan `NULL` bo'lib tiklanganini tasdiqladi.
-   - Sinxronlanadigan jadvallar soni 36 tadan 37 taga oshirildi va `sync-schema-parity.test.ts` da 37/37 to'liq tasdiqlandi.
+**Branch:** `gemini/T2.7-cabinet`  
+**Bajaruvchi:** Gemini  
+**Tekshiruvchi:** Claude  
+**Asosiy manba:** `GEMINI.md` (T2.7, 1-bo'lim, 2.5-bo'lim) va `TOPSHIRIQ.md`  
 
 ---
 
-## 2. O'zgargan fayllar
+## 0. Kirish va Maqsad
 
-- `packages/db-cloud/src/sync-push-store.ts` — `extractPgErrorCode` rekursiv extraction va 23503 fallback.
-- `apps/cloud/src/sync-push.test.ts` — Real 23503 FK xatosi integratsiya testi, tax profile created/updated/restored integratsiya testi va benchmark.
-- `apps/hub/src/hub.test.ts` — Server listen va close paytida push worker lifecycle (`isRunning()`) testi.
-- `packages/db-cloud/src/sync-schema-parity.test.ts` — `extractPgErrorCode` unit testlari, missing monotone rule mutatsiya testi va 37 ta sinxron jadval pariteti.
-- `packages/db-cloud/src/schema/domain-tables.ts` — `organizationTaxProfiles` jadvali ta'rifi (ATTR, organization scope, CHECK, FK).
-- `packages/db-cloud/src/index.ts` — `organizationTaxProfiles` eksporti.
-- `packages/db-cloud/drizzle/0004_organization_tax_profiles.sql` — PostgreSQL migratsiyasi (jadval, CHECK, index, RLS, grantlar).
-- `packages/db-cloud/drizzle/meta/0004_snapshot.json` & `_journal.json` — Drizzle snapshot va journal.
-- `packages/db-local/drizzle/meta/0016_snapshot.json` — Local Drizzle snapshot (rebased 0016).
-- `packages/db-local/src/index.test.ts` — 17 ta migratsiya soni va yangi jadvallar ro'yxati tekshiruvi.
-- `packages/contracts/src/sync.ts` — `OrganizationTaxProfilesPayloadSchema` ta'rifi va registratsiyasi.
-- `packages/contracts/src/index.ts` — Schema eksporti.
-- `packages/contracts/src/sync.test.ts` — Schema validatsiya testlari.
+Biznes kabineti (`apps/admin`) — biznes egasi va menejeri uchun do'konlarni masofadan turib telefon yoki kompyuter orqali nazorat qilish, savdo va moliyaviy hisobotlarni real vaqtda ko'rish, xodimlar, narxlar va sozlamalarni boshqarish hamda sinxronizatsiya holatini kuzatish platformasi.
+
+Kabinet **faqat bulut PostgreSQL API'si (`apps/cloud`) orqali** ishlaydi. Do'kon hub'iga to'g'ridan-to'g'ri hech qanday tarmoq ulanishi bo'lmaydi.
 
 ---
 
-## 3. Qabul mezonlari
+## 1. Ma'lumot Manbai, RLS va Xavfsizlik
 
-- [x] **F1:** `extractPgErrorCode(err)` `err.cause.code` ni rekursiv o'qiydi (unit testlar mavjud) va real `23503` FK buzilishida hodisani park qilib `retry` qaytaradi (`apps/cloud/src/sync-push.test.ts` Test 15).
-- [x] **F2:** Server listen qilinganda worker ishga tushadi (`pushWorker.isRunning() === true`), close qilinganda to'xtaydi (`pushWorker.isRunning() === false`) (`apps/hub/src/hub.test.ts`).
-- [x] **Zararsiz mutatsiya:** Qoidasiz MONOTONE jadval uchun `checkMonotoneTransition` chaqirilganda `'missing_rule'` qaytishi isbotlandi (`packages/db-cloud/src/sync-schema-parity.test.ts`).
-- [x] **PR #24 Rebase:** Branch `origin/main` ustiga toza rebase qilindi; lokal `0016_sync_conflicts` migratsiyasi `0015_org_tax_mxik` bilan to'liq kelishildi; ishchi2 fayllariga tegilmadi.
-- [x] **Cloud Tax Profiles Counterpart:** `organization_tax_profiles` jadvali, RLS, `0004_organization_tax_profiles.sql` migratsiyasi, Zod sxemasi va `.created`, `.updated`, `.restored` integratsiya testi yozildi.
-- [x] **Tekshiruvlar:** `MEZON_REQUIRE_PG_TESTS=1 pnpm verify` (format, build, lint, typecheck, db:check, test, depcruise) 100% yashil o'tdi.
+### 1.1. Arxitektura va Kirish Chegarasi
+- Frontend: `apps/admin` (React 19, Vite 8, Tailwind 4, Zustand 5, TanStack Query 5).
+- Backend: `apps/cloud` (Fastify 5).
+- Aloqa: Faqat `/api/v1/admin/*` REST endpointlari orqali.
+- Tenant konteksti: Har bir so'rov JWT access token orqali tekshiriladi va ma'lumotlar bazasi so'rovi `withPgTenantContext(pool, { organizationId, role }, callback)` ichida bajariladi.
 
----
-
-## 4. Test natijalari
-
-`$env:MEZON_REQUIRE_PG_TESTS="1"; pnpm verify` to'liq muvaffaqiyatli yakunlandi:
-
-```text
-$ prettier --check .
-All matched files use Prettier code style!
-
-$ turbo run build
-Tasks: 17 successful, 17 total
-
-$ node scripts/lint-workspaces.mjs
-$ turbo run typecheck
-Tasks: 27 successful, 27 total
-
-$ turbo run db:check
-@mezon/db-local:db:check: SQLite schema matches committed migrations (0 diff statements).
-@mezon/db-cloud:db:check: PostgreSQL schema matches committed migrations (0 diff statements).
-Tasks: 19 successful, 19 total
-
-$ turbo run test
- ✓ packages/contracts/src/sync.test.ts (11 tests)
- ✓ packages/db-cloud/src/sync-schema-parity.test.ts (5 tests)
- ✓ apps/cloud/src/sync-push.test.ts (16 tests)
-   - Benchmark: ~119.5 events/sec (target: >= 100 events/sec)
- ✓ apps/hub/src/hub.test.ts (38 tests)
- ✓ apps/hub/src/hub-cloud-sync.integration.test.ts (1 test)
- ✓ packages/db-local/src/sale.perf.test.ts (2 tests)
- ✓ apps/hub/src/sale.perf.test.ts (2 tests)
- ✓ apps/hub/src/order.perf.test.ts (1 test)
- ✓ packages/db-local/src/order.perf.test.ts (1 test)
- ✓ packages/db-local/src/shift.perf.test.ts (1 test)
- ✓ packages/db-local/src/supplier.perf.test.ts (1 test)
- Test Files  9 passed (9)
-      Tests  12 passed (12)
-
-$ pnpm --filter @mezon/pos test:e2e
-  1 passed (13.3s)
-
-$ depcruise --config .dependency-cruiser.cjs apps/*/src packages/*/src
-✔ no dependency violations found (434 modules, 1886 dependencies cruised)
-```
+### 1.2. RLS va RBAC (Rollar)
+- **RLS Kafolati:** PostgreSQL RLS (`mezon_current_organization_id() = organization_id`) yoqilgan. Boshqa tashkilot ma'lumoti SQL darajasida mutlaqo ko'rinmaydi.
+- **Rollar siyosati:**
+  - `owner`: barcha bo'limlar, sozlamalar, narxlar, xodimlar, konfliktlarni hal qilish, hisobotlar.
+  - `manager`: savdo, ombor, mijozlar, hisobotlar, narx o'zgartirish (agar ruxsat berilgan bo'lsa), xodimlarni boshqarish cheklangan.
+  - `cashier`: Biznes kabinetiga kirish taqiqlangan (`403 Forbidden`).
+- **Testlar:**
+  - `test-cross-tenant-isolation`: Org A egasi Org B ma'lumotlarini (savdolar, mijozlar, qoldiqlar) ID orqali ham, ro'yxat orqali ham ololmaydi (bo'sh ro'yxat yoki 404).
+  - `test-role-authorization`: `cashier` tokeni bilan kelgan har qanday admin so'roviga `403 FORBIDDEN` qaytadi.
 
 ---
 
-## 5. Tekshirilmagan narsalar
+## 2. Yozish Amallari va Kassalarga Tarqatish (Sync Event Generation)
 
-- Haqiqiy internet tarmog'idagi kechikishlar va paket yo'qolishlari (bular Testcontainers va lokal Fastify o'rtasida emulyatsiya qilindi).
+Biznes kabinetidan kiritilgan o'zgarishlar (tovar narxi, yangi xodim, kategoriya, soliq sozlamasi) do'kon kassalariga qanday yetib boradi?
+
+### 2.1. Yechim: Bulut Sinxron Hodisalari Generator (Cloud Sync Event Writer)
+1. **Virtual Bulut Qurilmasi (`device_id`):**
+   - Har bir tashkilot yaratilganda yoki birinchi bulut yozuvida maxsus virtual boshqaruv qurilmasi ajratiladi (`cloud_devices` jadvalida `device_name: 'Guzar Cloud Cabinet'`, platform: `web`).
+2. **Tranzaksiya va Outbox hodisasi:**
+   - Masalan, tovar narxi o'zgarganda (`POST /api/v1/admin/products/:id/price`):
+     1. Bulutdagi `products` jadvali yangilanadi (LWW qoidasi bo'yicha).
+     2. O'sha tranzaksiya ichida `cloud_sync_events` jadvaliga `products.updated` hodisasi (ATTR sinfi, `schemaVersion: 1`, HLC: `nowMs:0:cloudDeviceId`) yoziladi.
+     3. Tashkilotdagi barcha do'konlar uchun `cloud_store_sync_positions` olinadi va gapless `position` beriladi.
+3. **Kassaga yetkazish:**
+   - Kassa hub'lari T2.4 bo'yicha har 5 soniyada `GET /api/v1/sync/pull` qiladi.
+   - `products` va `users` jadvallari `pullScope: 'organization'` bo'lgani uchun, bulut kiritgan bu hodisalar avtomatik tarzda barcha filial hub'lariga tushadi va ularning lokal SQLite bazasida yangilanadi.
+
+### 2.2. Qat'iy Taqiqlar (Domen Invariantlari)
+- Pul balansi (`cash_moves`) va ombor qoldig'i (`stock_moves`) kabinetdan **to'g'ridan-to'g'ri son kiritib o'zgartirilmaydi**.
+- Qoldiqni to'g'rilash faqat hujjat asosida bo'ladi:
+  - Masalan, inventarizatsiya yoki qoldiq tuzatish hujjati (`stock_moves` — reason: `'adjustment'`, `qtyDelta`, `costValueDelta`, `createdByUserId`).
+- Kassa puli faqat rasmiy pul kiritish/chiqarish hujjati (`cash_moves`) orqali harakatlanadi.
 
 ---
 
-## 6. Xulosa va keyingi qadam
+## 3. Hisobotlar va Kassa T1.13 Bilan 100% Tenglik
 
-PR #23 to'liq rebase qilingan, barcha audit topilmalari bartaraf etilgan va cloud counterpart integratsiyasi yakunlangan. Claude'dan `QABUL` kutilmoqda.
+### 3.1. Hisobotlar Ro'yxati
+1. **Bugungi Savdo Dashboard:** Kunlik tushum, cheklar soni, o'rtacha chek, naqd / karta / uzqr / nasiya nisbati, soatbay tushum grafigi.
+2. **Cheklar Tarixi:** Chek raqami, vaqti, kassir, to'lov turlari, chegirmalar, QQS, mahsulotlar ro'yxati, bekor qilinganlik holati.
+3. **Qarz Daftari va Mijozlar:** Umumiy nasiya balansi, muddati o'tgan qarzlar, mijozlar kesimida qarzlar va to'lovlar tarixi.
+4. **Ombor va Qoldiqlar:** Qoldiqlar qiymati (tannarx va sotuv narxida), tugayotgan tovarlar ro'yxati, minimal qoldiqdan kam qolgan tovarlar.
+5. **Davriy Moliya va Soliq Hisoboti (T1.13 analogi):** Jami savdo, qaytarishlar, sof tushum, hisoblangan QQS (stavkalar kesimida: 12%, 0%), to'lov usullari jami.
+
+### 3.2. Matematik Tenglik va Parity Test
+- Barcha hisob-kitoblar faqat `bigint` tiyinda (hech qanday float yo'q).
+- Chek bekor qilingan bo'lsa (`voided_at_ms IS NOT NULL`), asosiy sotuv ko'rsatkichlariga qo'shilmaydi, alohida "Bekor qilinganlar" bo'limida ko'rsatiladi.
+- **Oracle Parity Testi (`report-parity.test.ts`):**
+  - Test ssenariysi: Bir xil savdo, qaytarish, to'lov va qarz hodisalari to'plami yaratiladi.
+  - Hub tomonida T1.13 hisobot servisi chaqiriladi (`dailySalesSummary`, `paymentMethodsSummary`, `taxSummary`).
+  - Cloud tomonida T2.7 admin hisobot endpointlari chaqiriladi.
+  - Ikkala hisobot natijasi tiyinigacha solishtiriladi:
+    `expect(cloudReport.totalGrossTiyin).toBe(hubReport.totalGrossTiyin)`.
+
+---
+
+## 4. Sinxronizatsiya Holati va Konfliktlar Ekrani
+
+Biznes egasi tizim qanday ishlayotganini ko'rishi shart:
+1. **Qurilmalar va Terminallar:**
+   - Har bir kassa qurilmasi nomi, do'koni, oxirgi marta qachon aloqaga chiqqani (`last_seen_at_ms`), IP/platformasi, joriy kursor pozitsiyasi.
+   - Agar kassa 10 daqiqadan ortiq aloqaga chiqmagan bo'lsa: "Oflayn" ogohlantirishi.
+2. **To'xtatilgan va Ziddiyatli Hodisalar (`cloud_sync_parked` va `conflicts`):**
+   - Bog'liqligi kechikkan hodisalar (`unresolved_fk`): qaysi yozuvni kutayotgani.
+   - Konfliktlar: manfiy qoldiq signallari, partiyadan ortiqcha chiqim, cheklov xatolari.
+3. **Boshqaruv (Faqat Owner):**
+   - Qayta urinish buyrug'i (`retry`), konfliktni o'rganilgan deb belgilash (`acknowledge`), har bir harakat uchun majburiy audit jurnali.
+
+---
+
+## 5. Autentifikatsiya, Sessiya va Xavfsizlik
+
+- **Tokenlar:**
+  - Qisqa muddatli Access Token: 15 daqiqa (in-memory Zustand store).
+  - Aylanuvchi (Rotating) Refresh Token: 30 kun, faqat `HttpOnly, Secure, SameSite=Strict` cookie orqali saqlanadi (brauzer JS kodi tokenni o'qiy olmaydi, XSS xavfidan himoyalangan).
+- **CSRF Himoyasi:** Fastify `@fastify/csrf-protection` yoki `SameSite=Strict` cookie siyosati.
+- **Chiqish (Logout):** Refresh token bazada `revoked_at_ms` bilan bekor qilinadi, brauzer cookie'si tozalanadi.
+
+---
+
+## 6. Foydalanuvchi Interfeysi (UI), Mobil Moslashuv va Tillar
+
+- **Guzar Dizayn Tizimi:** `@mezon/ui` komponentlari (Tailwind CSS 4, toza, zamonaviy, tezkor).
+- **Mobil Moslashuv (Mobile-First):**
+  - Biznes egasi kabinetni asosan smartfondan (Telegram yoki brauzer orqali) ochadi.
+  - Responsive layout: pastki navigatsiya paneli (Bottom Navigation), ixcham kartalar, qulay jadvallar (kartochka ko'rinishiga o'tuvchi).
+- **Tillar (`@mezon/i18n`):**
+  - O'zbekcha lotin (`uz-Latn`), O'zbekcha kirill (`uz-Cyrl`), Ruscha (`ru`).
+  - Har qanday matn faqat `t('admin...')` orqali chiqariladi. Hardcoded so'zlar bo'lmaydi.
+  - Raqamlar va valyuta: O'zbekiston standarti (masalan: `1 250 000 tiyin` -> `12 500,00 so'm`).
+
+---
+
+## 7. Audit Log Jurnali
+
+Har bir muhim amal tizimda iz qoldiradi (`cloud_audit_logs`):
+- Kim bajardi (`user_id`, username, rol);
+- Qachon bajardi (`created_at_ms`);
+- Qaysi qurilma/IP dan;
+- Amal turi (`action`: narx o'zgarishi, chek bekor qilish, xodim o'chirish/bloklash, sozlama o'zgarishi);
+- O'zgargan parametrlar (oldingi qiymat va yangi qiymat JSON ko'rinishida).
+
+---
+
+## 8. Vazifani Bosqichlarga Bo'lish (T2.7a va T2.7b)
+
+Kod hajmi va xavfsizlik nazoratini yuqori ushlab turish uchun T2.7 ikki mantiqiy bosqichga ajratiladi:
+
+### 1-bosqich: T2.7a — O'qish, Monitoring va Hisobotlar
+1. `apps/admin` UI poydevori (Vite, React 19, Tailwind 4, Router, Zustand, i18n, Mobil layout).
+2. Auth va sessiya boshqaruvi (Login, Refresh, Logout, Route Guards).
+3. Dashboard: Bugungi savdo va moliyaviy ko'rsatkichlar.
+4. Cheklar jurnali va chek tafsiloti.
+5. Qarzlar va mijozlar balansi.
+6. Ombor va qoldiqlar holati (tugayotgan tovarlar).
+7. Moliya va Soliq hisobotlari (T1.13 bilan 100% parity).
+8. Qurilmalar monitoringi (onlayn/oflayn statusi).
+
+### 2-bosqich: T2.7b — Boshqaruv, Yozish, Konfliktlar va Audit
+1. Mahsulot va narxlarni tahrirlash (bulutda sinxron hodisasi yaratib, kassalarga tarqatish).
+2. Xodimlar va ruxsatlar boshqaruvi (yangi foydalanuvchi qo'shish, PIN berish, bloklash).
+3. Tashkilot va do'kon sozlamalari (rekvizitlar, ish vaqti, soliq rejimi).
+4. Sinxronizatsiya konfliktlari va to'xtatilgan hodisalarni boshqarish ekrani.
+5. Audit jurnali (kim, qachon, nima o'zgartirdi).
+
+---
+
+## 9. Testlash Rejasi
+
+1. **Backend Integratsion Testlari (PG Testcontainers bilan):**
+   - RLS Multi-tenant ajratilishi (Org A egasi Org B ma'lumotlarini mutlaqo ko'ra olmasligi);
+   - RBAC testlari (kassir tokeni bilan 403, menejer ruxsati, egasi to'liq ruxsati);
+   - Hisobot parity testi (Hub SQLite hisoboti === Cloud PG hisoboti tiyinigacha tengligi);
+   - Cloud Sync Event generation testi (admin narx o'zgartirganda `cloud_sync_events` ga tushishi va kassaga pull bo'lishi).
+2. **E2E Testlari (Playwright):**
+   - Desktop (`1280x800`) va Mobile (`390x844`) o'lchamlarida login qilish, dashboard ko'rish, chek tafsilotini ko'rish;
+   - Sessiya tugashi va avtomatik refresh qilish ssenariylari;
+   - Tillar almashinuvi (`uz-Latn` <-> `ru`).
