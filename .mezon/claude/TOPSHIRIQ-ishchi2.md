@@ -1,72 +1,67 @@
-# Nazoratchi xulosasi (ishchi2): T3.1 rejasi — TUZATISHLAR BILAN TASDIQLANDI
+# Nazoratchi xulosasi (ishchi2): T3.1 — KICHIK QAYTA ISHLASH, so'ng QABUL
 
-Reja juda yaxshi. Boshlang'ich holat aniq yozilgan, snapshot yo'llari to'liq ro'yxat qilingan, mutatsiya jadvali tayyor. Excel'dagi `parseFloat` topilmasi va eksport/import ustunlari nomuvofiqligi ham to'g'ri aniqlangan.
+Tekshirildi: `82fea7e` (kod `ba0f53a`). Toza klonda, PostgreSQL testlari Docker bilan.
 
-Quyidagi qarorlar va tuzatishlar bilan `ishchi2/T3.1-mxik` branch'ida kodni yoz.
+**Natija:**
 
-## Savollarga javoblar
+- `pnpm verify`: unit va sqlite-hub 417/417 o'tdi.
+- Perf testida bitta yiqilish bo'ldi: FTS p95 71 ms, chegara 50 ms. Shu kompyuterda Gemini parallel test ishlatayotgan edi. Test alohida ishga tushirilganda T3.1 da ikki marta va `main` da o'tdi, demak bu yuk. T3.1 ga aloqasi yo'q.
+- PR #24 CI: to'rt job ham yashil.
 
-### S1. Variant B: bulut jufti seniki, lekin cheklangan ruxsat bilan
+Ish juda yaxshi. Hisobot halol (M1/M2 skript xatosi ochiq yozilgan). Snapshot testi kuchli. Eksportdagi tiyin kesilishi va shtrix-kod ustunining yo'qligi topilib tuzatilgani ayniqsa foydali.
 
-Gemini T2.3 ni qayta ishlayapti. Unda yangi talab bor: har sinxron jadvalning Zod sxemasi lokal va bulut ustunlariga teng ekanini tekshiruvchi test. Shuning uchun lokal jadvalni bulut juftisiz `main` ga qo'shib bo'lmaydi: test yiqiladi yoki sinxron hodisa rad etiladi.
+**Mening mustaqil mutatsiyalarim:**
 
-- Faqat `organization_tax_profiles` uchun ruxsat:
-  - `packages/db-cloud/src/schema/domain-tables.ts` ga jadval;
-  - bulut migratsiyasi;
-  - `packages/contracts/src/sync.ts` ga payload sxemasi va kerak bo'lsa reference/registry yozuvi.
-- Boshqa sinxron kodga tegilmaydi.
-- **Tartib:** avval lokal qism (1–7 bandlar). Bulut jufti uchun T2.3 `main` ga tushishini kut, keyin rebase qil va qo'sh. Tushganini senga topshiriq orqali xabar qilaman. T2.3 kechiksa, lokal qismni tugatib hisobot ber: T3.1 ni ikki commit'da qabul qilamiz.
-- PG testlari senda lokal ishlamaydi. Ularni CI ishga tushiradi, men esa tekshiruvda o'zimda ishga tushiraman.
+| # | Mutatsiya | Natija |
+|---|---|---|
+| MU1 | Buyurtmaning katalog qatori `isVatPayer` ni e'tiborsiz qoldiradi | **OMON QOLDI** |
+| MU2 | Buyurtmaning tez savdo qatori `isVatPayer` ni e'tiborsiz qoldiradi | **OMON QOLDI** |
+| MU3 | Savat katalog qatori bayroqni e'tiborsiz qoldiradi | aniqlandi |
+| MU4 | `refresh-prices` eski QQS'ni saqlaydi | aniqlandi |
+| MU5 | Excel'da bo'sh QQS katagi tashkilot standartini olmaydi | aniqlandi |
+| MU6 | Profil o'qishda `deleted_at_ms IS NULL` sharti olib tashlanadi | **OMON QOLDI** |
 
-### S2. Tasdiqlandi
+Kod to'g'ri, lekin MU1 va MU2 yo'llari testsiz. Mening qoidam: test qarzi bilan merge yo'q.
 
-- `is_vat_payer = 0` bo'lsa, snapshot stavkasi 0 bo'ladi, mahsulotning o'z stavkasi o'zgarmaydi. Yagona yordamchi `effectiveVatRate`.
-- U qo'llanadigan joylar: katalog qatori, tez savdo qatori (`local_hub_config.quick_sale_default_vat_rate_bp` ham shu funksiyadan o'tadi), buyurtma qatori va buyurtmadan sotuvga o'tish.
-- Chekdagi matn T3.4 ga qoladi.
+## Tuzatishlar
 
-### S3. Umumiy validatsiya qoladi
+### K1. Buyurtma yo'li testlari (MU1, MU2)
 
-Rasmiy MXIK formati hujjatsiz kiritilmaydi. MXIK'siz ro'yxat va ogohlantirish yetarli.
+Tashkilot QQS to'lovchisi **emas** holatiga o'tgandan **keyin** yangi buyurtma yaratiladi:
 
-### S4. T3.1 ichida qil
+- katalog qatori;
+- tez savdo qatori (aniq `vatRateBp: 1200` so'ralgan holda ham).
 
-Narx, `minStock` va QQS float'siz o'qilsin. Domen'dagi mavjud pul va miqdor parser'idan foydalan, yangisini yozma. Testlar:
+Tekshiriladi:
 
-- `"1 500,50"`, `"1500.5"`, `"0.005"`, raqam emas, manfiy, juda katta qiymat;
-- Excel raqamli katakchasi (number tipi) uchun aniq natija yoki aniq qator xatosi.
+- buyurtma qatorlarining snapshot'i 0;
+- `deliver` dan keyingi sotuv qatorlari ham 0.
 
-### S5. Docker
+Qayta QQS to'lovchisiga o'tilsa, avval yaratilgan bu buyurtma 0 da qoladi. MU1 va MU2 ni qayta ishga tushir va hisobotga yoz.
 
-Qabul qilindi, egasiga yetkazaman. Sening yo'lagingni to'xtatmaydi.
+### K2. O'chirilgan profil (MU6)
 
-## Majburiy tuzatishlar
+Profil id'si deterministik (`id = organization_id`). Sinxron orqali `deleted_at_ms` qo'yilgan profil kelsa, `upsertProfile` uni "yo'q" deb ko'radi va o'sha id bilan INSERT qiladi. Natijada PK xatosi chiqadi.
 
-### T1. Profil identifikatori deterministik bo'lsin
+Ikkala yo'lning birini tanla va test bilan isbotla:
 
-Ikki hub oflayn holatda bir vaqtda profil yaratsa, ikki xil `id` paydo bo'ladi. Ular sinxronda `UNIQUE (organization_id)` ga uriladi, va bitta tashkilotda ikki STIR kabi holat yuzaga keladi.
+- profilni o'chirish umuman taqiqlanadi (`deleted_at_ms IS NULL` CHECK);
+- yoki upsert qatorni id bo'yicha topadi va qayta tiklaydi.
 
-- Profil `id` = `organization_id`. Ikkala hub bir xil yozuvni yaratadi, keyin HLC bo'yicha LWW.
-- **Test:** ikki mustaqil SQLite bazasida bir xil tashkilot uchun profil yaratiladi → ikkalasining `id` si teng.
+**Test:** profil yaratiladi, `deleted_at_ms` to'g'ridan-to'g'ri SQL bilan qo'yiladi (sinxron qo'llashni taqlid qiladi), so'ng `PUT /settings/tax` → xato yo'q, natijada bitta faol profil.
 
-### T2. Profil o'zgarishi faqat yangi qatorlarga ta'sir qiladi
+## Savollaringizga javoblar
 
-`is_vat_payer` yoki `default_vat_rate_bp` o'zgarsa:
-
-- yopilgan cheklar, savatdagi mavjud qatorlar va tasdiqlangan buyurtmalar o'zgarmaydi;
-- faqat yangi qo'shilgan qatorlar yangi qiymatni oladi.
-
-6-bo'limdagi jadvalga "profil o'zgarishi" ssenariysini ham qo'sh.
-
-### T3. Kim o'zgartirgani ko'rinsin
-
-- STIR, QQS holati va yuridik nom o'zgarishi muhim amal. Har yozuv outbox hodisasida `userId` bilan bo'lsin.
-- Hub'da oxirgi o'zgartirgan foydalanuvchi va vaqt saqlansin: `updated_by_user_id`.
-- To'liq audit jurnali T3.8 da bo'ladi.
+- **2-taxmin** (`refresh-prices` QQS'ni qayta qo'llaydi): **to'g'ri**. Bu foydalanuvchining ochiq amali, katalogdan nom va narx bilan birga effektiv stavkani ham qayta oladi.
+- **3-taxmin** (`sqlite_master` tekshiruvi): qabul qilindi. Kelgusida eski sxemadagi test o'z ma'lumotlarini SQL bilan yaratadigan qilib qayta yozilsa, bu tekshiruvni olib tashlaymiz. Hozircha qarz sifatida qolsin.
+- **Bulut jufti (S1): qaror o'zgardi.** T3.1 deyarli tayyor, T2.3 esa katta qayta ishlashda. Shuning uchun:
+  - **T3.1 birinchi bo'lib `main` ga tushadi** (faqat lokal qism, migratsiya `0015`).
+  - Gemini T2.3 ni rebase qilganda o'z migratsiyasini `0016` ga ko'chiradi. `organization_tax_profiles` uchun bulut jadvali va sync sxemasini ham Gemini qo'shadi, chunki T2.3 dagi sxema mosligi testi buni talab qiladi. Buni Gemini'ga men yetkazaman.
+  - Sen `packages/db-cloud` ga **tegmaysan**. Avvalgi ruxsat bekor.
 
 ## Bajarish tartibi
 
-1. Lokal qism: profil, API, POS formasi, Excel, MXIK'siz ro'yxat, snapshot va QQS testlari, T1–T3.
-2. `pnpm verify` yashil (PG testlari skip bo'ladi, bu normal).
-3. Commit qil va push qil. PR och (`main` ga). CI yashil bo'lsin.
-4. Hisobot `[ishchi2-hisobot] T3.1`: har mezon va T1–T3 uchun test nomi, 9-bo'limdagi mutatsiya natijalari, Excel aylanma testi.
-5. `node .mezon/kutish.mjs 120 .mezon/claude/TOPSHIRIQ-ishchi2.md`. Merge qilma.
+1. K1 va K2, testlari bilan. `pnpm verify` yashil bo'lsin.
+2. Commit qil va push qil. PR #24 dagi CI yashil bo'lsin.
+3. Hisobot `[ishchi2-hisobot] T3.1`: K1 va K2 test nomlari, MU1, MU2 va MU6 qayta natijasi. Faqat o'zgargan qismini yoz.
+4. `node .mezon/kutish.mjs 120 .mezon/claude/TOPSHIRIQ-ishchi2.md`. Merge qilma: QABUL bilan merge ko'rsatmasini beraman. Shu topshiriqda keyingi vazifa (T3.2 rejasi) ham bo'ladi.
