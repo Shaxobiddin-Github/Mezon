@@ -380,6 +380,11 @@ export const ListProductsQuerySchema = z.strictObject({
   categoryId: UuidV7Schema.optional(),
   limit: z.coerce.number().int().min(1).max(200).optional(),
   offset: z.coerce.number().int().min(0).max(1_000_000).optional(),
+  /** T3.1: only active products with no MXIK (query string `true`/`false`). */
+  missingMxik: z
+    .enum(['true', 'false'])
+    .transform((v) => v === 'true')
+    .optional(),
 });
 export type ListProductsQueryDto = z.infer<typeof ListProductsQuerySchema>;
 

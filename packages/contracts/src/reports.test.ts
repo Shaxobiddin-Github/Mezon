@@ -180,10 +180,14 @@ describe('@mezon/contracts - T1.13 Reports, Excel & Backup Schemas', () => {
           costPrice: '350000',
           minStockMilli: '5000',
           initialStockMilli: '20000',
+          mxik: '10202001001000000',
+          packageCode: '1500234',
+          vatRateBp: 1200,
         },
       ],
     });
     expect(preview.createsCount).toBe(1);
+    expect(preview.rows[0]?.vatRateBp).toBe(1200);
 
     const commit = ExcelImportCommitRequestSchema.parse({
       previewToken: '01950000-0000-7000-8000-000000000010',

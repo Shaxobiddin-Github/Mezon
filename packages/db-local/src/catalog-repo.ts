@@ -136,6 +136,8 @@ export interface ListProductsFilter {
   readonly categoryId?: UuidV7;
   readonly limit?: number;
   readonly offset?: number;
+  /** T3.1: only active products without an MXIK code. */
+  readonly missingMxik?: boolean;
 }
 
 export interface ListProductsPageResult {
@@ -629,6 +631,54 @@ export class SqliteCatalogStore {
     });
   }
 
+  /**
+   * T3.1 Excel export: earliest active product-level (variant-less) barcode per product in one query,
+   * so the export carries the "Shtrix-kod" column the importer reads.
+   */
+  async listPrimaryBarcodesByProduct(): Promise<ReadonlyMap<UuidV7, string>> {
+    const { uow, organizationId } = this.requireContext();
+    return uow.runReadOnly(() => {
+      const rows = this.connection.db
+        .select({ productId: productBarcodes.productId, barcode: productBarcodes.barcode })
+        .from(productBarcodes)
+        .where(
+          and(
+            eq(productBarcodes.organizationId, organizationId),
+            isNull(productBarcodes.deletedAtMs),
+            isNull(productBarcodes.variantId),
+          ),
+        )
+        .orderBy(asc(productBarcodes.createdAtMs), asc(productBarcodes.id))
+        .all();
+      const map = new Map<UuidV7, string>();
+      for (const r of rows) {
+        if (!map.has(r.productId)) {
+          map.set(r.productId, r.barcode);
+        }
+      }
+      return Promise.resolve(map);
+    });
+  }
+
+  /** T3.1: number of active products with no MXIK (warning badge; fiscal behaviour is T3.2). */
+  async countProductsMissingMxik(): Promise<number> {
+    const { uow, organizationId } = this.requireContext();
+    return uow.runReadOnly(() => {
+      const row = this.connection.db
+        .select({ count: sql<number>`count(*)` })
+        .from(products)
+        .where(
+          and(
+            eq(products.organizationId, organizationId),
+            isNull(products.deletedAtMs),
+            isNull(products.mxik),
+          ),
+        )
+        .all()[0];
+      return Promise.resolve(Number(row?.count ?? 0));
+    });
+  }
+
   async listProducts(filter: ListProductsFilter = {}): Promise<ListProductsPageResult> {
     const { uow, organizationId } = this.requireContext();
     const limit = filter.limit ?? 50;
@@ -637,6 +687,47 @@ export class SqliteCatalogStore {
     const rawQuery = filter.q?.trim() ?? '';
 
     return uow.runReadOnly(() => {
+      if (filter.missingMxik === true) {
+        // T3.1 "MXIK'siz mahsulotlar": served from partial index idx_products_org_missing_mxik.
+        // Optional text filter uses substring match on normalized name/sku per token (subset is small).
+        const conds = [
+          eq(products.organizationId, organizationId),
+          isNull(products.deletedAtMs),
+          isNull(products.mxik),
+        ];
+        if (categoryId !== undefined) {
+          conds.push(eq(products.categoryId, categoryId));
+        }
+        for (const token of tokenizeCatalogSearchQuery(rawQuery)) {
+          const tokenCond = or(
+            sql`instr(${products.nameSearch}, ${token}) > 0`,
+            sql`instr(coalesce(${products.skuSearch}, ''), ${token}) > 0`,
+          );
+          if (tokenCond !== undefined) {
+            conds.push(tokenCond);
+          }
+        }
+        const totalRow = this.connection.db
+          .select({ count: sql<number>`count(*)` })
+          .from(products)
+          .where(and(...conds))
+          .all()[0];
+        const rows = this.connection.db
+          .select()
+          .from(products)
+          .where(and(...conds))
+          .orderBy(asc(products.nameSearch), asc(products.id))
+          .limit(limit)
+          .offset(offset)
+          .all();
+        return Promise.resolve({
+          products: rows.map(toStoredProduct),
+          total: Number(totalRow?.count ?? 0),
+          limit,
+          offset,
+        });
+      }
+
       if (rawQuery.length === 0) {
         const conds = [eq(products.organizationId, organizationId), isNull(products.deletedAtMs)];
         if (categoryId !== undefined) {

@@ -68,3 +68,13 @@ export function calculateVatIncluded(gross: Money, rate: VatRate): VatIncludedRe
   const net = (rawGross - (vat as bigint)) as Money;
   return { net, vat };
 }
+
+/**
+ * Effective VAT rate snapshotted onto a new cart/order line (T3.1, nazoratchi S2).
+ * A non-VAT-payer organization snapshots 0 regardless of the product's own configured rate;
+ * the product rate itself is left untouched so switching payer status later needs no catalog edit.
+ * Only NEW lines use this; existing snapshots are never recomputed.
+ */
+export function effectiveVatRate(productRate: VatRate, isVatPayer: boolean): VatRate {
+  return isVatPayer ? productRate : ZERO_VAT_RATE;
+}

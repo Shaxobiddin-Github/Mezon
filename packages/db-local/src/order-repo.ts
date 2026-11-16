@@ -61,6 +61,7 @@ import {
   toPromotionRule,
 } from './cart-repo.js';
 import type { LocalSqliteConnection } from './connection.js';
+import { effectiveVatRateBp, readEffectiveVatSettingsSync } from './tax-settings-repo.js';
 import { advanceOrderSeqSync } from './device-state.js';
 import { type StoredSaleRecord, completeSaleCoreInTxSync, toStoredSale } from './sale-repo.js';
 import {
@@ -680,10 +681,16 @@ export class SqliteOrderStore {
             unitPriceSnapshot: unitPrice,
             mxikSnapshot: prod.mxik,
             packageCodeSnapshot: prod.packageCode,
-            vatRateBpSnapshot: prod.vatRateBp,
+            vatRateBpSnapshot: effectiveVatRateBp(
+              prod.vatRateBp,
+              readEffectiveVatSettingsSync(session.db, ctx.organizationId).isVatPayer,
+            ),
           });
         } else {
-          const vatRateBp = line.vatRateBp ?? settings.quickSaleDefaultVatRateBp ?? 0;
+          const vatRateBp = effectiveVatRateBp(
+            line.vatRateBp ?? settings.quickSaleDefaultVatRateBp ?? 0,
+            readEffectiveVatSettingsSync(session.db, ctx.organizationId).isVatPayer,
+          );
           const mxikSnapshot = line.mxik ?? settings.quickSaleDefaultMxik ?? null;
           const packageCodeSnapshot = line.packageCode ?? null;
           resolvedDraftLines.push({

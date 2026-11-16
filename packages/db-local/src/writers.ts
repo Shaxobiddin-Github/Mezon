@@ -42,6 +42,12 @@ export type BusinessUpdateValues<TTable extends SQLiteTable> = Partial<
 >;
 
 export interface InsertEntityOptions<TValues extends Record<string, unknown>> {
+  /**
+   * Optional deterministic entity id (T3.1). When omitted a fresh UUIDv7 is generated.
+   * Used for org-singleton ATTR rows (`organization_tax_profiles.id = organization_id`) so
+   * independent offline hubs converge on one entity instead of colliding.
+   */
+  readonly entityId?: UuidV7;
   readonly organizationId: UuidV7;
   readonly storeId?: UuidV7;
   readonly values: TValues;
@@ -193,7 +199,8 @@ function insertSyncedRecord<TTable extends SQLiteTable>(
   const rawValues = options.values as Record<string, unknown>;
   assertNoReservedOverrides(rawValues);
 
-  const entityId = session.nextId();
+  const entityId =
+    options.entityId !== undefined ? parseUuidV7(options.entityId) : session.nextId();
   const hlc = serializeHlc(session.nextHlc());
   const nowMs = session.nowUnixMs();
 

@@ -229,6 +229,27 @@ describe('@mezon/db-local [PERF] - T1.1 Catalog 50k WAL benchmark', () => {
 
       expect(scanP95).toBeLessThanOrEqual(20);
       expect(searchP95).toBeLessThanOrEqual(50);
+
+      // T3.1 "MXIK'siz mahsulotlar" (worst case: all 50k seeded products lack MXIK).
+      const missingTimes: number[] = [];
+      for (let round = 0; round < 10; round++) {
+        const t0 = performance.now();
+        const count = await env.catalogStore.countProductsMissingMxik();
+        const page = await env.catalogStore.listProducts({ missingMxik: true, limit: 50 });
+        const filtered = await env.catalogStore.listProducts({
+          missingMxik: true,
+          q: 'nomer 4999',
+          limit: 50,
+        });
+        missingTimes.push(performance.now() - t0);
+        expect(count).toBe(50_000);
+        expect(page.total).toBe(50_000);
+        expect(page.products).toHaveLength(50);
+        expect(filtered.products.length).toBeGreaterThan(0);
+      }
+      const missingP95 = percentile(missingTimes, 95);
+      console.info(`[T3.1 Perf 50k] missing-MXIK count+page+filter p95=${missingP95.toFixed(3)}ms`);
+      expect(missingP95).toBeLessThanOrEqual(300);
     } finally {
       env.connection.close();
     }

@@ -150,6 +150,7 @@ export {
   localReceiptPrints,
   localCashDrawerEvents,
   localCloudState,
+  organizationTaxProfiles,
 } from './schema/index.js';
 
 export {
@@ -480,3 +481,17 @@ export {
   SqliteCloudStore,
   createSqliteCloudStore,
 } from './cloud-repo.js';
+
+export {
+  type TaxSettingsRuntimeContext,
+  type CreateSqliteTaxSettingsStoreOptions,
+  type StoredTaxProfileRecord,
+  type UpsertTaxProfileInput,
+  type EffectiveVatSettings,
+  DEFAULT_VAT_SETTINGS,
+  effectiveVatRateBp,
+  readTaxProfileRowSync,
+  readEffectiveVatSettingsSync,
+  SqliteTaxSettingsStore,
+  createSqliteTaxSettingsStore,
+} from './tax-settings-repo.js';

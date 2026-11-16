@@ -189,6 +189,7 @@ describe('@mezon/db-local - Schema foundation, registry, pragmas, and bigint saf
       ['local_receipt_prints', 'LOCAL'],
       ['local_cash_drawer_events', 'LOCAL'],
       ['local_cloud_state', 'LOCAL'],
+      ['organization_tax_profiles', 'ATTR'],
     ]);
     expect(() =>
       validateSqliteSchemaRegistry(
@@ -425,7 +426,7 @@ describe('@mezon/db-local - Schema foundation, registry, pragmas, and bigint saf
       const migCountRow = conn.sqlite
         .prepare('SELECT COUNT(*) as cnt FROM __drizzle_migrations')
         .get() as { cnt: bigint };
-      expect(migCountRow.cnt).toBe(15n);
+      expect(migCountRow.cnt).toBe(16n);
     } finally {
       conn.close();
     }

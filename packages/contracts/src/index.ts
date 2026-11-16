@@ -726,3 +726,17 @@ export {
   HubPairCloudRequestSchema,
   type HubPairCloudRequestDto,
 } from './cloud-device.js';
+
+export {
+  TinSchema,
+  LegalNameSchema,
+  LegalAddressSchema,
+  OrganizationTaxProfileSchema,
+  type OrganizationTaxProfileDto,
+  TaxProfileResponseSchema,
+  type TaxProfileResponseDto,
+  UpdateTaxProfileRequestSchema,
+  type UpdateTaxProfileRequestDto,
+  MissingMxikCountResponseSchema,
+  type MissingMxikCountResponseDto,
+} from './tax-settings.js';

@@ -1,4 +1,5 @@
 import type {
+  MissingMxikCountResponseDto,
   BarcodeResponseDto,
   CategoryResponseDto,
   CategorySummaryDto,
@@ -153,6 +154,10 @@ export class HubCatalogService {
       limit: page.limit,
       offset: page.offset,
     };
+  }
+
+  async countProductsMissingMxik(): Promise<MissingMxikCountResponseDto> {
+    return { count: await this.store.countProductsMissingMxik() };
   }
 
   async getProduct(productId: UuidV7): Promise<ProductDetailResponseDto> {
