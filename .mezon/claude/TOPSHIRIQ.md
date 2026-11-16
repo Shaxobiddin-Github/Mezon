@@ -1,84 +1,70 @@
-# Claude xulosasi: T2.4 qayta ishlash — SHARTLI QABUL (kichik test va PR)
+# Claude xulosasi: T2.4 — Y1 QABUL. Qolgani: migratsiya 0018 va PR. Parallel: T2.7 rejasi
 
-Tekshirildi: `807b416` (kod `60f77df`). Toza klonda, toza build bilan, PG testlari Docker'da.
+Tekshirildi: `c2de5d4` (kod `86445f0`).
 
-**Natija:**
+## Y1 — qabul
 
-- T2.4 testlari: 32/32 o'tdi (PG bilan).
-- X1–X5 haqiqatan tuzatilgan:
-  - ORACLE-P1 va 3 qurilma, 2 do'kondagi parallel test;
-  - SQLite cheklovlarini tasniflash;
-  - proyeksiyalar `rebuildProjections` oracle'iga teng;
-  - haqiqiy bulut orqali ikki hub;
-  - PG testlari ketma-ket.
-
-**Mustaqil mutatsiyalarim** (8 ta):
-
-| # | Mutatsiya | Natija |
-|---|---|---|
-| G1 | Tartib `received_at_ms` bo'yicha | aniqlandi |
-| G2 | Cheklov xatosi vaqtinchalik deb tasniflanadi | aniqlandi |
-| G3 | FK xatosi doimiy deb tasniflanadi | aniqlandi |
-| G4 | Ombor proyeksiyasi yangilanmaydi | aniqlandi |
-| G5 | Yetkazib beruvchi proyeksiyasi yangilanmaydi | aniqlandi |
-| G6 | Echo faqat `deviceId` bo'yicha bostiriladi | aniqlandi |
-| G8 | Ledger'lar tashkilot bo'yicha pull qilinmaydi | aniqlandi |
-| **G7** | **Barcha jadvallar tashkilot bo'yicha pull qilinadi** (`.filter(() => true)`) | **OMON QOLDI** |
+- Mustaqil mutatsiyam bilan tekshirdim: **G7 endi yiqiladi** (`store-scoped isolation (Y1 / G7)` testi). G8 ham yiqiladi.
+- Shunday qilib 8 ta mutatsiyaning 8 tasi aniqlandi.
+- Y4 o'lchovi qayd etildi: 50 ming mahsulot va 100 ming ledger bilan bitta partiya 1,23 soniya. Bu T2.6 ga o'tadi.
 
 ## Qolgan ishlar
 
-### Y1. Do'kon izolyatsiyasi testi (G7)
+### Z1. Migratsiya 0018 (Y3, o'zgarmagan)
 
-Boshqa do'konning **do'kon doirasidagi** hodisasi (`sales`, `stock_moves`, `cash_moves`, `shifts`) boshqa do'kon hub'iga tushsa, hech bir test yiqilmaydi. "enforces pullScope" testi faqat tashkilot doirasidagi kategoriyani va boshqa tenantni tekshiradi.
+PR #25 (T3.2) hali `main` ga tushmagan. ishchi2 uni merge qiladi.
 
-Bu tushib qolsa, boshqa filialning savdo va ombor harakatlari kassaga kirib, qoldiqni buzadi.
+1. `git fetch` bilan `origin/main` da `T3.2: Qoidalar dvigateli` commit'i paydo bo'lishini kut (har 2–3 daqiqada tekshir).
+2. `git merge origin/main` (rebase emas).
+3. `0017_sync_pull` → `0018_sync_pull`. Jurnal va snapshot qayta yaratilsin, migratsiya sonlari testlari yangilansin.
+4. `pnpm db:check` va `MEZON_REQUIRE_PG_TESTS=1 pnpm verify` yashil.
+5. Push qil.
 
-**Test:**
+### Z2. PR
 
-1. `storeA1` qurilmasi do'kon doirasidagi hodisa push qiladi (kamida `stock_moves` va `sales`).
-2. `storeA2` qurilmasi pull qiladi → bu hodisalar **kelmaydi**.
-3. `storeA1` ning o'zi pull qilganda keladi.
-4. Bir vaqtda ledger (`customer_ledger`) A2 ga keladi.
+Sening muhitingda `gh` yo'q, meniki ham login qilinmagan. **PR'larni ishchi2 ochadi** (unda `gh` bor), men unga yozaman. Sen PR ochmaysan va token so'ramaysan.
 
-G7 mutatsiyasi endi yiqilishi kerak.
+- Z1 push qilingach, hisobotga oxirgi commit SHA'sini yoz.
+- PR ochilgach CI natijasini men tekshiraman. CI qizil bo'lsa, shu faylda yozaman.
 
-### Y2. PR va CI
+## Parallel ish: T2.7 biznes kabineti — REJA
 
-PR hali ham ochilmagan. Hisobotda CI natijasi yo'q.
+Kutish vaqtini bo'sh o'tkazma. PR #25 ni kutayotganda T2.7 rejasini yoz.
 
-- `gemini/T2.4-sync-pull` dan `main` ga PR och.
-- To'rtala job yashil bo'lsin, yangi `pg-cloud` loyihasi ham CI'da ishlasin.
-- Hisobotga PR raqami va CI natijasini yoz.
+- **Branch:** `main` dan `gemini/T2.7-cabinet`. T2.4 dan emas.
+- Reja faylini **shu yangi branch'da** yoz: `.mezon/gemini/HISOBOT.md`, commit `[gemini-reja] T2.7`.
+- T2.4 branch'i bilan aralashtirma: branch almashtirishdan oldin `git status` toza bo'lsin.
 
-### Y3. Migratsiya raqami
+**GEMINI.md T2.7:** `apps/admin`.
 
-ishchi2'ning T3.2 (PR #25) qabul qilingan va undan oldin merge bo'ladi. U ham lokal `0017` (`0017_rules_packages`) ishlatadi.
+- **Bo'limlar:** bugungi savdo, cheklar, tugayotgan tovar, mahsulotlar, ombor, mijozlar va qarzlar, hisobotlar, xodimlar va ruxsatlar, qurilmalar, sinxron konfliktlari, sozlamalar.
+- Onlayn buyurtmalar F5 dan keyin qo'shiladi.
+- **Audit:** har muhim amal (narx o'zgarishi, chek bekor qilish, qoldiq tuzatish) kim va qachon qilgani bilan ko'rinadi.
+- Mobil moslashuv, Guzar uslubi.
 
-- PR #25 `main` ga tushgach, `main` ni o'z branch'ingga **merge** qil (rebase emas).
-- `0017_sync_pull` ni **`0018`** ga ko'chir, jurnal va snapshot'ni qayta yarat, migratsiya sonlari testlarini yangila.
-- Agar sen birinchi tayyor bo'lsang ham, PR #25 ni kut.
+**Rejada bo'lishi kerak:**
 
-### Y4. T2.6 uchun qayd (hozir tuzatish shart emas)
+1. **Ma'lumot manbai.** Kabinet faqat bulut PG dan o'qiydi (T2.1 API orqali), hub'ga to'g'ridan-to'g'ri ulanmaydi.
+   - Har endpoint uchun RLS (`mezon_current_organization_id()`) va rol tekshiruvi.
+   - Boshqa tashkilot ma'lumotini olishga urinish testi.
+2. **Yozish amallari** (narx, xodim, ruxsat, sozlama). Ular buluttan hub'ga qanday yetadi?
+   - Bulutda yozilgan o'zgarish sinxron hodisa bo'lib pull orqali kassaga tushishi kerak (T2.4 mexanizmi).
+   - Bulut o'zi hodisa yaratadimi, `deviceId` nima bo'ladi, HLC qanday? Variantlarni asosla.
+   - Pul va qoldiqni kabinetdan to'g'ridan-to'g'ri o'zgartirish **yo'q**. Qoldiq tuzatish faqat hujjat (`stock_moves`) orqali.
+3. **Hisobotlar.**
+   - Kassadagi T1.13 hisobotlari bilan bir xil raqam chiqishi kerak.
+   - Qanday isbotlaysan? Taklif: bir xil ma'lumotda hub hisoboti va kabinet hisobotini solishtiruvchi test.
+4. **Konfliktlar ekrani.** T2.3 `cloud_sync_parked` va T2.4 konfliktlari: ko'rish va qo'lda hal qilish (faqat owner/manager, audit bilan).
+5. **Auth.** T2.1 login va refresh, sessiya muddati, chiqish. Kabinet tokenlari brauzerda qayerda saqlanadi?
+6. **Tillar.** `@mezon/i18n` (T4.6 dan keyin uz-Latn, uz-Cyrl, ru). Matn kodda yozilmaydi.
+7. **Testlar.** API testlari (PG bilan), Playwright E2E (mobil o'lcham ham), ruxsatsiz kirish testlari.
+8. **Bo'lish.** Bitta PR uchun katta bo'lsa, T2.7a (o'qish: savdo, cheklar, ombor, hisobot) va T2.7b (yozish: narx, xodim, sozlama, konflikt) ga bo'l.
 
-Pull partiyasida bitta `stock_moves` yoki ledger hodisasi bo'lsa ham **to'liq** qayta qurish ishga tushadi, va bu yozish tranzaksiyasi ichida bo'ladi. 50 ming mahsulotli do'konda bu kassa savdosini bloklashi mumkin. T2.6 ("faqat tegilgan yozuvlar") buni tuzatadi.
-
-**Qo'shimcha so'rov:** hisobotda 50 ming mahsulot va 100 ming ledger qatorida bitta pull partiyasining vaqtini o'lchab yoz.
-
-## Vazifalar taqsimoti o'zgarmoqda
-
-Egasi qaroriga ko'ra **T2.4 merge qilingach** vazifalar almashtiriladi:
-
-- **ishchi2:** T2.5, T2.6, T2.8 integratsion testi, fiskal va to'lov yadrosi, T4.1, T4.7.
-- **Gemini:** T2.7 biznes kabineti, T2.8 Telegram bot qismi, T4.4 web-kassa UI, F5 Guzar Market UI, Cafe va bron UI.
-
-Keyingi topshirig'ing T2.7 bo'ladi, merge'dan keyin shu faylda.
-
-**Bitta qo'shimcha ish.** `claude/T4.6-i18n` branch'i (T4.6 tillar, men yozdim) uchun ham PR och: `T4.6: Tillar — o'zbek lotin, kirill va rus`. U PR #25 dan keyin merge bo'ladi, men uni avval o'sha holatga moslab yangilayman. PR'ni ochib qo'yishing kifoya, kodga tegma.
+**Qat'iy:** `apps/hub/src/sync*`, `packages/sync`, `packages/db-local` sinxron kodiga tegma. Kerak bo'lsa rejada so'ra. Bu qism endi ishchi2 da.
 
 ## Bajarish tartibi
 
-1. Y1 testi. G7 mutatsiyasi yiqilishini hisobotda ko'rsat.
-2. PR'larni och: T2.4 va `claude/T4.6-i18n`.
-3. PR #25 merge bo'lishini kut, keyin Y3.
-4. `MEZON_REQUIRE_PG_TESTS=1 pnpm verify` va CI yashil.
-5. Hisobot `[gemini-hisobot] T2.4`, so'ng `node .mezon/kutish.mjs`. Merge qilma.
+1. T2.7 rejasini yoz, `gemini/T2.7-cabinet` ga push qil.
+2. PR #25 tushgach, T2.4 branch'ida Z1, so'ng push.
+3. Hisobot T2.4 branch'ida `[gemini-hisobot] T2.4` (faqat Z1 natijasi).
+4. `node .mezon/kutish.mjs`. Javobim T2.7 rejasi bo'yicha `gemini/T2.7-cabinet` da, T2.4 bo'yicha shu branch'da bo'ladi.
