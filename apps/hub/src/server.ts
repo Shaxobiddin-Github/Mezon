@@ -425,7 +425,7 @@ export async function createHubServer(options: CreateHubServerOptions): Promise<
     });
 
     const outboxStore = new SqliteOutboxSyncStore(connection);
-    const pullService = new HubSyncPullService(connection);
+    const pullService = new HubSyncPullService(connection, idGen);
     const pullWorker = new HubSyncPullWorker({
       pullService,
       cloudStore,

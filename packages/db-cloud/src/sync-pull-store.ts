@@ -1,4 +1,4 @@
-import { and, eq, inArray, notInArray, or, sql } from 'drizzle-orm';
+import { and, asc, eq, inArray, notInArray, or, sql } from 'drizzle-orm';
 import type { NodePgDatabase } from 'drizzle-orm/node-postgres';
 import type pg from 'pg';
 import { parseUuidV7 } from '@mezon/domain';
@@ -51,7 +51,7 @@ export class CloudSyncPullStore {
         // 2. Identify organization-scoped entities per metadata (T4)
         const orgPullEntities = cloudSchemaRegistry
           .all()
-          .filter((m) => m.pullScope === 'organization')
+          .filter((m) => m.pullScope === 'organization' || m.tenantScope === 'organization')
           .map((m) => m.tableName);
 
         const scopeFilter =
@@ -98,7 +98,7 @@ export class CloudSyncPullStore {
               positionFilter,
             ),
           )
-          .orderBy(cloudSyncEvents.receivedAtMs, cloudSyncEvents.position)
+          .orderBy(asc(cloudSyncEvents.position), asc(cloudSyncEvents.storeId))
           .limit(queryLimit);
 
         const hasMore = rawRows.length > params.limit;

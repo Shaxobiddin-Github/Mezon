@@ -1397,6 +1397,277 @@ function formatConflictDetail(conflict: ReplayStockConflict): string {
  * `local_stock_conflicts`) cleanly from authoritative FACT `stock_moves` + `batches` ordered
  * deterministically by `(hlc ASC, id ASC)` (`S2`, never emits outbox events, never fails on CHECKs).
  */
+export function executeStockProjectionsRebuildSync(
+  _sqlite: LocalSqliteConnection['sqlite'],
+  db: LocalSqliteConnection['db'],
+  scope: {
+    readonly organizationId: UuidV7;
+    readonly storeId: UuidV7;
+    readonly nextId: () => UuidV7;
+    readonly nowUnixMs: () => UnixMs;
+  },
+): RebuildStockProjectionsResult {
+  const organizationId = parseUuidV7(scope.organizationId);
+  const storeId = parseUuidV7(scope.storeId);
+  const nowMs = scope.nowUnixMs();
+
+  const prodRows = db
+    .select({
+      id: products.id,
+      trackBatches: products.trackBatches,
+    })
+    .from(products)
+    .where(eq(products.organizationId, organizationId))
+    .all();
+
+  const trackBatchesByProduct = new Map<UuidV7, boolean>();
+  for (const p of prodRows) {
+    trackBatchesByProduct.set(p.id, Boolean(p.trackBatches));
+  }
+
+  const moveRows = db
+    .select()
+    .from(stockMoves)
+    .where(and(eq(stockMoves.organizationId, organizationId), eq(stockMoves.storeId, storeId)))
+    .orderBy(asc(stockMoves.hlc), asc(stockMoves.id))
+    .all();
+
+  const rcvLineUnknownRows = db
+    .select({
+      stockMoveId: goodsReceivingLines.stockMoveId,
+      costUnknown: goodsReceivingLines.costUnknown,
+    })
+    .from(goodsReceivingLines)
+    .where(
+      and(
+        eq(goodsReceivingLines.organizationId, organizationId),
+        eq(goodsReceivingLines.storeId, storeId),
+        eq(goodsReceivingLines.costUnknown, true),
+      ),
+    )
+    .all();
+  const unknownCostMoveIds = new Set<UuidV7>(rcvLineUnknownRows.map((r) => r.stockMoveId));
+
+  const confirmRows = db
+    .select()
+    .from(receivingCostConfirmations)
+    .where(
+      and(
+        eq(receivingCostConfirmations.organizationId, organizationId),
+        eq(receivingCostConfirmations.storeId, storeId),
+      ),
+    )
+    .orderBy(asc(receivingCostConfirmations.hlc), asc(receivingCostConfirmations.id))
+    .all();
+
+  // Map receiving line ID -> stockMoveId & resolution timestamp for confirmed unknown-cost conflicts
+  const lineIdToStockMoveId = new Map<UuidV7, UuidV7>();
+  if (confirmRows.length > 0) {
+    const rcvLinesForConfirm = db
+      .select({
+        id: goodsReceivingLines.id,
+        stockMoveId: goodsReceivingLines.stockMoveId,
+      })
+      .from(goodsReceivingLines)
+      .where(
+        inArray(
+          goodsReceivingLines.id,
+          confirmRows.map((c) => c.receivingLineId),
+        ),
+      )
+      .all();
+    for (const rl of rcvLinesForConfirm) {
+      lineIdToStockMoveId.set(rl.id, rl.stockMoveId);
+    }
+  }
+  const resolvedMoveTimestamps = new Map<UuidV7, UnixMs>();
+  for (const c of confirmRows) {
+    const mId = lineIdToStockMoveId.get(c.receivingLineId);
+    if (mId) {
+      resolvedMoveTimestamps.set(mId, c.createdAtMs);
+    }
+  }
+
+  type RebuildTimelineEvent =
+    | {
+        readonly kind: 'move';
+        readonly hlc: string;
+        readonly id: UuidV7;
+        readonly row: typeof stockMoves.$inferSelect;
+      }
+    | {
+        readonly kind: 'confirm';
+        readonly hlc: string;
+        readonly id: UuidV7;
+        readonly row: typeof receivingCostConfirmations.$inferSelect;
+      };
+
+  const timeline: RebuildTimelineEvent[] = [
+    ...moveRows.map((row) => ({ kind: 'move' as const, hlc: row.hlc, id: row.id, row })),
+    ...confirmRows.map((row) => ({ kind: 'confirm' as const, hlc: row.hlc, id: row.id, row })),
+  ].sort((a, b) => {
+    if (a.hlc < b.hlc) return -1;
+    if (a.hlc > b.hlc) return 1;
+    if (a.kind !== b.kind) return a.kind === 'move' ? -1 : 1;
+    if (a.id < b.id) return -1;
+    if (a.id > b.id) return 1;
+    return 0;
+  });
+
+  const pools = new Map<
+    string,
+    {
+      readonly productId: UuidV7;
+      readonly variantId: UuidV7 | null;
+      readonly state: ReplayStockPoolState;
+    }
+  >();
+  const allConflicts: ReplayStockConflict[] = [];
+
+  for (const ev of timeline) {
+    const r = ev.row;
+    const key = poolKey(r.productId, r.variantId);
+    let entry = pools.get(key);
+    if (!entry) {
+      entry = {
+        productId: r.productId,
+        variantId: r.variantId,
+        state: createEmptyStockPoolState(),
+      };
+      pools.set(key, entry);
+    }
+
+    const trackBatches = trackBatchesByProduct.get(r.productId) ?? false;
+    if (ev.kind === 'move') {
+      const m = ev.row;
+      const emitted = applyReplayStockMove(entry.state, {
+        moveId: m.id,
+        productId: m.productId,
+        variantId: m.variantId,
+        batchId: m.batchId,
+        hlc: m.hlc,
+        reason: parseStockMoveReason(m.reason),
+        qtyDelta: m.qtyDelta,
+        costValueDelta: m.costValueDelta,
+        trackBatches,
+        isUnknownCost: unknownCostMoveIds.has(m.id),
+      });
+      allConflicts.push(...emitted);
+    } else {
+      const c = ev.row;
+      applyStockCostConfirmation(entry.state, {
+        confirmationId: c.id,
+        productId: c.productId,
+        variantId: c.variantId,
+        batchId: c.batchId,
+        hlc: c.hlc,
+        receivedQty: c.receivedQty,
+        confirmedTotalCost: c.confirmedTotalCost,
+        trackBatches,
+      });
+    }
+  }
+
+  // Clear existing LOCAL projection & conflict cache for this store only
+  db.delete(localBatchBalances)
+    .where(
+      and(
+        eq(localBatchBalances.organizationId, organizationId),
+        eq(localBatchBalances.storeId, storeId),
+      ),
+    )
+    .run();
+  db.delete(localStockBalances)
+    .where(
+      and(
+        eq(localStockBalances.organizationId, organizationId),
+        eq(localStockBalances.storeId, storeId),
+      ),
+    )
+    .run();
+  db.delete(localStockConflicts)
+    .where(
+      and(
+        eq(localStockConflicts.organizationId, organizationId),
+        eq(localStockConflicts.storeId, storeId),
+      ),
+    )
+    .run();
+
+  let balancesRebuilt = 0;
+  let batchesRebuilt = 0;
+
+  for (const entry of pools.values()) {
+    const s = entry.state;
+    db.insert(localStockBalances)
+      .values({
+        id: scope.nextId(),
+        organizationId,
+        storeId,
+        productId: entry.productId,
+        variantId: entry.variantId,
+        qtyOnHand: s.qtyOnHand,
+        totalValue: s.totalValue,
+        deficitQty: s.deficitQty,
+        provisionalDeficitValue: s.provisionalDeficitValue,
+        costVarianceValue: s.costVarianceValue,
+        lastUnitCost: s.lastUnitCost,
+        createdAtMs: nowMs,
+        updatedAtMs: nowMs,
+      })
+      .run();
+    balancesRebuilt += 1;
+
+    for (const b of s.batches.values()) {
+      db.insert(localBatchBalances)
+        .values({
+          id: scope.nextId(),
+          organizationId,
+          storeId,
+          batchId: b.batchId,
+          productId: entry.productId,
+          variantId: entry.variantId,
+          hlc: b.hlc,
+          remainingQty: b.remainingQty,
+          remainingValue: b.remainingValue,
+          createdAtMs: nowMs,
+          updatedAtMs: nowMs,
+        })
+        .run();
+      batchesRebuilt += 1;
+    }
+  }
+
+  for (const c of allConflicts) {
+    const resolvedAt =
+      c.reason === 'UNKNOWN_COST_SURPLUS' ? (resolvedMoveTimestamps.get(c.moveId) ?? null) : null;
+    db.insert(localStockConflicts)
+      .values({
+        id: scope.nextId(),
+        organizationId,
+        storeId,
+        productId: c.productId,
+        variantId: c.variantId,
+        batchId: c.batchId,
+        moveId: c.moveId,
+        conflictQty: c.conflictQty,
+        reason: c.reason,
+        detail: formatConflictDetail(c),
+        resolvedAtMs: resolvedAt,
+        createdAtMs: nowMs,
+        updatedAtMs: nowMs,
+      })
+      .run();
+  }
+
+  return {
+    balancesRebuilt,
+    batchesRebuilt,
+    movesReplayed: moveRows.length,
+    conflictsDetected: allConflicts.length,
+  };
+}
+
 export async function rebuildStockProjections(
   connection: LocalSqliteConnection,
   scope: {
@@ -1406,267 +1677,8 @@ export async function rebuildStockProjections(
     readonly nowUnixMs: () => UnixMs;
   },
 ): Promise<RebuildStockProjectionsResult> {
-  const organizationId = parseUuidV7(scope.organizationId);
-  const storeId = parseUuidV7(scope.storeId);
-
-  return runConnectionProjectionMaintenance(connection, (_sqlite, db) => {
-    const nowMs = scope.nowUnixMs();
-
-    const prodRows = db
-      .select({
-        id: products.id,
-        trackBatches: products.trackBatches,
-      })
-      .from(products)
-      .where(eq(products.organizationId, organizationId))
-      .all();
-
-    const trackBatchesByProduct = new Map<UuidV7, boolean>();
-    for (const p of prodRows) {
-      trackBatchesByProduct.set(p.id, Boolean(p.trackBatches));
-    }
-
-    const moveRows = db
-      .select()
-      .from(stockMoves)
-      .where(and(eq(stockMoves.organizationId, organizationId), eq(stockMoves.storeId, storeId)))
-      .orderBy(asc(stockMoves.hlc), asc(stockMoves.id))
-      .all();
-
-    const rcvLineUnknownRows = db
-      .select({
-        stockMoveId: goodsReceivingLines.stockMoveId,
-        costUnknown: goodsReceivingLines.costUnknown,
-      })
-      .from(goodsReceivingLines)
-      .where(
-        and(
-          eq(goodsReceivingLines.organizationId, organizationId),
-          eq(goodsReceivingLines.storeId, storeId),
-          eq(goodsReceivingLines.costUnknown, true),
-        ),
-      )
-      .all();
-    const unknownCostMoveIds = new Set<UuidV7>(rcvLineUnknownRows.map((r) => r.stockMoveId));
-
-    const confirmRows = db
-      .select()
-      .from(receivingCostConfirmations)
-      .where(
-        and(
-          eq(receivingCostConfirmations.organizationId, organizationId),
-          eq(receivingCostConfirmations.storeId, storeId),
-        ),
-      )
-      .orderBy(asc(receivingCostConfirmations.hlc), asc(receivingCostConfirmations.id))
-      .all();
-
-    // Map receiving line ID -> stockMoveId & resolution timestamp for confirmed unknown-cost conflicts
-    const lineIdToStockMoveId = new Map<UuidV7, UuidV7>();
-    if (confirmRows.length > 0) {
-      const rcvLinesForConfirm = db
-        .select({
-          id: goodsReceivingLines.id,
-          stockMoveId: goodsReceivingLines.stockMoveId,
-        })
-        .from(goodsReceivingLines)
-        .where(
-          inArray(
-            goodsReceivingLines.id,
-            confirmRows.map((c) => c.receivingLineId),
-          ),
-        )
-        .all();
-      for (const rl of rcvLinesForConfirm) {
-        lineIdToStockMoveId.set(rl.id, rl.stockMoveId);
-      }
-    }
-    const resolvedMoveTimestamps = new Map<UuidV7, UnixMs>();
-    for (const c of confirmRows) {
-      const mId = lineIdToStockMoveId.get(c.receivingLineId);
-      if (mId) {
-        resolvedMoveTimestamps.set(mId, c.createdAtMs);
-      }
-    }
-
-    type RebuildTimelineEvent =
-      | {
-          readonly kind: 'move';
-          readonly hlc: string;
-          readonly id: UuidV7;
-          readonly row: typeof stockMoves.$inferSelect;
-        }
-      | {
-          readonly kind: 'confirm';
-          readonly hlc: string;
-          readonly id: UuidV7;
-          readonly row: typeof receivingCostConfirmations.$inferSelect;
-        };
-
-    const timeline: RebuildTimelineEvent[] = [
-      ...moveRows.map((row) => ({ kind: 'move' as const, hlc: row.hlc, id: row.id, row })),
-      ...confirmRows.map((row) => ({ kind: 'confirm' as const, hlc: row.hlc, id: row.id, row })),
-    ].sort((a, b) => {
-      if (a.hlc < b.hlc) return -1;
-      if (a.hlc > b.hlc) return 1;
-      if (a.kind !== b.kind) return a.kind === 'move' ? -1 : 1;
-      if (a.id < b.id) return -1;
-      if (a.id > b.id) return 1;
-      return 0;
-    });
-
-    const pools = new Map<
-      string,
-      {
-        readonly productId: UuidV7;
-        readonly variantId: UuidV7 | null;
-        readonly state: ReplayStockPoolState;
-      }
-    >();
-    const allConflicts: ReplayStockConflict[] = [];
-
-    for (const ev of timeline) {
-      const r = ev.row;
-      const key = poolKey(r.productId, r.variantId);
-      let entry = pools.get(key);
-      if (!entry) {
-        entry = {
-          productId: r.productId,
-          variantId: r.variantId,
-          state: createEmptyStockPoolState(),
-        };
-        pools.set(key, entry);
-      }
-
-      const trackBatches = trackBatchesByProduct.get(r.productId) ?? false;
-      if (ev.kind === 'move') {
-        const m = ev.row;
-        const emitted = applyReplayStockMove(entry.state, {
-          moveId: m.id,
-          productId: m.productId,
-          variantId: m.variantId,
-          batchId: m.batchId,
-          hlc: m.hlc,
-          reason: parseStockMoveReason(m.reason),
-          qtyDelta: m.qtyDelta,
-          costValueDelta: m.costValueDelta,
-          trackBatches,
-          isUnknownCost: unknownCostMoveIds.has(m.id),
-        });
-        allConflicts.push(...emitted);
-      } else {
-        const c = ev.row;
-        applyStockCostConfirmation(entry.state, {
-          confirmationId: c.id,
-          productId: c.productId,
-          variantId: c.variantId,
-          batchId: c.batchId,
-          hlc: c.hlc,
-          receivedQty: c.receivedQty,
-          confirmedTotalCost: c.confirmedTotalCost,
-          trackBatches,
-        });
-      }
-    }
-
-    // Clear existing LOCAL projection & conflict cache for this store only
-    db.delete(localBatchBalances)
-      .where(
-        and(
-          eq(localBatchBalances.organizationId, organizationId),
-          eq(localBatchBalances.storeId, storeId),
-        ),
-      )
-      .run();
-    db.delete(localStockBalances)
-      .where(
-        and(
-          eq(localStockBalances.organizationId, organizationId),
-          eq(localStockBalances.storeId, storeId),
-        ),
-      )
-      .run();
-    db.delete(localStockConflicts)
-      .where(
-        and(
-          eq(localStockConflicts.organizationId, organizationId),
-          eq(localStockConflicts.storeId, storeId),
-        ),
-      )
-      .run();
-
-    let balancesRebuilt = 0;
-    let batchesRebuilt = 0;
-
-    for (const entry of pools.values()) {
-      const s = entry.state;
-      db.insert(localStockBalances)
-        .values({
-          id: scope.nextId(),
-          organizationId,
-          storeId,
-          productId: entry.productId,
-          variantId: entry.variantId,
-          qtyOnHand: s.qtyOnHand,
-          totalValue: s.totalValue,
-          deficitQty: s.deficitQty,
-          provisionalDeficitValue: s.provisionalDeficitValue,
-          costVarianceValue: s.costVarianceValue,
-          lastUnitCost: s.lastUnitCost,
-          createdAtMs: nowMs,
-          updatedAtMs: nowMs,
-        })
-        .run();
-      balancesRebuilt += 1;
-
-      for (const b of s.batches.values()) {
-        db.insert(localBatchBalances)
-          .values({
-            id: scope.nextId(),
-            organizationId,
-            storeId,
-            batchId: b.batchId,
-            productId: entry.productId,
-            variantId: entry.variantId,
-            hlc: b.hlc,
-            remainingQty: b.remainingQty,
-            remainingValue: b.remainingValue,
-            createdAtMs: nowMs,
-            updatedAtMs: nowMs,
-          })
-          .run();
-        batchesRebuilt += 1;
-      }
-    }
-
-    for (const c of allConflicts) {
-      const resolvedAt =
-        c.reason === 'UNKNOWN_COST_SURPLUS' ? (resolvedMoveTimestamps.get(c.moveId) ?? null) : null;
-      db.insert(localStockConflicts)
-        .values({
-          id: scope.nextId(),
-          organizationId,
-          storeId,
-          productId: c.productId,
-          variantId: c.variantId,
-          batchId: c.batchId,
-          moveId: c.moveId,
-          conflictQty: c.conflictQty,
-          reason: c.reason,
-          detail: formatConflictDetail(c),
-          resolvedAtMs: resolvedAt,
-          createdAtMs: nowMs,
-          updatedAtMs: nowMs,
-        })
-        .run();
-    }
-
-    return {
-      balancesRebuilt,
-      batchesRebuilt,
-      movesReplayed: moveRows.length,
-      conflictsDetected: allConflicts.length,
-    };
+  return runConnectionProjectionMaintenance(connection, (sqlite, db) => {
+    return executeStockProjectionsRebuildSync(sqlite, db, scope);
   });
 }
 

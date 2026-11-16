@@ -47,6 +47,7 @@ describePg('@mezon/cloud - Sync Pull Engine (T2.4)', () => {
   const storeB = parseUuidV7('018bcfe5-6800-7000-8000-000000000022');
   const deviceA1 = parseUuidV7('018bcfe5-6800-7000-8000-000000000111');
   const deviceA2 = parseUuidV7('018bcfe5-6800-7000-8000-000000000112');
+  const deviceA3 = parseUuidV7('018bcfe5-6800-7000-8000-000000000113');
   const deviceB = parseUuidV7('018bcfe5-6800-7000-8000-000000000222');
   const ownerA = parseUuidV7('018bcfe5-6800-7000-8000-000000000055');
   const ownerB = parseUuidV7('018bcfe5-6800-7000-8000-000000000066');
@@ -55,6 +56,7 @@ describePg('@mezon/cloud - Sync Pull Engine (T2.4)', () => {
 
   let deviceTokenA1: string;
   let deviceTokenA2: string;
+  let _deviceTokenA3: string;
   let deviceTokenB: string;
 
   function makeHlc(seq: number, devId: string) {
@@ -275,6 +277,28 @@ describePg('@mezon/cloud - Sync Pull Engine (T2.4)', () => {
     });
     expect(pairResA2.statusCode).toBe(201);
     deviceTokenA2 = pairResA2.json<CloudPairDeviceResponseDto>().deviceToken;
+
+    // Pair Device A3 (under Org A / Store A1)
+    const codeA3 = await deviceStore.createPairingCode({
+      organizationId: orgA,
+      storeId: storeA1,
+      deviceName: 'POS A3',
+      nowMs,
+      idGen,
+    });
+
+    const pairResA3 = await server.inject({
+      method: 'POST',
+      url: '/api/v1/devices/pair',
+      payload: {
+        code: codeA3.code,
+        deviceId: deviceA3,
+        platform: 'windows',
+        appVersion: '1.0.0',
+      },
+    });
+    expect(pairResA3.statusCode).toBe(201);
+    _deviceTokenA3 = pairResA3.json<CloudPairDeviceResponseDto>().deviceToken;
 
     // Pair Device B (under Org B / Store B)
     const codeB = await deviceStore.createPairingCode({
@@ -547,90 +571,251 @@ describePg('@mezon/cloud - Sync Pull Engine (T2.4)', () => {
     expect(data2.hasMore).toBe(false);
   });
 
-  it('parallel multi-writer + simultaneous puller maintains gapless positions without dropped events', async () => {
-    // 2 parallel workers push 10 events each concurrently to Store A1
-    const worker1Events: SyncEventEnvelopeDto[] = [];
-    const worker2Events: SyncEventEnvelopeDto[] = [];
+  it('ORACLE-P1: events with inverted received_at_ms vs position arrive in monotonic position order without omission', async () => {
+    const eventId1 = idGen.nextId();
+    const eventId2 = idGen.nextId();
+    const catId1 = idGen.nextId();
+    const catId2 = idGen.nextId();
 
-    for (let i = 1; i <= 10; i++) {
-      const cId1 = idGen.nextId();
-      worker1Events.push({
-        eventId: idGen.nextId(),
-        organizationId: orgA,
-        storeId: storeA1,
-        deviceId: deviceA1,
-        deviceSeq: String(100 + i),
-        hlc: makeHlc(100 + i, deviceA1),
-        type: 'categories.created',
-        entity: 'categories',
-        entityId: cId1,
-        entityClass: 'ATTR',
-        schemaVersion: 1,
-        payload: makeCategoryPayload(cId1, `Parallel Cat W1-${i}`, i),
-      });
+    // Directly insert 2 events into cloud_sync_events with inverted received_at_ms:
+    // Event 1: position = 9001n, received_at_ms = 900
+    // Event 2: position = 9002n, received_at_ms = 100
+    await adminConn.pool.query(
+      `INSERT INTO cloud_sync_events (
+         id, organization_id, store_id, device_id, device_seq, hlc,
+         type, entity, entity_id, class, schema_version, payload,
+         position, received_at_ms, created_at_ms
+       ) VALUES
+       ($1, $2, $3, $4, 1, $5, 'categories.created', 'categories', $6, 'ATTR', 1, $7, 9001, 900, 900),
+       ($8, $2, $3, $4, 2, $9, 'categories.created', 'categories', $10, 'ATTR', 1, $11, 9002, 100, 100)`,
+      [
+        eventId1,
+        orgA,
+        storeA1,
+        deviceA1,
+        makeHlc(1, deviceA1),
+        catId1,
+        JSON.stringify(makeCategoryPayload(catId1, 'Oracle Cat 1')),
+        eventId2,
+        makeHlc(2, deviceA1),
+        catId2,
+        JSON.stringify(makeCategoryPayload(catId2, 'Oracle Cat 2')),
+      ],
+    );
 
-      const cId2 = idGen.nextId();
-      worker2Events.push({
-        eventId: idGen.nextId(),
+    // Pull 1: cursors at 9000, limit = 1
+    const pull1 = await server.inject({
+      method: 'GET',
+      url: `/api/v1/sync/pull?cursors=${encodeURIComponent(`${storeA1}:9000`)}&limit=1`,
+      headers: { Authorization: `Bearer ${deviceTokenA1}` },
+    });
+    expect(pull1.statusCode).toBe(200);
+    const data1 = pull1.json<SyncPullResponseDto>();
+    expect(data1.events.length).toBe(1);
+    expect(data1.events[0].position).toBe('9001');
+    expect(data1.hasMore).toBe(true);
+
+    // Pull 2: using nextCursors from pull 1, limit = 1
+    const cursorPairs = Object.entries(data1.nextCursors).map(([sId, pos]) => `${sId}:${pos}`);
+    const pull2 = await server.inject({
+      method: 'GET',
+      url: `/api/v1/sync/pull?cursors=${encodeURIComponent(cursorPairs.join(','))}&limit=1`,
+      headers: { Authorization: `Bearer ${deviceTokenA1}` },
+    });
+    expect(pull2.statusCode).toBe(200);
+    const data2 = pull2.json<SyncPullResponseDto>();
+    expect(data2.events.length).toBe(1);
+    expect(data2.events[0].position).toBe('9002');
+  });
+
+  it('concurrent multi-writer (3 devices, 2 stores) + simultaneous paginated pull loop: 0 omissions, 0 duplicates', async () => {
+    // 3 distinct devices across 2 dedicated stores to avoid position pollution from earlier tests:
+    // Device Conc1 (Store Conc1), Device Conc2 (Store Conc2), Device Conc3 (Store Conc1)
+    const storeConc1 = parseUuidV7(idGen.nextId());
+    const storeConc2 = parseUuidV7(idGen.nextId());
+    const devConc1 = parseUuidV7(idGen.nextId());
+    const devConc2 = parseUuidV7(idGen.nextId());
+    const devConc3 = parseUuidV7(idGen.nextId());
+
+    await adminConn.pool.query(
+      `INSERT INTO cloud_stores (id, organization_id, name, code, is_active, created_at_ms, updated_at_ms)
+       VALUES ($1, $2, 'Concurrent Store 1', 'conc_1', true, $3, $3),
+              ($4, $2, 'Concurrent Store 2', 'conc_2', true, $3, $3)`,
+      [storeConc1, orgA, nowMs, storeConc2],
+    );
+
+    async function pairConcDevice(
+      stId: typeof storeConc1,
+      dId: typeof devConc1,
+      dName: string,
+    ): Promise<string> {
+      const code = await deviceStore.createPairingCode({
         organizationId: orgA,
-        storeId: storeA1,
-        deviceId: deviceA1,
-        deviceSeq: String(200 + i),
-        hlc: makeHlc(200 + i, deviceA1),
-        type: 'categories.created',
-        entity: 'categories',
-        entityId: cId2,
-        entityClass: 'ATTR',
-        schemaVersion: 1,
-        payload: makeCategoryPayload(cId2, `Parallel Cat W2-${i}`, i),
+        storeId: stId,
+        deviceName: dName,
+        nowMs,
+        idGen,
       });
+      const pairRes = await server.inject({
+        method: 'POST',
+        url: '/api/v1/devices/pair',
+        payload: {
+          code: code.code,
+          deviceId: dId,
+          platform: 'windows',
+          appVersion: '1.0.0',
+        },
+      });
+      expect(pairRes.statusCode).toBe(201);
+      return pairRes.json<CloudPairDeviceResponseDto>().deviceToken;
     }
 
-    const push1 = server.inject({
-      method: 'POST',
-      url: '/api/v1/sync/push',
-      headers: { Authorization: `Bearer ${deviceTokenA1}` },
-      payload: {
-        clientVersion: '1.0.0',
-        storeId: storeA1,
-        deviceId: deviceA1,
-        events: worker1Events,
-      },
-    });
+    const tokenConc1 = await pairConcDevice(storeConc1, devConc1, 'POS Conc 1');
+    const tokenConc2 = await pairConcDevice(storeConc2, devConc2, 'POS Conc 2');
+    const tokenConc3 = await pairConcDevice(storeConc1, devConc3, 'POS Conc 3');
 
-    const push2 = server.inject({
-      method: 'POST',
-      url: '/api/v1/sync/push',
-      headers: { Authorization: `Bearer ${deviceTokenA1}` },
-      payload: {
-        clientVersion: '1.0.0',
-        storeId: storeA1,
-        deviceId: deviceA1,
-        events: worker2Events,
-      },
-    });
+    const totalPushes = 5;
+    const eventsPerPush = 3;
+    const totalExpectedEvents = totalPushes * 3 * eventsPerPush; // 45 events total
 
-    const [res1, res2] = await Promise.all([push1, push2]);
-    expect(res1.statusCode).toBe(200);
-    expect(res2.statusCode).toBe(200);
+    const acceptedEventIds = new Set<string>();
 
-    // Pull all events for Store A1 and verify gapless position ordering
-    const pullAll = await server.inject({
-      method: 'GET',
-      url: '/api/v1/sync/pull?limit=200',
-      headers: { Authorization: `Bearer ${deviceTokenA1}` },
-    });
-    expect(pullAll.statusCode).toBe(200);
-    const allData = pullAll.json<SyncPullResponseDto>();
+    async function pushBatchForDevice(
+      devId: typeof devConc1,
+      stId: typeof storeConc1,
+      token: string,
+    ) {
+      let devSeq = 0;
+      for (let p = 0; p < totalPushes; p++) {
+        const events: SyncEventEnvelopeDto[] = [];
+        for (let e = 0; e < eventsPerPush; e++) {
+          devSeq++;
+          const catId = parseUuidV7(idGen.nextId());
+          const evtId = parseUuidV7(idGen.nextId());
+          events.push({
+            eventId: evtId,
+            organizationId: orgA,
+            storeId: stId,
+            deviceId: devId,
+            deviceSeq: String(devSeq),
+            hlc: makeHlc(devSeq, devId),
+            type: 'categories.created',
+            entity: 'categories',
+            entityId: catId,
+            entityClass: 'ATTR',
+            schemaVersion: 1,
+            payload: makeCategoryPayload(catId, `Concurrent Cat ${devId.slice(-4)}-${devSeq}`),
+          });
+          acceptedEventIds.add(evtId);
+        }
 
-    // Positions for Store A1 must be strictly increasing with no duplicates
-    const storeA1Events = allData.events.filter((e) => e.storeId === storeA1);
-    expect(storeA1Events.length).toBeGreaterThanOrEqual(20);
+        const res = await server.inject({
+          method: 'POST',
+          url: '/api/v1/sync/push',
+          headers: { Authorization: `Bearer ${token}` },
+          payload: {
+            clientVersion: '1.0.0',
+            storeId: stId,
+            deviceId: devId,
+            events,
+          },
+        });
+        expect(res.statusCode).toBe(200);
+        await new Promise((resolve) => setTimeout(resolve, Math.floor(Math.random() * 5)));
+      }
+    }
 
-    for (let idx = 1; idx < storeA1Events.length; idx++) {
-      const prevPos = BigInt(storeA1Events[idx - 1].position);
-      const currPos = BigInt(storeA1Events[idx].position);
-      expect(currPos).toBeGreaterThan(prevPos);
+    const pulledEvents: SyncPullResponseDto['events'] = [];
+    const pulledEventIds = new Set<string>();
+    let duplicateCount = 0;
+    let pullsDone = false;
+
+    async function pullWorkerLoop() {
+      let cursors: Record<string, string> = { [storeConc1]: '0', [storeConc2]: '0' };
+      while (!pullsDone) {
+        const cursorStr = Object.entries(cursors)
+          .map(([s, p]) => `${s}:${p}`)
+          .join(',');
+        const query = cursorStr ? `cursors=${encodeURIComponent(cursorStr)}&limit=3` : 'limit=3';
+        const res = await server.inject({
+          method: 'GET',
+          url: `/api/v1/sync/pull?${query}`,
+          headers: { Authorization: `Bearer ${tokenConc1}` },
+        });
+        if (res.statusCode === 200) {
+          const body = res.json<SyncPullResponseDto>();
+          for (const ev of body.events) {
+            if (acceptedEventIds.has(ev.eventId)) {
+              if (pulledEventIds.has(ev.eventId)) {
+                duplicateCount++;
+              } else {
+                pulledEventIds.add(ev.eventId);
+                pulledEvents.push(ev);
+              }
+            }
+          }
+          cursors = { ...cursors, ...body.nextCursors };
+          if (!body.hasMore) {
+            await new Promise((resolve) => setTimeout(resolve, 10));
+          }
+        }
+      }
+
+      // Final drain passes until hasMore is false
+      let hasMore = true;
+      while (hasMore) {
+        const cursorStr = Object.entries(cursors)
+          .map(([s, p]) => `${s}:${p}`)
+          .join(',');
+        const query = cursorStr
+          ? `cursors=${encodeURIComponent(cursorStr)}&limit=100`
+          : 'limit=100';
+        const res = await server.inject({
+          method: 'GET',
+          url: `/api/v1/sync/pull?${query}`,
+          headers: { Authorization: `Bearer ${tokenConc1}` },
+        });
+        const body = res.json<SyncPullResponseDto>();
+        for (const ev of body.events) {
+          if (acceptedEventIds.has(ev.eventId)) {
+            if (pulledEventIds.has(ev.eventId)) {
+              duplicateCount++;
+            } else {
+              pulledEventIds.add(ev.eventId);
+              pulledEvents.push(ev);
+            }
+          }
+        }
+        cursors = { ...cursors, ...body.nextCursors };
+        hasMore = body.hasMore;
+      }
+    }
+
+    const pullPromise = pullWorkerLoop();
+    await Promise.all([
+      pushBatchForDevice(devConc1, storeConc1, tokenConc1),
+      pushBatchForDevice(devConc2, storeConc2, tokenConc2),
+      pushBatchForDevice(devConc3, storeConc1, tokenConc3),
+    ]);
+    pullsDone = true;
+    await pullPromise;
+
+    expect(pulledEvents.length).toBe(totalExpectedEvents);
+    expect(duplicateCount).toBe(0);
+    expect(pulledEventIds.size).toBe(totalExpectedEvents);
+
+    // Verify monotonic position ordering per store
+    const store1Events = pulledEvents.filter((e) => e.storeId === storeA1);
+    const store2Events = pulledEvents.filter((e) => e.storeId === storeA2);
+    for (let idx = 1; idx < store1Events.length; idx++) {
+      expect(BigInt(store1Events[idx].position)).toBeGreaterThan(
+        BigInt(store1Events[idx - 1].position),
+      );
+    }
+    for (let idx = 1; idx < store2Events.length; idx++) {
+      expect(BigInt(store2Events[idx].position)).toBeGreaterThan(
+        BigInt(store2Events[idx - 1].position),
+      );
     }
   });
 });

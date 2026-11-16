@@ -5,7 +5,8 @@ import {
   validateSyncEntityPayload,
   type MonotoneTransitionRule,
 } from '@mezon/sync';
-import { type UnixMs, type UuidV7, parseUuidV7 } from '@mezon/domain';
+import { type UnixMs, type UuidV7, type IdGenerator, parseUuidV7 } from '@mezon/domain';
+import { createSystemUuidV7Generator } from '@mezon/drivers';
 import {
   getTableColumns,
   localSchemaRegistry,
@@ -13,6 +14,9 @@ import {
   buildSqliteForeignReferencesMap,
   type SqliteForeignKeyRef,
   type LocalSqliteConnection,
+  executeCustomerBalancesRebuildSync,
+  executeSupplierBalancesRebuildSync,
+  executeStockProjectionsRebuildSync,
 } from '@mezon/db-local';
 
 export class PermanentSyncError extends Error {
@@ -23,6 +27,48 @@ export class PermanentSyncError extends Error {
     super(message);
     this.name = 'PermanentSyncError';
   }
+}
+
+export type SqliteSyncErrorCategory =
+  | { readonly type: 'permanent'; readonly code: string; readonly message: string }
+  | { readonly type: 'park_foreign_key'; readonly code: string; readonly message: string }
+  | { readonly type: 'transient'; readonly code?: string; readonly message: string };
+
+export function classifySyncError(err: unknown): SqliteSyncErrorCategory {
+  if (err instanceof PermanentSyncError) {
+    return { type: 'permanent', code: err.reason, message: err.message };
+  }
+  const msg = err instanceof Error ? err.message : String(err);
+  if (typeof err === 'object' && err !== null && 'code' in err) {
+    const code = String(err.code);
+    if (code === 'SQLITE_CONSTRAINT_FOREIGNKEY') {
+      return { type: 'park_foreign_key', code, message: msg };
+    }
+    if (code.startsWith('SQLITE_CONSTRAINT')) {
+      return { type: 'permanent', code: `LOCAL_CONSTRAINT_FAILED:${code}`, message: msg };
+    }
+    if (
+      code === 'SQLITE_BUSY' ||
+      code === 'SQLITE_IOERR' ||
+      code === 'SQLITE_FULL' ||
+      code === 'SQLITE_LOCKED' ||
+      code === 'SQLITE_NOMEM' ||
+      code === 'SQLITE_CORRUPT'
+    ) {
+      return { type: 'transient', code, message: msg };
+    }
+  }
+  if (/FOREIGN KEY constraint failed/i.test(msg)) {
+    return { type: 'park_foreign_key', code: 'SQLITE_CONSTRAINT_FOREIGNKEY', message: msg };
+  }
+  if (
+    /CHECK constraint failed|NOT NULL constraint failed|UNIQUE constraint failed|PRIMARY KEY constraint failed/i.test(
+      msg,
+    )
+  ) {
+    return { type: 'permanent', code: 'LOCAL_CONSTRAINT_FAILED', message: msg };
+  }
+  return { type: 'transient', message: msg };
 }
 
 export interface SyncApplyBatchResult {
@@ -50,7 +96,10 @@ export class HubSyncPullService {
   private readonly sqlite: LocalSqliteConnection['sqlite'];
   private readonly foreignRefsMap: Record<string, readonly SqliteForeignKeyRef[]>;
 
-  constructor(private readonly connection: LocalSqliteConnection) {
+  constructor(
+    private readonly connection: LocalSqliteConnection,
+    private readonly idGen: IdGenerator = createSystemUuidV7Generator(),
+  ) {
     this.sqlite = connection.sqlite;
     this.foreignRefsMap = buildSqliteForeignReferencesMap(localSchemaRegistry);
   }
@@ -88,6 +137,9 @@ export class HubSyncPullService {
     let skippedEchoCount = 0;
     let parkedCount = 0;
     let conflictCount = 0;
+    let hasCustomerLedger = false;
+    let hasSupplierLedger = false;
+    let hasStockEvents = false;
 
     const executeTx = this.sqlite.transaction(() => {
       // T1: Set in_sync = 1 in main schema table
@@ -228,7 +280,15 @@ export class HubSyncPullService {
 
               if (existingMonotone) {
                 const monotoneRule = MONOTONE_TRANSITION_RULES[tableMeta.tableName];
-                if (monotoneRule) {
+                if (!monotoneRule) {
+                  this.recordConflict(
+                    event,
+                    'UNKNOWN_MONOTONE_RULE',
+                    `No monotone transition rule defined for table "${tableMeta.tableName}"`,
+                    params.nowMs,
+                  );
+                  conflictCount++;
+                } else {
                   const transition = monotoneRule.checkTransition(existingMonotone, payloadData);
                   if (transition === 'rejected') {
                     throw new PermanentSyncError(
@@ -253,19 +313,54 @@ export class HubSyncPullService {
               }
             }
 
-            // 8. Update projections for ledger entries (T4)
-            this.updateProjections(event, payloadData, params.nowMs);
+            if (event.entity === 'customer_ledger') {
+              hasCustomerLedger = true;
+            } else if (event.entity === 'supplier_ledger') {
+              hasSupplierLedger = true;
+            } else if (event.entity === 'stock_moves' || event.entity === 'batches') {
+              hasStockEvents = true;
+            }
 
             this.sqlite.exec(`RELEASE SAVEPOINT ${spName}`);
           } catch (err: unknown) {
             this.sqlite.exec(`ROLLBACK TO SAVEPOINT ${spName}`);
-            if (err instanceof PermanentSyncError) {
-              this.recordConflict(event, err.reason, err.message, params.nowMs);
+            const classified = classifySyncError(err);
+            if (classified.type === 'permanent') {
+              this.recordConflict(event, classified.code, classified.message, params.nowMs);
               conflictCount++;
+            } else if (classified.type === 'park_foreign_key') {
+              this.parkEvent(event, { targetEntity: 'unknown', targetId: 'unknown' }, params.nowMs);
+              parkedCount++;
             } else {
               throw err;
             }
           }
+        }
+
+        // 8. Update projections for applied ledger or stock events using authoritative rebuild logic (X3)
+        if (hasCustomerLedger) {
+          executeCustomerBalancesRebuildSync(
+            this.sqlite,
+            this.connection.db,
+            params.context.organizationId,
+            params.nowMs,
+          );
+        }
+        if (hasSupplierLedger) {
+          executeSupplierBalancesRebuildSync(
+            this.sqlite,
+            this.connection.db,
+            params.context.organizationId,
+            params.nowMs,
+          );
+        }
+        if (hasStockEvents) {
+          executeStockProjectionsRebuildSync(this.sqlite, this.connection.db, {
+            organizationId: params.context.organizationId,
+            storeId: params.context.storeId,
+            nextId: () => this.idGen.nextId(),
+            nowUnixMs: () => params.nowMs,
+          });
         }
 
         // 9. Retry parked events
@@ -274,9 +369,7 @@ export class HubSyncPullService {
         // 10. Atomically update cursors inside the same transaction
         for (const [storeId, lastPos] of Object.entries(params.nextCursors)) {
           const parsedStore = parseUuidV7(storeId);
-          const cursorId = parseUuidV7(
-            `${params.context.organizationId.slice(0, 19)}${storeId.slice(19)}`,
-          );
+          const cursorId = this.idGen.nextId();
           this.sqlite
             .prepare(
               `INSERT INTO local_sync_cursors (id, organization_id, store_id, last_position, created_at_ms, updated_at_ms)
@@ -569,74 +662,6 @@ export class HubSyncPullService {
     values.push(event.entityId);
     const sqlStr = `UPDATE "${tableMeta.tableName}" SET ${setClauses.join(', ')} WHERE id = ?`;
     this.sqlite.prepare(sqlStr).run(...values);
-  }
-
-  private updateProjections(
-    event: SyncedEventDto,
-    payload: Record<string, unknown>,
-    nowMs: UnixMs,
-  ): void {
-    if (event.entity === 'customer_ledger') {
-      const customerId = (payload.customerId ?? payload.customer_id) as string | undefined;
-      const orgId = event.organizationId;
-      if (customerId) {
-        const rawDelta =
-          payload.amountDelta ?? payload.amount_delta ?? payload.balanceDeltaTiyin ?? '0';
-        const delta = BigInt(rawDelta as string | number);
-        const custUuid = parseUuidV7(customerId);
-        const balRow = this.sqlite
-          .prepare(
-            'SELECT id, balance, total_debt_accrued, total_settled FROM local_customer_balances WHERE customer_id = ? LIMIT 1',
-          )
-          .get(customerId) as
-          | {
-              id: string;
-              balance: number | bigint;
-              total_debt_accrued: number | bigint;
-              total_settled: number | bigint;
-            }
-          | undefined;
-
-        if (balRow) {
-          const currentBal = BigInt(balRow.balance);
-          const newBal = currentBal + delta < 0n ? 0n : currentBal + delta;
-          const newAccrued =
-            delta > 0n
-              ? BigInt(balRow.total_debt_accrued) + delta
-              : BigInt(balRow.total_debt_accrued);
-          const newSettled =
-            delta < 0n ? BigInt(balRow.total_settled) + -delta : BigInt(balRow.total_settled);
-
-          this.sqlite
-            .prepare(
-              'UPDATE local_customer_balances SET balance = ?, total_debt_accrued = ?, total_settled = ?, last_activity_at_ms = ?, updated_at_ms = ? WHERE customer_id = ?',
-            )
-            .run(Number(newBal), Number(newAccrued), Number(newSettled), nowMs, nowMs, customerId);
-        } else {
-          const initBal = delta < 0n ? 0n : delta;
-          const initAccrued = delta > 0n ? delta : 0n;
-          const initSettled = delta < 0n ? -delta : 0n;
-          this.sqlite
-            .prepare(
-              `INSERT INTO local_customer_balances (
-                 id, organization_id, customer_id, balance, total_debt_accrued, total_settled,
-                 last_activity_at_ms, created_at_ms, updated_at_ms
-               ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-            )
-            .run(
-              custUuid,
-              orgId,
-              custUuid,
-              Number(initBal),
-              Number(initAccrued),
-              Number(initSettled),
-              nowMs,
-              nowMs,
-              nowMs,
-            );
-        }
-      }
-    }
   }
 
   private retryParkedEvents(nowMs: UnixMs): void {

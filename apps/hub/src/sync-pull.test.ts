@@ -10,6 +10,9 @@ import {
   shifts,
   sales,
   users,
+  executeStockProjectionsRebuildSync,
+  executeCustomerBalancesRebuildSync,
+  executeSupplierBalancesRebuildSync,
 } from '@mezon/db-local';
 import {
   type Clock,
@@ -19,11 +22,15 @@ import {
   unixMsFromBigInt,
   moneyFromTiyin,
 } from '@mezon/domain';
-import { type SyncedEventDto, CURRENT_SCHEMA_VERSION } from '@mezon/sync';
+import {
+  type SyncedEventDto,
+  CURRENT_SCHEMA_VERSION,
+  MONOTONE_TRANSITION_RULES,
+} from '@mezon/sync';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import type { SafeStoragePort } from './safe-storage-port.js';
 import { createHubServer } from './server.js';
-import { HubSyncPullService } from './sync-pull-service.js';
+import { HubSyncPullService, classifySyncError, PermanentSyncError } from './sync-pull-service.js';
 
 class MockSafeStorage implements SafeStoragePort {
   isAvailable(): boolean {
@@ -741,5 +748,583 @@ describe('HubSyncPullService & HubSyncPullWorker (T2.4)', () => {
 
     expect(hub.pushWorker.isRunning()).toBe(false);
     expect(hub.pullWorker.isRunning()).toBe(false);
+  });
+
+  it('T3 (Oracle-X2): per-event SAVEPOINT handles SQLITE_CONSTRAINT_CHECK (whitespace name) by recording conflict and advancing cursor', () => {
+    const validCatId1 = idGen.nextId();
+    const whitespaceCatId = idGen.nextId();
+    const validCatId2 = idGen.nextId();
+
+    const validEvent1: SyncedEventDto = {
+      eventId: idGen.nextId(),
+      organizationId: orgId,
+      storeId,
+      deviceId,
+      deviceSeq: '101',
+      hlc: '000170000000000:00101:01880000-0000-7000-8000-000000000001',
+      type: 'category.created',
+      entity: 'categories',
+      entityId: validCatId1,
+      entityClass: 'ATTR',
+      schemaVersion: CURRENT_SCHEMA_VERSION,
+      payload: {
+        id: validCatId1,
+        organizationId: orgId,
+        deviceId,
+        hlc: '000170000000000:00101:01880000-0000-7000-8000-000000000001',
+        createdAtMs: Number(currentNowMs),
+        updatedAtMs: Number(currentNowMs),
+        name: 'Valid Category 1',
+        nameSearch: 'valid category 1',
+        sortOrder: 1,
+      },
+      position: '101',
+      hlcAdjusted: false,
+      receivedAtMs: unixMsFromBigInt(currentNowMs),
+    };
+
+    // Claude's exact toxic scenario: valid schemaVersion, but name: '   ' which triggers SQLite CHECK constraint: chk_categories_name_nonempty
+    const whitespaceNameEvent: SyncedEventDto = {
+      eventId: idGen.nextId(),
+      organizationId: orgId,
+      storeId,
+      deviceId,
+      deviceSeq: '102',
+      hlc: '000170000000000:00102:01880000-0000-7000-8000-000000000001',
+      type: 'category.created',
+      entity: 'categories',
+      entityId: whitespaceCatId,
+      entityClass: 'ATTR',
+      schemaVersion: CURRENT_SCHEMA_VERSION,
+      payload: {
+        id: whitespaceCatId,
+        organizationId: orgId,
+        deviceId,
+        hlc: '000170000000000:00102:01880000-0000-7000-8000-000000000001',
+        createdAtMs: Number(currentNowMs),
+        updatedAtMs: Number(currentNowMs),
+        name: '   ',
+        nameSearch: '   ',
+        sortOrder: 2,
+      },
+      position: '102',
+      hlcAdjusted: false,
+      receivedAtMs: unixMsFromBigInt(currentNowMs),
+    };
+
+    const validEvent2: SyncedEventDto = {
+      eventId: idGen.nextId(),
+      organizationId: orgId,
+      storeId,
+      deviceId,
+      deviceSeq: '103',
+      hlc: '000170000000000:00103:01880000-0000-7000-8000-000000000001',
+      type: 'category.created',
+      entity: 'categories',
+      entityId: validCatId2,
+      entityClass: 'ATTR',
+      schemaVersion: CURRENT_SCHEMA_VERSION,
+      payload: {
+        id: validCatId2,
+        organizationId: orgId,
+        deviceId,
+        hlc: '000170000000000:00103:01880000-0000-7000-8000-000000000001',
+        createdAtMs: Number(currentNowMs),
+        updatedAtMs: Number(currentNowMs),
+        name: 'Valid Category 2',
+        nameSearch: 'valid category 2',
+        sortOrder: 3,
+      },
+      position: '103',
+      hlcAdjusted: false,
+      receivedAtMs: unixMsFromBigInt(currentNowMs),
+    };
+
+    const res = pullService.applySyncPullBatch({
+      context: { organizationId: orgId, storeId, deviceId },
+      events: [validEvent1, whitespaceNameEvent, validEvent2],
+      nextCursors: { [storeId]: 103n },
+      nowMs: unixMsFromBigInt(currentNowMs),
+    });
+
+    expect(res.appliedCount).toBe(2);
+    expect(res.conflictCount).toBe(1);
+
+    // Both valid categories exist
+    expect(
+      conn.sqlite.prepare('SELECT id FROM categories WHERE id = ?').get(validCatId1),
+    ).toBeDefined();
+    expect(
+      conn.sqlite.prepare('SELECT id FROM categories WHERE id = ?').get(validCatId2),
+    ).toBeDefined();
+    // Toxic category does not exist
+    expect(
+      conn.sqlite.prepare('SELECT id FROM categories WHERE id = ?').get(whitespaceCatId),
+    ).toBeUndefined();
+
+    // Conflict recorded with LOCAL_CONSTRAINT_FAILED code
+    const conflict = conn.sqlite
+      .prepare('SELECT reason FROM local_sync_conflicts WHERE event_id = ?')
+      .get(whitespaceNameEvent.eventId) as { reason: string };
+    expect(conflict).toBeDefined();
+    expect(conflict.reason).toContain('LOCAL_CONSTRAINT_FAILED');
+
+    // Cursor cleanly advanced to 103
+    const cursor = conn.sqlite
+      .prepare('SELECT last_position FROM local_sync_cursors WHERE store_id = ?')
+      .get(storeId) as { last_position: string | bigint };
+    expect(BigInt(cursor.last_position)).toBe(103n);
+  });
+
+  it('T3 (Oracle-X2): transient error (SQLITE_BUSY / IOERR) rolls back entire batch and rethrows', () => {
+    const validCatId = idGen.nextId();
+    const validEvent: SyncedEventDto = {
+      eventId: idGen.nextId(),
+      organizationId: orgId,
+      storeId,
+      deviceId,
+      deviceSeq: '201',
+      hlc: '000170000000000:00201:01880000-0000-7000-8000-000000000001',
+      type: 'category.created',
+      entity: 'categories',
+      entityId: validCatId,
+      entityClass: 'ATTR',
+      schemaVersion: CURRENT_SCHEMA_VERSION,
+      payload: {
+        id: validCatId,
+        organizationId: orgId,
+        deviceId,
+        hlc: '000170000000000:00201:01880000-0000-7000-8000-000000000001',
+        createdAtMs: Number(currentNowMs),
+        updatedAtMs: Number(currentNowMs),
+        name: 'Transient Test Cat',
+        nameSearch: 'transient test cat',
+        sortOrder: 1,
+      },
+      position: '201',
+      hlcAdjusted: false,
+      receivedAtMs: unixMsFromBigInt(currentNowMs),
+    };
+
+    // Simulate transient error when inserting category
+    const origPrepare = conn.sqlite.prepare.bind(conn.sqlite);
+    let throwNow = false;
+    conn.sqlite.prepare = ((sql: string) => {
+      if (throwNow && sql.includes('INSERT INTO "categories"')) {
+        const busyErr = new Error('database is locked');
+        (busyErr as unknown as { code: string }).code = 'SQLITE_BUSY';
+        throw busyErr;
+      }
+      return origPrepare(sql);
+    }) as unknown as typeof conn.sqlite.prepare;
+
+    try {
+      throwNow = true;
+      expect(() => {
+        pullService.applySyncPullBatch({
+          context: { organizationId: orgId, storeId, deviceId },
+          events: [validEvent],
+          nextCursors: { [storeId]: 201n },
+          nowMs: unixMsFromBigInt(currentNowMs),
+        });
+      }).toThrow('database is locked');
+    } finally {
+      conn.sqlite.prepare = origPrepare;
+    }
+
+    // Event should NOT be applied
+    expect(
+      conn.sqlite.prepare('SELECT id FROM categories WHERE id = ?').get(validCatId),
+    ).toBeUndefined();
+    // Cursor should NOT advance
+    const cursor = conn.sqlite
+      .prepare('SELECT last_position FROM local_sync_cursors WHERE store_id = ?')
+      .get(storeId) as { last_position: string | bigint } | undefined;
+    expect(cursor?.last_position).toBeUndefined();
+  });
+
+  it('T4 (Oracle-X3): stock_moves, customer_ledger and supplier_ledger update projections identically to rebuildProjections oracle', () => {
+    const prodId = idGen.nextId();
+    const batchId = idGen.nextId();
+    const moveId = idGen.nextId();
+    const custId = idGen.nextId();
+    const custLedgerId = idGen.nextId();
+    const suppId = idGen.nextId();
+    const suppLedgerId = idGen.nextId();
+
+    // 1. Seed base product and batch into local SQLite
+    conn.sqlite
+      .prepare(
+        `INSERT INTO products (id, organization_id, device_id, hlc, name, name_search, sku, unit, sale_price, created_at_ms, updated_at_ms)
+         VALUES (?, ?, ?, '000170000000000:00000:01880000-0000-7000-8000-000000000001', 'Test Product', 'test product', 'SKU-001', 'dona', 15000, ?, ?)`,
+      )
+      .run(prodId, orgId, deviceId, Number(currentNowMs), Number(currentNowMs));
+
+    conn.sqlite
+      .prepare(
+        `INSERT INTO batches (id, organization_id, store_id, device_id, hlc, product_id, batch_number, initial_qty, initial_cost_value, created_at_ms)
+         VALUES (?, ?, ?, ?, '000170000000000:00000:01880000-0000-7000-8000-000000000001', ?, 'BATCH-001', 10000, 100000, ?)`,
+      )
+      .run(batchId, orgId, storeId, deviceId, prodId, Number(currentNowMs));
+
+    // Seed customer and supplier
+    conn.sqlite
+      .prepare(
+        `INSERT INTO customers (id, organization_id, device_id, hlc, full_name, name_search, is_active, created_at_ms, updated_at_ms)
+         VALUES (?, ?, ?, '000170000000000:00000:01880000-0000-7000-8000-000000000001', 'Oracle Customer', 'oracle customer', 1, ?, ?)`,
+      )
+      .run(custId, orgId, deviceId, Number(currentNowMs), Number(currentNowMs));
+
+    conn.sqlite
+      .prepare(
+        `INSERT INTO suppliers (id, organization_id, device_id, hlc, name, name_search, is_active, created_at_ms, updated_at_ms)
+         VALUES (?, ?, ?, '000170000000000:00000:01880000-0000-7000-8000-000000000001', 'Oracle Supplier', 'oracle supplier', 1, ?, ?)`,
+      )
+      .run(suppId, orgId, deviceId, Number(currentNowMs), Number(currentNowMs));
+
+    // 2. Prepare pull events: stock move (opening balance 10 units = 10000 milliunits), customer debt, supplier debt
+    const stockMoveEvent: SyncedEventDto = {
+      eventId: idGen.nextId(),
+      organizationId: orgId,
+      storeId,
+      deviceId,
+      deviceSeq: '301',
+      hlc: '000170000000000:00301:01880000-0000-7000-8000-000000000001',
+      type: 'stock_move.created',
+      entity: 'stock_moves',
+      entityId: moveId,
+      entityClass: 'FACT',
+      schemaVersion: CURRENT_SCHEMA_VERSION,
+      payload: {
+        id: moveId,
+        organizationId: orgId,
+        storeId,
+        deviceId,
+        hlc: '000170000000000:00301:01880000-0000-7000-8000-000000000001',
+        createdAtMs: Number(currentNowMs),
+        productId: prodId,
+        batchId,
+        qtyDelta: '10000',
+        costValueDelta: '100000',
+        sourceType: 'stock_entry',
+        sourceId: idGen.nextId(),
+        reason: 'initial',
+        createdByUserId: cashierId,
+      },
+      position: '301',
+      hlcAdjusted: false,
+      receivedAtMs: unixMsFromBigInt(currentNowMs),
+    };
+
+    const custLedgerEvent: SyncedEventDto = {
+      eventId: idGen.nextId(),
+      organizationId: orgId,
+      storeId,
+      deviceId,
+      deviceSeq: '302',
+      hlc: '000170000000000:00302:01880000-0000-7000-8000-000000000001',
+      type: 'customer_ledger.created',
+      entity: 'customer_ledger',
+      entityId: custLedgerId,
+      entityClass: 'FACT',
+      schemaVersion: CURRENT_SCHEMA_VERSION,
+      payload: {
+        id: custLedgerId,
+        organizationId: orgId,
+        storeId,
+        deviceId,
+        hlc: '000170000000000:00302:01880000-0000-7000-8000-000000000001',
+        createdAtMs: Number(currentNowMs),
+        customerId: custId,
+        entryType: 'opening_balance',
+        amountDelta: '55000',
+        sourceType: 'opening_balance',
+        sourceId: idGen.nextId(),
+        reason: 'Customer initial balance',
+        createdByUserId: cashierId,
+      },
+      position: '302',
+      hlcAdjusted: false,
+      receivedAtMs: unixMsFromBigInt(currentNowMs),
+    };
+
+    const suppLedgerEvent: SyncedEventDto = {
+      eventId: idGen.nextId(),
+      organizationId: orgId,
+      storeId,
+      deviceId,
+      deviceSeq: '303',
+      hlc: '000170000000000:00303:01880000-0000-7000-8000-000000000001',
+      type: 'supplier_ledger.created',
+      entity: 'supplier_ledger',
+      entityId: suppLedgerId,
+      entityClass: 'FACT',
+      schemaVersion: CURRENT_SCHEMA_VERSION,
+      payload: {
+        id: suppLedgerId,
+        organizationId: orgId,
+        storeId,
+        deviceId,
+        hlc: '000170000000000:00303:01880000-0000-7000-8000-000000000001',
+        createdAtMs: Number(currentNowMs),
+        supplierId: suppId,
+        entryType: 'opening_balance',
+        amountDelta: '88000',
+        sourceType: 'opening_balance',
+        sourceId: idGen.nextId(),
+        reason: 'Supplier initial balance',
+        createdByUserId: cashierId,
+      },
+      position: '303',
+      hlcAdjusted: false,
+      receivedAtMs: unixMsFromBigInt(currentNowMs),
+    };
+
+    // 3. Apply pull batch
+    const res = pullService.applySyncPullBatch({
+      context: { organizationId: orgId, storeId, deviceId },
+      events: [stockMoveEvent, custLedgerEvent, suppLedgerEvent],
+      nextCursors: { [storeId]: 303n },
+      nowMs: unixMsFromBigInt(currentNowMs),
+    });
+
+    expect(res.appliedCount).toBe(3);
+
+    // 4. Read projections updated by pull
+    const pulledStock = conn.sqlite
+      .prepare(
+        'SELECT product_id, qty_on_hand, total_value FROM local_stock_balances WHERE product_id = ?',
+      )
+      .get(prodId) as { product_id: string; qty_on_hand: bigint; total_value: bigint };
+
+    const pulledCustomer = conn.sqlite
+      .prepare(
+        'SELECT customer_id, balance, total_debt_accrued FROM local_customer_balances WHERE customer_id = ?',
+      )
+      .get(custId) as { customer_id: string; balance: bigint; total_debt_accrued: bigint };
+
+    const pulledSupplier = conn.sqlite
+      .prepare(
+        'SELECT supplier_id, balance, total_debt_accrued FROM local_supplier_balances WHERE supplier_id = ?',
+      )
+      .get(suppId) as { supplier_id: string; balance: bigint; total_debt_accrued: bigint };
+
+    expect(pulledStock.qty_on_hand).toBe(10000n);
+    expect(pulledCustomer.balance).toBe(55000n);
+    expect(pulledSupplier.balance).toBe(88000n);
+
+    // 5. Clear all projections to simulate cold restore / rebuild
+    conn.sqlite.prepare('DELETE FROM local_stock_balances').run();
+    conn.sqlite.prepare('DELETE FROM local_batch_balances').run();
+    conn.sqlite.prepare('DELETE FROM local_customer_balances').run();
+    conn.sqlite.prepare('DELETE FROM local_supplier_balances').run();
+
+    // Verify projections are wiped
+    const countRow = conn.sqlite
+      .prepare('SELECT COUNT(*) as c FROM local_stock_balances')
+      .get() as { c: bigint | number };
+    expect(Number(countRow.c)).toBe(0);
+
+    // 6. Run authoritative Oracle rebuild functions
+    executeStockProjectionsRebuildSync(conn.sqlite, conn.db, {
+      organizationId: orgId,
+      storeId,
+      nextId: () => idGen.nextId(),
+      nowUnixMs: () => unixMsFromBigInt(currentNowMs),
+    });
+    executeCustomerBalancesRebuildSync(conn.sqlite, conn.db, orgId, unixMsFromBigInt(currentNowMs));
+    executeSupplierBalancesRebuildSync(conn.sqlite, conn.db, orgId, unixMsFromBigInt(currentNowMs));
+
+    // 7. Verify Oracle rebuilt balances match pull balances with 0 drift
+    const rebuiltStock = conn.sqlite
+      .prepare(
+        'SELECT product_id, qty_on_hand, total_value FROM local_stock_balances WHERE product_id = ?',
+      )
+      .get(prodId) as { product_id: string; qty_on_hand: bigint; total_value: bigint };
+
+    const rebuiltCustomer = conn.sqlite
+      .prepare(
+        'SELECT customer_id, balance, total_debt_accrued FROM local_customer_balances WHERE customer_id = ?',
+      )
+      .get(custId) as { customer_id: string; balance: bigint; total_debt_accrued: bigint };
+
+    const rebuiltSupplier = conn.sqlite
+      .prepare(
+        'SELECT supplier_id, balance, total_debt_accrued FROM local_supplier_balances WHERE supplier_id = ?',
+      )
+      .get(suppId) as { supplier_id: string; balance: bigint; total_debt_accrued: bigint };
+
+    expect(rebuiltStock).toEqual(pulledStock);
+    expect(rebuiltCustomer).toEqual(pulledCustomer);
+    expect(rebuiltSupplier).toEqual(pulledSupplier);
+  });
+
+  it('T4 (Oracle-X4): unknown monotone rule records UNKNOWN_MONOTONE_RULE conflict and advances cursor', () => {
+    const shiftId = idGen.nextId();
+    // 1. Seed existing shift into local DB
+    conn.db
+      .insert(shifts)
+      .values({
+        id: shiftId,
+        organizationId: orgId,
+        storeId,
+        deviceId,
+        shiftNo: 10n,
+        shiftCode: 'SHIFT-010',
+        status: 'open',
+        openedByUserId: cashierId,
+        openingCash: moneyFromTiyin(0n),
+        openingDiscrepancy: moneyFromTiyin(0n),
+        openClientRequestId: idGen.nextId(),
+        openRequestHash: 'hash123456',
+        openedAtMs: unixMsFromBigInt(currentNowMs),
+        createdAtMs: unixMsFromBigInt(currentNowMs),
+        updatedAtMs: unixMsFromBigInt(currentNowMs),
+        hlc: '000170000000000:00000:01880000-0000-7000-8000-000000000001',
+      })
+      .run();
+
+    // 2. Temporarily delete shifts rule from MONOTONE_TRANSITION_RULES to simulate unknown rule
+    const rulesRecord = MONOTONE_TRANSITION_RULES as Record<string, unknown>;
+    const origShiftsRule = rulesRecord.shifts;
+    delete rulesRecord.shifts;
+
+    const monotoneEvent: SyncedEventDto = {
+      eventId: idGen.nextId(),
+      organizationId: orgId,
+      storeId,
+      deviceId,
+      deviceSeq: '401',
+      hlc: '000170000000000:00401:01880000-0000-7000-8000-000000000001',
+      type: 'shift.closed',
+      entity: 'shifts',
+      entityId: shiftId,
+      entityClass: 'MONOTONE',
+      schemaVersion: CURRENT_SCHEMA_VERSION,
+      payload: {
+        id: shiftId,
+        organizationId: orgId,
+        storeId,
+        deviceId,
+        hlc: '000170000000000:00401:01880000-0000-7000-8000-000000000001',
+        createdAtMs: Number(currentNowMs),
+        updatedAtMs: Number(currentNowMs),
+        shiftNo: '10',
+        shiftCode: 'SHIFT-010',
+        status: 'closed',
+        openedByUserId: cashierId,
+        closedByUserId: cashierId,
+        openingCash: '0',
+        openingDiscrepancy: '0',
+        openClientRequestId: idGen.nextId(),
+        openRequestHash: 'hashopen',
+        closeClientRequestId: idGen.nextId(),
+        closeRequestHash: 'hashclose',
+        openedAtMs: Number(currentNowMs),
+        closedAtMs: Number(currentNowMs),
+      },
+      position: '401',
+      hlcAdjusted: false,
+      receivedAtMs: unixMsFromBigInt(currentNowMs),
+    };
+
+    try {
+      const res = pullService.applySyncPullBatch({
+        context: { organizationId: orgId, storeId, deviceId },
+        events: [monotoneEvent],
+        nextCursors: { [storeId]: 401n },
+        nowMs: unixMsFromBigInt(currentNowMs),
+      });
+
+      expect(res.appliedCount).toBe(0);
+      expect(res.conflictCount).toBe(1);
+
+      const conflict = conn.sqlite
+        .prepare('SELECT reason FROM local_sync_conflicts WHERE event_id = ?')
+        .get(monotoneEvent.eventId) as { reason: string };
+      expect(conflict).toBeDefined();
+      expect(conflict.reason).toBe('UNKNOWN_MONOTONE_RULE');
+
+      const cursor = conn.sqlite
+        .prepare('SELECT last_position FROM local_sync_cursors WHERE store_id = ?')
+        .get(storeId) as { last_position: string | bigint };
+      expect(BigInt(cursor.last_position)).toBe(401n);
+    } finally {
+      rulesRecord.shifts = origShiftsRule;
+    }
+  });
+});
+
+describe('classifySyncError unit tests (X2)', () => {
+  it('correctly classifies PermanentSyncError', () => {
+    const err = new PermanentSyncError('CUSTOM_PERM_CODE', 'Custom permanent error message');
+    const res = classifySyncError(err);
+    expect(res).toEqual({
+      type: 'permanent',
+      code: 'CUSTOM_PERM_CODE',
+      message: 'Custom permanent error message',
+    });
+  });
+
+  it('correctly classifies SQLITE_CONSTRAINT_CHECK, NOTNULL, UNIQUE as permanent', () => {
+    const checkErr = new Error('CHECK constraint failed: chk_categories_name_nonempty');
+    (checkErr as unknown as { code: string }).code = 'SQLITE_CONSTRAINT_CHECK';
+    expect(classifySyncError(checkErr)).toEqual({
+      type: 'permanent',
+      code: 'LOCAL_CONSTRAINT_FAILED:SQLITE_CONSTRAINT_CHECK',
+      message: 'CHECK constraint failed: chk_categories_name_nonempty',
+    });
+
+    const notNullErr = new Error('NOT NULL constraint failed: categories.name');
+    (notNullErr as unknown as { code: string }).code = 'SQLITE_CONSTRAINT_NOTNULL';
+    expect(classifySyncError(notNullErr)).toEqual({
+      type: 'permanent',
+      code: 'LOCAL_CONSTRAINT_FAILED:SQLITE_CONSTRAINT_NOTNULL',
+      message: 'NOT NULL constraint failed: categories.name',
+    });
+
+    const uniqueErr = new Error('UNIQUE constraint failed: categories.name');
+    (uniqueErr as unknown as { code: string }).code = 'SQLITE_CONSTRAINT_UNIQUE';
+    expect(classifySyncError(uniqueErr)).toEqual({
+      type: 'permanent',
+      code: 'LOCAL_CONSTRAINT_FAILED:SQLITE_CONSTRAINT_UNIQUE',
+      message: 'UNIQUE constraint failed: categories.name',
+    });
+  });
+
+  it('correctly classifies SQLITE_CONSTRAINT_FOREIGNKEY as park_foreign_key', () => {
+    const fkErr = new Error('FOREIGN KEY constraint failed');
+    (fkErr as unknown as { code: string }).code = 'SQLITE_CONSTRAINT_FOREIGNKEY';
+    expect(classifySyncError(fkErr)).toEqual({
+      type: 'park_foreign_key',
+      code: 'SQLITE_CONSTRAINT_FOREIGNKEY',
+      message: 'FOREIGN KEY constraint failed',
+    });
+
+    // Also handles when code is missing but regex matches message
+    const msgFkErr = new Error('FOREIGN KEY constraint failed');
+    expect(classifySyncError(msgFkErr)).toEqual({
+      type: 'park_foreign_key',
+      code: 'SQLITE_CONSTRAINT_FOREIGNKEY',
+      message: 'FOREIGN KEY constraint failed',
+    });
+  });
+
+  it('correctly classifies SQLITE_BUSY, SQLITE_IOERR, SQLITE_FULL as transient', () => {
+    const busyErr = new Error('database is locked');
+    (busyErr as unknown as { code: string }).code = 'SQLITE_BUSY';
+    expect(classifySyncError(busyErr)).toEqual({
+      type: 'transient',
+      code: 'SQLITE_BUSY',
+      message: 'database is locked',
+    });
+
+    const ioErr = new Error('disk I/O error');
+    (ioErr as unknown as { code: string }).code = 'SQLITE_IOERR';
+    expect(classifySyncError(ioErr)).toEqual({
+      type: 'transient',
+      code: 'SQLITE_IOERR',
+      message: 'disk I/O error',
+    });
   });
 });
