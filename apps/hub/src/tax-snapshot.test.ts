@@ -829,3 +829,184 @@ describe('T3.1 Excel import/export fiscal columns', () => {
     }
   });
 });
+
+describe('T3.1 rework K1: order path uses the effective VAT rate (MU1, MU2)', () => {
+  it('orders created AFTER switching to non-VAT-payer snapshot 0 (catalog + quick sale), keep 0 after switching back, and deliver at 0', async () => {
+    const a = await bootHub(3109);
+    const { hub } = a;
+    try {
+      await hub.app.inject({
+        method: 'PUT',
+        url: '/settings/tax',
+        headers: hdr(a.owner.token),
+        payload: PROFILE_PAYER,
+      });
+      const prodRes = await hub.app.inject({
+        method: 'POST',
+        url: '/products',
+        headers: hdr(a.owner.token),
+        payload: {
+          name: 'Choy K1',
+          unit: 'dona',
+          salePrice: '1120000',
+          mxik: '10101001001000011',
+          vatRateBp: 1200,
+          unlimited: true,
+        },
+      });
+      expect(prodRes.statusCode).toBe(201);
+      const productId = ProductDetailResponseSchema.parse(prodRes.json()).product.id;
+      await hub.app.inject({
+        method: 'POST',
+        url: '/shifts/open',
+        headers: hdr(a.cashier.token),
+        payload: { clientRequestId: a.nextReq(), openingCash: '0' },
+      });
+
+      // Switch to non-VAT-payer BEFORE creating the order.
+      expect(
+        (
+          await hub.app.inject({
+            method: 'PUT',
+            url: '/settings/tax',
+            headers: hdr(a.owner.token),
+            payload: { ...PROFILE_PAYER, isVatPayer: false },
+          })
+        ).statusCode,
+      ).toBe(200);
+
+      const createRes = await hub.app.inject({
+        method: 'POST',
+        url: '/orders',
+        headers: hdr(a.cashier.token),
+        payload: {
+          clientRequestId: a.nextReq(),
+          customerName: 'Mijoz K1',
+          lines: [
+            { kind: 'catalog', productId, qty: '1000' },
+            {
+              kind: 'quick_sale',
+              name: 'Tez savdo K1',
+              unit: 'dona',
+              qty: '1000',
+              unitPrice: '560000',
+              vatRateBp: 1200, // explicitly requested 12% — still 0 for a non-payer
+            },
+          ],
+        },
+      });
+      expect(createRes.statusCode, createRes.body).toBe(201);
+      const order = OrderActionResponseSchema.parse(createRes.json()).order;
+      const catalogLine = order.lines.find((l) => l.lineKind === 'catalog');
+      const quickLine = order.lines.find((l) => l.lineKind === 'quick_sale');
+      expect(catalogLine?.vatRateBpSnapshot).toBe(0); // MU1
+      expect(quickLine?.vatRateBpSnapshot).toBe(0); // MU2
+      expect(order.totalVat).toBe('0');
+
+      // Switching back to payer must not touch the already-created order.
+      await hub.app.inject({
+        method: 'PUT',
+        url: '/settings/tax',
+        headers: hdr(a.owner.token),
+        payload: PROFILE_PAYER,
+      });
+      for (const step of ['confirm', 'ready']) {
+        const res = await hub.app.inject({
+          method: 'POST',
+          url: `/orders/${order.id}/${step}`,
+          headers: hdr(a.cashier.token),
+          payload: { clientRequestId: a.nextReq() },
+        });
+        expect(res.statusCode, `${step}: ${res.body}`).toBe(200);
+      }
+      const deliverRes = await hub.app.inject({
+        method: 'POST',
+        url: `/orders/${order.id}/deliver`,
+        headers: hdr(a.cashier.token),
+        payload: {
+          clientRequestId: a.nextReq(),
+          expectedTotal: '1680000',
+          payments: [{ method: 'cash', tenderedAmount: '1680000' }],
+        },
+      });
+      expect(deliverRes.statusCode, deliverRes.body).toBe(200);
+      const delivered = DeliverOrderResponseSchema.parse(deliverRes.json());
+      expect(delivered.sale.lines).toHaveLength(2);
+      expect(delivered.sale.lines.every((l) => l.vatRateBpSnapshot === 0)).toBe(true);
+      expect(delivered.sale.totalVat).toBe('0');
+    } finally {
+      await hub.close();
+    }
+  });
+});
+
+describe('T3.1 rework K2: tombstoned profile (MU6)', () => {
+  it('a profile tombstoned by sync reads as absent, and the next PUT restores the same row without a PK error', async () => {
+    const a = await bootHub(3110);
+    const { hub } = a;
+    try {
+      expect(
+        (
+          await hub.app.inject({
+            method: 'PUT',
+            url: '/settings/tax',
+            headers: hdr(a.owner.token),
+            payload: PROFILE_PAYER,
+          })
+        ).statusCode,
+      ).toBe(200);
+
+      // Simulate sync applying a delete: set deleted_at_ms directly.
+      hub.connection.sqlite
+        .prepare('UPDATE organization_tax_profiles SET deleted_at_ms = updated_at_ms WHERE id = ?')
+        .run(a.organizationId);
+
+      const afterDelete = await hub.app.inject({
+        method: 'GET',
+        url: '/settings/tax',
+        headers: hdr(a.owner.token),
+      });
+      expect(TaxProfileResponseSchema.parse(afterDelete.json()).profile).toBeNull();
+
+      const put = await hub.app.inject({
+        method: 'PUT',
+        url: '/settings/tax',
+        headers: hdr(a.manager.token),
+        payload: { ...PROFILE_PAYER, legalName: 'Tiklangan MChJ' },
+      });
+      expect(put.statusCode, put.body).toBe(200);
+      const restored = TaxProfileResponseSchema.parse(put.json()).profile;
+      expect(restored?.id).toBe(a.organizationId);
+      expect(restored?.legalName).toBe('Tiklangan MChJ');
+      expect(restored?.updatedByUserId).toBe(a.manager.id);
+
+      const rows = hub.connection.sqlite
+        .prepare('SELECT id, deleted_at_ms FROM organization_tax_profiles')
+        .all() as Array<{ id: string; deleted_at_ms: bigint | null }>;
+      expect(rows).toHaveLength(1);
+      expect(rows[0]?.deleted_at_ms).toBeNull();
+
+      const events = hub.connection.sqlite
+        .prepare(
+          `SELECT type FROM local_outbox WHERE entity = 'organization_tax_profiles' ORDER BY device_seq`,
+        )
+        .all() as Array<{ type: string }>;
+      expect(events.map((e) => e.type)).toEqual([
+        'organization_tax_profile.created',
+        'organization_tax_profile.restored',
+      ]);
+
+      // The restored profile is active again for VAT settings and further updates.
+      const update = await hub.app.inject({
+        method: 'PUT',
+        url: '/settings/tax',
+        headers: hdr(a.owner.token),
+        payload: { ...PROFILE_PAYER, isVatPayer: false },
+      });
+      expect(update.statusCode).toBe(200);
+      expect(TaxProfileResponseSchema.parse(update.json()).profile?.isVatPayer).toBe(false);
+    } finally {
+      await hub.close();
+    }
+  });
+});

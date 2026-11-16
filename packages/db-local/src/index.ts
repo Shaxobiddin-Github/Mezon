@@ -89,6 +89,7 @@ export {
   insertFact,
   insertAttr,
   updateAttr,
+  restoreAttr,
   tombstoneAttr,
   insertMonotone,
   updateMonotone,

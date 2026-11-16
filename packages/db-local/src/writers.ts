@@ -251,11 +251,13 @@ function mutateMutableSyncedRecord<TTable extends SQLiteTable>(
   table: TTable,
   expectedClass: 'ATTR' | 'MONOTONE',
   options: {
-    readonly opName: 'updateAttr' | 'tombstoneAttr' | 'updateMonotone';
+    readonly opName: 'updateAttr' | 'tombstoneAttr' | 'updateMonotone' | 'restoreAttr';
     readonly id: UuidV7;
     readonly organizationId: UuidV7;
     readonly storeId?: UuidV7;
-    readonly defaultVerb: 'updated' | 'deleted';
+    readonly defaultVerb: 'updated' | 'deleted' | 'restored';
+    /** When true the target may currently be tombstoned (used by `restoreAttr`). */
+    readonly allowTombstoned?: boolean;
     readonly eventType?: string;
     readonly schemaVersion?: number;
     readonly payload?: Record<string, unknown>;
@@ -279,7 +281,7 @@ function mutateMutableSyncedRecord<TTable extends SQLiteTable>(
     validEntityId,
     organizationId,
     storeId,
-    expectedClass === 'ATTR',
+    expectedClass === 'ATTR' && options.allowTombstoned !== true,
   );
 
   const setPatch = options.buildPatch(nowMs, hlc);
@@ -372,6 +374,40 @@ export function updateAttr<TTable extends SQLiteTable>(
       deviceId: session.deviceId,
       hlc,
       updatedAtMs: nowMs,
+    }),
+  });
+}
+
+/**
+ * Updates an `ATTR` record that may currently be tombstoned and clears `deleted_at_ms` (restore),
+ * advancing `deviceId`, `hlc`, `updatedAtMs` and recording a matching `local_outbox` event in the
+ * same transaction. Used for deterministic-id singletons (T3.1 `organization_tax_profiles`) where a
+ * tombstone delivered by sync must not make the next local write collide on the primary key.
+ */
+export function restoreAttr<TTable extends SQLiteTable>(
+  session: SqliteUnitOfWorkSession,
+  table: TTable,
+  options: UpdateAttrOptions<BusinessUpdateValues<TTable>>,
+): SyncedWriteResult<TTable['$inferSelect']> {
+  const rawValues = options.values as Record<string, unknown>;
+  assertNoReservedOverrides(rawValues);
+
+  return mutateMutableSyncedRecord(session, table, 'ATTR', {
+    opName: 'restoreAttr',
+    id: options.id,
+    organizationId: options.organizationId,
+    storeId: options.storeId,
+    defaultVerb: 'restored',
+    allowTombstoned: true,
+    eventType: options.eventType,
+    schemaVersion: options.schemaVersion,
+    payload: options.payload,
+    buildPatch: (nowMs, hlc) => ({
+      ...rawValues,
+      deviceId: session.deviceId,
+      hlc,
+      updatedAtMs: nowMs,
+      deletedAtMs: null,
     }),
   });
 }

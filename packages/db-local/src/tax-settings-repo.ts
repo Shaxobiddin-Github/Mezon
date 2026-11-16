@@ -12,7 +12,7 @@ import type { BetterSQLite3Database } from 'drizzle-orm/better-sqlite3';
 import type { LocalSqliteConnection } from './connection.js';
 import { organizationTaxProfiles } from './schema/index.js';
 import type { SqliteUnitOfWork } from './uow.js';
-import { insertAttr, updateAttr } from './writers.js';
+import { insertAttr, restoreAttr, updateAttr } from './writers.js';
 
 export interface TaxSettingsRuntimeContext {
   readonly uow: SqliteUnitOfWork;
@@ -208,6 +208,29 @@ export class SqliteTaxSettingsStore {
     return uow.execute((session) => {
       const existing = readTaxProfileRowSync(session.db, organizationId);
       if (existing === null) {
+        // K2: the deterministic id (= organization_id) may already exist as a TOMBSTONE (e.g. a
+        // delete applied by sync). Restore that row instead of INSERTing a colliding primary key.
+        const tombstoned = session.db
+          .select({ id: organizationTaxProfiles.id })
+          .from(organizationTaxProfiles)
+          .where(
+            and(
+              eq(organizationTaxProfiles.id, organizationId),
+              eq(organizationTaxProfiles.organizationId, organizationId),
+            ),
+          )
+          .limit(1)
+          .all()[0];
+        if (tombstoned !== undefined) {
+          const res = restoreAttr(session, organizationTaxProfiles, {
+            id: organizationId,
+            organizationId,
+            values,
+            eventType: 'organization_tax_profile.restored',
+            schemaVersion: 1,
+          });
+          return Promise.resolve(toStoredTaxProfile(res.row));
+        }
         const res = insertAttr(session, organizationTaxProfiles, {
           entityId: organizationId,
           organizationId,
