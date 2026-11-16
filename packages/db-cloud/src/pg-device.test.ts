@@ -9,6 +9,7 @@ import {
   createCloudPgPool,
   migrateCloudDatabase,
 } from './index.js';
+import { shouldRunPgTests } from './pg-test-helper.js';
 import {
   cloudDevicePairingCodes,
   cloudDeviceTokens,
@@ -32,7 +33,9 @@ const schema = {
   cloudDeviceTokens,
 };
 
-describe('@mezon/db-cloud - Device Pairing, Concurrency & Token Lifecycle (D1, D2)', () => {
+const describePg = shouldRunPgTests() ? describe : describe.skip;
+
+describePg('@mezon/db-cloud - Device Pairing, Concurrency & Token Lifecycle (D1, D2)', () => {
   let container: StartedPostgreSqlContainer;
   let adminConn: ReturnType<typeof createCloudPgPool<typeof schema>>;
   let appConn: ReturnType<typeof createCloudPgPool<typeof schema>>;

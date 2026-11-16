@@ -1,4 +1,3 @@
-import { execFileSync } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
 import { createRequire } from 'node:module';
 import { HlcClock, serializeHlc, unixMsFromBigInt } from '@mezon/domain';
@@ -7,6 +6,7 @@ import { PostgreSqlContainer, type StartedPostgreSqlContainer } from '@testconta
 import { eq, sql } from 'drizzle-orm';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { provisionAppRole } from '../ops/provision-app-role.mjs';
+import { shouldRunPgTests } from './pg-test-helper.js';
 import {
   PG_APP_ROLE_NAME,
   PgSchemaRegistry,
@@ -30,19 +30,6 @@ interface DrizzlePgKitApi {
 const require = createRequire(import.meta.url);
 const { generateDrizzleJson, generateMigration } = require('drizzle-kit/api') as DrizzlePgKitApi;
 
-function isLinuxDockerAvailable(): boolean {
-  try {
-    const osType = execFileSync('docker', ['info', '--format', '{{.OSType}}'], {
-      encoding: 'utf8',
-      timeout: 3000,
-      stdio: ['ignore', 'pipe', 'ignore'],
-    }).trim();
-    return osType === 'linux';
-  } catch {
-    return false;
-  }
-}
-
 async function expectPgErrorCode(promise: Promise<unknown>, expectedCode: string): Promise<void> {
   try {
     await promise;
@@ -54,8 +41,7 @@ async function expectPgErrorCode(promise: Promise<unknown>, expectedCode: string
   }
 }
 
-const requirePg = process.env.MEZON_REQUIRE_PG === '1';
-const describePg = requirePg || isLinuxDockerAvailable() ? describe : describe.skip;
+const describePg = shouldRunPgTests() ? describe : describe.skip;
 
 describePg('@mezon/db-cloud - PostgreSQL 18 RLS, role isolation, and bigint fidelity', () => {
   const testRegistry = new PgSchemaRegistry();

@@ -18,13 +18,16 @@ import {
   migrateCloudDatabase,
   CloudAuthStore,
   CloudTenantStore,
+  shouldRunPgTests,
 } from '@mezon/db-cloud';
 import { provisionAppRole } from '../../../packages/db-cloud/ops/provision-app-role.mjs';
 import { loadCloudConfig } from './config.js';
 import { CloudJwtService } from './jwt.js';
 import { buildCloudServer } from './server.js';
 
-describe('@mezon/cloud - HTTP API, Fastify, Auth & Multi-Tenant RLS Integration', () => {
+const describePg = shouldRunPgTests() ? describe : describe.skip;
+
+describePg('@mezon/cloud - HTTP API, Fastify, Auth & Multi-Tenant RLS Integration', () => {
   let container: StartedPostgreSqlContainer;
   let adminConn: ReturnType<typeof createCloudPgPool>;
   let appConn: ReturnType<typeof createCloudPgPool>;
@@ -625,6 +628,66 @@ describe('@mezon/cloud - HTTP API, Fastify, Auth & Multi-Tenant RLS Integration'
         headers: { authorization: `Bearer ${deviceToken1}` },
       });
       expect(meRes.statusCode).toBe(403);
+    });
+
+    it('enforces brute-force rate limit: 20 failed pairing attempts from same IP -> 21st attempt returns 429 and blocks even valid code', async () => {
+      const attackerIp = '198.51.100.99';
+
+      // 1. Send 20 invalid pairing requests from attackerIp
+      for (let i = 0; i < 20; i++) {
+        const res = await server.inject({
+          method: 'POST',
+          url: '/api/v1/devices/pair',
+          remoteAddress: attackerIp,
+          payload: {
+            code: '22222222',
+            deviceId: idGen.nextId(),
+            platform: 'windows',
+            appVersion: '1.0.0',
+          },
+        });
+        expect(res.statusCode).toBe(404);
+      }
+
+      // 2. 21st attempt from same IP returns 429 Too Many Requests
+      const blockedRes = await server.inject({
+        method: 'POST',
+        url: '/api/v1/devices/pair',
+        remoteAddress: attackerIp,
+        payload: {
+          code: '22222222',
+          deviceId: idGen.nextId(),
+          platform: 'windows',
+          appVersion: '1.0.0',
+        },
+      });
+      expect(blockedRes.statusCode).toBe(429);
+
+      // 3. Even a fresh valid pairing code is blocked from that IP
+      const codeRes = await server.inject({
+        method: 'POST',
+        url: '/api/v1/devices/pairing-codes',
+        headers: { authorization: `Bearer ${ownerTokenA}` },
+        payload: {
+          storeId: storeA,
+          name: 'Attacked Device',
+        },
+      });
+      expect(codeRes.statusCode).toBe(201);
+      const validCode = codeRes.json<CloudCreatePairingCodeResponseDto>().code;
+
+      const validAttemptRes = await server.inject({
+        method: 'POST',
+        url: '/api/v1/devices/pair',
+        remoteAddress: attackerIp,
+        payload: {
+          code: validCode,
+          deviceId: idGen.nextId(),
+          platform: 'windows',
+          appVersion: '1.0.0',
+        },
+      });
+      expect(validAttemptRes.statusCode).toBe(429);
     });
   });
 });

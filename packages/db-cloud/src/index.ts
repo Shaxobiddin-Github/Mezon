@@ -65,3 +65,5 @@ export {
   type DeviceOwnerLookup,
   type VerifiedDeviceContext,
 } from './device-store.js';
+
+export { isDockerAvailable, shouldRunPgTests } from './pg-test-helper.js';

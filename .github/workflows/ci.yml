@@ -139,7 +139,7 @@ jobs:
         run: pnpm run build
 
       - name: Run PostgreSQL RLS and bigint integration tests
-        run: pnpm exec vitest run packages/db-cloud
+        run: pnpm exec vitest run packages/db-cloud apps/cloud
 
   desktop:
     name: Build & E2E Desktop Installer (windows-latest)

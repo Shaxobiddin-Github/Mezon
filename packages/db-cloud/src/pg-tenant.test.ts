@@ -13,6 +13,7 @@ import {
   migrateCloudDatabase,
   withPgTenantContext,
 } from './index.js';
+import { shouldRunPgTests } from './pg-test-helper.js';
 import {
   cloudLoginIdentities,
   cloudOrganizations,
@@ -30,7 +31,9 @@ const schema = {
   cloudLoginIdentities,
 };
 
-describe('@mezon/db-cloud - PostgreSQL 18 Tenant Isolation & Pre-Auth Security (C1, C2)', () => {
+const describePg = shouldRunPgTests() ? describe : describe.skip;
+
+describePg('@mezon/db-cloud - PostgreSQL 18 Tenant Isolation & Pre-Auth Security (C1, C2)', () => {
   let container: StartedPostgreSqlContainer;
   let adminConn: ReturnType<typeof createCloudPgPool<typeof schema>>;
   let appConn: ReturnType<typeof createCloudPgPool<typeof schema>>;
