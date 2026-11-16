@@ -8,5 +8,12 @@
   "scripts": {
     "build": "tsc -b",
     "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@mezon/contracts": "workspace:*",
+    "@mezon/domain": "workspace:*"
+  },
+  "devDependencies": {
+    "@mezon/test-utils": "workspace:*"
   }
 }

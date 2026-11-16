@@ -31,6 +31,7 @@ import {
   createSqlitePrinterStore,
   SqliteCloudStore,
   createSqliteCloudStore,
+  SqliteOutboxSyncStore,
 } from '@mezon/db-local';
 import {
   type Clock,
@@ -70,6 +71,7 @@ import { HubReportService } from './report-service.js';
 import { CatalogImportCache } from './catalog-import-cache.js';
 import { AesGcmSafeStorageAdapter, type SafeStoragePort } from './safe-storage-port.js';
 import { HubCloudService } from './cloud-service.js';
+import { HubSyncPushWorker } from './sync-push-worker.js';
 
 export interface CreateHubServerOptions {
   readonly dbPath: string;
@@ -131,6 +133,8 @@ export interface HubServer {
   readonly importCache: CatalogImportCache;
   readonly cloudStore: SqliteCloudStore;
   readonly cloudService: HubCloudService;
+  readonly outboxStore: SqliteOutboxSyncStore;
+  readonly pushWorker: HubSyncPushWorker;
   readonly safeStorage: SafeStoragePort;
   listen(): Promise<{ readonly host: typeof DEFAULT_HUB_HOST; readonly port: number }>;
   close(): Promise<void>;
@@ -393,22 +397,35 @@ export async function createHubServer(options: CreateHubServerOptions): Promise<
       return ctx ? ctx.uow : null;
     });
 
+    const getDeviceId = () => {
+      const ctx = store.getActiveRuntimeContext();
+      if (ctx) {
+        return ctx.config.deviceId;
+      }
+      const row = connection.sqlite
+        .prepare('SELECT device_id FROM local_device_state LIMIT 1')
+        .get() as { device_id: string } | undefined;
+      if (row?.device_id) {
+        return parseUuidV7(row.device_id);
+      }
+      throw new DomainError('DEVICE_NOT_INITIALIZED', 'Qurilma holati topilmadi');
+    };
+
     cloudService = new HubCloudService({
       cloudStore,
       safeStorage,
-      getDeviceId: () => {
-        const ctx = store.getActiveRuntimeContext();
-        if (ctx) {
-          return ctx.config.deviceId;
-        }
-        const row = connection.sqlite
-          .prepare('SELECT device_id FROM local_device_state LIMIT 1')
-          .get() as { device_id: string } | undefined;
-        if (row?.device_id) {
-          return parseUuidV7(row.device_id);
-        }
-        throw new DomainError('DEVICE_NOT_INITIALIZED', 'Qurilma holati topilmadi');
-      },
+      getDeviceId,
+      clock,
+      idGen,
+      fetchFn: options.cloudFetchFn,
+    });
+
+    const outboxStore = new SqliteOutboxSyncStore(connection);
+    const pushWorker = new HubSyncPushWorker({
+      outboxStore,
+      cloudStore,
+      safeStorage,
+      getDeviceId,
       clock,
       idGen,
       fetchFn: options.cloudFetchFn,
@@ -477,6 +494,8 @@ export async function createHubServer(options: CreateHubServerOptions): Promise<
       importCache,
       cloudStore,
       cloudService,
+      outboxStore,
+      pushWorker,
       safeStorage,
       async listen() {
         await app.listen({
@@ -488,6 +507,8 @@ export async function createHubServer(options: CreateHubServerOptions): Promise<
           boundPort = addr.port;
           hostState.updatePort(addr.port);
         }
+        // R6: Automatically start outbox push worker when hub listens
+        pushWorker.start();
         return {
           host: DEFAULT_HUB_HOST,
           port: boundPort ?? securityConfig.port,
@@ -495,6 +516,7 @@ export async function createHubServer(options: CreateHubServerOptions): Promise<
       },
       async close() {
         try {
+          pushWorker.stop();
           await app.close();
         } finally {
           connection.close();

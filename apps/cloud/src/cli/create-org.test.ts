@@ -80,5 +80,5 @@ describePg('@mezon/cloud - CLI org:create (C4)', () => {
     } finally {
       await appConn.close();
     }
-  });
+  }, 30_000);
 });

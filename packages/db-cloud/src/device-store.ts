@@ -404,7 +404,8 @@ export class CloudDeviceStore {
 
       const device = devices[0];
       if (device.status !== 'active') {
-        throw new DomainError('DEVICE_REVOKED', 'Qurilma bekor qilingan yoki bloklangan');
+        const code = device.status === 'blocked' ? 'DEVICE_BLOCKED' : 'DEVICE_REVOKED';
+        throw new DomainError(code, 'Qurilma bekor qilingan yoki bloklangan');
       }
 
       // Check D2 Grace Period vs Token Reuse
@@ -442,7 +443,7 @@ export class CloudDeviceStore {
 
       // Check token expiry
       if (tokenRecord.expiresAtMs < BigInt(nowMs)) {
-        throw new DomainError('AUTH_UNAUTHORIZED', 'Qurilma tokenining muddati o‘tgan');
+        throw new DomainError('TOKEN_EXPIRED', 'Qurilma tokenining muddati o‘tgan');
       }
 
       // Update last seen

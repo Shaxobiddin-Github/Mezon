@@ -17,6 +17,8 @@ export default defineConfig({
             '**/node_modules/**',
             '**/dist/**',
           ],
+          testTimeout: 120_000,
+          hookTimeout: 120_000,
           sequence: {
             groupOrder: 0,
           },

@@ -368,3 +368,46 @@ export function validatePgSchemaRegistry(
     }
   }
 }
+
+export interface CloudForeignKeyRef {
+  readonly payloadKey: string;
+  readonly columnName: string;
+  readonly targetEntity: string;
+}
+
+export function snakeToCamel(s: string): string {
+  return s.replace(/_([a-z0-9])/g, (_, letter: string) => letter.toUpperCase());
+}
+
+/**
+ * R3: Automatically builds foreign key reference metadata by reflecting over Drizzle table foreign keys.
+ * Completely eliminates hand-typed, incomplete foreign key reference lists.
+ */
+export function buildDrizzleForeignReferencesMap(
+  registry: PgSchemaRegistry,
+): Record<string, readonly CloudForeignKeyRef[]> {
+  const map: Record<string, CloudForeignKeyRef[]> = {};
+  for (const meta of registry.all()) {
+    if (meta.tableClass === 'LOCAL') continue;
+    const config = getTableConfig(meta.table);
+    const refs: CloudForeignKeyRef[] = [];
+    for (const fk of config.foreignKeys) {
+      const ref = fk.reference();
+      const foreignTableName = getTableConfig(ref.foreignTable).name;
+      for (const col of ref.columns) {
+        if (col.name === 'organization_id' || col.name === 'store_id' || col.name === 'device_id') {
+          continue;
+        }
+        refs.push({
+          payloadKey: snakeToCamel(col.name),
+          columnName: col.name,
+          targetEntity: foreignTableName,
+        });
+      }
+    }
+    if (refs.length > 0) {
+      map[meta.tableName] = refs;
+    }
+  }
+  return map;
+}

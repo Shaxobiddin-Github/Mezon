@@ -9,3 +9,5 @@ export {
   cloudDevices,
   cloudDeviceTokens,
 } from './tables.js';
+export { cloudSyncEvents, cloudStoreSyncPositions, cloudSyncParked } from './sync-tables.js';
+export * from './domain-tables.js';
