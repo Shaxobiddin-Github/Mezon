@@ -44,12 +44,22 @@ const PAYLOAD = {
 
 describe('T3.2a scripts/rules-sign (CLI library)', () => {
   it('keygen refuses any path inside the repository (incl. repo root and nested dirs)', () => {
+    // Safety: exercise keygen against a THROWAWAY repo root so that even a broken guard can never
+    // write keys into the real working tree. The real repo root is checked with the pure predicate.
+    const fakeRepo = fs.mkdtempSync(path.join(os.tmpdir(), 'mezon-fake-repo-'));
+    tempDirs.push(fakeRepo);
     for (const target of [
-      lib.REPO_ROOT,
-      path.join(lib.REPO_ROOT, 'keys'),
-      path.join(lib.REPO_ROOT, 'packages', 'x'),
+      fakeRepo,
+      path.join(fakeRepo, 'keys'),
+      path.join(fakeRepo, 'packages', 'x'),
     ]) {
-      expect(() => lib.keygen(target), target).toThrow(/inside the repository/);
+      expect(() => lib.keygen(target, { repoRoot: fakeRepo }), target).toThrow(
+        /inside the repository/,
+      );
+    }
+    expect(fs.readdirSync(fakeRepo)).toEqual([]);
+    for (const target of [lib.REPO_ROOT, path.join(lib.REPO_ROOT, 'keys')]) {
+      expect(lib.isInsideRepo(target), target).toBe(true);
     }
     expect(lib.isInsideRepo(path.join(os.tmpdir(), 'mezon-x'))).toBe(false);
   });
