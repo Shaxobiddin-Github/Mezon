@@ -15,6 +15,7 @@ import { getSqliteCustomColumnKind, sqliteHlc, sqliteUnixMs, sqliteUuidV7 } from
 
 export type TableClass = 'FACT' | 'ATTR' | 'MONOTONE' | 'LOCAL';
 export type TenantScope = 'organization' | 'store' | 'none';
+export type PullScope = 'organization' | 'store';
 
 export interface TableDefinitionOptions<
   TClass extends TableClass = TableClass,
@@ -23,6 +24,7 @@ export interface TableDefinitionOptions<
   readonly name: string;
   readonly tableClass: TClass;
   readonly tenantScope: TScope;
+  readonly pullScope?: PullScope;
   readonly monotoneColumns?: readonly string[];
 }
 
@@ -30,6 +32,7 @@ export interface SqliteTableMetadata {
   readonly tableName: string;
   readonly tableClass: TableClass;
   readonly tenantScope: TenantScope;
+  readonly pullScope: PullScope;
   readonly monotoneColumns: readonly string[];
   readonly table: SQLiteTable;
 }
@@ -196,10 +199,14 @@ export class SqliteSchemaRegistry {
       return [...autoChecks, ...userExtra];
     });
 
+    const pullScope: PullScope =
+      options.pullScope ?? (options.tenantScope === 'organization' ? 'organization' : 'store');
+
     this.entries.set(options.name, {
       tableName: options.name,
       tableClass: options.tableClass,
       tenantScope: options.tenantScope,
+      pullScope,
       monotoneColumns: [...(options.monotoneColumns ?? [])],
       table: tbl,
     });
@@ -360,4 +367,46 @@ export function validateSqliteSchemaRegistry(
       }
     }
   }
+}
+
+export interface SqliteForeignKeyRef {
+  readonly payloadKey: string;
+  readonly columnName: string;
+  readonly targetEntity: string;
+}
+
+export function snakeToCamel(s: string): string {
+  return s.replace(/_([a-z0-9])/g, (_, letter: string) => letter.toUpperCase());
+}
+
+/**
+ * Automatically builds foreign key reference metadata by reflecting over SQLite table foreign keys.
+ */
+export function buildSqliteForeignReferencesMap(
+  registry: SqliteSchemaRegistry,
+): Record<string, readonly SqliteForeignKeyRef[]> {
+  const map: Record<string, SqliteForeignKeyRef[]> = {};
+  for (const meta of registry.all()) {
+    if (meta.tableClass === 'LOCAL') continue;
+    const config = getTableConfig(meta.table);
+    const refs: SqliteForeignKeyRef[] = [];
+    for (const fk of config.foreignKeys) {
+      const ref = fk.reference();
+      const foreignTableName = getTableConfig(ref.foreignTable).name;
+      for (const col of ref.columns) {
+        if (col.name === 'organization_id' || col.name === 'store_id' || col.name === 'device_id') {
+          continue;
+        }
+        refs.push({
+          payloadKey: snakeToCamel(col.name),
+          columnName: col.name,
+          targetEntity: foreignTableName,
+        });
+      }
+    }
+    if (refs.length > 0) {
+      map[meta.tableName] = refs;
+    }
+  }
+  return map;
 }

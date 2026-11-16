@@ -116,4 +116,6 @@ export {
   extractPgErrorCode,
 } from './sync-push-store.js';
 
+export { CloudSyncPullStore, ForeignStoreError } from './sync-pull-store.js';
+
 export { isDockerAvailable, shouldRunPgTests } from './pg-test-helper.js';

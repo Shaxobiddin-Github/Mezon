@@ -1,11 +1,19 @@
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { type SyncPushResponseDto, SyncPushRequestSchema } from '@mezon/contracts';
+import {
+  type SyncPushResponseDto,
+  SyncPushRequestSchema,
+  parseAndValidateSyncCursors,
+} from '@mezon/contracts';
 import {
   PG_APP_ROLE_NAME,
   CloudSyncPushStore,
+  CloudSyncPullStore,
+  ForeignStoreError,
   cloudSyncEvents,
+  cloudOrganizations,
+  cloudStores,
   createCloudPgPool,
   migrateCloudDatabase,
   sales,
@@ -34,6 +42,7 @@ describePg('@mezon/hub - Hub to Cloud Sync Integration Test (R6)', () => {
   let appConn: ReturnType<typeof createCloudPgPool>;
   let cloudServer: FastifyInstance;
   let hubServer: HubServer;
+  let syncPushStore: CloudSyncPushStore;
   let tmpDir: string;
   let dbPath: string;
 
@@ -42,6 +51,7 @@ describePg('@mezon/hub - Hub to Cloud Sync Integration Test (R6)', () => {
   const deviceA = parseUuidV7('018bcfe5-6800-7000-8000-000000000111');
   const ownerA = parseUuidV7('018bcfe5-6800-7000-8000-000000000003');
   const validToken = 'test-device-token-12345';
+  const nowMs = unixMsFromBigInt(1700000000000n);
 
   let cloudBaseUrl: string;
 
@@ -65,13 +75,32 @@ describePg('@mezon/hub - Hub to Cloud Sync Integration Test (R6)', () => {
     appConn = createCloudPgPool({
       connectionString: appConnUri.toString(),
     });
-    const syncPushStore = new CloudSyncPushStore(appConn.pool);
+    syncPushStore = new CloudSyncPushStore(appConn.pool);
 
-    const nowMs = unixMsFromBigInt(1700000000000n);
     const initHlc = serializeHlc({
       physicalMs: nowMs,
       logical: 0,
       nodeId: deviceA,
+    });
+
+    // Seed org and store into Cloud tables
+    await adminConn.db.insert(cloudOrganizations).values({
+      id: orgA,
+      organizationId: orgA,
+      name: 'Org A',
+      status: 'active',
+      createdAtMs: nowMs,
+      updatedAtMs: nowMs,
+    });
+
+    await adminConn.db.insert(cloudStores).values({
+      id: storeA,
+      organizationId: orgA,
+      name: 'Store A',
+      code: 'store_a',
+      isActive: true,
+      createdAtMs: nowMs,
+      updatedAtMs: nowMs,
     });
 
     // Seed ownerA into Cloud domain users table so foreign keys resolve
@@ -117,6 +146,44 @@ describePg('@mezon/hub - Hub to Cloud Sync Integration Test (R6)', () => {
       });
 
       return reply.code(200).send(result);
+    });
+
+    const syncPullStore = new CloudSyncPullStore(appConn.pool);
+
+    cloudServer.get('/api/v1/sync/pull', async (req, reply) => {
+      const authHeader = req.headers.authorization;
+      if (authHeader !== `Bearer ${validToken}`) {
+        return reply.code(401).send({ error: 'Unauthorized', code: 'DEVICE_UNAUTHORIZED' });
+      }
+
+      const query = req.query as { cursors?: string; limit?: string };
+      const parsedCursors = parseAndValidateSyncCursors(query.cursors);
+      if (!parsedCursors.success) {
+        return reply.code(400).send({ error: 'Bad Request', code: 'INVALID_CURSORS' });
+      }
+
+      try {
+        const result = await syncPullStore.getSyncPullEvents({
+          context: {
+            organizationId: orgA,
+            storeId: storeA,
+            deviceId: deviceA,
+            deviceName: 'Kassa 1',
+            status: 'active',
+          },
+          cursors: parsedCursors.cursors,
+          limit: query.limit ? Number(query.limit) : 100,
+        });
+
+        return reply.code(200).send(result);
+      } catch (err) {
+        if (err instanceof ForeignStoreError) {
+          return reply
+            .code(400)
+            .send({ error: 'Bad Request', code: 'FOREIGN_STORE_ID', message: err.message });
+        }
+        throw err;
+      }
     });
 
     const cloudAddr = await cloudServer.listen({ host: '127.0.0.1', port: 0 });
@@ -387,5 +454,65 @@ describePg('@mezon/hub - Hub to Cloud Sync Integration Test (R6)', () => {
     expect(cloudEvent.entity).toBe('sales');
     expect(cloudEvent.entityId).toBe(saleId);
     expect(cloudEvent.position).toBe(1n);
+
+    // Verify pushWorker already pulled and skipped the sale as echo
+    expect(hubServer.pullService.getCursors(orgA)[storeA]).toBe(1n);
+
+    // 7. Verify Hub Pull Worker (T2.4):
+    // Push an org-scoped category into Cloud
+    const catId = parseUuidV7('018bcfe5-6800-7000-8000-000000000077');
+    const catEventId = parseUuidV7('018bcfe5-6800-7000-8000-000000000078');
+    await syncPushStore.processSyncPushBatch({
+      context: {
+        organizationId: orgA,
+        storeId: storeA,
+        deviceId: deviceA,
+        deviceName: 'Kassa 1',
+        status: 'active',
+      },
+      events: [
+        {
+          eventId: catEventId,
+          organizationId: orgA,
+          storeId: storeA,
+          deviceId: deviceA,
+          deviceSeq: '2',
+          hlc: '001700000000000:00002:018bcfe5-6800-7000-8000-000000000111',
+          type: 'categories.created',
+          entity: 'categories',
+          entityId: catId,
+          entityClass: 'ATTR',
+          schemaVersion: 1,
+          payload: {
+            id: catId,
+            organizationId: orgA,
+            name: 'Integration Cat',
+            nameSearch: 'integration cat',
+            parentId: null,
+            sortOrder: 1,
+            deviceId: deviceA,
+            hlc: '001700000000000:00002:018bcfe5-6800-7000-8000-000000000111',
+            createdAtMs: '1700000000000',
+            updatedAtMs: '1700000000000',
+            deletedAtMs: null,
+          },
+        },
+      ],
+      nowMs,
+    });
+
+    // Hub executes pullBatch
+    const pullOutcome = await hubServer.pullWorker.pullBatch();
+    expect(pullOutcome.status).toBe('ok');
+    expect(pullOutcome.pulled).toBe(1);
+    expect(pullOutcome.applied).toBe(1);
+    expect(pullOutcome.skippedEcho).toBe(0);
+    expect(hubServer.pullService.getCursors(orgA)[storeA]).toBe(2n);
+
+    // Verify category row in Hub SQLite
+    const hubCat = hubServer.connection.sqlite
+      .prepare('SELECT name FROM categories WHERE id = ?')
+      .get(catId) as { name: string } | undefined;
+    expect(hubCat?.name).toBe('Integration Cat');
   });
 });

@@ -72,6 +72,8 @@ import { CatalogImportCache } from './catalog-import-cache.js';
 import { AesGcmSafeStorageAdapter, type SafeStoragePort } from './safe-storage-port.js';
 import { HubCloudService } from './cloud-service.js';
 import { HubSyncPushWorker } from './sync-push-worker.js';
+import { HubSyncPullService } from './sync-pull-service.js';
+import { HubSyncPullWorker } from './sync-pull-worker.js';
 
 export interface CreateHubServerOptions {
   readonly dbPath: string;
@@ -135,6 +137,8 @@ export interface HubServer {
   readonly cloudService: HubCloudService;
   readonly outboxStore: SqliteOutboxSyncStore;
   readonly pushWorker: HubSyncPushWorker;
+  readonly pullService: HubSyncPullService;
+  readonly pullWorker: HubSyncPullWorker;
   readonly safeStorage: SafeStoragePort;
   listen(): Promise<{ readonly host: typeof DEFAULT_HUB_HOST; readonly port: number }>;
   close(): Promise<void>;
@@ -421,6 +425,16 @@ export async function createHubServer(options: CreateHubServerOptions): Promise<
     });
 
     const outboxStore = new SqliteOutboxSyncStore(connection);
+    const pullService = new HubSyncPullService(connection);
+    const pullWorker = new HubSyncPullWorker({
+      pullService,
+      cloudStore,
+      safeStorage,
+      getDeviceId,
+      clock,
+      idGen,
+      fetchFn: options.cloudFetchFn,
+    });
     const pushWorker = new HubSyncPushWorker({
       outboxStore,
       cloudStore,
@@ -429,6 +443,7 @@ export async function createHubServer(options: CreateHubServerOptions): Promise<
       clock,
       idGen,
       fetchFn: options.cloudFetchFn,
+      pullWorker,
     });
 
     app = Fastify({
@@ -496,6 +511,8 @@ export async function createHubServer(options: CreateHubServerOptions): Promise<
       cloudService,
       outboxStore,
       pushWorker,
+      pullService,
+      pullWorker,
       safeStorage,
       async listen() {
         await app.listen({
@@ -507,8 +524,9 @@ export async function createHubServer(options: CreateHubServerOptions): Promise<
           boundPort = addr.port;
           hostState.updatePort(addr.port);
         }
-        // R6: Automatically start outbox push worker when hub listens
+        // R6 / T2.4: Automatically start push and pull workers when hub listens
         pushWorker.start();
+        pullWorker.start();
         return {
           host: DEFAULT_HUB_HOST,
           port: boundPort ?? securityConfig.port,
@@ -517,6 +535,7 @@ export async function createHubServer(options: CreateHubServerOptions): Promise<
       async close() {
         try {
           pushWorker.stop();
+          pullWorker.stop();
           await app.close();
         } finally {
           connection.close();

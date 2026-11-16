@@ -19,9 +19,12 @@ export {
   type TableDefinitionOptions,
   type SqliteTableMetadata,
   type SqliteCommonColumns,
+  type SqliteForeignKeyRef,
   SchemaValidationError,
   SqliteSchemaRegistry,
   validateSqliteSchemaRegistry,
+  snakeToCamel,
+  buildSqliteForeignReferencesMap,
 } from './registry.js';
 
 export {
@@ -104,6 +107,8 @@ export {
   updateMonotone,
 } from './writers.js';
 
+export { getTableColumns } from 'drizzle-orm';
+
 export {
   localSchemaRegistry,
   localDeviceState,
@@ -162,6 +167,9 @@ export {
   localCloudState,
   organizationTaxProfiles,
   localSyncConflicts,
+  localSyncApplyState,
+  localSyncCursors,
+  localSyncParked,
 } from './schema/index.js';
 
 export {
