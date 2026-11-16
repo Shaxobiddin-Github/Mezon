@@ -50,8 +50,14 @@ function pseudoSig(message: string, secret: string): string {
   for (const ch of `${secret}|${message}`)
     h = (h * 131n + BigInt(ch.codePointAt(0) ?? 0)) % (1n << 255n);
   const hex = h.toString(16).padStart(128, '0').slice(-128);
-  const bytes = hex.match(/../g)?.map((b) => parseInt(b, 16)) ?? [];
-  return btoa(String.fromCharCode(...bytes));
+  // Map hex digits onto the base64 alphabet: 86 chars + '==' matches the 64-byte signature shape.
+  const alphabet = 'ABCDEFGHIJKLMNOP';
+  const body = hex
+    .slice(0, 86)
+    .split('')
+    .map((c) => alphabet['0123456789abcdef'.indexOf(c)] ?? 'A')
+    .join('');
+  return `${body}==`;
 }
 const testVerifier: RulesSignatureVerifier = {
   verifyEd25519: (pub, message, sig) => sig === pseudoSig(message, pub),
@@ -123,7 +129,7 @@ describe('@mezon/rules — canonical JSON', () => {
   });
 
   it('rejects floats, NaN, undefined, bigint and non-plain objects', () => {
-    for (const bad of [1.5, Number.NaN, Infinity, { a: undefined }, 1n, new Map()]) {
+    for (const bad of [1.5, 0 / 0, Infinity, { a: undefined }, 1n, new Map()]) {
       expect(() => canonicalJson(bad as unknown)).toThrow(DomainError);
     }
   });
@@ -288,7 +294,7 @@ describe('@mezon/rules — evaluate (T3.2a)', () => {
 
   it('EXPIRED_GOODS: store-local date boundary — yesterday blocks, today and tomorrow pass', () => {
     // Tashkent is UTC+5: 18:59:59.999Z = 23:59:59.999 local; 19:00:00Z = 00:00 next day.
-    const todayStartLocal = BigInt(Date.UTC(2025, 10, 12, 19, 0, 0)); // 2025-11-13 00:00 Tashkent
+    const todayStartLocal = 1_762_974_000_000n; // 2025-11-13 00:00 Tashkent
     const at = (ms: bigint) => ctx({ nowMs: ms, todayDateKey: toDateKey(ms) });
     const exp = (ms: bigint) =>
       line('l1', { batchExpiries: [{ expiryDateMs: ms, qtyMilli: 1000n }] });
