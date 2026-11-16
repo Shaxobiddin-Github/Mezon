@@ -1,16 +1,22 @@
 import { execFileSync } from 'node:child_process';
 
+let cachedDockerAvailable: boolean | null = null;
+
 export function isDockerAvailable(): boolean {
+  if (cachedDockerAvailable !== null) {
+    return cachedDockerAvailable;
+  }
   try {
     const osType = execFileSync('docker', ['info', '--format', '{{.OSType}}'], {
       encoding: 'utf8',
-      timeout: 3000,
+      timeout: 10000,
       stdio: ['ignore', 'pipe', 'ignore'],
     }).trim();
-    return osType === 'linux';
+    cachedDockerAvailable = osType === 'linux';
   } catch {
-    return false;
+    cachedDockerAvailable = false;
   }
+  return cachedDockerAvailable;
 }
 
 export function shouldRunPgTests(): boolean {
