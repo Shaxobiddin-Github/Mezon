@@ -1,269 +1,273 @@
-# Reja: T3.1 — MXIK va soliq sozlamalari
+# Hisobot: T3.1 — MXIK va soliq sozlamalari (lokal qism)
 
-Branch: `ishchi2/T3.1-mxik` (asos `main` = `12072ea`, ustida `[claude]` `64b743a`)
-Bajaruvchi: ishchi2
-Holat: **REJA**. Kod yozilmagan, tasdiq kutilyapti.
-
-O'qildi: `GEMINI.md` (to'liq, ayniqsa 3, 4, 5, 10 va 17-bo'limlar), `.mezon/ALOQA.md`, `.mezon/ISHCHI2.md`, `.mezon/claude/TOPSHIRIQ-ishchi2.md`. Ko'rib chiqilgan kod:
-- `db-local/src/schema/index.ts`, `registry.ts`, `cart-repo.ts`, `return-repo.ts`, `report-repo.ts`;
-- `contracts/src/catalog.ts`;
-- `domain/src/vat.ts`, `rounding.ts`, `cart.ts`, `catalog.ts`, `auth.ts`;
-- `hub/src/catalog-service.ts`, `excel-port.ts`, `catalog-import-routes.ts`, `printer-service.ts`;
-- `drivers/src/printer/escpos-encoder.ts`;
-- `apps/pos/src/components/*`, `packages/i18n`.
-
-Gemini'ning tasdiqlangan T2.3 topshirig'ini faqat o'qidim (`origin/gemini/T2.3-sync-push`).
+Branch / PR: `ishchi2/T3.1-mxik` / https://github.com/Shaxobiddin-Github/Mezon/pull/24
+Kod commit: `ba0f53a` (T3.1: MXIK va soliq sozlamalari). Asos: `main` = `12072ea`, `[claude]` `28dc80b`.
+Bajaruvchi: ishchi2.
+Holat: **lokal qism tayyor.** Bulut jufti (S1) T2.3 `main` ga tushgach alohida commit bilan qo'shiladi, nazoratchi ko'rsatmasi shunday.
 
 ---
 
-## 0. Boshlang'ich holat (sozlash va `pnpm verify`)
+## Nima qilindi
 
-Muhit: Node 24.22.1, pnpm 12.18.0, git 2.54. Docker Desktop ishga tushmayapti: o'rnatma buzilgan, registry'da `SOFTWARE\Docker Inc.\Docker Desktop` kaliti yo'q. Shu sababli PG (Testcontainers) testlarini lokal ishga tushira olmayman. Bu testlar faqat `apps/cloud` va `packages/db-cloud` da, ya'ni Gemini yo'lagida. Ular CI'da tekshiriladi.
+### 1. Tashkilot soliq profili
+- **Jadval:** `organization_tax_profiles`. Sinf ATTR, tenant doirasi organization.
+- **Ustunlar:**
+  - `tin`: CHECK 9 ta raqam;
+  - `legal_name`, `legal_address`: CHECK bo'sh emas;
+  - `is_vat_payer`;
+  - `default_vat_rate_bp`: CHECK 0..10000;
+  - `updated_by_user_id`: FK → `users` (T3).
+- **T1:** CHECK `id = organization_id`. Repo `insertAttr` ga `entityId: organizationId` beradi. Buning uchun `writers.ts` dagi `InsertEntityOptions` ga ixtiyoriy `entityId` qo'shildi.
+- **Yozuv:** `UnitOfWork` ichida, outbox'dagi ATTR hodisasi bilan birga:
+  - `organization_tax_profile.created`;
+  - `organization_tax_profile.updated`.
+  - Payload'da `updatedByUserId` bor (T3).
+- **Trigger:** `BEFORE DELETE` jismoniy o'chirishni taqiqlaydi (ATTR qoidasi).
+- **API** (`apps/hub/src/tax-settings-routes.ts`):
 
-`pnpm verify` natijasi 0.1-bandda.
+  | Endpoint | Ruxsat |
+  |---|---|
+  | `GET /settings/tax` | `tax:read` |
+  | `PUT /settings/tax` | `tax:write` |
 
-### 0.1. `pnpm verify` (boshlang'ich)
+  - Ruxsatlar faqat owner va manager'da, kassir 403 oladi.
+  - Profil hali yo'q bo'lsa, javob `{ profile: null }`.
 
-| Qadam | Natija |
+### 2. QQS to'lovchisi bo'lmagan tashkilot (S2, T2)
+- Domen'da `effectiveVatRate(rate, isVatPayer)` bor. Uning bp ko'rinishi `effectiveVatRateBp` db-local'da, chunki domen'da `Number` lint bilan taqiqlangan.
+- U faqat **yangi** qator snapshot'larida qo'llanadi:
+  - savatdagi katalog qatori;
+  - tez savdo qatori (`quick_sale_default_vat_rate_bp` ham shu funksiyadan o'tadi);
+  - buyurtma qatori (katalog va tez savdo).
+- Buyurtmadan sotuvga o'tishda stavka buyurtma qatorining snapshot'idan olinadi, qayta hisoblanmaydi.
+- Mahsulotning o'z `vat_rate_bp` qiymati o'zgarmaydi.
+- Chekdagi matn T3.4 ga qoldi, printer joylashuvi o'zgartirilmadi.
+
+### 3. Mahsulot formasi (POS)
+- Fayl: `apps/pos/src/components/CatalogScreen.tsx`. Yuqori paneldagi "Mahsulotlar" tugmasi faqat owner va manager'ga ko'rinadi.
+- Mahsulotlar ro'yxati qidiruv bilan.
+- Yaratish va tahrirlash formasi: nom, birlik, narx, MXIK, qadoq kodi, QQS %.
+  - Validatsiya contracts'dagi `MxikSchema`, `PackageCodeSchema` va `VatRateBpSchema` bilan, takror kod yo'q.
+  - QQS foizi float'siz parse qilinadi: `@mezon/ui` dagi `parseSomInputToTiyinString` ishlatiladi, chunki 2 kasrli foizning masshtabi tiyin bilan bir xil.
+- "Soliq sozlamalari" tabi: STIR, yuridik nom, manzil, QQS to'lovchisi belgisi, standart stavka.
+- Yangi mahsulotda QQS maydoni tashkilotning standart stavkasi bilan to'ldiriladi.
+
+### 4. Excel (S4)
+- **Ustunlar:** import va eksport `CATALOG_SHEET_COLUMNS` ni birgalikda ishlatadi: Nomi, SKU, Shtrix-kod, Birlik, Narx, Min. zaxira, MXIK, Qadoq kodi, QQS (%).
+- **Eksportdagi topilmalar tuzatildi:**
+  - shtrix-kod ustuni yo'q edi;
+  - narx `/ 100n` bilan **butun so'mgacha kesilardi** (tiyin yo'qolardi). Endi aniq o'nlik satr yoziladi.
+- **Float'siz parse:** narx, `minStock` va QQS domen'dagi `parseMoneyDecimal` va `parseQuantityDecimal` orqali o'qiladi. Ulardan oldin faqat normalizatsiya bor: bo'shliqlar, NBSP va o'nlik vergul. `parseFloat` olib tashlandi.
+- **Qator darajasidagi xatolar:** `errorCode` bor (`excelImport.error.*`, i18n). Preview javobida yangi ixtiyoriy `code` maydoni bor. Noto'g'ri qator importni yiqitmaydi.
+- **Bo'sh QQS katagi:** tashkilotning standart stavkasi olinadi, profil bo'lmasa 0.
+- **Preview va commit:** `mxik`, `packageCode` va `vatRateBp` olib o'tiladi.
+
+### 5. MXIK'siz mahsulotlar
+- `GET /products?missingMxik=true`: `q` va `categoryId` bilan ishlaydi.
+- `GET /products/missing-mxik/count`.
+- Partial indeks `idx_products_org_missing_mxik`.
+- POS'da sariq ogohlantirish va filtr bor. Savdo bloklanmaydi.
+
+### 6. i18n
+Yangi kalitlar: `catalog.*`, `taxSettings.*`, `excelImport.error.*` (`packages/i18n/src/locales/uz-Latn.ts`).
+
+---
+
+## O'zgargan fayllar (fayl — sabab)
+
+**Domen va contracts**
+
+| Fayl | Sabab |
 |---|---|
-| `format:check` | ✅ `All matched files use Prettier code style!` |
-| `build` | ✅ `Tasks: 17 successful, 17 total` |
-| `lint` | ✅ |
-| `typecheck` | ✅ `Tasks: 26 successful, 26 total` |
-| `db:check` | ✅ `Tasks: 19 successful, 19 total` |
-| `test:unit` (unit + sqlite-hub) | ✅ `Test Files 72 passed \| 5 skipped (77)`, `Tests 330 passed \| 41 skipped (371)` |
-| `test:perf` | ✅ `Test Files 9 passed (9)`, `Tests 12 passed (12)` |
-| `test:e2e:pos` | Birinchi ishga tushirishda ❌: Playwright brauzeri o'rnatilmagan edi (`Executable doesn't exist ... chrome-headless-shell.exe`). Bu muhit muammosi. `playwright install chromium-headless-shell` dan keyin ✅ `1 passed`: scan → savat 20.6 ms, 50k FTS 47.2 ms |
-| `depcruise` | ✅ `no dependency violations found (406 modules, 1723 dependencies cruised)` |
+| `packages/domain/src/vat.ts`, `index.ts` | `effectiveVatRate` |
+| `packages/domain/src/auth.ts` | `tax:read`, `tax:write` (owner, manager) |
+| `packages/contracts/src/tax-settings.ts` (yangi), `index.ts` | `TinSchema`, profil DTO, `MissingMxikCount` |
+| `packages/contracts/src/catalog.ts` | `ListProductsQuerySchema.missingMxik` |
+| `packages/contracts/src/reports.ts` | Preview qatoriga `mxik`, `packageCode`, `vatRateBp`; xatoga `code` |
 
-**Skip bo'lgan 5 fayl** Docker'siz PG testlari (`shouldRunPgTests()`): `apps/cloud/src/cli/create-org.test.ts`, `apps/cloud/src/server.test.ts`, `packages/db-cloud/src/pg-{device,rls,tenant}.test.ts`.
+**DB (db-local)**
 
-**Xulosa:** kod o'zgarishisiz boshlang'ich holat yashil. Faqat PG testlari lokal tekshirilmadi.
-
----
-
-## 1. Tashkilot soliq sozlamalari
-
-### Joyi: yangi jadval `organization_tax_profiles`
-
-- **Sinf:** `ATTR`. Tahrirlanadi va HLC bo'yicha LWW.
-- **Tenant doirasi:** `organization`. STIR, yuridik nom va QQS holati tashkilotga tegishli, do'konga emas. Ularni biznes kabineti (T2.7) va keyin fiskal chek (T3.4) o'qiydi.
-- **Bitta tashkilot uchun bitta qator:** `uidx_org_tax_profiles_org` UNIQUE `(organization_id) WHERE deleted_at_ms IS NULL`.
-- **Nega `local_hub_config` emas:** u `LOCAL`, ya'ni sinxronlanmaydi va bitta hub'ga tegishli. Ikki do'konli tashkilotda ikki xil STIR paydo bo'lib qoladi. Bulutga ham chiqmaydi.
-
-### Ustunlar
-
-Umumiy ustunlar registrdan keladi.
-
-| Ustun | Tip | Cheklov |
-|---|---|---|
-| `tin` | text | `NOT NULL`, CHECK `length = 9` va faqat raqam (`GLOB '[0-9]*'` + uzunlik) |
-| `legal_name` | text | `NOT NULL`, `trim` qilingandan keyin ≥ 1 belgi |
-| `legal_address` | text | `NOT NULL`, `trim` qilingandan keyin ≥ 1 belgi |
-| `is_vat_payer` | bool | `NOT NULL`, `IN (0,1)` |
-| `default_vat_rate_bp` | int | `NOT NULL`, `0..10000` |
-
-### Contracts
-
-`packages/contracts/src/tax-settings.ts` (yangi fayl) va `index.ts` dan eksport:
-- `TinSchema`: 9 raqam, faqat format tekshiriladi. Nazorat raqami algoritmi qo'shilmaydi, chunki uni o'ylab topmayman.
-- `OrganizationTaxProfileSchema`, `UpdateTaxProfileRequestSchema`, `TaxProfileResponseSchema`.
-- Mavjud `VatRateBpSchema` qayta ishlatiladi.
-
-### API (hub)
-
-Yangi fayl: `apps/hub/src/tax-settings-routes.ts`.
-
-| Endpoint | Ruxsat | Kim |
-|---|---|---|
-| `GET /settings/tax` | yangi `tax:read` | owner, manager |
-| `PUT /settings/tax` | yangi `tax:write` | owner, manager |
-
-- Kassir ikkala endpoint'da 403 oladi.
-- Profil hali yo'q bo'lsa, `GET` 404 emas, `{ profile: null }` qaytaradi.
-- Yozuv `UnitOfWork` ichida bajariladi va o'sha tranzaksiyada outbox'ga ATTR hodisasi yoziladi (3.1-bo'lim, 11-band).
-- Ruxsatlar `packages/domain/src/auth.ts` dagi `ROLE_PERMISSION_TABLE` ga qo'shiladi.
-
-### Sinxronga ta'siri (savol S1)
-
-Yangi sinxron jadval qo'shilsa, Gemini'ning T2.3 kodi uni registrdan avtomatik oladi: payload Zod sxemasi va "36 sinxron jadval" ro'yxati. Lekin bulutda mos jadval kerak bo'ladi (`packages/db-cloud`). Bu Gemini yo'lagi, unga ruxsatsiz tegmayman. 3-bo'limdagi S1 savoliga qarang.
-
----
-
-## 2. QQS to'lovchisi bo'lmagan tashkilot (savol S2)
-
-`GEMINI.md` da QQS to'lovchisi bo'lmagan tashkilot uchun **aniq qoida yo'q**. Mavjud QQS modeli:
-- 3.1-bo'lim, 8-band: chek qatorida QQS o'sha paytdagi qiymatda (snapshot) saqlanadi.
-- T0.2: QQS hisobi.
-- Kod: `domain/src/cart.ts` QQS'ni har qator bo'yicha, chegirma taqsimlangandan keyin `calculateVatIncluded` bilan ajratadi. Ya'ni QQS narx ichida va har qatorda yaxlitlanadi.
-
-Shuning uchun quyidagini **taklif** qilaman va tasdiqni kutaman:
-
-- `is_vat_payer = 0` bo'lsa, savatga qator qo'shilganda **samarali stavka 0** bo'ladi: `vat_rate_bp_snapshot = 0`. Mahsulotning o'z `vat_rate_bp` qiymati o'zgarmaydi, shuning uchun tashkilot keyin QQS to'lovchisiga aylansa, katalogni qayta tahrirlash kerak bo'lmaydi.
-  - Snapshot olinadigan joylar: `cart-repo.ts` (katalog va tez savdo qatori) va buyurtma qatori (`order-repo`).
-  - Bitta yordamchi funksiya bo'ladi: domen'da `effectiveVatRate(productRateBp, isVatPayer)`.
-- Hisobotlar o'zgarmaydi. Ular snapshot'dan (`v_sales_lines`) o'qiydi, shuning uchun QQS 0 bo'lib chiqadi.
-- **Chekdagi matn:** stavka 0 bo'lganda "QQS (0%)" chiqadimi, "QQSsiz" chiqadimi yoki satr umuman chiqmaydimi, bu **qonuniy chek maydoni masalasi**. U `[TASDIQLANSIN]` (10-bo'lim, "Chek maydonlari ro'yxati") va T3.4 ga tegishli. T3.1 da printer joylashuvini **o'zgartirmayman**, mavjud xatti-harakat qoladi.
-
----
-
-## 3. Mahsulot formasi (MXIK, qadoq kodi, QQS)
-
-POS'da hozir katalogni boshqarish ekrani yo'q, faqat tez savdo modali bor. `apps/admin` esa bulut kabineti (T2.7) uchun. Shuning uchun:
-
-- **`apps/pos`:** yangi `CatalogScreen.tsx`. Unda mahsulot ro'yxati (qidiruv bilan), yaratish va tahrirlash modali bo'ladi. Faqat `catalog:write` ruxsati bor foydalanuvchilarga ko'rinadi: owner va manager.
-- **Maydonlar:** mavjud `CreateProductRequestSchema` va `UpdateProductRequestSchema` dagilar. Formada QQS foizda kiritiladi (masalan `12`), ichkarida basis point'ga aylanadi (`1200`). Aylantirish float'siz, satrni tahlil qilish orqali bo'ladi.
-- **Validatsiya:** klientda `MxikSchema`, `PackageCodeSchema` va `VatRateBpSchema` contracts'dan **import qilinadi**, takror yozilmaydi. Hub ham aynan shu sxemalar bilan tekshiradi.
-- **Standart QQS:** yangi mahsulotda QQS maydoni tashkilot profilidagi `default_vat_rate_bp` bilan to'ldiriladi. Profil bo'lmasa, 0 bilan.
-- **MXIK formati (savol S3):** hozir `normalizeFiscalCode` 1–N xavfsiz ASCII belgini qabul qiladi. Rasmiy MXIK formatini (uzunlik va raqamlar) o'ylab topmayman, mavjud validatsiya qoladi.
-
----
-
-## 4. Excel import va eksport
-
-`apps/hub/src/excel-port.ts` va `catalog-import-routes.ts`:
-
-- **Import:** 7, 8 va 9-ustunlar qo'shiladi: `MXIK`, `Qadoq kodi`, `QQS (%)`. Ustunlar oxiriga qo'shiladi, shuning uchun mavjud fayllar ishlashda davom etadi.
-- **Qator darajasidagi xato:** MXIK, qadoq kodi yoki QQS noto'g'ri bo'lsa, faqat shu qator `invalidRows` ga tushadi. Xatoda kod va i18n kaliti bo'ladi. Qolgan qatorlar import qilinadi. Bo'sh QQS bo'lsa, tashkilotning standart stavkasi olinadi.
-- **Commit:** `ExcelImportCommitRequestSchema` va keshdagi preview qatorlari yangi maydonlarni olib o'tadi. Mahsulot `mxik`, `package_code` va `vat_rate_bp` bilan yaratiladi.
-- **Eksport:** `generateCatalogWorkbook` ga `Shtrix-kod`, `MXIK`, `Qadoq kodi` va `QQS (%)` qo'shiladi. Eksport ustunlari import ustunlari bilan **bir xil tartibda** bo'ladi, shunda eksport qilingan faylni qayta import qilish mumkin. Hozir eksportda shtrix-kod ustuni yo'q, import esa 3-ustunni shtrix-kod deb o'qiydi. Bu nomuvofiqlik shu ishda tuzatiladi.
-- **Topilma (savol S4):** importda narx `parseFloat` bilan o'qiladi (`excel-port.ts`, "Price parsing" qismi). Bu 3.1-bo'lim, 1-bandga zid. Yangi QQS ustunini float'siz parse qilaman. Shu fayl ichida narx va `minStock` ni ham satr asosidagi o'nlik parser'ga o'tkazishni taklif qilaman, test bilan. Tasdiqlansa, T3.1 ichida qilaman.
-
----
-
-## 5. MXIK'siz mahsulotlar ro'yxati
-
-- **API:** `ListProductsQuerySchema` ga ixtiyoriy `missingMxik: boolean` filtri qo'shiladi. Yangi endpoint ochilmaydi, mavjud `GET /catalog/products` kengaytiriladi. Sanoq uchun `GET /catalog/products/missing-mxik/count` qo'shiladi.
-- **Indeks:** `idx_products_org_missing_mxik` `(organization_id, name_search, id) WHERE mxik IS NULL AND deleted_at_ms IS NULL`. 50 000 mahsulotda perf testi qo'shiladi.
-- **UI:** `CatalogScreen` da "MXIK'siz (N)" filtri va sariq ogohlantirish bo'ladi: "Fiskal chek uchun MXIK kerak bo'ladi". Savdo **bloklanmaydi**. Fiskal rejimdagi xatti-harakat T3.2 da hal qilinadi.
-
----
-
-## 6. Snapshot mezoni: tekshiriladigan yo'llar
-
-Har bir yo'l uchun ssenariy bir xil: chek (yoki buyurtma) yaratiladi, keyin mahsulotning `name`, `mxik`, `package_code` va `vat_rate_bp` qiymatlari **va** tashkilotning `is_vat_payer` holati o'zgartiriladi.
-
-| # | Yo'l | Kutilgan natija |
-|---|---|---|
-| 1 | Savdo detali (`GET /sales/:id`) | Qatorlarda eski nom, MXIK, qadoq kodi, QQS stavkasi va summasi |
-| 2 | Chekni qayta chop etish (`printer-service`, `FakePrinter` baytlari) | Eski nom va QQS, baytlar asl chek baytlariga teng (reprint belgisidan tashqari) |
-| 3 | Qaytarish (to'liq va qisman) | `return_lines` snapshot'i sotuv qatoridan olinadi, mahsulotdan emas |
-| 4 | Kunlik va oylik hisobotlar, Excel hisobot eksporti | QQS va tushum o'zgarmaydi |
-| 5 | Buyurtma qatori va buyurtmadan sotuvga o'tish | Buyurtma snapshot'i saqlanadi |
-| 6 | Savatdagi qator (tahrirdan oldin qo'shilgan) | Mavjud xatti-harakat avval test bilan **qayd etiladi**, keyin tasdiq olinadi |
-
-6-band: savatdagi qator hozir snapshot'ni qo'shilgan paytdagi qiymatda ushlab turadi. Shuni test bilan mahkamlayman.
-
-**Test fayllari:**
-- `apps/hub/src/tax-snapshot.test.ts`: API orqali 1, 2, 3, 4 va 5-yo'llar;
-- `packages/db-local/src/sale.test.ts`: repo darajasi.
-
----
-
-## 7. QQS yaxlitlash testlari
-
-### Domen (`packages/domain/src/vat.test.ts`, yangi)
-
-**Chegara jadvali**, `calculateVatIncluded`:
-
-| Kirish | Kutilgan |
+| Fayl | Sabab |
 |---|---|
-| gross 0 | vat 0 |
-| gross 1 tiyin, 12% | vat 0 |
-| gross 112, 12% | vat 12 |
-| aniq yarim qiymat (masalan gross 56, 12%) | yaxlitlash yo'nalishi qo'lda hisoblab tekshiriladi |
-| stavka 0 | vat 0 |
-| stavka 10000 | maksimal stavka |
-| juda katta summa (> 2^53) | aniq natija |
-| manfiy summa (qaytarish) | ishora simmetriyasi |
+| `schema/index.ts` | Jadval va partial indeks |
+| `drizzle/0015_org_tax_mxik.sql`, `meta/0015_snapshot.json`, `meta/_journal.json` | Migratsiya |
+| `tax-settings-repo.ts` (yangi) | Store, `readEffectiveVatSettingsSync`, `effectiveVatRateBp` |
+| `writers.ts` | Ixtiyoriy `entityId` |
+| `cart-repo.ts`, `order-repo.ts` | Effektiv stavka yangi qatorlarda |
+| `catalog-repo.ts` | `missingMxik` filtri, sanoq, eksport uchun shtrix-kodlar |
+| `index.ts` | Eksportlar |
 
-**Property testlar** (fast-check):
-- `net + vat === gross`;
-- `0 ≤ |vat| ≤ |gross|`;
-- `f(-x) = -f(x)`;
-- gross o'sganda vat kamaymaydi;
-- `rate = 0` bo'lsa `vat = 0`.
+**Hub**
 
-### Savat va chek (`cart.test.ts` kengaytiriladi)
+| Fayl | Sabab |
+|---|---|
+| `tax-settings-routes.ts` (yangi), `routes.ts`, `server.ts` | API va ulash |
+| `catalog-routes.ts`, `catalog-service.ts` | Sanoq endpoint'i |
+| `excel-port.ts`, `catalog-import-routes.ts` | Fiskal ustunlar, float'siz parse, aylanma |
 
-- Ko'p qatorli chek: 0% va 12% aralash.
-- Chegirmalar: foiz chegirma, summa chegirmasi va aksiya.
-- Property: `Σ qator vat = totalVat` va `Σ (net + vat) = totalFinal`.
-- QQS to'lovchisi bo'lmagan tashkilot: `totalVat = 0`.
-- Qo'lda hisoblangan misol: QQS har qatorda yaxlitlangani uchun chek darajasida hisoblangan QQS'dan farq qilishi mumkin. Bu farq misolda hujjatlashtiriladi.
+**POS va i18n**
 
-### Qaytarish
+| Fayl | Sabab |
+|---|---|
+| `components/CatalogScreen.tsx` (yangi) | UI |
+| `App.tsx`, `App.css`, `store/pos-store.ts` | `catalog` modali va tugma |
+| `api/hub-client.ts` | Yangi metodlar |
+| `packages/i18n/src/locales/uz-Latn.ts` | Matnlar |
 
-Qisman qaytarishda qaytarilgan QQS yig'indisi asl qator QQS'idan oshmaydi.
+**Testlar**
+- Yangi: `packages/domain/src/vat.test.ts`, `packages/contracts/src/tax-settings.test.ts`, `packages/db-local/src/tax-settings.test.ts`, `apps/hub/src/tax-snapshot.test.ts`, `apps/hub/src/excel-port.test.ts`.
+- Yangilangan: `catalog.perf.test.ts` (MXIK'siz o'lchovi), `index.test.ts` (registry ro'yxati va migratsiyalar soni 15 → 16), `reports.test.ts` (fixture'ga yangi majburiy maydonlar).
 
----
+Yangi kutubxona qo'shilmadi. Tegilmagan fayllar: `apps/cloud/**`, `packages/db-cloud/**`, `apps/hub/src/sync*`, `packages/contracts/src/sync.ts`, `.mezon/claude/*`, `.mezon/gemini/*`.
 
-## 8. Migratsiya va sxema registri
+## Migratsiyalar
 
-Lokal ish nomi `0015_org_tax_mxik.sql`. Gemini T2.3 da `0015_sync_conflicts` qo'shyapti. Shuning uchun PR ochishdan oldin `origin/main` ga rebase qilaman va migratsiyani `main` dagi oxirgi raqamdan keyingi bo'sh raqamga ko'chiraman (ehtimol `0016`). Keyin drizzle jurnalini qayta yarataman. `main` ga tushgan migratsiyani tahrirlamayman.
+`0015_org_tax_mxik.sql`:
+- `CREATE TABLE organization_tax_profiles`. Unda CHECK'lar bor, shu jumladan `id = organization_id` va STIR.
+- UNIQUE `(organization_id) WHERE deleted_at_ms IS NULL`.
+- Partial indeks `idx_products_org_missing_mxik`.
+- `trg_organization_tax_profiles_no_delete`.
 
-| O'zgarish | Sinf | Tenant |
-|---|---|---|
-| Yangi jadval `organization_tax_profiles` | ATTR | organization |
-| `products` ga yangi partial indeks `idx_products_org_missing_mxik` (ustun qo'shilmaydi) | — | — |
+`db:check`: "SQLite schema matches committed migrations (0 diff statements)".
 
-- `products` ustunlari o'zgarmaydi: `mxik`, `package_code` va `vat_rate_bp` allaqachon bor.
-- Sxema registri testlaridagi jadval va migratsiya sonlari, shuningdek `['…', 'ATTR']` ro'yxati yangilanadi.
-- Ruxsatlar (`tax:read`, `tax:write`) faqat domen jadvalida, ular migratsiya emas.
-
----
-
-## 9. Test rejasi va mutatsiyalar
-
-| Mezon yoki qoida | Test | Mutatsiya (kod ataylab buziladi, test yiqilishi kerak) |
-|---|---|---|
-| Snapshot | `tax-snapshot.test.ts` (6-bo'limdagi 1–5-yo'llar) | Reprint qatorida `itemName` mahsulotdan o'qiladi; qaytarishda QQS mahsulotdan olinadi |
-| QQS yaxlitlash | `vat.test.ts`, `cart.test.ts` | `divideRoundHalfAwayFromZero` → oddiy bo'lish; qator emas, chek darajasida yaxlitlash |
-| QQS to'lovchisi emas | `cart.test.ts`, hub testi | `effectiveVatRate` bayroqni e'tiborsiz qoldiradi |
-| RBAC | `tax-settings.test.ts`: kassir 403 (GET va PUT), manager/owner 200 | Kassirga `tax:write` beriladi |
-| STIR | contracts va DB CHECK testlari: 8 raqam, 10 raqam, harf, bo'shliq rad etiladi | Regex `\d{8,9}` ga o'zgartiriladi; CHECK olib tashlanadi |
-| Excel qator xatosi | `excel-port` testi: 1 noto'g'ri MXIK + 3 yaxshi qator → 3 import, 1 xato | Noto'g'ri qatorda `throw` qilinadi |
-| Excel aylanma | eksport → import → bir xil maydonlar | Eksport ustun tartibi buziladi |
-| MXIK'siz ro'yxat | hub testi va perf testi | `mxik IS NULL` sharti olib tashlanadi |
-| Bitta tashkilot — bitta profil | DB testi | UNIQUE indeks olib tashlanadi |
-| Outbox | Profil yozilganda outbox'da ATTR hodisasi; rollback'da outbox bo'sh | Outbox yozuvi olib tashlanadi |
-| Ikki tenant | B tashkilotning profili A'da ko'rinmaydi | `organization_id` filtri olib tashlanadi |
-
-Mutatsiyalar qo'lda qilinadi, natijasi (qaysi test yiqilgani) hisobotga yoziladi va kod qaytariladi.
+`origin/main` hali `12072ea` da (oxirgi migratsiya `0014`), shuning uchun `0015` bo'sh. Gemini'ning `0015_sync_conflicts` migratsiyasi oldin tushsa, merge'dan oldin rebase qilaman, migratsiyani `0016` ga ko'chiraman va jurnalni qayta yarataman.
 
 ---
 
-## 10. i18n
+## Qabul mezonlari
 
-- Yangi UI matnlari `packages/i18n/src/locales/uz-Latn.ts` ga `catalog.*` va `taxSettings.*` kalitlari bilan qo'shiladi.
-- Hub yangi xatolarni kod bilan qaytaradi: `INVALID_TIN`, `INVALID_MXIK_ROW` va hokazo. UI ularni i18n orqali tarjima qiladi.
-- Mavjud hub xabarlarini (ular hozir qattiq yozilgan) qayta yozmayman, bu vazifadan tashqari.
+- [x] **Chek snapshot'i keyingi tahrirdan ta'sirlanmaydi.** Test: `apps/hub/src/tax-snapshot.test.ts` → "sale detail, reprint, return, reports, order→sale and open cart keep old name/MXIK/VAT after product and profile edits". Chekdan keyin mahsulotning nomi, MXIK va QQS stavkasi **va** tashkilotning QQS to'lovchisi holati o'zgartiriladi. Keyin quyidagilar tekshiriladi:
+  1. savdo detali (`saleStore.getSaleById`): eski nom, MXIK va 1200 bp, `totalVat` 120000;
+  2. chekni qayta chop etish: `NUSXA` qatoridan tashqari matn asl chek bilan aynan bir xil, "YANGI" so'zi yo'q;
+  3. kunlik hisobot: `totalVat` 120000;
+  4. qaytarish: qatorda eski nom, MXIK, 1200 bp, `vatTotal` 120000;
+  5. tahrirdan oldin yaratilgan buyurtma → `confirm` → `ready` → `deliver`: sotuv qatorida eski nom va 1200 bp;
+  6. ochiq savatdagi mavjud qator o'zgarmaydi (T2).
+- [x] **QQS yaxlitlash testlari.** Test: `packages/domain/src/vat.test.ts`, 25 ta test.
+  - Chegara jadvali: 0; 1, 4 va 5 tiyin; 112; aniq yarim qiymatlar (14 → 2, 42 → 5); 0%; 100%; 2^53 dan katta summa; manfiy summalar.
+  - Property testlar: `net + vat = gross`, `|vat| ≤ |gross|`, ishora simmetriyasi, monotonlik, `0% ⇒ 0`, xato ≤ 0.5 tiyin.
+  - Ko'p qatorli chek, 12% + 0% va summa chegirmasi. Qo'lda hisoblangan: QQS 9643, net 80357.
+  - Qator bo'yicha yaxlitlash hujjatlashtirildi: 3 × 14 tiyin → Σ 6, chek darajasida hisoblansa 5 bo'lardi.
+  - QQS to'lovchisi bo'lmagan chek: `totalVat` 0.
+  - Property: tasodifiy 0%/12% cheklar foiz chegirmasi bilan, Σ qator QQS = `totalVat`.
+- [x] **T1 (deterministik id).**
+  - "T1: two independent hubs of the same organization create the profile with the same entity id": ikki alohida SQLite bazasi, bir xil tashkilot, natijada `id` ikkalasida bir xil va `organization_id` ga teng.
+  - "T1 + T3 …": `id = organization_id`, fizik jihatdan bitta qator.
+  - db-local: CHECK `id ≠ organization_id` qatorni rad etadi.
+- [x] **T2 (faqat yangi qatorlar).** Snapshot testining davomi:
+  - savatdagi mavjud qator 1200 da qoladi;
+  - yangi katalog qatori (p2) 0 oladi;
+  - yangi tez savdo qatori (1200 so'ralgan) 0 oladi;
+  - yangi savatdagi p1: yangi nom, 0;
+  - mahsulotning o'z stavkasi 1500 da qoladi;
+  - tashkilot qayta QQS to'lovchisiga aylansa, yangi qator 1500 oladi.
+- [x] **T3 (kim o'zgartirgani).** "T1 + T3 …":
+  - `updatedByUserId` avval manager, keyin owner;
+  - outbox'da `created` va `updated` hodisalari, class ATTR, `entity_id = org`;
+  - payload ichida tegishli foydalanuvchi id'si bor.
+- [x] **RBAC.** "RBAC: cashier 403 on read and write; manager/owner can read and write". Autentifikatsiyasiz so'rov 401 oladi.
+- [x] **STIR validatsiyasi.**
+  - contracts: 8 va 10 raqam, harf, bo'shliq, bo'sh satr, arabcha raqamlar rad etiladi;
+  - API: 400 qaytadi va hech narsa yozilmaydi (outbox 0);
+  - DB CHECK.
+- [x] **Rollback.** db-local: "a failed write rolls back the profile AND its outbox event; the next write succeeds". FK xatosi yoki `INVALID_TIN` bo'lsa, profil ham, outbox ham bo'sh qoladi. Keyingi yozuv normal ishlaydi.
+- [x] **Excel qator xatolari (S4).** "invalid MXIK/VAT/price are row-level errors…":
 
----
+  | Kiritilgan qiymat | Natija |
+  |---|---|
+  | `"1 500,50"` | 150050 tiyin |
+  | raqamli katak `1500.5` | 150050 tiyin |
+  | `"0.005"` | `invalidPrice` |
+  | `0.1 + 0.2` (float artefakti) | `invalidPrice` |
+  | `"-5"` | `invalidPrice` |
+  | `"99999999999999999999"` | `invalidPrice` (int64 dan katta) |
+  | `"abc"` | `invalidPrice` |
+  | MXIK `"MXIK BOR!"` | `invalidMxik` |
+  | QQS `"150"` | `invalidVat` |
 
-## O'zgaradigan fayllar (reja)
+  9 qatordan 2 tasi import qilindi. Bo'sh QQS katagi tashkilot standarti 1200 ni oldi. Parser'ning unit testlari `apps/hub/src/excel-port.test.ts` da.
+- [x] **Excel aylanma.** "round trip: export → import preview yields identical …": nom, SKU, shtrix-kod, birlik, narx (tiyinigacha), `minStock`, MXIK, qadoq kodi va QQS bir xil chiqadi. Xatolar ro'yxati bo'sh.
+- [x] **MXIK'siz ro'yxat.** "lists/counts only active products without MXIK …": sanoq 3; o'chirilgan mahsulot kirmaydi; `q=non` filtri ishlaydi; kassir o'qiy oladi; MXIK to'ldirilgach sanoq 2. Perf: 50 000 MXIK'siz mahsulotda (eng og'ir holat) sanoq, sahifa va filtr birgalikda p95 **117 ms**.
 
-- `packages/contracts/src/tax-settings.ts` (yangi), `catalog.ts`, `index.ts`
-- `packages/domain/src/vat.ts` (`effectiveVatRate`), `auth.ts` (ruxsatlar), `vat.test.ts` (yangi)
-- `packages/db-local/src/schema/index.ts`, `tax-settings-repo.ts` (yangi), `cart-repo.ts`, `order-repo.ts`, `catalog-repo.ts`, `drizzle/00xx_*.sql`, `drizzle/meta/*`, `index.test.ts`
-- `apps/hub/src/tax-settings-routes.ts` (yangi), `catalog-routes.ts`, `catalog-service.ts`, `excel-port.ts`, `catalog-import-routes.ts`, `routes.ts` va testlar
-- `apps/pos/src/components/CatalogScreen.tsx` (yangi), `api/hub-client.ts`, `App.tsx`
-- `packages/i18n/src/locales/uz-Latn.ts`
+## Mutatsiya dalillari
 
-**Tegmayman:** `apps/cloud/**`, `packages/db-cloud/**`, `apps/hub/src/sync*`, `packages/contracts/src/sync.ts`, `.mezon/claude/*`, `.mezon/gemini/*`.
+Har mutatsiya bitta matnli o'zgarish. Skript tegishli testlarni ishga tushiradi va faylni qaytaradi. db-local yoki domen o'zgarsa, paket qayta build qilinadi, chunki hub ularni `dist` dan import qiladi. Natija: **16 tadan 16 tasi aniqlandi.**
 
-Yangi kutubxona qo'shilmaydi.
+| # | Mutatsiya | Natija | Yiqilgan test |
+|---|---|---|---|
+| M1 | Mahsulot tahriri mavjud `sale_lines` snapshot'ini qayta yozadi | aniqlandi | snapshot testi (tax-snapshot) |
+| M2 | Qaytarish QQS'ni sotuv qatoridan emas, mahsulotdan oladi | aniqlandi | snapshot testi (qaytarish) |
+| M3 | Yaxlitlash: `>=` → `>` (yarimda pastga) | aniqlandi | `vat.test` boundary: 14→2, 42→5, 100% 5→3, manfiy |
+| M4 | Savat qator stavkasini e'tiborsiz qoldiradi | aniqlandi | `vat.test`: 12%+0% misol, 3×14, property |
+| M5 | `effectiveVatRate` bayroqni e'tiborsiz qoldiradi | aniqlandi | `vat.test` (2), db-local `effectiveVatRateBp`, snapshot testi |
+| M6 | Kassirga `tax:read` va `tax:write` beriladi | aniqlandi | RBAC testi |
+| M7 | `TinSchema` 8–9 raqamni qabul qiladi | aniqlandi | contracts `TinSchema` |
+| M8 | Migratsiyadagi STIR CHECK olib tashlanadi | aniqlandi | db-local DB CHECK testi |
+| M9 | `entityId: organizationId` olib tashlanadi (tasodifiy id) | aniqlandi | 9 ta test, shu jumladan ikki hub va T1+T3 |
+| M10 | Yangilashda `updated_by_user_id` eski qiymatda qoladi | aniqlandi | T1 + T3 testi |
+| M11 | Excel'da noto'g'ri qator butun importni yiqitadi | aniqlandi | Excel qator xatolari testi |
+| M12 | Eksportda MXIK va qadoq kodi ustunlari o'rni almashadi | aniqlandi | Excel aylanma testi |
+| M13 | Narx `parseFloat × 100` bilan o'qiladi | aniqlandi | `excel-port.test` (money), Excel import testi |
+| M14 | MXIK'siz ro'yxatda `mxik IS NULL` sharti olib tashlanadi | aniqlandi | MXIK'siz testi |
+| M15 | Tez savdo qatori effektiv stavkani chetlab o'tadi | aniqlandi | snapshot/T2 testi (tez savdo 0) |
+| M16 | Profil o'zgarishi savatdagi mavjud qatorlarni qayta yozadi | aniqlandi | snapshot/T2 testi (mavjud qator 1200) |
 
----
+Shaffoflik uchun: birinchi ishga tushirishda M1 va M2 **omon qolgan** edi. Sababi testda emas, skriptda edi: ular db-local fayllarini o'zgartiradi, lekin skript db-local'ni qayta build qilmagan. Hub testlari esa `dist` dan o'qiydi, ya'ni buzilgan kod umuman ishga tushmagan. Skriptga `rebuild` qo'shildi va qayta ishga tushirilgach ikkalasi ham aniqlandi.
+
+## Test natijasi (buyruq va haqiqiy chiqish)
+
+`pnpm verify` (lokal, Docker yoqilgan, kod commit `ba0f53a`):
+```
+All matched files use Prettier code style!
+build      Tasks:    17 successful, 17 total
+typecheck  Tasks:    26 successful, 26 total
+db:check   Tasks:    19 successful, 19 total
+test:unit  Test Files  82 passed (82)   Tests  417 passed (417)
+test:perf  Test Files  9 passed (9)     Tests  12 passed (12)
+test:e2e   1 passed (9.6s)
+depcruise  ✔ no dependency violations found (417 modules, 1786 dependencies cruised)
+EXIT=0
+```
+
+- Boshlang'ich holatda 371 test bor edi. PG testlari endi skip bo'lmaydi: egasi Docker'ni o'rnatdi.
+- Perf: `[T3.1 Perf 50k] missing-MXIK count+page+filter p95=117.224ms`. T1.1 skan p95 0.669 ms, qidiruv p95 28.4 ms.
+
+**CI (PR #24):** _yakuniy holati quyida, "CI" bo'limida._
+
+## Tekshirilmagan narsalar
+
+- **Bulut jufti (S1):** `packages/db-cloud` jadvali, bulut migratsiyasi va `contracts/src/sync.ts` payload sxemasi hali yo'q. Nazoratchi ko'rsatmasi bo'yicha ular T2.3 `main` ga tushgach qo'shiladi.
+- **POS UI:** `CatalogScreen` uchun Playwright E2E yozilmadi. UI typecheck va lint'dan o'tadi, mavjud E2E ham o'tadi. Formadagi validatsiya contracts sxemalarini ishlatadi va ular unit testlar bilan qoplangan. Ekranni qo'lda ochib ko'rmadim.
+- **Chekdagi QQS matni** QQS to'lovchisi bo'lmagan tashkilot uchun ("QQSsiz" va hokazo) T3.4 ga qoldirildi.
+
+## Qilingan taxminlar (nazoratchi ko'rib chiqsin)
+
+1. **Profil yo'q bo'lsa,** tashkilot QQS to'lovchisi deb hisoblanadi va standart stavka 0 bo'ladi. Bu T3.1 dan oldingi xatti-harakatning aynan o'zi: mahsulot stavkasi o'zgarishsiz snapshot qilinadi.
+2. **`POST /carts/:id/refresh-prices`** foydalanuvchining ochiq amali. U avvaldan narx va MXIK'ni katalogdan qayta o'qirdi, endi effektiv QQS stavkasini ham qayta qo'llaydi. Profilning o'zgarishi o'zi esa mavjud qatorlarga tegmaydi (T2), bu M16 bilan isbotlangan. Agar `refresh-prices` QQS'ga tegmasligi kerak bo'lsa, ayting.
+3. **Eski sxemaga moslik:** `readEffectiveVatSettingsSync` jadval yo'q bo'lsa `DEFAULT_VAT_SETTINGS` ni qaytaradi. Bu jadval mavjudligini `sqlite_master` orqali tekshiradi va kesh ishlatmaydi. Sabab: mavjud `sale.test.ts` M1 testi bazani 0006 gacha migratsiya qiladi, savdolarni **joriy** savat kodi bilan yaratadi, keyin 0007 ga ko'taradi. Ya'ni savat yo'li eski sxemada ham ishlashi kerak va testni o'zgartirmadim. Production hub ishga tushishda doim oxirgi migratsiyagacha ko'tariladi. Bu holat test bilan qoplangan.
+4. **Excel preview qatoridagi yangi maydonlar** `mxik`, `packageCode`, `vatRateBp` majburiy qilindi, chunki hub ularni doim qaytaradi. `reports.test.ts` fixture'i shunga moslab yangilandi va yangi tekshiruv qo'shildi. Xato qatoridagi `code` maydoni ixtiyoriy, eski klientlar buzilmaydi.
+5. **Eksport hajmi:** eksport mavjud `listProducts({ limit: 5000 })` chegarasini saqlaydi. Bu chegarani o'zgartirmadim.
+
+## Takliflar
+
+- Mavjud hub xabarlari (masalan Excel import route'idagi xatolar) hali qattiq yozilgan o'zbekcha matnlar. Alohida vazifada kod va i18n ko'rinishiga o'tkazish mumkin.
+- `CatalogScreen` uchun Playwright E2E (MXIK kiritish, MXIK'siz filtri, soliq sozlamalari). Buni T3.2 bilan birga qilish qulay bo'ladi.
 
 ## Egasi yoki nazoratchi qarori kerak bo'lgan savollar
 
-- **S1. Bulutdagi jadval.** `organization_tax_profiles` sinxron (ATTR) bo'ladi. Uning bulutdagi jufti (`packages/db-cloud` sxemasi va migratsiyasi) Gemini yo'lagida.
-  - Variant A: men faqat lokal jadvalni qo'shaman, bulut juftini Gemini T2.3 yoki T2.4 ichida qo'shadi.
-  - Variant B: menga `packages/db-cloud` ga faqat shu jadval uchun tegishga ruxsat beriladi.
-  - Variant C: T3.1 da jadval vaqtincha `LOCAL` bo'ladi, keyin ATTR'ga o'tkaziladi. Buni tavsiya qilmayman.
-  - Qaysi biri? Gemini'ning T2.3 dagi "36 sinxron jadval" ro'yxatiga ham ta'sir qiladi.
-- **S2. QQS to'lovchisi bo'lmagan tashkilot.** 2-bo'limdagi taklif ("samarali stavka 0, mahsulot stavkasi o'zgarmaydi") tasdiqlanadimi? Chekdagi matn ("QQSsiz" va hokazo) T3.4 ga qoldiriladimi?
-- **S3. MXIK formati.** Qat'iy format validatsiyasi (uzunlik, faqat raqamlar) kerakmi? Kerak bo'lsa, manba hujjatini bering. Hozirgi umumiy validatsiya qoladi.
-- **S4. Excel `parseFloat`.** Narx va `minStock` ni float'siz parser'ga o'tkazish T3.1 ichida qilinsinmi yoki alohida vazifa bo'lsinmi?
-- **S5. Docker.** Lokal Docker Desktop buzilgan, PG testlarini lokal ishga tushira olmayman. Mening yo'lagimga bu ta'sir qilmaydi, PG testlari CI'da ishlaydi. Tuzatish egasining ishi.
+- 2-taxmin (`refresh-prices` QQS'ni qayta qo'llashi) to'g'rimi?
+- Bulut jufti (S1): T2.3 tushganini topshiriq orqali bildirasizmi? Shu ko'rsatmani kutyapman. Merge qilmayman.
+
+## CI
+
+PR #24 (run 43818551481). Hisobot yozilgan paytdagi holat:
+
+| Job | Holat |
+|---|---|
+| Detect Desktop Changes | ✅ pass |
+| Verify PostgreSQL RLS (ubuntu-latest) | ✅ pass (44s) |
+| Verify (ubuntu-latest) | ⏳ ishlayapti |
+| Verify (windows-latest) | ⏳ ishlayapti |
+| Build & E2E Desktop Installer (windows-latest) | skip (desktop o'zgarmagan) |
+
+Verify job'lari hisobot commit qilinganda hali tugamagan edi. Natijani shu PR'da ko'rasiz. Ulardan biri qizil bo'lsa, tuzataman va bu yerga yozaman.
