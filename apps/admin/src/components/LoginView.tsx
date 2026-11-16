@@ -16,8 +16,9 @@ export const LoginView: React.FC = () => {
     setSubmitting(true);
     try {
       await doLogin(login.trim(), password);
-    } catch (err: any) {
-      setError(err.message || 'Kirishda xatolik yuz berdi');
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : 'Kirishda xatolik yuz berdi';
+      setError(msg);
     } finally {
       setSubmitting(false);
     }
@@ -37,7 +38,12 @@ export const LoginView: React.FC = () => {
           </div>
         )}
 
-        <form onSubmit={handleSubmit} className="space-y-4">
+        <form
+          onSubmit={(e) => {
+            void handleSubmit(e);
+          }}
+          className="space-y-4"
+        >
           <div>
             <label className="block text-xs font-semibold text-slate-600 uppercase tracking-wider mb-1">
               Login (Email yoki telefon)

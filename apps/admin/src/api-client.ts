@@ -64,8 +64,8 @@ export class AdminApiClient {
     if (!res.ok) {
       let errMsg = `Server xatosi: ${res.status}`;
       try {
-        const errJson = await res.json();
-        errMsg = errJson.message || errJson.error || errMsg;
+        const errJson = (await res.json()) as { message?: string; error?: string };
+        errMsg = errJson.message ?? errJson.error ?? errMsg;
       } catch {
         // ignore
       }

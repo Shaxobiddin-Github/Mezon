@@ -10,7 +10,7 @@ export const DashboardView: React.FC = () => {
   const [showProfit, setShowProfit] = useState(false);
 
   useEffect(() => {
-    loadDashboard();
+    void loadDashboard();
   }, []);
 
   const loadDashboard = async () => {
@@ -19,8 +19,9 @@ export const DashboardView: React.FC = () => {
     try {
       const res = await adminApi.getDashboard();
       setData(res);
-    } catch (err: any) {
-      setError(err.message || 'Dashboard ma’lumotlarini yuklashda xatolik');
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : 'Dashboard ma’lumotlarini yuklashda xatolik';
+      setError(msg);
     } finally {
       setLoading(false);
     }
@@ -40,7 +41,9 @@ export const DashboardView: React.FC = () => {
         <p className="font-semibold">Xatolik:</p>
         <p className="text-sm mt-1">{error}</p>
         <button
-          onClick={loadDashboard}
+          onClick={() => {
+            void loadDashboard();
+          }}
           className="mt-4 px-3 py-1.5 bg-red-600 text-white rounded text-xs hover:bg-red-700"
         >
           Qayta urinish
@@ -65,7 +68,9 @@ export const DashboardView: React.FC = () => {
             {showProfit ? 'Foydani yashirish' : 'Foydani koʻrsatish'}
           </button>
           <button
-            onClick={loadDashboard}
+            onClick={() => {
+              void loadDashboard();
+            }}
             className="text-xs px-3 py-1.5 rounded-lg bg-indigo-50 text-indigo-700 hover:bg-indigo-100 font-medium transition-colors"
           >
             Yangilash

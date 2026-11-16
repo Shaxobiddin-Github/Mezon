@@ -74,7 +74,9 @@ export const Navbar: React.FC<NavbarProps> = ({ currentTab, onSelectTab }) => {
             </div>
 
             <button
-              onClick={() => logout()}
+              onClick={() => {
+                void logout();
+              }}
               className="text-xs font-medium text-slate-600 hover:text-red-600 px-3 py-1.5 rounded border border-slate-200 hover:border-red-200 hover:bg-red-50 transition-colors"
             >
               Chiqish

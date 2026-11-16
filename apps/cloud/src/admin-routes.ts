@@ -1,15 +1,11 @@
 import { createHash, randomBytes } from 'node:crypto';
 import {
-  type AdminCustomersQueryDto,
   AdminCustomersQuerySchema,
-  type AdminProductsQueryDto,
   AdminProductsQuerySchema,
-  type AdminReceiptsQueryDto,
   AdminReceiptsQuerySchema,
   type CloudLoginRequestDto,
   CloudLoginRequestSchema,
   DailySalesReportQuerySchema,
-  maskPhoneNumber,
 } from '@mezon/contracts';
 import {
   AdminReadStore,
@@ -65,6 +61,7 @@ export async function registerAdminRoutes(
   app: FastifyInstance,
   options: AdminRoutesOptions,
 ): Promise<void> {
+  await Promise.resolve();
   const { config, jwtService, authStore, adminStore } = options;
   const defaultIdGen: IdGenerator = new MonotonicUuidV7Generator({
     clock: { now: () => unixMsFromBigInt(BigInt(Date.now())) },

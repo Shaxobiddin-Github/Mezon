@@ -1,8 +1,11 @@
 import {
+  type AdminCustomerDetailResponseDto,
   type AdminCustomersResponseDto,
   type AdminDashboardResponseDto,
+  type AdminReceiptDetailResponseDto,
   type AdminReceiptsResponseDto,
   type CloudLoginResponseDto,
+  type DailySalesReportResponseDto,
 } from '@mezon/contracts';
 import {
   CloudAuthStore,
@@ -166,7 +169,7 @@ describePg('@mezon/cloud - Admin Cabinet API & Security Integration (T2.7a)', ()
         },
       });
       expect(res.statusCode).toBe(403);
-      const json = JSON.parse(res.payload);
+      const json = JSON.parse(res.payload) as { message: string };
       expect(json.message).toContain('Cashier accounts cannot access');
     });
 
@@ -213,7 +216,8 @@ describePg('@mezon/cloud - Admin Cabinet API & Security Integration (T2.7a)', ()
         },
       });
       expect(res.statusCode).toBe(400);
-      expect(JSON.parse(res.payload).message).toContain('X-Mezon-Admin');
+      const json = JSON.parse(res.payload) as { message: string };
+      expect(json.message).toContain('X-Mezon-Admin');
     });
 
     it('rejects refresh when Origin is disallowed (CSRF check)', async () => {
@@ -255,7 +259,7 @@ describePg('@mezon/cloud - Admin Cabinet API & Security Integration (T2.7a)', ()
       });
 
       expect(refreshRes.statusCode).toBe(200);
-      const refreshJson = JSON.parse(refreshRes.payload);
+      const refreshJson = JSON.parse(refreshRes.payload) as { accessToken: string };
       expect(refreshJson.accessToken).toBeDefined();
 
       const newCookieHeader = String(refreshRes.headers['set-cookie']);
@@ -306,7 +310,7 @@ describePg('@mezon/cloud - Admin Cabinet API & Security Integration (T2.7a)', ()
       cashierTokenA = await jwtService.signAccessToken({
         sub: cashierA,
         org: orgA,
-        role: 'cashier' as any,
+        role: 'cashier',
         name: 'Kassir A',
       });
 
@@ -451,7 +455,7 @@ describePg('@mezon/cloud - Admin Cabinet API & Security Integration (T2.7a)', ()
       });
 
       expect(detailRes.statusCode).toBe(200);
-      const detail = JSON.parse(detailRes.payload);
+      const detail = JSON.parse(detailRes.payload) as AdminReceiptDetailResponseDto;
       expect(detail.receiptNumber).toBe('REC-201');
       expect(detail.lines.length).toBe(1);
       expect(detail.lines[0]?.productName).toBe('Non');
@@ -484,7 +488,7 @@ describePg('@mezon/cloud - Admin Cabinet API & Security Integration (T2.7a)', ()
       });
 
       expect(detailRes.statusCode).toBe(200);
-      const detail = JSON.parse(detailRes.payload);
+      const detail = JSON.parse(detailRes.payload) as AdminCustomerDetailResponseDto;
       expect(detail.fullName).toBe('Temur Bek');
       expect(detail.phone).toBe('+998909876543'); // Unmasked for owner
     });
@@ -499,7 +503,7 @@ describePg('@mezon/cloud - Admin Cabinet API & Security Integration (T2.7a)', ()
       });
 
       expect(res.statusCode).toBe(200);
-      const json = JSON.parse(res.payload);
+      const json = JSON.parse(res.payload) as DailySalesReportResponseDto;
       expect(json.totalSalesCount).toBe(1);
       expect(json.totalGrossSales).toBe('2000000');
       expect(json.totalNetSales).toBe('2000000');

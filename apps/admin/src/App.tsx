@@ -12,8 +12,8 @@ export const App: React.FC = () => {
   const [currentTab, setCurrentTab] = useState<AdminTab>('dashboard');
 
   useEffect(() => {
-    checkSession();
-  }, []);
+    void checkSession();
+  }, [checkSession]);
 
   if (isLoading) {
     return (

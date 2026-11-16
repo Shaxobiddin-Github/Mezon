@@ -18,7 +18,7 @@ export const ReceiptsView: React.FC = () => {
   const [detailLoading, setDetailLoading] = useState(false);
 
   useEffect(() => {
-    loadReceipts(true);
+    void loadReceipts(true);
   }, [statusFilter]);
 
   const loadReceipts = async (reset = false) => {
@@ -78,7 +78,9 @@ export const ReceiptsView: React.FC = () => {
             <option value="voided">Bekor qilingan</option>
           </select>
           <button
-            onClick={() => loadReceipts(true)}
+            onClick={() => {
+              void loadReceipts(true);
+            }}
             className="text-xs px-3 py-2 rounded-lg bg-indigo-50 text-indigo-700 hover:bg-indigo-100 font-medium transition-colors"
           >
             Yangilash
@@ -117,7 +119,9 @@ export const ReceiptsView: React.FC = () => {
                 receipts.map((r) => (
                   <tr
                     key={r.id}
-                    onClick={() => handleSelectReceipt(r.id)}
+                    onClick={() => {
+                      void handleSelectReceipt(r.id);
+                    }}
                     className="hover:bg-indigo-50/50 cursor-pointer transition-colors"
                   >
                     <td className="px-6 py-3 font-semibold text-indigo-600">{r.receiptNumber}</td>
@@ -147,7 +151,9 @@ export const ReceiptsView: React.FC = () => {
         {nextCursor && (
           <div className="p-4 border-t border-slate-100 text-center">
             <button
-              onClick={() => loadReceipts(false)}
+              onClick={() => {
+                void loadReceipts(false);
+              }}
               disabled={loadingMore}
               className="px-4 py-2 text-xs font-semibold text-indigo-600 bg-indigo-50 hover:bg-indigo-100 rounded-lg transition-colors disabled:opacity-50"
             >

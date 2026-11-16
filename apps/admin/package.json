@@ -5,8 +5,8 @@
   "type": "module",
   "main": "./dist/index.html",
   "scripts": {
-    "build": "tsc -b && vite build",
-    "typecheck": "tsc -b --noEmit",
+    "build": "tsc --noEmit && vite build",
+    "typecheck": "tsc --noEmit && tsc -p tsconfig.test.json --noEmit",
     "dev": "vite"
   },
   "dependencies": {

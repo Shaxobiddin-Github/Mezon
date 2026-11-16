@@ -1,14 +1,11 @@
 import {
-  DomainError,
   type Money,
   type Quantity,
   type UnixMs,
   type UuidV7,
   moneyFromTiyin,
-  moneyToTiyin,
   parseUuidV7,
   quantityFromMilli,
-  quantityToMilli,
   unixMsFromBigInt,
 } from '@mezon/domain';
 import type { Pool } from 'pg';
@@ -393,9 +390,9 @@ export class AdminReadStore {
 
       if (query.cursor) {
         const parts = query.cursor.split(':');
-        if (parts.length === 2) {
-          const cursorMs = BigInt(parts[0]!);
-          const cursorId = parts[1]!;
+        if (parts.length === 2 && parts[0] && parts[1]) {
+          const cursorMs = BigInt(parts[0]);
+          const cursorId = parts[1];
           conditions.push(
             `(s.created_at_ms, s.id) < ($${argIdx++}::bigint, $${argIdx++}::uuid)`,
           );
@@ -445,8 +442,10 @@ export class AdminReadStore {
 
       let nextCursor: string | null = null;
       if (hasMore && pageRows.length > 0) {
-        const last = pageRows[pageRows.length - 1]!;
-        nextCursor = `${last.created_at_ms}:${last.id}`;
+        const last = pageRows[pageRows.length - 1];
+        if (last) {
+          nextCursor = `${last.created_at_ms}:${last.id}`;
+        }
       }
 
       const items: CloudReceiptItem[] = pageRows.map((r) => ({
@@ -513,8 +512,8 @@ export class AdminReadStore {
         void_reason: string | null;
       }>(saleSql, [organizationId, receiptId]);
 
-      if (saleRes.rows.length === 0) return null;
-      const s = saleRes.rows[0]!;
+      if (saleRes.rows.length === 0 || !saleRes.rows[0]) return null;
+      const s = saleRes.rows[0];
 
       const linesSql = `
         SELECT
@@ -638,9 +637,9 @@ export class AdminReadStore {
 
       if (query.cursor) {
         const parts = query.cursor.split(':');
-        if (parts.length === 2) {
-          const cursorMs = BigInt(parts[0]!);
-          const cursorId = parts[1]!;
+        if (parts.length === 2 && parts[0] && parts[1]) {
+          const cursorMs = BigInt(parts[0]);
+          const cursorId = parts[1];
           conditions.push(
             `(c.created_at_ms, c.id) < ($${argIdx++}::bigint, $${argIdx++}::uuid)`,
           );
@@ -679,8 +678,10 @@ export class AdminReadStore {
 
       let nextCursor: string | null = null;
       if (hasMore && pageRows.length > 0) {
-        const last = pageRows[pageRows.length - 1]!;
-        nextCursor = `${last.created_at_ms}:${last.id}`;
+        const last = pageRows[pageRows.length - 1];
+        if (last) {
+          nextCursor = `${last.created_at_ms}:${last.id}`;
+        }
       }
 
       const items: CloudCustomerItem[] = pageRows.map((r) => ({
@@ -727,8 +728,8 @@ export class AdminReadStore {
         balance_tiyin: string;
       }>(custSql, [params.organizationId, params.customerId]);
 
-      if (custRes.rows.length === 0) return null;
-      const c = custRes.rows[0]!;
+      if (custRes.rows.length === 0 || !custRes.rows[0]) return null;
+      const c = custRes.rows[0];
 
       const ledgerSql = `
         SELECT
@@ -815,9 +816,9 @@ export class AdminReadStore {
 
       if (query.cursor) {
         const parts = query.cursor.split(':');
-        if (parts.length === 2) {
-          const cursorMs = BigInt(parts[0]!);
-          const cursorId = parts[1]!;
+        if (parts.length === 2 && parts[0] && parts[1]) {
+          const cursorMs = BigInt(parts[0]);
+          const cursorId = parts[1];
           conditions.push(
             `(p.created_at_ms, p.id) < ($${argIdx++}::bigint, $${argIdx++}::uuid)`,
           );
@@ -863,8 +864,10 @@ export class AdminReadStore {
 
       let nextCursor: string | null = null;
       if (hasMore && pageRows.length > 0) {
-        const last = pageRows[pageRows.length - 1]!;
-        nextCursor = `${last.created_at_ms}:${last.id}`;
+        const last = pageRows[pageRows.length - 1];
+        if (last) {
+          nextCursor = `${last.created_at_ms}:${last.id}`;
+        }
       }
 
       const items: CloudProductItem[] = pageRows.map((r) => ({

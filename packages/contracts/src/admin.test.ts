@@ -2,7 +2,6 @@ import { describe, expect, it } from 'vitest';
 import {
   AdminDashboardResponseSchema,
   AdminReceiptsQuerySchema,
-  AdminReceiptsResponseSchema,
   maskPhoneNumber,
 } from './admin.js';
 

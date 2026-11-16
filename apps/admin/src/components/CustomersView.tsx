@@ -18,7 +18,7 @@ export const CustomersView: React.FC = () => {
   const [detailLoading, setDetailLoading] = useState(false);
 
   useEffect(() => {
-    loadCustomers(true);
+    void loadCustomers(true);
   }, [search]);
 
   const loadCustomers = async (reset = false) => {
@@ -76,7 +76,9 @@ export const CustomersView: React.FC = () => {
             className="text-xs px-3 py-2 rounded-lg border border-slate-300 bg-white focus:outline-none focus:ring-2 focus:ring-indigo-500 w-full sm:w-64"
           />
           <button
-            onClick={() => loadCustomers(true)}
+            onClick={() => {
+              void loadCustomers(true);
+            }}
             className="text-xs px-3 py-2 rounded-lg bg-indigo-50 text-indigo-700 hover:bg-indigo-100 font-medium transition-colors"
           >
             Yangilash
@@ -113,7 +115,9 @@ export const CustomersView: React.FC = () => {
                 customers.map((c) => (
                   <tr
                     key={c.id}
-                    onClick={() => handleSelectCustomer(c.id)}
+                    onClick={() => {
+                      void handleSelectCustomer(c.id);
+                    }}
                     className="hover:bg-indigo-50/50 cursor-pointer transition-colors"
                   >
                     <td className="px-6 py-3 font-semibold text-slate-900">{c.fullName}</td>
@@ -141,7 +145,9 @@ export const CustomersView: React.FC = () => {
         {nextCursor && (
           <div className="p-4 border-t border-slate-100 text-center">
             <button
-              onClick={() => loadCustomers(false)}
+              onClick={() => {
+                void loadCustomers(false);
+              }}
               disabled={loadingMore}
               className="px-4 py-2 text-xs font-semibold text-indigo-600 bg-indigo-50 hover:bg-indigo-100 rounded-lg transition-colors disabled:opacity-50"
             >

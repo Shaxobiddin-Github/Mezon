@@ -1,6 +1,6 @@
 import { z } from 'zod';
 import { BigIntStringSchema, UuidV7Schema } from './auth.js';
-import { DateStringSchema, MonthStringSchema } from './reports.js';
+import { DateStringSchema } from './reports.js';
 
 // Phone masking helper: '+998 90 *** ** 12'
 export function maskPhoneNumber(phone: string | null | undefined): string | null {

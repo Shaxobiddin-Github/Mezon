@@ -48,7 +48,7 @@ export class CloudJwtService {
     return {
       sub: parseUuidV7(payload.sub),
       org: parseUuidV7(payload.org),
-      role: payload.role as 'owner' | 'manager' | 'cashier',
+      role: payload.role,
       name: payload.name,
     };
   }

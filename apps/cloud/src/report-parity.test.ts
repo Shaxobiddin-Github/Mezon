@@ -31,7 +31,6 @@ import {
 } from '@mezon/db-local';
 import {
   type PinHasher,
-  type UnixMs,
   type UuidV7,
   moneyFromTiyin,
   moneyToTiyin,
@@ -67,6 +66,7 @@ describePg('A1: Hub vs Cloud DailySalesReport Parity (T2.7a)', () => {
   let appConn: ReturnType<typeof createCloudPgPool>;
   let syncPushStore: CloudSyncPushStore;
   let adminReadStore: AdminReadStore;
+  let hubReportStore: ReturnType<typeof createSqliteReportStore>;
 
   let orgId: UuidV7;
   let storeId: UuidV7;
@@ -168,6 +168,7 @@ describePg('A1: Hub vs Cloud DailySalesReport Parity (T2.7a)', () => {
     const saleStore = createSqliteSaleStore({ connection: localConn, getRuntimeContext: getStoreCtx });
     const returnStore = createSqliteReturnStore({ connection: localConn, getRuntimeContext: getStoreCtx });
     const shiftStore = createSqliteShiftStore({ connection: localConn, getRuntimeContext: getStoreCtx });
+    hubReportStore = createSqliteReportStore({ connection: localConn, getRuntimeContext: getStoreCtx });
 
     // Item 1: Samarqand non (12% VAT = 1200 bp), Sale Price: 10,000 tiyin, Cost: 6,000 tiyin
     const p1 = (
@@ -319,17 +320,6 @@ describePg('A1: Hub vs Cloud DailySalesReport Parity (T2.7a)', () => {
   });
 
   it('matches Hub DailySalesReport and Cloud DailySalesReport tiyin-to-tiyin across all metrics', async () => {
-    const localConn = openLocalConnections[0]!;
-    const getStoreCtx = () => ({
-      uow: {} as any,
-      organizationId: orgId,
-      storeId,
-    });
-    const hubReportStore = createSqliteReportStore({
-      connection: localConn,
-      getRuntimeContext: getStoreCtx,
-    });
-
     // 1. Fetch Hub Report
     const hubReport = await hubReportStore.getDailySalesReport({
       fromDate: '2026-11-01',
@@ -367,17 +357,22 @@ describePg('A1: Hub vs Cloud DailySalesReport Parity (T2.7a)', () => {
     // Cost of goods sold & Gross Profit
     expect(cloudReport.totalCostValue).toBeDefined();
     expect(hubReport.totalCostValue).toBeDefined();
-    expect(moneyToTiyin(cloudReport.totalCostValue!)).toBe(moneyToTiyin(hubReport.totalCostValue!));
+    if (cloudReport.totalCostValue && hubReport.totalCostValue) {
+      expect(moneyToTiyin(cloudReport.totalCostValue)).toBe(moneyToTiyin(hubReport.totalCostValue));
+    }
 
     expect(cloudReport.totalGrossProfit).toBeDefined();
     expect(hubReport.totalGrossProfit).toBeDefined();
-    expect(moneyToTiyin(cloudReport.totalGrossProfit!)).toBe(moneyToTiyin(hubReport.totalGrossProfit!));
+    if (cloudReport.totalGrossProfit && hubReport.totalGrossProfit) {
+      expect(moneyToTiyin(cloudReport.totalGrossProfit)).toBe(moneyToTiyin(hubReport.totalGrossProfit));
+    }
 
     // Daily buckets count and exact values
     expect(cloudReport.days.length).toBe(hubReport.days.length);
     for (let i = 0; i < hubReport.days.length; i++) {
-      const hDay = hubReport.days[i]!;
-      const cDay = cloudReport.days[i]!;
+      const hDay = hubReport.days[i];
+      const cDay = cloudReport.days[i];
+      if (!hDay || !cDay) continue;
 
       expect(cDay.date).toBe(hDay.date);
       expect(cDay.salesCount).toBe(hDay.salesCount);

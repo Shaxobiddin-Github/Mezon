@@ -15,7 +15,7 @@ export const DailyReportView: React.FC = () => {
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    loadReport();
+    void loadReport();
   }, []);
 
   const loadReport = async () => {
@@ -64,7 +64,9 @@ export const DailyReportView: React.FC = () => {
             />
           </div>
           <button
-            onClick={loadReport}
+            onClick={() => {
+              void loadReport();
+            }}
             className="text-xs px-3 py-1.5 rounded bg-indigo-600 hover:bg-indigo-700 text-white font-medium transition-colors shadow-sm"
           >
             Hisobotni shakllantirish

@@ -1,6 +1,12 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { AdminApiClient } from './api-client.js';
 
+function getUrlString(url: RequestInfo | URL): string {
+  if (typeof url === 'string') return url;
+  if (url instanceof URL) return url.pathname;
+  return url.url;
+}
+
 describe('AdminApiClient (apps/admin)', () => {
   let client: AdminApiClient;
   const originalFetch = globalThis.fetch;
@@ -15,19 +21,20 @@ describe('AdminApiClient (apps/admin)', () => {
   });
 
   it('performs login and stores access token', async () => {
-    globalThis.fetch = vi.fn().mockResolvedValue({
-      ok: true,
-      status: 200,
-      json: async () => ({
-        accessToken: 'access-token-123',
-        user: {
-          id: '01950000-0000-7000-8000-000000000001',
-          organizationId: '01950000-0000-7000-8000-000000000002',
-          role: 'owner',
-          name: 'Owner',
-        },
-      }),
-    } as any);
+    globalThis.fetch = vi.fn().mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          accessToken: 'access-token-123',
+          user: {
+            id: '01950000-0000-7000-8000-000000000001',
+            organizationId: '01950000-0000-7000-8000-000000000002',
+            role: 'owner',
+            name: 'Owner',
+          },
+        }),
+        { status: 200, headers: { 'Content-Type': 'application/json' } },
+      ),
+    );
 
     const res = await client.login({ login: 'owner@guzar.uz', password: 'Password123!' });
     expect(res.accessToken).toBe('access-token-123');
@@ -36,14 +43,16 @@ describe('AdminApiClient (apps/admin)', () => {
 
   it('sends X-Mezon-Admin security header on refresh (A3 CSRF guard)', async () => {
     let capturedHeaders: Headers | undefined;
-    globalThis.fetch = vi.fn().mockImplementation((url, init) => {
-      if (url === '/api/v1/admin/auth/refresh') {
-        capturedHeaders = new Headers(init.headers);
-        return Promise.resolve({
-          ok: true,
-          status: 200,
-          json: async () => ({ accessToken: 'new-refreshed-token' }),
-        });
+    globalThis.fetch = vi.fn().mockImplementation((url: RequestInfo | URL, init?: RequestInit) => {
+      const urlStr = getUrlString(url);
+      if (urlStr === '/api/v1/admin/auth/refresh') {
+        capturedHeaders = new Headers(init?.headers);
+        return Promise.resolve(
+          new Response(JSON.stringify({ accessToken: 'new-refreshed-token' }), {
+            status: 200,
+            headers: { 'Content-Type': 'application/json' },
+          }),
+        );
       }
       return Promise.reject(new Error('Unknown url'));
     });
@@ -57,41 +66,42 @@ describe('AdminApiClient (apps/admin)', () => {
     client.setAccessToken('expired-token');
     let callCount = 0;
 
-    globalThis.fetch = vi.fn().mockImplementation((url, init) => {
+    globalThis.fetch = vi.fn().mockImplementation((url: RequestInfo | URL, init?: RequestInit) => {
       callCount++;
-      if (url === '/api/v1/admin/dashboard') {
+      const urlStr = getUrlString(url);
+      if (urlStr === '/api/v1/admin/dashboard') {
         const headers = new Headers(init?.headers);
         if (headers.get('Authorization') === 'Bearer expired-token') {
-          return Promise.resolve({
-            ok: false,
-            status: 401,
-            json: async () => ({ error: 'Unauthorized' }),
-          });
+          return Promise.resolve(
+            new Response(JSON.stringify({ error: 'Unauthorized' }), { status: 401 }),
+          );
         }
         if (headers.get('Authorization') === 'Bearer fresh-token') {
-          return Promise.resolve({
-            ok: true,
-            status: 200,
-            json: async () => ({
-              todayDate: '2026-11-10',
-              grossSales: '1000000',
-              returnsTotal: '0',
-              netSales: '1000000',
-              receiptsCount: 1,
-              avgReceipt: '1000000',
-              stores: [],
-            }),
-          });
+          return Promise.resolve(
+            new Response(
+              JSON.stringify({
+                todayDate: '2026-11-10',
+                grossSales: '1000000',
+                returnsTotal: '0',
+                netSales: '1000000',
+                receiptsCount: 1,
+                avgReceipt: '1000000',
+                stores: [],
+              }),
+              { status: 200, headers: { 'Content-Type': 'application/json' } },
+            ),
+          );
         }
       }
-      if (url === '/api/v1/admin/auth/refresh') {
-        return Promise.resolve({
-          ok: true,
-          status: 200,
-          json: async () => ({ accessToken: 'fresh-token' }),
-        });
+      if (urlStr === '/api/v1/admin/auth/refresh') {
+        return Promise.resolve(
+          new Response(JSON.stringify({ accessToken: 'fresh-token' }), {
+            status: 200,
+            headers: { 'Content-Type': 'application/json' },
+          }),
+        );
       }
-      return Promise.reject(new Error(`Unexpected url ${url}`));
+      return Promise.reject(new Error(`Unexpected url ${urlStr}`));
     });
 
     const data = await client.getDashboard();
@@ -105,20 +115,17 @@ describe('AdminApiClient (apps/admin)', () => {
     const onUnauthorized = vi.fn();
     client.setOnUnauthorized(onUnauthorized);
 
-    globalThis.fetch = vi.fn().mockImplementation((url) => {
-      if (url === '/api/v1/admin/dashboard') {
-        return Promise.resolve({
-          ok: false,
-          status: 401,
-          json: async () => ({ error: 'Unauthorized' }),
-        });
+    globalThis.fetch = vi.fn().mockImplementation((url: RequestInfo | URL) => {
+      const urlStr = getUrlString(url);
+      if (urlStr === '/api/v1/admin/dashboard') {
+        return Promise.resolve(
+          new Response(JSON.stringify({ error: 'Unauthorized' }), { status: 401 }),
+        );
       }
-      if (url === '/api/v1/admin/auth/refresh') {
-        return Promise.resolve({
-          ok: false,
-          status: 401,
-          json: async () => ({ error: 'Refresh failed' }),
-        });
+      if (urlStr === '/api/v1/admin/auth/refresh') {
+        return Promise.resolve(
+          new Response(JSON.stringify({ error: 'Refresh failed' }), { status: 401 }),
+        );
       }
       return Promise.reject(new Error('Unexpected url'));
     });
