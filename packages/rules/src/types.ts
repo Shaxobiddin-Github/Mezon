@@ -1,22 +1,21 @@
 /**
  * T3.2 rules engine types. Pure data: no IO, no clock, no crypto (`GEMINI.md` §2.2).
  * Money is bigint tiyin, quantity bigint milli-units (§3.1.1); JSON transport uses strings.
+ *
+ * Scope per owner answers (TOPSHIRIQ 79df8b8): no prescription rule (S5), no social-card rule
+ * (S6 deferred), expired goods only WARN (S7), cash refund of cashless receipts allowed (S8).
  */
 
 /** Stable finding codes; UI translates `rules.<code>` via i18n. */
 export const RULE_CODES = [
-  // T3.2a (implemented)
   'EXPIRED_GOODS',
-  'SOCIAL_CARD_DATA_REQUIRED',
   'MXIK_MISSING',
   'PACKAGE_MISSING',
   'PACKAGE_EXPIRED',
   'PACKAGE_INVALID',
-  // T3.2b (format reserved; semantics pending owner answers S1, S3–S5, S7, S8)
   'CASH_FORBIDDEN_MXIK',
   'MIXED_RECEIPT_CASHLESS',
   'MXIK_CASH_LIMIT',
-  'PRESCRIPTION_REQUIRED',
 ] as const;
 export type RuleCode = (typeof RULE_CODES)[number];
 
@@ -38,6 +37,19 @@ export interface MxikMatchList {
   readonly prefixes: readonly string[];
 }
 
+/**
+ * Per-MXIK cash limit (S4). The real value (e.g. 176 mln so'm) exists ONLY in the signed package.
+ * - `appliesTo: 'cash'`      — the cash portion attributed to that MXIK (proportional allocation);
+ * - `appliesTo: 'mxikTotal'` — the receipt total of that MXIK, applied only when cash is used;
+ * - `inclusive: true`        — an amount equal to the limit is allowed (violation only above it).
+ */
+export interface PerMxikCashLimit {
+  readonly limitTiyin: bigint;
+  readonly appliesTo: 'cash' | 'mxikTotal';
+  readonly inclusive: boolean;
+  readonly exempt: MxikMatchList;
+}
+
 /** Signed payload. Real rule data comes ONLY from a signed package, never from code. */
 export interface RulesPayload {
   readonly packageVersion: bigint;
@@ -45,12 +57,7 @@ export interface RulesPayload {
   readonly validUntilMs: bigint;
   readonly sourceRefs: readonly string[];
   readonly cashForbidden: MxikMatchList;
-  readonly prescriptionRequired: MxikMatchList;
-  readonly perMxikCashLimit: {
-    readonly limitTiyin: bigint;
-    readonly exempt: MxikMatchList;
-  } | null;
-  readonly socialCard: { readonly enabled: boolean };
+  readonly perMxikCashLimit: PerMxikCashLimit | null;
   readonly expiredGoods: { readonly enabled: boolean };
 }
 
@@ -75,12 +82,6 @@ export interface VerifiedRulesPackage {
 
 export type RulesPackageState = 'ok' | 'missing' | 'expired' | 'invalid';
 
-export interface SocialCardInput {
-  readonly cardType: string;
-  readonly cardNumber: string;
-  readonly transactionId: string;
-}
-
 export interface RulesBatchExpiry {
   /** Batch expiry instant (store-local date semantics), null when the batch has none. */
   readonly expiryDateMs: bigint | null;
@@ -104,7 +105,6 @@ export interface RulesCartInput {
 export interface RulesPaymentInput {
   readonly method: string;
   readonly amountTiyin: bigint;
-  readonly socialCard: SocialCardInput | null;
 }
 
 export interface RulesContext {

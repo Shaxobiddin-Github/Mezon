@@ -76,9 +76,7 @@ const PAYLOAD_KEYS = [
   'validUntilMs',
   'sourceRefs',
   'cashForbidden',
-  'prescriptionRequired',
   'perMxikCashLimit',
-  'socialCard',
   'expiredGoods',
 ] as const;
 
@@ -102,9 +100,18 @@ export function parseRulesPayload(raw: unknown): RulesPayload {
   if (raw.perMxikCashLimit !== null) {
     const l = raw.perMxikCashLimit;
     if (!isRecord(l)) fail('payload.perMxikCashLimit: must be an object or null');
-    assertExactKeys(l, ['limitTiyin', 'exempt'], 'payload.perMxikCashLimit');
+    assertExactKeys(
+      l,
+      ['limitTiyin', 'appliesTo', 'inclusive', 'exempt'],
+      'payload.perMxikCashLimit',
+    );
+    if (l.appliesTo !== 'cash' && l.appliesTo !== 'mxikTotal') {
+      fail('payload.perMxikCashLimit.appliesTo: must be "cash" or "mxikTotal"');
+    }
     perMxikCashLimit = {
       limitTiyin: parseUint(l.limitTiyin, 'payload.perMxikCashLimit.limitTiyin'),
+      appliesTo: l.appliesTo,
+      inclusive: parseBool(l.inclusive, 'payload.perMxikCashLimit.inclusive'),
       exempt: parseMxikList(l.exempt, 'payload.perMxikCashLimit.exempt'),
     };
   }
@@ -114,9 +121,7 @@ export function parseRulesPayload(raw: unknown): RulesPayload {
     validUntilMs,
     sourceRefs,
     cashForbidden: parseMxikList(raw.cashForbidden, 'payload.cashForbidden'),
-    prescriptionRequired: parseMxikList(raw.prescriptionRequired, 'payload.prescriptionRequired'),
     perMxikCashLimit,
-    socialCard: parseFlag(raw.socialCard, 'payload.socialCard'),
     expiredGoods: parseFlag(raw.expiredGoods, 'payload.expiredGoods'),
   };
 }
@@ -130,15 +135,15 @@ export function rulesPayloadToWire(p: RulesPayload): Record<string, unknown> {
     validUntilMs: p.validUntilMs.toString(),
     sourceRefs: [...p.sourceRefs],
     cashForbidden: list(p.cashForbidden),
-    prescriptionRequired: list(p.prescriptionRequired),
     perMxikCashLimit:
       p.perMxikCashLimit === null
         ? null
         : {
             limitTiyin: p.perMxikCashLimit.limitTiyin.toString(),
+            appliesTo: p.perMxikCashLimit.appliesTo,
+            inclusive: p.perMxikCashLimit.inclusive,
             exempt: list(p.perMxikCashLimit.exempt),
           },
-    socialCard: { enabled: p.socialCard.enabled },
     expiredGoods: { enabled: p.expiredGoods.enabled },
   };
 }

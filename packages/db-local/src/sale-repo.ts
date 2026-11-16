@@ -37,11 +37,7 @@ import {
   requireCartRowInDbSync,
 } from './cart-repo.js';
 import type { LocalSqliteConnection } from './connection.js';
-import {
-  type SaleRulesCheckLine,
-  type SaleRulesEvaluator,
-  maskSocialCardNumber,
-} from './sale-rules-port.js';
+import type { SaleRulesCheckLine, SaleRulesEvaluator } from './sale-rules-port.js';
 import {
   type StoredCashMoveRecord,
   prepareCustomerForSaleInTxSync,
@@ -800,7 +796,6 @@ export function completeSaleCoreInTxSync(
     payments: resolvedPayments.payments.map((p) => ({
       method: p.method,
       amountTiyin: moneyToTiyin(p.amount),
-      socialCard: p.socialCard ?? null,
     })),
   });
   if (rulesResult.block.length > 0) {
@@ -830,17 +825,7 @@ export function completeSaleCoreInTxSync(
         tenderedAmount: item.tenderedAmount,
         changeAmount: item.changeAmount,
         providerRef: item.providerRef,
-        // T3.2: social-card details persisted MASKED only (full number never stored).
-        providerMetaJson:
-          item.socialCard !== undefined && item.socialCard !== null
-            ? JSON.stringify({
-                socialCard: {
-                  cardType: item.socialCard.cardType.trim(),
-                  cardNumberMasked: maskSocialCardNumber(item.socialCard.cardNumber),
-                  transactionId: item.socialCard.transactionId.trim(),
-                },
-              })
-            : null,
+        providerMetaJson: null,
       },
       eventType: 'payment.created',
       schemaVersion: 1,

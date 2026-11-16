@@ -530,5 +530,4 @@ export {
   type SaleRulesFinding,
   type SaleRulesCheckResult,
   type SaleRulesEvaluator,
-  maskSocialCardNumber,
 } from './sale-rules-port.js';

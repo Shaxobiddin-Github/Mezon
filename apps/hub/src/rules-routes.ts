@@ -106,12 +106,10 @@ export function registerRulesRoutes(
           ? {
               method: 'cash',
               amountTiyin: BigInt(p.amount ?? p.tenderedAmount),
-              socialCard: null,
             }
           : {
               method: p.method,
               amountTiyin: BigInt(p.amount),
-              socialCard: p.socialCard ?? null,
             },
       ),
     );

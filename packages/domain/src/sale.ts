@@ -49,13 +49,6 @@ export interface ValidatedCashPayment {
   readonly changeAmount: Money;
 }
 
-/** T3.2 social-card payment details (nazoratchi S6 interim: all three required, length-bounded). */
-export interface SocialCardPaymentInput {
-  readonly cardType: string;
-  readonly cardNumber: string;
-  readonly transactionId: string;
-}
-
 export type SalePaymentInput =
   | {
       readonly method: 'cash';
@@ -66,7 +59,6 @@ export type SalePaymentInput =
       readonly method: NonCashPaymentMethod;
       readonly amount: Money;
       readonly providerRef?: string | null;
-      readonly socialCard?: SocialCardPaymentInput | null;
     };
 
 export interface AdvanceSalePaymentInput {
@@ -83,8 +75,6 @@ export interface ResolvedSalePaymentItem {
   readonly tenderedAmount: Money | null;
   readonly changeAmount: Money;
   readonly providerRef: string | null;
-  /** T3.2: raw social-card input (masked before persistence by the storage layer). */
-  readonly socialCard?: SocialCardPaymentInput | null;
 }
 
 export interface ResolvedSalePayments {
@@ -296,12 +286,6 @@ export function resolveSalePayments(params: {
     } else {
       assertBoundedPositive(moneyToTiyin(row.amount), `${row.method}.amount`);
       normalizePaymentProviderRef(row.providerRef);
-      if (row.socialCard !== undefined && row.socialCard !== null && row.method !== 'social_card') {
-        throw new DomainError(
-          'VALIDATION_ERROR',
-          'socialCard is only allowed for social_card payments',
-        );
-      }
       nonCashTotalTiyin += moneyToTiyin(row.amount);
     }
   }
@@ -338,7 +322,6 @@ export function resolveSalePayments(params: {
         tenderedAmount: null,
         changeAmount: ZERO_MONEY,
         providerRef: row.method === 'advance' ? null : normalizePaymentProviderRef(row.providerRef),
-        ...(row.method === 'social_card' ? { socialCard: row.socialCard ?? null } : {}),
       });
       sumPaidTiyin += amountTiyin;
     }

@@ -166,7 +166,6 @@ function mapSalePaymentsInput(
       method: p.method,
       amount: moneyFromTiyin(BigInt(p.amount)),
       ...(p.providerRef !== undefined ? { providerRef: p.providerRef } : {}),
-      ...(p.socialCard !== undefined ? { socialCard: p.socialCard } : {}),
     };
   });
 }

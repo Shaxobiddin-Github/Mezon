@@ -39,10 +39,6 @@ interface NonCashRowState {
   readonly method: NonCashMethod;
   readonly amountSom: string;
   readonly providerRef: string;
-  /** T3.2 social-card details (only for `social_card`). */
-  readonly cardType: string;
-  readonly cardNumber: string;
-  readonly transactionId: string;
 }
 
 export function PaymentModal({
@@ -155,15 +151,6 @@ export function PaymentModal({
           method: row.method,
           amount: amt,
           providerRef: row.providerRef.trim() || null,
-          ...(row.method === 'social_card'
-            ? {
-                socialCard: {
-                  cardType: row.cardType,
-                  cardNumber: row.cardNumber,
-                  transactionId: row.transactionId,
-                },
-              }
-            : {}),
         });
       }
     }
@@ -372,9 +359,6 @@ export function PaymentModal({
                   method: 'card',
                   amountSom: tiyinToSomInputString(remainingForCashTiyin.toString()),
                   providerRef: '',
-                  cardType: '',
-                  cardNumber: '',
-                  transactionId: '',
                 },
               ]);
               setTenderedCashSom('0');
@@ -432,30 +416,6 @@ export function PaymentModal({
                   );
                 }}
               />
-              {row.method === 'social_card' &&
-                (
-                  [
-                    ['cardType', 'payment.socialCard.cardType'],
-                    ['cardNumber', 'payment.socialCard.cardNumber'],
-                    ['transactionId', 'payment.socialCard.transactionId'],
-                  ] as const
-                ).map(([field, label]) => (
-                  <input
-                    key={field}
-                    className="pos-input"
-                    data-testid={`payment-social-${field}-${String(index)}`}
-                    placeholder={t(label)}
-                    autoComplete="off"
-                    value={row[field]}
-                    onChange={(e) => {
-                      onInputsChanged();
-                      const val = e.target.value;
-                      setNonCashRows((prev) =>
-                        prev.map((r) => (r.key === row.key ? { ...r, [field]: val } : r)),
-                      );
-                    }}
-                  />
-                ))}
               <button
                 type="button"
                 className="pos-btn pos-btn-danger"

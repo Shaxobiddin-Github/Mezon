@@ -19,11 +19,14 @@ export const RulesPayloadWireSchema = z.strictObject({
   validUntilMs: UintStringSchema,
   sourceRefs: z.array(z.string().min(1).max(256)).max(64),
   cashForbidden: MxikMatchListSchema,
-  prescriptionRequired: MxikMatchListSchema,
   perMxikCashLimit: z
-    .strictObject({ limitTiyin: UintStringSchema, exempt: MxikMatchListSchema })
+    .strictObject({
+      limitTiyin: UintStringSchema,
+      appliesTo: z.enum(['cash', 'mxikTotal']),
+      inclusive: z.boolean(),
+      exempt: MxikMatchListSchema,
+    })
     .nullable(),
-  socialCard: z.strictObject({ enabled: z.boolean() }),
   expiredGoods: z.strictObject({ enabled: z.boolean() }),
 });
 export type RulesPayloadWireDto = z.infer<typeof RulesPayloadWireSchema>;

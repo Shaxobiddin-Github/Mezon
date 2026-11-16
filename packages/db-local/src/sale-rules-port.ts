@@ -22,11 +22,6 @@ export interface SaleRulesCheckLine {
 export interface SaleRulesCheckPayment {
   readonly method: string;
   readonly amountTiyin: bigint;
-  readonly socialCard: {
-    readonly cardType: string;
-    readonly cardNumber: string;
-    readonly transactionId: string;
-  } | null;
 }
 
 export interface SaleRulesCheckInput {
@@ -49,9 +44,3 @@ export interface SaleRulesCheckResult {
 }
 
 export type SaleRulesEvaluator = (input: SaleRulesCheckInput) => SaleRulesCheckResult;
-
-/** Masks a social-card number to its last 4 characters (PII: full number is never persisted). */
-export function maskSocialCardNumber(raw: string): string {
-  const t = raw.trim();
-  return `****${t.slice(-4)}`;
-}

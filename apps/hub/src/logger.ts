@@ -1,20 +1,7 @@
 import { DEFAULT_LOG_REDACT_PATHS, createRotatingFileLogStream } from '@mezon/drivers/node';
 import pino, { type DestinationStream, type LevelWithSilent, type Logger } from 'pino';
 
-/** T3.2: social-card numbers (PII) are never written to logs at any nesting depth we log. */
-export const SOCIAL_CARD_REDACT_PATHS: readonly string[] = [
-  'socialCard.cardNumber',
-  '*.socialCard.cardNumber',
-  '*.*.socialCard.cardNumber',
-  '*.*.*.socialCard.cardNumber',
-  '*.cardNumber',
-  '*.*.cardNumber',
-];
-
-export const HUB_LOGGER_REDACT_PATHS: readonly string[] = [
-  ...DEFAULT_LOG_REDACT_PATHS,
-  ...SOCIAL_CARD_REDACT_PATHS,
-];
+export const HUB_LOGGER_REDACT_PATHS: readonly string[] = DEFAULT_LOG_REDACT_PATHS;
 
 const REDACTED_LOG_QUERY_KEYS = new Set<string>([
   'q',

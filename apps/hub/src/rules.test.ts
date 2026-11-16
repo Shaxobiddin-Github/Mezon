@@ -69,9 +69,7 @@ function wirePayload(version: number, over: Record<string, unknown> = {}) {
     validUntilMs: (NOW + 30n * DAY).toString(),
     sourceRefs: ['SINTETIK-TEST'],
     cashForbidden: { exact: ['99900000000000001'], prefixes: [] },
-    prescriptionRequired: { exact: [], prefixes: [] },
     perMxikCashLimit: null,
-    socialCard: { enabled: true },
     expiredGoods: { enabled: true },
     ...over,
   };
@@ -455,11 +453,10 @@ describe('T3.2a final rules check in every sale path', () => {
     }
   });
 
-  it('expired batch blocks the sale with FULL rollback; the next sale is healthy', async () => {
+  it('expired batch only WARNS (owner S7): the sale completes and stock is deducted', async () => {
     const env = await boot(3206, []);
     try {
       const pid = await product(env, { unlimited: false, trackBatches: true });
-      const fresh = await product(env);
       const inbound = await env.hub.app.inject({
         method: 'POST',
         url: '/stock/moves/in',
@@ -475,15 +472,7 @@ describe('T3.2a final rules check in every sale path', () => {
       });
       expect(inbound.statusCode, inbound.body).toBe(201);
       await openShift(env);
-      const before = {
-        sales: count(env, 'SELECT COUNT(*) AS n FROM sales'),
-        moves: count(env, 'SELECT COUNT(*) AS n FROM stock_moves'),
-        outboxFacts: count(
-          env,
-          "SELECT COUNT(*) AS n FROM local_outbox WHERE entity IN ('sales','sale_lines','payments','stock_moves')",
-        ),
-        receipt: count(env, 'SELECT last_receipt_seq AS n FROM local_device_state'),
-      };
+      setFiscalMode(env, false);
       const cartId = await cartWith(env, pid);
       const res = await env.hub.app.inject({
         method: 'POST',
@@ -495,25 +484,175 @@ describe('T3.2a final rules check in every sale path', () => {
           payments: [{ method: 'card', amount: '100000' }],
         },
       });
-      expect(res.statusCode).toBe(422);
-      expect(res.body).toContain('EXPIRED_GOODS');
-      expect(count(env, 'SELECT COUNT(*) AS n FROM sales')).toBe(before.sales);
-      expect(count(env, 'SELECT COUNT(*) AS n FROM stock_moves')).toBe(before.moves);
-      expect(count(env, 'SELECT last_receipt_seq AS n FROM local_device_state')).toBe(
-        before.receipt,
-      );
-      // no sale/stock/payment facts reached the outbox
+      expect(res.statusCode, res.body).toBe(200);
+      expect(count(env, 'SELECT COUNT(*) AS n FROM sales')).toBe(1n);
       expect(
         count(
           env,
-          "SELECT COUNT(*) AS n FROM local_outbox WHERE entity IN ('sales','sale_lines','payments','stock_moves')",
+          "SELECT COUNT(*) AS n FROM stock_moves WHERE reason = 'sale' AND batch_id IS NOT NULL",
+        ),
+      ).toBe(1n);
+    } finally {
+      await env.hub.close();
+    }
+  });
+
+  it('cash ban: preview and final return the same code, a direct API call gets 422 with FULL rollback, cashless passes', async () => {
+    const key = makeKey('test-k1');
+    const env = await boot(3207, [key.trusted]);
+    try {
+      expect((await importPkg(env, signEnvelope(wirePayload(1), key))).statusCode).toBe(200);
+      const banned = await product(env, {
+        mxik: '99900000000000001',
+        unlimited: false,
+        trackBatches: true,
+      });
+      await env.hub.app.inject({
+        method: 'POST',
+        url: '/stock/moves/in',
+        headers: hdr(env.owner),
+        payload: {
+          productId: banned,
+          reason: 'purchase',
+          qty: '5000',
+          totalCostValue: '250000',
+          batchNumber: 'B-1',
+        },
+      });
+      await openShift(env);
+      const cartId = await cartWith(env, banned);
+      const cashPayments = [{ method: 'cash', tenderedAmount: '100000' }];
+      const check = RulesCheckResponseSchema.parse(
+        (
+          await env.hub.app.inject({
+            method: 'POST',
+            url: `/carts/${cartId}/rules-check`,
+            headers: hdr(env.cashier),
+            payload: { payments: cashPayments },
+          })
+        ).json(),
+      );
+      expect(check.block.map((b) => b.code)).toEqual(['CASH_FORBIDDEN_MXIK']);
+
+      const before = {
+        sales: count(env, 'SELECT COUNT(*) AS n FROM sales'),
+        moves: count(env, 'SELECT COUNT(*) AS n FROM stock_moves'),
+        cash: count(env, 'SELECT COUNT(*) AS n FROM cash_moves'),
+        outboxFacts: count(
+          env,
+          "SELECT COUNT(*) AS n FROM local_outbox WHERE entity IN ('sales','sale_lines','payments','stock_moves','cash_moves')",
+        ),
+        receipt: count(env, 'SELECT last_receipt_seq AS n FROM local_device_state'),
+      };
+      const direct = await env.hub.app.inject({
+        method: 'POST',
+        url: `/carts/${cartId}/complete`,
+        headers: hdr(env.cashier),
+        payload: { clientRequestId: env.n(), expectedTotal: '100000', payments: cashPayments },
+      });
+      expect(direct.statusCode).toBe(422);
+      expect(errCode(direct)).toBe('RULES_BLOCKED');
+      const details = ApiErrorEnvelopeSchema.parse(direct.json()).error.details as {
+        block: { code: string }[];
+      };
+      expect(details.block.map((b) => b.code)).toEqual(check.block.map((b) => b.code));
+      expect(count(env, 'SELECT COUNT(*) AS n FROM sales')).toBe(before.sales);
+      expect(count(env, 'SELECT COUNT(*) AS n FROM stock_moves')).toBe(before.moves);
+      expect(count(env, 'SELECT COUNT(*) AS n FROM cash_moves')).toBe(before.cash);
+      expect(count(env, 'SELECT last_receipt_seq AS n FROM local_device_state')).toBe(
+        before.receipt,
+      );
+      expect(
+        count(
+          env,
+          "SELECT COUNT(*) AS n FROM local_outbox WHERE entity IN ('sales','sale_lines','payments','stock_moves','cash_moves')",
         ),
       ).toBe(before.outboxFacts);
 
-      const okCart = await cartWith(env, fresh);
+      const card = await env.hub.app.inject({
+        method: 'POST',
+        url: `/carts/${cartId}/complete`,
+        headers: hdr(env.cashier),
+        payload: {
+          clientRequestId: env.n(),
+          expectedTotal: '100000',
+          payments: [{ method: 'card', amount: '100000' }],
+        },
+      });
+      expect(card.statusCode, card.body).toBe(200);
+    } finally {
+      await env.hub.close();
+    }
+  });
+
+  it('per-MXIK cash limit from the signed package blocks cart complete AND order deliver; card passes', async () => {
+    const key = makeKey('test-k1');
+    const env = await boot(3209, [key.trusted]);
+    try {
+      const limited = wirePayload(1, {
+        cashForbidden: { exact: [], prefixes: [] },
+        perMxikCashLimit: {
+          limitTiyin: '99999', // synthetic: just below the 100000-tiyin product
+          appliesTo: 'mxikTotal',
+          inclusive: true,
+          exempt: { exact: [], prefixes: [] },
+        },
+      });
+      expect((await importPkg(env, signEnvelope(limited, key))).statusCode).toBe(200);
+      const pid = await product(env);
+      await openShift(env);
+      const cartId = await cartWith(env, pid);
+      const blocked = await env.hub.app.inject({
+        method: 'POST',
+        url: `/carts/${cartId}/complete`,
+        headers: hdr(env.cashier),
+        payload: {
+          clientRequestId: env.n(),
+          expectedTotal: '100000',
+          payments: [{ method: 'cash', tenderedAmount: '100000' }],
+        },
+      });
+      expect(blocked.statusCode).toBe(422);
+      expect(blocked.body).toContain('MXIK_CASH_LIMIT');
+
+      const order = OrderActionResponseSchema.parse(
+        (
+          await env.hub.app.inject({
+            method: 'POST',
+            url: '/orders',
+            headers: hdr(env.cashier),
+            payload: {
+              clientRequestId: env.n(),
+              customerName: 'Mijoz',
+              lines: [{ kind: 'catalog', productId: pid, qty: '1000' }],
+            },
+          })
+        ).json(),
+      ).order;
+      for (const step of ['confirm', 'ready']) {
+        await env.hub.app.inject({
+          method: 'POST',
+          url: `/orders/${order.id}/${step}`,
+          headers: hdr(env.cashier),
+          payload: { clientRequestId: env.n() },
+        });
+      }
+      const deliver = await env.hub.app.inject({
+        method: 'POST',
+        url: `/orders/${order.id}/deliver`,
+        headers: hdr(env.cashier),
+        payload: {
+          clientRequestId: env.n(),
+          expectedTotal: '100000',
+          payments: [{ method: 'cash', tenderedAmount: '100000' }],
+        },
+      });
+      expect(deliver.statusCode).toBe(422);
+      expect(deliver.body).toContain('MXIK_CASH_LIMIT');
+
       const ok = await env.hub.app.inject({
         method: 'POST',
-        url: `/carts/${okCart}/complete`,
+        url: `/carts/${cartId}/complete`,
         headers: hdr(env.cashier),
         payload: {
           clientRequestId: env.n(),
@@ -522,63 +661,6 @@ describe('T3.2a final rules check in every sale path', () => {
         },
       });
       expect(ok.statusCode, ok.body).toBe(200);
-    } finally {
-      await env.hub.close();
-    }
-  });
-
-  it('preview and final use the same evaluate: social card without data → same code; a direct API call (bypassing UI) gets 422; complete data is stored MASKED', async () => {
-    const env = await boot(3207, []);
-    try {
-      const pid = await product(env);
-      await openShift(env);
-      const cartId = await cartWith(env, pid);
-      const badPayments = [{ method: 'social_card', amount: '100000' }];
-      const check = RulesCheckResponseSchema.parse(
-        (
-          await env.hub.app.inject({
-            method: 'POST',
-            url: `/carts/${cartId}/rules-check`,
-            headers: hdr(env.cashier),
-            payload: { payments: badPayments },
-          })
-        ).json(),
-      );
-      expect(check.block.map((b) => b.code)).toEqual(['SOCIAL_CARD_DATA_REQUIRED']);
-      const direct = await env.hub.app.inject({
-        method: 'POST',
-        url: `/carts/${cartId}/complete`,
-        headers: hdr(env.cashier),
-        payload: { clientRequestId: env.n(), expectedTotal: '100000', payments: badPayments },
-      });
-      expect(direct.statusCode).toBe(422);
-      const details = ApiErrorEnvelopeSchema.parse(direct.json()).error.details as {
-        block: { code: string }[];
-      };
-      expect(details.block.map((b) => b.code)).toEqual(check.block.map((b) => b.code));
-
-      const card = { cardType: 'IJT-TEST', cardNumber: '8600123412345678', transactionId: 'TX-77' };
-      const ok = await env.hub.app.inject({
-        method: 'POST',
-        url: `/carts/${cartId}/complete`,
-        headers: hdr(env.cashier),
-        payload: {
-          clientRequestId: env.n(),
-          expectedTotal: '100000',
-          payments: [{ method: 'social_card', amount: '100000', socialCard: card }],
-        },
-      });
-      expect(ok.statusCode, ok.body).toBe(200);
-      expect(ok.body).not.toContain('8600123412345678');
-      const meta = env.hub.connection.sqlite
-        .prepare("SELECT provider_meta_json AS m FROM payments WHERE method = 'social_card'")
-        .get() as { m: string };
-      expect(meta.m).toContain('****5678');
-      expect(meta.m).not.toContain('86001234');
-      const dump = JSON.stringify(
-        env.hub.connection.sqlite.prepare('SELECT payload FROM local_outbox').all(),
-      );
-      expect(dump).not.toContain('8600123412345678');
     } finally {
       await env.hub.close();
     }

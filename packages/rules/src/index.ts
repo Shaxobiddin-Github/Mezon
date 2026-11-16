@@ -22,5 +22,5 @@ export {
   verifyRulesPackage,
   resolveRulesPackageState,
 } from './verify.js';
-export { SOCIAL_CARD_LIMITS, isSocialCardComplete, evaluate } from './evaluate.js';
+export { matchesMxikList, evaluate } from './evaluate.js';
 export { PRODUCTION_TRUSTED_RULE_KEYS } from './trusted-keys.js';

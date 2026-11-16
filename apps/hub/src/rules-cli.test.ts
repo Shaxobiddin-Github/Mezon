@@ -36,9 +36,7 @@ const PAYLOAD = {
   validUntilMs: (NOW + DAY).toString(),
   sourceRefs: ['SINTETIK-TEST'],
   cashForbidden: { exact: [], prefixes: [] },
-  prescriptionRequired: { exact: [], prefixes: [] },
   perMxikCashLimit: null,
-  socialCard: { enabled: true },
   expiredGoods: { enabled: true },
 };
 

@@ -257,8 +257,6 @@ export {
   CashSalePaymentInputSchema,
   type CashSalePaymentInputDto,
   NonCashSalePaymentInputSchema,
-  SocialCardInputSchema,
-  type SocialCardInputDto,
   type NonCashSalePaymentInputDto,
   SalePaymentInputSchema,
   type SalePaymentInputDto,
