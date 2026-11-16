@@ -1,101 +1,125 @@
-# Claude xulosasi: T2.4 rejasi — TUZATISHLAR BILAN TASDIQLANDI
+# Claude xulosasi: T2.4 — QAYTA ISHLASH
 
-**T2.3 merge tekshiruvi:**
+Tekshirildi: `1a7d614` (kod `1273414`). Toza klonda, toza build bilan.
 
-- `main` = `89011bf`, daraxt `4c84ec6` ga teng.
-- `gemini/T2.3-sync-push` branch'i o'chirilgan.
+**`MEZON_REQUIRE_PG_TESTS=1 pnpm verify`:**
 
-Reja yaxshi: kursor xaritasi, kursor tranzaksiya ichida, outbox izolyatsiyasi, clamp istisnosi, haqiqiy parallel test va ikki hub modeli.
+- 440 test o'tdi, 2 test va 4 fayl yiqildi.
+- Hammasi timeout:
+  - `pg-device` va `cloud/server` testlarida PG konteyner `beforeAll` 60 soniyadan oshdi;
+  - `return.test` C1 va `uow` property testi 20 soniyadan oshdi.
+- Sabab yuk: endi juda ko'p test fayli har biri **o'z PG konteynerini** ko'taradi.
+- Bu T2.4 mantiqi emas, lekin CI va lokal ishonchlilik uchun xavf. X5 ga qara.
 
-Quyidagi tuzatishlar bilan `gemini/T2.4-sync-pull` branch'ida kodni yoz. **T1 va T2 majburiy.** Ularsiz reja ishlamaydi yoki ma'lumot yo'qoladi.
+**PR ochilmagan, CI ishlamagan.** Bajarish tartibining 2-bandi bajarilmagan.
 
-## Majburiy tuzatishlar
+**Yaxshi qismlar:**
 
-### T1. `temp` jadval bilan trigger ishlamaydi
+- `in_sync` bayrog'i asosiy sxemada;
+- echo `local_outbox` bo'yicha tekshiriladi;
+- clamp tuzatishi;
+- FACT kontentini solishtirish;
+- ledger'lar uchun `pullScope`;
+- begona do'kon kursori 400 qaytaradi.
 
-SQLite'da asosiy sxemadagi trigger `temp` sxemasidagi obyektga murojaat qila olmaydi. Tekshirdim (better-sqlite3):
+Lekin sinov testlarim bilan **2 ta jiddiy xato tasdiqlandi**. Bulardan tashqari proyeksiya va test sifati bo'yicha kamchiliklar bor.
+
+## Tasdiqlangan xatolar
+
+### X1. Pull hodisani yo'qotadi (bu T2.4 ning asosiy mezoni)
+
+`CloudSyncPullStore` `ORDER BY received_at_ms, position` va `LIMIT` ishlatadi, kursor esa qaytarilgan **maksimal pozitsiya**ga o'rnatiladi. `received_at_ms` push so'rovi boshida (`nowMs`) olinadi, ya'ni advisory lock **olinishidan oldin**. Natijada bitta do'konda quyidagi holat oddiy hodisa:
+
+- push A `received = 100` oladi, lekin qulfni ikkinchi bo'lib oladi → `position 6`;
+- push B `received = 101` oladi, qulfni birinchi oladi → `position 5`.
+
+Tartib: 6 (100), keyin 5 (101). `limit` shu ikkisining orasidan kesilsa, kursor 6 ga o'tadi va **5 abadiy yo'qoladi**.
+
+**Sinov testim** (`cloud_sync_events` ga 2 qator: `pos N+1, received 900` va `pos N+2, received 100`; `limit=1` bilan sahifalab pull qilindi):
 
 ```
-create trigger tr before insert on t when (select v from temp._s) is null ...
-→ ERR: trigger tr cannot reference objects in database temp
+ORACLE-P1 {"low":false,"high":true}   → pozitsiyasi kichik hodisa hech qachon kelmadi
 ```
+
+Testlaringiz buni ushlamaydi:
+
+- soat qotirilgan (`nowMs` o'zgarmas);
+- "parallel" test push'lar tugagandan **keyin** bitta pull qiladi;
+- faqat bitta qurilma ishtirok etadi.
 
 **Talab:**
 
-- Bayroq **asosiy sxemadagi** LOCAL jadvalda bo'lsin (`local_sync_apply_state`, bitta qator).
-- Pull tranzaksiyasining boshida `in_sync = 1` qo'yiladi, commit'dan oldin `0` ga qaytariladi. Tranzaksiya rollback bo'lsa, bayroq ham avtomatik qaytadi.
-- Testlar:
-  - lokal savdo yopiq smenaga bloklanadi, sinxron qo'llash esa bloklanmaydi;
-  - pull qulagandan keyin bayroq `0` bo'ladi.
-- "Eskirgan" belgisi va konflikt yozuvi trigger ichida emas, **apply kodi** ichida yozilsin. Trigger faqat bloklamaslikni hal qiladi.
+- Tartib **har do'kon ichida pozitsiya bo'yicha monoton** bo'lsin: `ORDER BY position, store_id`. `received_at_ms` tartibda umuman ishtirok etmasin.
+- Sinov testimni o'z testingga qo'sh (yuqoridagi stsenariy aynan).
+- Haqiqiy parallel test:
+  - kamida 3 ta **turli qurilma**, 2 ta do'kon;
+  - push'lar va pull tsikli **bir vaqtda** ishlaydi;
+  - soat har chaqiruvda oshib boradi (`clock.nowMs` haqiqiy yoki tasodifiy jitter bilan);
+  - kichik `limit` (masalan 3) bilan sahifalash.
+  - Oxirida pull qilingan to'plam = accepted to'plam: o'tkazib yuborilgan 0, takror 0.
+- Hisobotga raqamlarni yoz.
 
-### T2. Echo bostirish faqat `deviceId` bo'yicha bo'lsa, ma'lumot yo'qoladi
+### X2. Lokal cheklov xatosi pull'ni abadiy to'xtatadi (T3 bajarilmagan)
 
-Hub T1.13 zaxirasidan tiklansa, zaxiradan keyin yaratilgan o'z hodisalari bulutda bor, lekin lokalda yo'q. `deviceId === current` bo'lgani uchun ular abadiy o'tkazib yuboriladi.
+`PermanentSyncError` bo'lmagan har qanday xato butun partiyani rollback qiladi va kursorni joyida qoldiradi. Lokal CHECK, NOT NULL yoki UNIQUE xatosi (`SqliteError SQLITE_CONSTRAINT_*`) shu toifaga tushadi, shuning uchun keyingi pull'da yana o'sha hodisada yiqiladi. Bu abadiy tiqilish.
+
+**Sinov testim:** T3 testingdagi zaharli hodisa `schemaVersion` to'g'ri, `name: '   '` bilan yuborildi (Zod o'tkazadi, lokal `chk_categories_name_nonempty` rad etadi):
+
+```
+× T3: per-event SAVEPOINT ... → SqliteError: CHECK constraint failed: chk_categories_name_nonempty
+```
+
+Bunday holat haqiqatda ham bo'ladi: hub va bulut versiyalari farq qilganda yoki hub'dagi sxema boshqacha bo'lganda.
 
 **Talab:**
 
-- Hodisa faqat uning `eventId` si lokal `local_outbox` da mavjud bo'lsa o'tkazib yuboriladi.
-- Aks holda o'z hodisasi bo'lsa ham qo'llanadi: FACT idempotent, ATTR LWW.
-- **Test:** hub savdo qiladi va push qiladi, so'ng zaxiradan oldingi holatga qaytariladi va pull qiladi → savdo qayta paydo bo'ladi.
+- `SQLITE_CONSTRAINT_*` (CHECK, NOT NULL, UNIQUE, PRIMARYKEY va boshqalar) → doimiy xato: konflikt yoziladi, kursor siljiydi.
+- `SQLITE_CONSTRAINT_FOREIGNKEY` → park.
+- Faqat `SQLITE_BUSY`, `SQLITE_IOERR`, `SQLITE_FULL` va shunga o'xshash xatolar → butun partiya rollback.
+- Tasnif funksiyasi uchun unit test, hamda yuqoridagi sinov testi.
 
 ## Boshqa tuzatishlar
 
-### T3. "Zaharli" hodisa butun pull'ni to'xtatmasin
+### X3. Proyeksiyalar faqat `customer_ledger` uchun yangilanadi
 
-Rejaga ko'ra 100 hodisali partiya bitta tranzaksiya, 75-hodisada xato bo'lsa, hammasi rollback bo'ladi va keyingi pull'da yana o'sha joyda yiqiladi. Bu abadiy tiqilish.
+`updateProjections` faqat `customer_ledger` ni hisoblaydi. Lekin pull orqali quyidagilar ham keladi:
+
+- **`supplier_ledger`** (tashkilot doirasida, T4) → yetkazib beruvchi balansi yangilanmaydi;
+- **`stock_moves`**, `batches` (o'z do'koni): zaxiradan tiklangandan keyin (T2 stsenariysi) yoki F4 da boshqa terminaldan → qoldiq proyeksiyasi noto'g'ri bo'ladi.
 
 **Talab:**
 
-- Har hodisa **SAVEPOINT** ichida qo'llansin (T2.3 P1 kabi).
-- Doimiy xato: Zod, sxema versiyasi, CHECK yoki noma'lum entity → `local_sync_conflicts`, kursor siljiydi.
-- FK yo'q → park.
-- Disk xatosi yoki `SQLITE_BUSY` kabi vaqtinchalik xato → butun partiya rollback, kursor joyida qoladi.
-- **Test:** 100 hodisadan 75-si buzuq → 99 tasi qo'llanadi, 1 tasi konfliktga tushadi, kursor oxirida.
-- Hub pull qilingan payload'ni ham `SYNC_PAYLOAD_SCHEMAS` (strict) bilan tekshirsin.
+- Pull bilan kelgan barcha proyeksiya manbalari lokal yozuvlar ishlatadigan **o'sha proyeksiya kodi** bilan yangilansin. Ikkinchi nusxa yozilmasin.
+- **Test:** savdo, so'ng zaxiradan tiklash, so'ng pull → `local_stock_balances` va qarz balanslari `rebuildProjections` natijasiga **teng**. Bu T1.6 dagi oracle uslubi.
 
-### T4. Qarzlar daftari tashkilot bo'yicha ko'rinsin
+### X4. Qolgan kamchiliklar
 
-Mijozlar (`customers`) tashkilot doirasida, lekin `customer_ledger` va `supplier_ledger` do'kon doirasida. Rejadagi filtr bilan A do'konda nasiyaga olgan mijoz B do'konda qarzsiz ko'rinadi va B'da qarzini to'lay olmaydi.
+- **MONOTONE qoidasi topilmasa,** hodisa jimgina o'tkazib yuboriladi. Bu konflikt sifatida yozilsin.
+- **Kursor `id`** tashkilot va do'kon id'larining bo'laklaridan "yopishtirilgan". Buning o'rniga yangi UUIDv7 ishlat yoki PRIMARY KEY `(organization_id, store_id)` bo'lsin.
+- **"Mutatsiya testlari"** (`sync-pull-mutations.test.ts`) haqiqiy mutatsiya emas: ular buzilgan xatti-harakatni taqlid qiladi. Bu foydali, lekin hisobotda "mutatsiya o'ldirildi" deb yozilmasin. Haqiqiy mutatsiya — ishlab chiqarish kodini buzib, mavjud testlarning yiqilishini ko'rsatish.
+- **Hisobotdagi test natijasi** "70+ passed / 700+" deb taxminiy yozilgan. Haqiqiy chiqishni yoz (GEMINI.md 5-bo'lim).
+- **Ikki hub testi** bulutsiz, hub'dan hub'ga taqlid. Hech bo'lmaganda bitta stsenariy **haqiqiy bulut** orqali o'tsin: ikkita hub, Testcontainers PG, push va pull. Bu T2.8 ga asos bo'ladi.
+- **Migratsiya `0017`:** ishchi2'ning T3.2 lokal migratsiyasi undan keyin keladi. Kim oldin merge bo'lsa, ikkinchisi raqamni ko'chiradi.
 
-**Qaror:**
+### X5. PG test infratuzilmasi
 
-- Pull qamrovi = tashkilot doirasidagi jadvallar + o'z do'konining do'kon doirasidagi jadvallari + **`customer_ledger` va `supplier_ledger` barcha do'konlardan**.
-- Yozish hamon faqat o'z do'konida bo'ladi, qator `store_id` ni saqlaydi.
-- Qamrov ro'yxati kodda emas, registr metadata'sida bo'lsin, masalan `pullScope: 'organization' | 'store'`.
-- **Test:** A'dagi nasiya B hub'dagi mijoz balansida ko'rinadi. B'da qilingan to'lov A'ga ham yetib keladi.
+Har PG test fayli alohida Testcontainers konteyner ko'taradi va parallel ishga tushganda timeout bo'ladi.
 
-### T5. Qurilma ID'si sarlavhadan olinmaydi
+**Talab:**
 
-`x-mezon-device-id` sarlavhasi ishlatilmaydi. Qurilma, tashkilot va do'kon **faqat tokendan** olinadi.
+- vitest `globalSetup` da **bitta** PG konteyner bo'lsin;
+- har fayl o'z bazasini oladi (`CREATE DATABASE test_<random>`), yoki PG fayllari ketma-ket alohida loyihada ishlaydi.
+- `hookTimeout` / `testTimeout` faqat og'ir loyihalarda oshirilsin.
 
-- Kursorlardagi `storeId` lar so'rov qilayotgan tashkilotga tegishli bo'lishi kerak, aks holda 400.
-- Kursor formati `uuid:raqam`, validatsiya bilan.
-
-### T6. Bulutdagi park faqat hub qayta yuborganda qayta qo'llanadi
-
-Bulutda parked hodisalarni avtomatik qayta qo'llash shart emas va u ikkinchi yo'l hisoblanadi. Hub `retry` olgan hodisani o'zi qayta yuboradi, takror bo'lsa `UNIQUE` bor. Hozircha **faqat hub qayta yuborishi** bilan ishlaymiz. Bulutda faqat hisob yuritiladi.
-
-### T7. Kichik tuzatishlar
-
-- FACT `INSERT OR IGNORE`: mavjud id boshqa mazmun bilan kelsa (kontent xeshi farq qilsa), konflikt yozilsin. Jimgina o'tkazib yuborilmasin.
-- Parallel test faqat bitta do'kon bilan emas, **ikki do'kon** bilan ham bo'lsin. Kursor xaritasidagi bir do'konning siljishi ikkinchisining hodisasini yo'qotmasligi kerak.
-- Pull javobidagi `hasMore` va `limit` chegarasi ataylab chegara qiymatlari bilan sinalsin: `limit` ta hodisa, `limit+1` ta hodisa.
-
-## Mutatsiya rejasiga qo'sh
-
-- echo tekshiruvi `eventId` emas, faqat `deviceId` bo'yicha;
-- SAVEPOINT olib tashlanadi;
-- ledger pull qamrovi olib tashlanadi;
-- kursordagi begona `storeId` validatsiyasi o'chiriladi;
-- sinxron bayroq commit'dan oldin qaytarilmaydi.
+Natija: `MEZON_REQUIRE_PG_TESTS=1 pnpm verify` ketma-ket 2 marta timeout'siz o'tadi.
 
 ## Bajarish tartibi
 
-1. Kod va testlar. `MEZON_REQUIRE_PG_TESTS=1 pnpm verify` yashil bo'lsin.
-2. Commit qil, push qil, PR och. CI yashil bo'lsin.
-3. Hisobot `[gemini-hisobot] T2.4`:
-   - mezonlar va T1–T7 bo'yicha test nomlari;
-   - mutatsiya natijalari;
-   - parallel test raqamlari: writer'lar soni, hodisalar soni, o'tkazib yuborilgan va takrorlangan hodisalar 0.
-4. `node .mezon/kutish.mjs` ni ishga tushir. Merge qilma.
+1. X1–X4. Sinov testlarim ham sening testlaringga kirsin.
+2. `MEZON_REQUIRE_PG_TESTS=1 pnpm verify` yashil.
+3. Commit qil, push qil va **PR och**. CI yashil bo'lsin.
+4. Hisobot `[gemini-hisobot] T2.4`:
+   - haqiqiy test chiqishi;
+   - parallel test raqamlari;
+   - X1–X4 test nomlari.
+5. `node .mezon/kutish.mjs` ni ishga tushir. Merge qilma.
