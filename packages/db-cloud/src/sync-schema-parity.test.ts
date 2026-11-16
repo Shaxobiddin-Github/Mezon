@@ -1,7 +1,12 @@
 import { MONOTONE_TRANSITION_RULES, SYNC_ENTITY_PAYLOAD_SCHEMAS } from '@mezon/sync';
 import { getTableConfig } from 'drizzle-orm/pg-core';
 import { describe, expect, it } from 'vitest';
-import { buildDrizzleForeignReferencesMap, cloudSchemaRegistry, snakeToCamel } from './index.js';
+import {
+  buildDrizzleForeignReferencesMap,
+  cloudSchemaRegistry,
+  extractPgErrorCode,
+  snakeToCamel,
+} from './index.js';
 
 describe('@mezon/db-cloud - Schema Registry, Foreign Keys & MONOTONE Parity (R2, R3, R7)', () => {
   it('R7: every synced table in cloudSchemaRegistry has a strict Zod payload schema with matching columns', () => {
@@ -96,5 +101,30 @@ describe('@mezon/db-cloud - Schema Registry, Foreign Keys & MONOTONE Parity (R2,
 
     expect(mappedFks).toBe(totalDrizzleFks);
     expect(mappedFks).toBeGreaterThanOrEqual(50);
+  });
+
+  it('F1: extractPgErrorCode accurately extracts SQLSTATE codes from both raw and DrizzleQueryError wrapped errors', () => {
+    // 1. Unwrapped raw error
+    const rawFkErr = { code: '23503', message: 'foreign key violation' };
+    expect(extractPgErrorCode(rawFkErr)).toBe('23503');
+
+    // 2. Wrapped in cause (DrizzleQueryError pattern)
+    const wrappedTransient = new Error('Query failed', {
+      cause: { code: '40P01', message: 'deadlock detected' },
+    });
+    expect(extractPgErrorCode(wrappedTransient)).toBe('40P01');
+
+    // 3. Doubly wrapped
+    const doubleWrapped = new Error('Outer', {
+      cause: new Error('Middle', {
+        cause: { code: '23514', message: 'check constraint violation' },
+      }),
+    });
+    expect(extractPgErrorCode(doubleWrapped)).toBe('23514');
+
+    // 4. Non-error or error without code
+    expect(extractPgErrorCode(null)).toBeUndefined();
+    expect(extractPgErrorCode(undefined)).toBeUndefined();
+    expect(extractPgErrorCode(new Error('Simple error without code'))).toBeUndefined();
   });
 });

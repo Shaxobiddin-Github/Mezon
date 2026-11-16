@@ -112,6 +112,7 @@ export {
   CloudSyncPushStore,
   type ForeignRefCheckResult,
   type MissingReferenceInfo,
+  extractPgErrorCode,
 } from './sync-push-store.js';
 
 export { isDockerAvailable, shouldRunPgTests } from './pg-test-helper.js';

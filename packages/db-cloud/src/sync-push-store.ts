@@ -8,7 +8,7 @@ import {
   validateSyncEntityPayload,
 } from '@mezon/sync';
 import { type UnixMs, type UuidV7 } from '@mezon/domain';
-import { and, eq, sql } from 'drizzle-orm';
+import { and, eq, inArray, sql } from 'drizzle-orm';
 import type { NodePgDatabase } from 'drizzle-orm/node-postgres';
 import type pg from 'pg';
 import type { QueryResult } from 'pg';
@@ -29,6 +29,27 @@ import {
 export interface MissingReferenceInfo {
   readonly targetEntity: string;
   readonly targetId: UuidV7;
+}
+
+/**
+ * Recursively extracts PostgreSQL SQLSTATE code from an error or wrapped DrizzleQueryError.
+ * In Drizzle ORM 0.45+, DatabaseError is wrapped in DrizzleQueryError (err.cause).
+ */
+export function extractPgErrorCode(err: unknown): string | undefined {
+  let curr: unknown = err;
+  let depth = 0;
+  while (curr && typeof curr === 'object' && depth < 10) {
+    if ('code' in curr && typeof (curr as { code: unknown }).code === 'string') {
+      return (curr as { code: string }).code;
+    }
+    if ('cause' in curr && (curr as { cause: unknown }).cause) {
+      curr = (curr as { cause: unknown }).cause;
+      depth++;
+    } else {
+      break;
+    }
+  }
+  return undefined;
 }
 
 export type ForeignRefCheckResult =
@@ -81,33 +102,37 @@ export class CloudSyncPushStore {
       let positionUpdated = false;
 
       const results: SyncEventResultDto[] = [];
+      const acceptedEventIds: UuidV7[] = [];
+
+      // 1. Batch deduplication: query already-accepted events in one query
+      const batchEventIds = params.events.map((e) => e.eventId);
+      const existingEvents =
+        batchEventIds.length > 0
+          ? await tx
+              .select({ id: cloudSyncEvents.id })
+              .from(cloudSyncEvents)
+              .where(
+                and(
+                  eq(cloudSyncEvents.organizationId, params.context.organizationId),
+                  inArray(cloudSyncEvents.id, batchEventIds),
+                ),
+              )
+          : [];
+      const duplicateEventIds = new Set(existingEvents.map((r) => r.id));
 
       for (const event of params.events) {
+        if (duplicateEventIds.has(event.eventId)) {
+          results.push({
+            eventId: event.eventId,
+            status: 'duplicate',
+          });
+          continue;
+        }
+
         // P1: Every event is wrapped in a SAVEPOINT
         await tx.execute(sql.raw('SAVEPOINT sp_event'));
 
         try {
-          // 1. Deduplication: check if already accepted
-          const existingEvent = await tx
-            .select({ id: cloudSyncEvents.id })
-            .from(cloudSyncEvents)
-            .where(
-              and(
-                eq(cloudSyncEvents.organizationId, params.context.organizationId),
-                eq(cloudSyncEvents.id, event.eventId),
-              ),
-            )
-            .limit(1);
-
-          if (existingEvent.length > 0) {
-            await tx.execute(sql.raw('RELEASE SAVEPOINT sp_event'));
-            results.push({
-              eventId: event.eventId,
-              status: 'duplicate',
-            });
-            continue;
-          }
-
           // 2. Tenant isolation check (envelope)
           if (event.organizationId !== params.context.organizationId) {
             await tx.execute(sql.raw('ROLLBACK TO SAVEPOINT sp_event'));
@@ -376,15 +401,8 @@ export class CloudSyncPushStore {
             createdAtMs: params.nowMs,
           });
 
-          // R5: Clean up / resolve from cloud_sync_parked
-          await tx
-            .delete(cloudSyncParked)
-            .where(
-              and(
-                eq(cloudSyncParked.organizationId, params.context.organizationId),
-                eq(cloudSyncParked.eventId, event.eventId),
-              ),
-            );
+          // R5: Clean up / resolve from cloud_sync_parked upon batch commit
+          acceptedEventIds.push(event.eventId);
 
           await tx.execute(sql.raw('RELEASE SAVEPOINT sp_event'));
 
@@ -397,8 +415,7 @@ export class CloudSyncPushStore {
           // P1: Savepoint rolls back; position is NOT incremented; good events proceed unaffected.
           await tx.execute(sql.raw('ROLLBACK TO SAVEPOINT sp_event'));
 
-          const pgCode =
-            err && typeof err === 'object' && 'code' in err ? String(err.code) : undefined;
+          const pgCode = extractPgErrorCode(err);
 
           // R3: SQLSTATE 23503 (foreign_key_violation) -> retry & park
           if (pgCode === '23503') {
@@ -448,6 +465,18 @@ export class CloudSyncPushStore {
             error: underlying,
           });
         }
+      }
+
+      // R5: Clean up / resolve accepted events from cloud_sync_parked in a single batch query
+      if (acceptedEventIds.length > 0) {
+        await tx
+          .delete(cloudSyncParked)
+          .where(
+            and(
+              eq(cloudSyncParked.organizationId, params.context.organizationId),
+              inArray(cloudSyncParked.eventId, acceptedEventIds),
+            ),
+          );
       }
 
       // Update store position record
@@ -734,34 +763,6 @@ export class CloudSyncPushStore {
     }
 
     if (tableMeta.tableClass === 'ATTR') {
-      const existing = await tx.execute(sql`
-        SELECT hlc, deleted_at_ms FROM ${sql.identifier(tableName)}
-        WHERE organization_id = ${organizationId} AND id = ${event.entityId}
-        LIMIT 1
-      `);
-
-      if (existing.rows.length > 0) {
-        const rawHlc = existing.rows[0]?.hlc;
-        const currentHlc = typeof rawHlc === 'string' ? rawHlc : '';
-        // LWW: only apply if incoming HLC is strictly greater than current HLC
-        if (effectiveHlc > currentHlc) {
-          const keys = Object.keys(payload).filter(
-            (k) => k !== 'id' && k !== 'organizationId' && k !== 'hlc' && k !== 'updatedAtMs',
-          );
-          const setClauses = keys.map(
-            (k) => sql`${sql.identifier(camelToSnake(k))} = ${payload[k]}`,
-          );
-
-          await tx.execute(sql`
-            UPDATE ${sql.identifier(tableName)}
-            SET ${sql.join([...setClauses, sql`hlc = ${effectiveHlc}`, sql`updated_at_ms = ${nowMs}`], sql`, `)}
-            WHERE organization_id = ${organizationId} AND id = ${event.entityId}
-          `);
-        }
-        return;
-      }
-
-      // Does not exist -> INSERT (R4: effectiveHlc enforced)
       const keys = Object.keys(payload).filter((k) => k !== 'hlc');
       const cols = keys.map((k) => sql.identifier(camelToSnake(k)));
       const vals = keys.map((k) => payload[k]);
@@ -769,12 +770,25 @@ export class CloudSyncPushStore {
       cols.push(sql.identifier('hlc'));
       vals.push(effectiveHlc);
 
+      const updateKeys = keys.filter(
+        (k) => k !== 'id' && k !== 'organizationId' && k !== 'createdAtMs' && k !== 'updatedAtMs',
+      );
+      const updateClauses = updateKeys.map(
+        (k) =>
+          sql`${sql.identifier(camelToSnake(k))} = EXCLUDED.${sql.identifier(camelToSnake(k))}`,
+      );
+      updateClauses.push(sql`hlc = EXCLUDED.hlc`);
+      updateClauses.push(sql`updated_at_ms = ${nowMs}`);
+
       await tx.execute(sql`
         INSERT INTO ${sql.identifier(tableName)} (${sql.join(cols, sql`, `)})
         VALUES (${sql.join(
           vals.map((v) => sql`${v}`),
           sql`, `,
         )})
+        ON CONFLICT (id) DO UPDATE
+        SET ${sql.join(updateClauses, sql`, `)}
+        WHERE EXCLUDED.hlc > ${sql.identifier(tableName)}.hlc
       `);
       return;
     }

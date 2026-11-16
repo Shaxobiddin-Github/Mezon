@@ -21,6 +21,7 @@ import {
 } from '@mezon/domain';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { SafeStoragePort } from './safe-storage-port.js';
+import { createHubServer } from './server.js';
 import { HubSyncPushWorker } from './sync-push-worker.js';
 
 class MockSafeStorage implements SafeStoragePort {
@@ -361,5 +362,21 @@ describe('HubSyncPushWorker', () => {
     const r3 = await worker.pushBatch();
     expect(r3.status).toBe('backoff');
     expect(worker.getCurrentBackoffMs()).toBe(4000);
+  });
+
+  it('F2: server listen() starts push worker (isRunning === true) and close() stops it (isRunning === false)', async () => {
+    const hub = await createHubServer({
+      dbPath,
+      port: 0,
+      logLevel: 'silent',
+    });
+
+    expect(hub.pushWorker.isRunning()).toBe(false);
+
+    await hub.listen();
+    expect(hub.pushWorker.isRunning()).toBe(true);
+
+    await hub.close();
+    expect(hub.pushWorker.isRunning()).toBe(false);
   });
 });
