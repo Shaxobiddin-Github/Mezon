@@ -1,182 +1,249 @@
-## Hisobot: T2.2
-Branch / PR: gemini/T2.2-device-pairing
-Commits:
-- `c1e56e2`: T2.1 qarzi: migratsiya alohida konteynerda
-- `a76a062`: T2.2: Qurilma juftlash, token rotatsiyasi va xavfsizlik
+# Reja: T2.3 — Sinxron Push Yadrosi (Outbox Push Engine)
 
-### Nima qilindi
-1. **T2.1 xavfsizlik qarzi to'liq bartaraf etildi (Commit 1: `c1e56e2`):**
-   - `deploy/docker-compose.yml` da `migrate` bir martalik konteyneri ajratildi (`command: pnpm --filter @mezon/cloud db:migrate`), `DATABASE_ADMIN_URL` faqat shunga berildi (`restart: "no"`).
-   - `cloud` servisi `depends_on: migrate: condition: service_completed_successfully` orqali ishga tushadi, uning environment'ida `DATABASE_ADMIN_URL` butunlay olib tashlandi, runtime faqat kam huquqli `DATABASE_URL` (`mezon_app`) bilan ishlaydi.
-   - `apps/cloud/src/index.ts` dagi auto-migration chaqiruvi butunlay o'chirildi. Alohida `pnpm --filter @mezon/cloud db:migrate` CLI buyrug'i (`apps/cloud/src/cli/migrate.ts`) yaratildi.
-   - `apps/cloud/src/deploy.test.ts` da `DATABASE_ADMIN_URL`ning cloud runtime muhitiga sizmasligi va `migrate` servisining mustaqil izolyatsiyasi tekshirildi (2/2 test o'tdi).
-
-2. **D1: Pre-Auth Lookup, Atomik Concurrency Guard & Rate Limiting:**
-   - PostgreSQL 18 da `cloud_device_pairing_codes` jadvali uchun `auth_lookup_pairing_code` `SECURITY DEFINER` funksiyasi yaratildi (`mezon_auth_owner` egaligida, `mezon_app` ga EXECUTE huquqi berilgan, to'g'ridan-to'g'ri `cloud_device_pairing_codes` SELECT huquqi `mezon_app`dan olib tashlangan).
-   - Kod generatsiyasi: `[2-9A-HJ-NP-Z]{8}` (chalkash 0, O, 1, I, L chetlatilgan), faqat SHA-256 xeshi saqlanadi.
-   - Concurrency race guard: `UPDATE cloud_device_pairing_codes SET used_at_ms = $1, updated_at_ms = $1 WHERE id = $2 AND used_at_ms IS NULL RETURNING id`. Bir vaqtning o'zida bir nechta so'rov kelsa, faqat bittasi yutadi, qolganlari `409 PAIRING_ALREADY_USED` bilan rad etiladi.
-   - IP bo'yicha rate-limiting (`max 20 req/min`) pre-auth juftlash marshruti uchun joriy etildi.
-
-3. **D2: Token Rotatsiyasi, Grace Period & Security Wipe:**
-   - Qurilma tokeni formati: `<orgId>.<deviceId>.<rawSecret>`. Bazada faqat SHA-256 `token_hash` saqlanadi. Tokenning amal qilish muddati 90 kun.
-   - Rotatsiya vaqti: `grace_until_ms = nowMs + 10 daqiqa`. 10 daqiqa ichida tarmoq uzilishi sababli eski token bilan qayta urinish kelganda, `clientRequestId` bo'yicha idempotent ravishda yangi token qaytariladi.
-   - Security Wipe (Token Reuse Detection): Grace period tugagandan keyin eski token bilan so'rov kelsa yoki bekor qilingan token ishlatilsa, qurilma holati darhol `blocked` qilinadi, barcha tokenlari bekor qilinadi (`revoked_at_ms = nowMs`) va o'zgarishlar commit qilinib, `DEVICE_TOKEN_REUSE` (401) qaytariladi.
-
-4. **D3: Ma'lumot chegarasi va oflayn izolyatsiya:**
-   - `local_cloud_state` va `local_pin_credentials` jadvallari `tableClass: 'LOCAL'` bo'lib, sinxronizatsiyaga kirmaydi.
-   - `users` jadvali esa `ATTR` sinfiga mansub bo'lib, xodim ma'lumotlari sinxronlanadi.
-   - PIN xeshlari, parollar va lokal auth yozuvlari hech qachon bulutga yuborilmaydi (`capturedBody` testi orqali tekshirildi).
-
-5. **D4: safeStorage Porti va SQLite Fayl Baytlarini Tekshirish:**
-   - `SafeStoragePort` interfeysi va `AesGcmSafeStorageAdapter` amalga oshirildi.
-   - Desktop ilovasi (`apps/desktop/src/main.ts`) utilityProcess uchun IPC orqali Electron'ning nativ `safeStorage` tizimiga ulandi (`mezon:safe-storage-is-available`, `mezon:safe-storage-encrypt`, `mezon:safe-storage-decrypt`).
-   - SQLite disk fayli tekshiruvi: Hub serverida juftlash amalga oshirilgach, `wal_checkpoint(TRUNCATE)` chaqirilib, diskdagi `hub.db` xom baytlari binary tarzda o'qildi. Natijada `rawSecret` ham, to'liq `deviceToken` ham SQLite bazasida ochiq matn (plaintext) holida umuman mavjud emasligi tasdiqlandi (`expect(dbText).not.toContain(...)`).
-
-6. **D5: Hub Marshrutlari Nomlanishi:**
-   - Hub marshrutlarida `/api/v1` prefiksi yo'q: `GET /cloud/status`, `POST /cloud/pair`, `POST /cloud/unpair` (Hub'dagi `/setup`, `/auth/login`, `/users` bilan bir xil).
-   - Bulut marshrutlari esa `/api/v1/...` standartida: `POST /api/v1/devices/pairing-codes`, `POST /api/v1/devices/pair`, `POST /api/v1/devices/rotate-token`, `GET /api/v1/devices/me`, `POST /api/v1/devices/:id/revoke`.
+## 0. Kirish va T2.2 yakuni
+- **T2.2 xulosasi:** Claude tomonidan `QABUL` qilindi (kod `a76a062`).
+- **Qarzlar:** T2.2 qarz commit'ida (`8eb5ecd`) bartaraf etildi:
+  - Brute-force rate limiting testi qo'shildi (20 noto'g'ri urinish -> 21-chisi 429; mutatsiya testi bilan isbotlandi);
+  - Windows CI runner'ida Testcontainers testlarini `shouldRunPgTests()` orqali shartli skip qilish va Ubuntu `postgres-rls` job'ida esa skip'ni qat'iy taqiqlash yo'lga qo'yildi;
+  - Docker aniqlash keshlandi va timeout 10 soniyaga uzaytirildi.
+- **CI & Merge:** PR #22 ochildi, GitHub Actions'da barcha 5 ta CI job (`Verify ubuntu`, `Verify windows`, `PostgreSQL RLS`, `Desktop Installer`, `Detect Desktop Changes`) 100% yashil o'tdi va `12072ea1388631c7027e2f5a43c5a1f20f2ea6a1` commit'i bilan `main`ga squash and merge qilindi. `gemini/T2.2-device-pairing` branch'i o'chirildi va `gemini/T2.3-sync-push` branch'i ochildi.
 
 ---
 
-### O'zgargan fayllar (fayl — sabab)
-- `.dependency-cruiser.cjs` — `packages/db-cloud` ichida Node built-in `node:crypto` modulidan foydalanishga ruxsat qo'shildi (token SHA-256 xeshlash uchun).
-- `deploy/docker-compose.yml` — `migrate` bir martalik xizmati ajratildi, `cloud` servisi environment'idan `DATABASE_ADMIN_URL` butunlay olib tashlandi.
-- `apps/cloud/package.json` — `"db:migrate": "tsx src/cli/migrate.ts"` buyrug'i qo'shildi.
-- `apps/cloud/src/cli/migrate.ts` — alohida migratsiya CLI skripti.
-- `apps/cloud/src/deploy.test.ts` — T2.1 xavfsizlik qarzi: Docker compose va runtime role izolyatsiyasi testi.
-- `apps/cloud/src/index.ts` — `startCloudServer()` dan auto-migrate chaqiruvi olib tashlandi.
-- `apps/cloud/src/server.ts` — Qurilma juftlash, token rotatsiyasi va bekor qilish HTTP marshrutlari qo'shildi.
-- `apps/cloud/src/server.test.ts` — Device pairing va token xavfsizligi bo'yicha integratsiya testlari qo'shildi.
-- `packages/contracts/src/cloud-device.ts` & `.test.ts` — Qurilma juftlash, kodlar, token rotatsiyasi va status kontraktlari (Zod).
-- `packages/contracts/src/index.ts` — Yangi shartnomalar eksport qilindi.
-- `packages/domain/src/errors.ts` — T2.2 xato kodlari qo'shildi (`STORE_NOT_FOUND`, `DEVICE_NOT_FOUND`, `DEVICE_REVOKED`, `DEVICE_TOKEN_REUSE`, `PAIRING_CODE_NOT_FOUND`, `PAIRING_ALREADY_USED`, `NETWORK_ERROR`, `RATE_LIMITED` va b.).
-- `packages/db-cloud/src/schema/tables.ts` — `cloud_device_pairing_codes`, `cloud_devices`, `cloud_device_tokens` jadvallari qo'shildi.
-- `packages/db-cloud/drizzle/0002_device_pairing.sql` — PostgreSQL 18 migratsiyasi (jadvallar, indekslar, RLS siyosatlari, `auth_lookup_pairing_code` va `auth_lookup_device_owner` SECURITY DEFINER funksiyalari).
-- `packages/db-cloud/src/device-store.ts` — `CloudDeviceStore` (D1 pre-auth lookup, atomik race guard, D2 token rotatsiyasi, 10-daqiqalik grace period, security wipe).
-- `packages/db-cloud/src/pg-device.test.ts` — Testcontainers PostgreSQL testlari (pre-auth lookup, concurrency race, tenant izolyatsiyasi, token lifecycle, token reuse detection).
-- `packages/db-cloud/src/index.ts` & `src/index.test.ts` — Eksportlar va jadval sinflari tekshiruvi.
-- `packages/db-local/src/schema/index.ts` — `localCloudState` jadvali qo'shildi (`tableClass: 'LOCAL'`).
-- `packages/db-local/drizzle/0014_cloud_device_pairing.sql` — SQLite migratsiyasi.
-- `packages/db-local/src/cloud-repo.ts` — `SqliteCloudStore` repozitoriysi.
-- `packages/db-local/src/index.ts` & `src/index.test.ts` — Eksportlar va SQLite jadval sinflari tekshiruvi.
-- `apps/hub/src/safe-storage-port.ts` — `SafeStoragePort` interfeysi va `AesGcmSafeStorageAdapter`.
-- `apps/hub/src/cloud-service.ts` — `HubCloudService` (juftlash, shifrlash, status olish, uzish).
-- `apps/hub/src/cloud-routes.ts` — Hub tomonidagi `/cloud/status`, `/cloud/pair`, `/cloud/unpair` marshrutlari (D5: no `/api/v1`).
-- `apps/hub/src/cloud.test.ts` — D3 (non-sync izolyatsiya), D4 (safeStorage shifrlash va SQLite fayl baytlarida plaintext token yo'qligi), D5 (marshrut nomlari), uzish va xato holatlari testlari (5/5 o'tdi).
-- `apps/hub/src/error-handler.ts` — 502 Bad Gateway (`NETWORK_ERROR`) va 429 Rate Limited qo'llab-quvvatlandi.
-- `apps/hub/src/routes.ts` & `src/server.ts` — `HubCloudService` va `/cloud/*` marshrutlari integratsiya qilindi.
-- `apps/desktop/src/main.ts` — Electron `safeStorage` IPC handlerlari qo'shildi.
+## 1. T2.3 Me'moriy tuzilishi va maqsadi
 
----
+T2.3 vazifasining maqsadi — `GEMINI.md` 4-bo'limidagi sinxronizatsiya spetsifikatsiyasiga to'liq mos keladigan **Push dvigatelini** (Hub yuboruvchisi va Bulut qabul qiluvchisini) qurish.
 
-### Migratsiyalar
-- `packages/db-cloud/drizzle/0002_device_pairing.sql`:
-  - `cloud_device_pairing_codes` (id, organization_id, store_id, device_name, code_hash, attempts_left, expires_at_ms, used_at_ms, created_at_ms, updated_at_ms);
-  - `cloud_devices` (id, organization_id, store_id, device_id, name, platform, app_version, status, last_seen_at_ms, created_at_ms, updated_at_ms);
-  - `cloud_device_tokens` (id, organization_id, device_id, token_hash, client_request_id, expires_at_ms, revoked_at_ms, grace_until_ms, replaced_by_token_id, created_at_ms, updated_at_ms);
-  - RLS yoqildi, `mezon_auth_owner` va `mezon_app` huquqlari belgilandi;
-  - `auth_lookup_pairing_code` va `auth_lookup_device_owner` `SECURITY DEFINER` funksiyalari yaratildi.
-- `packages/db-local/drizzle/0014_cloud_device_pairing.sql`:
-  - `local_cloud_state` (`tableClass: 'LOCAL'`, `tenantScope: 'none'`, encrypted_device_token BLOB).
-
-`db:check` natijasi:
-- `@mezon/db-cloud`: 0 diff statements.
-- `@mezon/db-local`: 0 diff statements.
-
----
-
-### Qabul mezonlari
-- [x] T2.1 qarzi: `deploy/docker-compose.yml` da `migrate` bir martalik servis, `cloud` servisida `DATABASE_ADMIN_URL` yo'q — dalil: `apps/cloud/src/deploy.test.ts` (2 tests passed).
-- [x] D1: Pre-auth lookup `SECURITY DEFINER` orqali, `cloud_device_pairing_codes` ga to'g'ridan-to'g'ri SELECT yo'q — dalil: `packages/db-cloud/drizzle/0002_device_pairing.sql` va `packages/db-cloud/src/device-store.ts`.
-- [x] D1: Atomik single-use concurrency guard parallel urinishda poygani yengadi — dalil: `packages/db-cloud/src/device-store.ts` (`UPDATE ... WHERE used_at_ms IS NULL RETURNING id`).
-- [x] D2: Token rotatsiyasida 10 daqiqalik grace period, idempotent retry va muddati o'tgan tokenni qayta ishlatganda Security Wipe (qurilma bloklanishi va barcha tokenlar bekor qilinishi) — dalil: `packages/db-cloud/src/device-store.ts`.
-- [x] D3: `local_cloud_state` va `local_pin_credentials` LOCAL, sinxronlanmaydi; PIN va maxfiy ma'lumotlar bulutga chiqmaydi — dalil: `apps/hub/src/cloud.test.ts` (D3 testi va outgoing payload tekshiruvi).
-- [x] D4: safeStorage shifrlash, diskdagi SQLite bazasida token plaintext holida umuman saqlanmaydi — dalil: `apps/hub/src/cloud.test.ts` (D4: `expect(dbText).not.toContain(...)`).
-- [x] D5: Hub endpointlarida `/api/v1` yo'q (`/cloud/status`, `/cloud/pair`, `/cloud/unpair`), bulutda `/api/v1/...` — dalil: `apps/hub/src/cloud-routes.ts` va `apps/hub/src/cloud.test.ts`.
-
----
-
-### Test natijasi (buyruq va haqiqiy chiqish)
-1. `pnpm format:check`
-```
-Checking formatting...
-All matched files use Prettier code style!
-```
-
-2. `pnpm run lint`
-```
-$ node scripts/lint-workspaces.mjs
-✔ 0 problems (0 errors, 0 warnings) across all workspaces
-```
-
-3. `pnpm typecheck`
-```
-Tasks: 26 successful, 26 total
-Cached: 22 cached, 26 total
-Time: 11.438s
-```
-
-4. `pnpm --filter @mezon/db-cloud db:check; pnpm --filter @mezon/db-local db:check`
-```
-PostgreSQL schema matches committed migrations (0 diff statements).
-SQLite schema matches committed migrations (0 diff statements).
-```
-
-5. `pnpm run depcruise`
-```
-✔ no dependency violations found (404 modules, 1717 dependencies cruised)
-```
-
-6. `pnpm vitest run --project sqlite-hub apps/hub/src/cloud.test.ts`
-```
- ✓  sqlite-hub  apps/hub/src/cloud.test.ts (5 tests) 6211ms
-   ✓ @mezon/hub - Cloud Pairing, SafeStorage Encryption & Boundary Security (D3, D4, D5) (5)
-     ✓ D5: GET /cloud/status returns unpaired on fresh hub (no /api/v1 prefix) 1857ms
-     ✓ D4: pairs with cloud, encrypts deviceToken via safeStorage, and stores zero plaintext in SQLite bytes 1144ms
-     ✓ D3: verifies table classes and non-sync isolation 1021ms
-     ✓ unpairs hub and clears credentials cleanly 1270ms
-     ✓ handles network error, 404, 409, and 429 errors from cloud API cleanly 917ms
-
- Test Files  1 passed (1)
-      Tests  5 passed (5)
-```
-
-7. `pnpm vitest run --project sqlite-hub`
-```
- Test Files  28 passed (28)
-      Tests  133 passed (133)
-```
-
-8. `pnpm test:perf`
-```
- Test Files  9 passed (9)
-      Tests  12 passed (12)
-```
-
-9. `pnpm test:e2e:pos`
-```
-[PERF] Scan -> Cart Line DOM latency: 23.6 ms
-[PERF] 50 000 products UI + FTS5 search latency: 46.7 ms
-  ok 1 e2e\pos.spec.ts:161:3 › @mezon/pos Playwright E2E — Kassa UI (T1.11) › Full POS workflow...
-  1 passed (10.9s)
+```text
+Do'kon Hub'i (SQLite)                               Bulut (PostgreSQL 18 RLS)
+┌─────────────────────────┐                         ┌──────────────────────────────────────────────┐
+│  local_outbox (pending) │                         │  POST /api/v1/sync/push                      │
+│            │            │                         │    │                                         │
+│     [Push Worker]       │   POST /sync/push       │    ├─ 1. Bearer deviceToken (D4) & Status    │
+│    (deviceSeq order,    ├────────────────────────►│    ├─ 2. Deduplication: UNIQUE(org, event_id)│
+│     batch: max 100)     │   (JSON payload)        │    ├─ 3. Tenant & Store validation           │
+│            │            │                         │    ├─ 4. Schema reference check (FK)         │
+│            │            │                         │    ├─ 5. Single-writer rule (stock/batches)  │
+│            ▼            │                         │    ├─ 6. HLC Skew guard (MAX_SKEW 5 min)     │
+│  Response Handler:      │   JSON Response         │    ├─ 7. FACT/ATTR/MONOTONE application      │
+│  - accepted  -> acked   │◄────────────────────────┤    └─ 8. Gapless position (advisory lock)    │
+│  - duplicate -> acked   │   { results: [...] }    └──────────────────────────────────────────────┘
+│  - rejected  -> conflict│
+│  - retry     -> backoff │
+└─────────────────────────┘
 ```
 
 ---
 
-### Tekshirilmagan narsalar
-- Testcontainers PostgreSQL testlari (`packages/db-cloud/src/pg-device.test.ts`, `apps/cloud/src/server.test.ts`, `packages/db-cloud/src/pg-tenant.test.ts`): mahalliy muhitda Docker Desktop xizmati ishlamagani sababli (`Could not find a working container runtime strategy`) faqat real PostgreSQL talab qiluvchi testlar o'tkazilmadi. Drizzle sxemalari `db:check` (0 diff statements) bilan to'liq tasdiqlandi.
+## 2. a) Hub tomoni (Yuboruvchi - Push Worker)
+
+### 2.1. Paketlash va navbat (`local_outbox`)
+1. **Paketlash tartibi:** `local_outbox` jadvalidan `status = 'pending'` bo'lgan yozuvlar qat'iy ravishda `deviceSeq ASC` tartibida olinadi (`SELECT ... WHERE status = 'pending' ORDER BY device_seq ASC LIMIT ?`).
+2. **Paket hajmi chegarasi:**
+   - Maksimal hodisalar soni: **100 ta hodisa**.
+   - Maksimal paket hajmi: **1 MB** (agar 100 taga yetmasdan JSON hajmi 1 MB dan oshsa, paket shu joyda kesiladi).
+3. **Fon xizmati (`HubSyncPushWorker`):**
+   - Faqat hub bulut bilan juftlangan bo'lsa (`local_cloud_state.status === 'paired'`) ishlaydi.
+   - Interval: odatiy holatda har 3-5 soniyada yoki yangi outbox hodisasi qo'shilganda trigger orqali tezkor uyg'onadi.
+   - **Eksponensial backoff:** Tarmoq xatolarida (`NETWORK_ERROR`, 502, timeout, server unavailable) urinishlar oralig'i: `1s -> 2s -> 4s -> 8s -> ... -> max 60s`. Muvaffaqiyatli push'dan keyin backoff 0 ga qaytadi.
+
+### 2.2. Javoblarni qayta ishlash holatlari
+Bulutdan `POST /api/v1/sync/push` ga quyidagi formatdagi javob keladi:
+`{ results: Array<{ eventId: string, status: 'accepted' | 'duplicate' | 'rejected' | 'retry', reason?: string }> }`
+
+- **`accepted`:** Hodisa bulutda muvaffaqiyatli qo'llandi.
+  - Hub `local_outbox` jadvalida `status = 'acked'`, `pushed_at_ms = nowMs` deb belgilaydi.
+- **`duplicate`:** Hodisa oldinroq qabul qilingan (tarmoq uzilib qayta yuborilgan holat).
+  - Hub buni ham muvaffaqiyat deb hisoblaydi va `status = 'acked'` deb belgilaydi.
+- **`rejected`:** Doimiy xato (masalan, begona do'kon ID, buzilgan payload, mavjud bo'lmagan havola, yagona yozuvchi qoidasining buzilishi).
+  - **Navbatni to'smaslik qoidasi:** Xato hodisa hech qachon cheksiz qayta yuborilib butun navbatni to'sib qo'ymasligi shart!
+  - `local_outbox` da `status = 'rejected'`, `last_error = reason` deb yoziladi.
+  - Yangi `local_sync_conflicts` (yoki `local_stock_conflicts`) jadvaliga ziddiyat yozuvi qayd etiladi (`id`, `event_id`, `entity`, `entity_id`, `reason`, `payload`, `created_at_ms`). Navbat keyingi `deviceSeq` bo'yicha davom etadi.
+- **`retry`:** Vaqtinchalik xato (masalan, bulut tomonida vaqtinchalik lock timeout).
+  - Hodisa `pending` holatida qoladi, `attempts = attempts + 1`, backoff ishga tushadi va qayta uriniladi.
+
+### 2.3. Faqat sinxron jadvallar kafolati
+- T0.5 va T2.2 D3 da o'rnatilgan qoida: Faqat `localSchemaRegistry` da `tableClass !== 'LOCAL'` bo'lgan jadvallar outbox hodisasi hosil qiladi.
+- `local_outbox`, `local_pin_credentials`, `local_cloud_state`, `local_device_state`, `local_stock_balances`, `local_carts` kabi LOCAL jadvallar hech qachon `local_outbox` ga tushmaydi.
+- Sinxronizatsiya yuboruvchisi paket yig'ishda har bir hodisaning `entityClass !== 'LOCAL'` ekanini qo'shimcha assert qiladi.
+
+### 2.4. Qurilma tokeni va xavfsizlik
+- Hub `deviceToken` ni T2.2 D4 da yaratilgan `SafeStoragePort` orqali xotiraga ochadi (`getDecryptedToken()`).
+- So'rov `Authorization: Bearer <deviceToken>` header'i bilan yuboriladi.
+- Agar bulutdan `401 Unauthorized` yoki `DEVICE_REVOKED` qaytsa:
+  - Push jarayoni darhol to'xtatiladi;
+  - `local_cloud_state` jadvalidagi holat `status = 'revoked'` ga o'tkaziladi;
+  - Tizim loglariga xavfsizlik ogohlantirishi yoziladi;
+  - Qayta urinishlar to'xtatiladi (foydalanuvchi do'konni qayta juftlamaguncha).
 
 ---
 
-### Qilingan taxminlar
-- Electron nativ `safeStorage` muhiti bo'lmagan standalone CLI / Linux / test holatlarida `AesGcmSafeStorageAdapter` xavfsiz AES-256-GCM algoritmi bilan tokenlarni shifrlaydi. Desktop (Electron) runtime'da esa asosiy jarayondagi nativ OS kalitlar omboriga (DPAPI / Keychain / Secret Service) ulanadi.
+## 3. b) Bulut tomoni (Qabul qiluvchi - Sync Push Engine)
+
+### 3.1. Endpoint va Autentifikatsiya
+- **Endpoint:** `POST /api/v1/sync/push`
+- **Autentifikatsiya:** T2.2 D2 da yaratilgan `deviceStore.verifyDeviceToken(deviceToken, nowMs)`.
+- Token orqali aniqlanadigan kontekst:
+  - `organizationId`: Tashkilot IDsi;
+  - `storeId`: Do'kon IDsi;
+  - `deviceId`: Qurilma IDsi;
+  - `deviceStatus`: Agar `active` bo'lmasa -> `401 / 403`.
+- Barcha amallar RLS kontekstida bajariladi: `withPgTenantContext(pool, organizationId, ...)`.
+
+### 3.2. Har bir hodisa uchun tekshiruv va qo'llash bosqichlari
+Har bir incoming hodisa `SyncEventEnvelope` formatida bo'ladi:
+```ts
+interface SyncEventEnvelope {
+  eventId: UuidV7;
+  organizationId: UuidV7;
+  storeId: UuidV7 | null;
+  deviceId: UuidV7;
+  deviceSeq: bigint;
+  hlc: string;
+  type: string;
+  entity: string;
+  entityId: UuidV7;
+  entityClass: 'FACT' | 'ATTR' | 'MONOTONE';
+  schemaVersion: number;
+  payload: Record<string, unknown>;
+}
+```
+
+Tranzaksiya ichida quyidagi qat'iy tartibda ishlov beriladi:
+
+1. **Deduplikatsiya (Takror nazorati):**
+   - `cloud_sync_events` jadvalida `UNIQUE(organization_id, event_id)` mavjud.
+   - Agar hodisa avval qabul qilingan bo'lsa -> natija: `{ eventId, status: 'duplicate' }`. Hech qanday qayta yozish bo'lmaydi.
+2. **Tenant & Store tekshiruvi:**
+   - `envelope.organizationId !== context.organizationId` -> darhol `rejected` (`TENANT_MISMATCH`).
+   - Agar `envelope.storeId` ko'rsatilgan bo'lsa va u `context.storeId` ga teng bo'lmasa -> `rejected` (`STORE_MISMATCH`).
+   - Qurilma o'zi tegishli bo'lmagan do'kon nomidan hodisa yubora olmaydi.
+3. **Payload havolalari (Foreign Entity / Reference integrity):**
+   - Hodisadagi chet havolalar (masalan, `sale_lines.sale_id`, `stock_moves.product_id`, `payments.sale_id`) shu tashkilotga tegishli ekanligi umumiy sxema metama'lumotlari (`foreignKeys`) bo'yicha tekshiriladi.
+   - Agar payload boshqa tashkilotga tegishli `id`ga havola qilsa yoki mavjud bo'lmagan majburiy ota entity'ga tayansa -> `rejected` (`FOREIGN_ENTITY_MISMATCH`).
+4. **Yagona yozuvchi qoidasi (Single-Writer Rule):**
+   - `stock_moves` va `batches` jadvallari faqat o'sha do'kon hub'idan yozilishi mumkin (`GEMINI.md` 4-bo'lim).
+   - Agar do'kon B hub'i do'kon A omboriga tegishli harakat yuborsa -> `rejected` (`SINGLE_WRITER_VIOLATION`).
+5. **Vaqt nazorati (HLC Skew Guard):**
+   - Kelajakdagi soat: Agar `parseHlc(envelope.hlc).wallTimeMs > nowMs + 5 daqiqa (MAX_SKEW)` bo'lsa:
+   - Server hodisaning HLC'sini serverning joriy HLC vaqtiga tushiradi (`clamped_hlc`) va hodisada `hlc_adjusted = true` deb qayd etadi.
+   - Soati orqada yoki buzilgan qurilma boshqa qurilmalarning to'g'ri ma'lumotlarini ezib (overwrite) keta olmaydi.
+6. **Klass qoidalari (Entity Class Rules):**
+   - **`FACT`:**
+     - O'zgarmas hodisalar (masalan, `sale_lines`, `payments`, `cash_moves`, `stock_moves`, `return_lines`).
+     - Faqat `INSERT` qilinadi. Hech qanday `UPDATE` yoki `DELETE` bo'lishi mumkin emas.
+   - **`ATTR`:**
+     - Tahrirlanadigan holatlar (masalan, `products`, `customers`, `categories`, `users`).
+     - HLC bo'yicha Oxirgi Yozuvchi Yutadi (Last-Write-Wins / LWW).
+     - Agar bazadagi mavjud qatorning `hlc >= incoming.hlc` bo'lsa: yangi yozuv qo'llanmaydi (chunki bazadagi yozuv yangiroq), ammo hodisa muvaffaqiyatli qabul qilingan hisoblanadi (`accepted`).
+     - Agar `incoming.hlc > current.hlc` bo'lsa: satr yangilanadi (`UPDATE ... SET ..., hlc = incoming.hlc`).
+   - **`MONOTONE`:**
+     - Bir tomonlama o'tishlar (masalan, `sales.voided_at_ms`, `orders.delivered_at_ms`, `shifts.closed_at_ms`, `inventory_counts.finalized_at_ms`).
+     - Faqat ruxsat etilgan bir tomonlama o'tish: `NULL -> NON-NULL`.
+     - Agar allaqachon `voided` bo'lgan chekni qayta ochish yoki o'zgartirish kelgan bo'lsa -> `rejected` (`INVALID_MONOTONE_TRANSITION`).
+7. **Bo'shliqsiz pozitsiya hisoblagichi (Pull uchun poydevor):**
+   - Har bir do'kon uchun alohida `cloud_store_sync_positions` jadvali (`organization_id`, `store_id`, `last_position`).
+   - Har bir qabul qilingan (`accepted`) hodisa yozilayotganda do'kon bo'yicha tranzaksiyaviy qulf olinadi:
+     `SELECT pg_advisory_xact_lock(hashtext('store_sync:' || store_id))`
+   - Pozitsiya olinadi: `position = last_position + 1`, `cloud_sync_events` ga yoziladi va `last_position` yangilanadi.
+   - Natijada har bir do'kon uchun hodisalar qat'iy 1, 2, 3... ketma-ketlikda, bo'shliqsiz saqlanadi (T2.4 Pull uchun tayyor poydevor).
 
 ---
 
-### Takliflar
-- Keyingi T2.3 (Outbox Sync Engine) vazifasida sinxronizatsiya protokoli uchun `deviceToken` Bearer token sifatida yuboriladi va `GET /api/v1/sync/pull` hamda `POST /api/v1/sync/push` marshrutlarida qurilma kontekstini tekshirish uchun ishlatiladi.
+## 4. Bulut sxemasi: Sinxron jadvallari ro'yxati
+
+F2 bosqichida PostgreSQL bazasida saqlanadigan va sinxron qilinadigan jadvallar ro'yxati:
+
+### 4.1. Sinxron qilinadigan 36 ta domen jadvali:
+| # | Jadval nomi | Sinfi | Tenant Scope | Izoh |
+|---|---|---|---|---|
+| 1 | `users` | `ATTR` | `organization` | Xodimlar (PIN va parolsiz) |
+| 2 | `categories` | `ATTR` | `organization` | Katalog toifalari |
+| 3 | `products` | `ATTR` | `organization` | Mahsulotlar katalogi |
+| 4 | `product_variants` | `ATTR` | `organization` | Mahsulot variantlari |
+| 5 | `product_barcodes` | `ATTR` | `organization` | Shtrixkodlar |
+| 6 | `price_changes` | `FACT` | `organization` | Narx o'zgarishlari tarixi |
+| 7 | `batches` | `ATTR` | `organization` | Mahsulot partiyalari (Single-writer) |
+| 8 | `stock_moves` | `FACT` | `organization` | Ombor harakatlari (Single-writer) |
+| 9 | `inventory_counts` | `MONOTONE` | `organization` | Qayta sanash (reviziya) |
+| 10 | `inventory_count_lines` | `FACT` | `organization` | Sanash qatorlari |
+| 11 | `promotions` | `ATTR` | `organization` | Aksiyalar va chegirmalar |
+| 12 | `sales` | `MONOTONE` | `organization` | Savdolar / Cheklar |
+| 13 | `sale_lines` | `FACT` | `organization` | Chek qatorlari (snapshot) |
+| 14 | `payments` | `FACT` | `organization` | To'lovlar |
+| 15 | `cash_moves` | `FACT` | `organization` | Kassa pul harakatlari |
+| 16 | `returns` | `FACT` | `organization` | Qaytuv hujjatlari |
+| 17 | `return_lines` | `FACT` | `organization` | Qaytuv qatorlari |
+| 18 | `return_payments` | `FACT` | `organization` | Qaytuv to'lovlari |
+| 19 | `customers` | `ATTR` | `organization` | Mijozlar bazasi |
+| 20 | `customer_ledger` | `FACT` | `organization` | Mijoz qarz daftari |
+| 21 | `suppliers` | `ATTR` | `organization` | Ta'minotchilar |
+| 22 | `goods_receivings` | `MONOTONE` | `organization` | Kirim fakturalari |
+| 23 | `goods_receiving_lines` | `FACT` | `organization` | Kirim qatorlari |
+| 24 | `receiving_cost_confirmations` | `FACT` | `organization` | Tannarx tasdiqlashlari |
+| 25 | `supplier_returns` | `FACT` | `organization` | Ta'minotchiga qaytarish |
+| 26 | `supplier_return_lines` | `FACT` | `organization` | Ta'minotchiga qaytarish qatorlari |
+| 27 | `supplier_ledger` | `FACT` | `organization` | Ta'minotchi qarz daftari |
+| 28 | `shifts` | `MONOTONE` | `organization` | Kassir smenalari |
+| 29 | `shift_cashier_sessions` | `FACT` | `organization` | Smena kassir sessiyalari |
+| 30 | `shift_closures` | `FACT` | `organization` | Smena yopilishlari |
+| 31 | `shift_closure_method_totals` | `FACT` | `organization` | Smena to'lov usullari yig'indisi |
+| 32 | `shift_closure_cashiers` | `FACT` | `organization` | Smena kassirlari balansi |
+| 33 | `day_closes` | `FACT` | `organization` | Kun yakunlari (Z-hisobot) |
+| 34 | `orders` | `MONOTONE` | `organization` | Oldindan buyurtmalar |
+| 35 | `order_lines` | `FACT` | `organization` | Buyurtma qatorlari |
+| 36 | `order_payments` | `FACT` | `organization` | Buyurtma avans to'lovlari |
+
+### 4.2. Sinxron tizim jadvallari (Bulutda yangi qo'shiladigan):
+- `cloud_sync_events` (`id`, `organization_id`, `store_id`, `device_id`, `device_seq`, `position`, `hlc`, `type`, `entity`, `entity_id`, `class`, `schema_version`, `payload`, `created_at_ms`):
+  - `UNIQUE(organization_id, event_id)` — takrorlarni aniqlash;
+  - `UNIQUE(organization_id, store_id, position)` — bo'shliqsiz pull oqimi.
+- `cloud_store_sync_positions` (`organization_id`, `store_id`, `last_position`, `updated_at_ms`):
+  - Har do'konning eng so'nggi global pozitsiyasi.
+
+### 4.3. Bulutga umuman sinxron qilinmaydigan 17 ta LOCAL jadval:
+`local_device_state`, `local_outbox`, `local_hub_config`, `local_pin_credentials`, `local_device_auth_state`, `local_sessions`, `local_stock_balances`, `local_batch_balances`, `local_stock_conflicts`, `local_carts`, `local_cart_lines`, `local_customer_balances`, `local_receiving_drafts`, `local_receiving_draft_lines`, `local_supplier_balances`, `local_receipt_prints`, `local_cash_drawer_events`, `local_cloud_state`.
+*(Eslatma: Qoldiqlar va balanslar proyeksiyalar hisoblanadi va bulutda ledger jadvallari orqali hisoblanadi, sinxron qilinmaydi).*
 
 ---
 
-### Egasi yoki Claude qarori kerak bo'lgan savollar
-- Hozircha savollar yo'q. Claude ko'rib chiqishi uchun tayyor.
+## 5. c) Testlar rejasi
+
+### 5.1. Mezonlardagi asosiy to'rtlik:
+1. **1 yomon + 10 yaxshi hodisa:**
+   - 11 ta hodisadan iborat bitta paket yuboriladi (10 ta normal savdo/qator va 1 ta begona/buzilgan hodisa).
+   - Natija: 10 ta yaxshi hodisa `accepted`, 1 ta yomon hodisa `rejected`.
+   - Hub tomonida yomon hodisa `local_sync_conflicts` ga chiqariladi, `local_outbox` dagi navbat to'xtab qolmasdan keyingi paketga o'tadi.
+2. **Begona `store_id` testi:**
+   - Do'kon A tokeni bilan do'kon B ga tegishli `store_id` li hodisa push qilinadi.
+   - Natija: Bulut hodisani `rejected` qiladi (`STORE_MISMATCH`), baza holati o'zgarmaydi.
+3. **Begona havola (Foreign Key) testi:**
+   - Org A tokeni bilan `sale_lines` hodisasi yuboriladi, lekin uning `sale_id` si Org B dagi savdoga havola qiladi (cross-tenant havola buzilishi).
+   - Natija: `rejected` (`FOREIGN_ENTITY_MISMATCH`).
+4. **Parallel ikki push poygasi (Haqiqiy PG parallelligi):**
+   - Ikki parallel jarayon ayni bir xil hodisalar paketini bir vaqtning o'zida yuboradi.
+   - Natija: Bitta jarayon `accepted` oladi, ikkinchisi `duplicate` oladi. Har bir hodisa bulutda faqat 1 marta qo'llanadi, hisoblar va pozitsiyalar 1 tiyingacha to'g'ri bo'ladi.
+
+### 5.2. Tarmoq uzilishlari va chegaraviy holatlar:
+5. **Yarim paket uzilishi va javob yo'qolishi:**
+   - Paket bulutga yetib bordi va yozildi, lekin tarmoq uzilib Hub javobni olmadi. Hub butun paketni qayta yuboradi.
+   - Natija: Barcha hodisalar `duplicate` sifatida tasdiqlanadi (`acked`), takroriy INSERT yoki hisob buzilishi bo'lmaydi.
+6. **Kelajakdagi HLC (Soat buzilishi):**
+   - Soati 1 soat oldinda bo'lgan Hub ATTR va FACT hodisalari yuboradi.
+   - Natija: `MAX_SKEW` (5 min) dan oshgani sababli HLC server vaqtiga tushiriladi (`hlc_adjusted = true`).
+7. **LWW ATTR poygasi:**
+   - Eski HLC'li mahsulot nomi yangilanishi va yangi HLC'li nom.
+   - Natija: Bazada faqat eng katta HLC'li nom qoladi.
+
+### 5.3. Model testi:
+8. **Ko'p do'konli model testi:**
+   - 2 ta mustaqil Hub (Do'kon 1 va Do'kon 2) tasodifiy savdo, qaytarish, kirim va harakat hodisalarini hosil qiladi va bulutga push qiladi.
+   - Bulutdagi FACT yig'indilari (savdo summalari, `stock_moves` miqdorlari, `customer_ledger` qarz yig'indilari) har ikkala Hub'dagi ko'rsatkichlar bilan tiyinigacha aniq teng bo'lishi tekshiriladi.
+
+---
+
+## 6. d) Doiradan tashqari
+- `GET /api/v1/sync/pull` (T2.4).
+- To'liq baza snapshot'ini olish va yangi terminalni bootstrap qilish (T2.5).
+- Biznes egasi kabinetidagi ziddiyatlarni ko'rish va boshqarish UI'si (T2.6).
+- Guzar Market ochiq katalog proyeksiyasi (`public_*` jadvallari — F5 bosqichida).
