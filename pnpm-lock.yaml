@@ -214,6 +214,9 @@ importers:
       '@mezon/domain':
         specifier: workspace:*
         version: link:../../packages/domain
+      '@mezon/sync':
+        specifier: workspace:*
+        version: link:../../packages/sync
       '@node-rs/argon2':
         specifier: 2.2.2
         version: 2.2.2
@@ -239,6 +242,9 @@ importers:
       '@types/node':
         specifier: ^26.6.6
         version: 26.6.6
+      drizzle-orm:
+        specifier: 0.45.4
+        version: 0.45.4(@types/better-sqlite3@9.6.0)(@types/pg@8.23.1)(better-sqlite3@13.0.3)(pg@8.23.1)
       testcontainers:
         specifier: ^12.2.1
         version: 12.2.1(bare-buffer@3.7.1)(supports-color@7.2.0)
@@ -294,6 +300,9 @@ importers:
       '@mezon/drivers':
         specifier: workspace:*
         version: link:../../packages/drivers
+      '@mezon/sync':
+        specifier: workspace:*
+        version: link:../../packages/sync
       '@node-rs/argon2':
         specifier: 2.2.2
         version: 2.2.2
@@ -310,12 +319,27 @@ importers:
         specifier: 4.6.7
         version: 4.6.7
     devDependencies:
+      '@mezon/db-cloud':
+        specifier: workspace:*
+        version: link:../../packages/db-cloud
       '@mezon/test-utils':
         specifier: workspace:*
         version: link:../../packages/test-utils
+      '@testcontainers/postgresql':
+        specifier: 12.2.1
+        version: 12.2.1(bare-buffer@3.7.1)(supports-color@7.2.0)
       '@types/exceljs':
         specifier: ^1.3.2
         version: 1.3.2
+      '@types/pg':
+        specifier: 8.23.1
+        version: 8.23.1
+      drizzle-orm:
+        specifier: 0.45.4
+        version: 0.45.4(@types/better-sqlite3@9.6.0)(@types/pg@8.23.1)(better-sqlite3@13.0.3)(pg@8.23.1)
+      pg:
+        specifier: 8.23.1
+        version: 8.23.1
 
   apps/pos:
     dependencies:
@@ -389,6 +413,9 @@ importers:
       '@mezon/domain':
         specifier: workspace:*
         version: link:../domain
+      '@mezon/sync':
+        specifier: workspace:*
+        version: link:../sync
       drizzle-orm:
         specifier: 0.45.4
         version: 0.45.4(@types/better-sqlite3@9.6.0)(@types/pg@8.23.1)(better-sqlite3@13.0.3)(pg@8.23.1)
@@ -457,7 +484,18 @@ importers:
         specifier: workspace:*
         version: link:../domain
 
-  packages/sync: {}
+  packages/sync:
+    dependencies:
+      '@mezon/contracts':
+        specifier: workspace:*
+        version: link:../contracts
+      '@mezon/domain':
+        specifier: workspace:*
+        version: link:../domain
+    devDependencies:
+      '@mezon/test-utils':
+        specifier: workspace:*
+        version: link:../test-utils
 
   packages/test-utils:
     dependencies:

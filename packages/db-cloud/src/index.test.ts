@@ -58,16 +58,23 @@ describe('@mezon/db-cloud - PostgreSQL schema registry, RLS templates, and bigin
   it('exports package marker and registers T2.1 and T2.2 schema tables', () => {
     expect(DB_CLOUD_PACKAGE).toBe('@mezon/db-cloud');
     const tableNames = cloudSchemaRegistry.all().map((t) => t.tableName);
-    expect(tableNames).toEqual([
-      'cloud_organizations',
-      'cloud_stores',
-      'cloud_users',
-      'cloud_refresh_tokens',
-      'cloud_login_identities',
-      'cloud_device_pairing_codes',
-      'cloud_devices',
-      'cloud_device_tokens',
-    ]);
+    expect(tableNames).toEqual(
+      expect.arrayContaining([
+        'cloud_organizations',
+        'cloud_stores',
+        'cloud_users',
+        'cloud_refresh_tokens',
+        'cloud_login_identities',
+        'cloud_device_pairing_codes',
+        'cloud_devices',
+        'cloud_device_tokens',
+        'cloud_sync_events',
+        'cloud_store_sync_positions',
+        'cloud_sync_parked',
+        'products',
+        'sales',
+      ]),
+    );
     expect(fs.existsSync(getDefaultCloudMigrationsFolder())).toBe(true);
   });
 

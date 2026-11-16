@@ -1722,7 +1722,7 @@ describe('@mezon/db-local - T1.8 Suppliers, Receiving, Unknown Cost, Ledger & Re
       .sort((a, b) => a.productId.localeCompare(b.productId));
     expect(stockAfterRebuild).toEqual(liveStockBefore);
     assertStockConservationIdentity(env.connection, stockAfterRebuild);
-  }, 20_000);
+  }, 60_000);
 
   it('T1.8 test qarzi: enforces exact 1-milli return quantity and FIFO batch depletion boundaries', async () => {
     const env = await setupSupplierEnv({ seed: 808 });

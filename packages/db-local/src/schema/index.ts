@@ -2929,3 +2929,30 @@ export const organizationTaxProfiles = localSchemaRegistry.defineTable(
     ),
   ],
 );
+
+/**
+ * Unresolvable sync push rejection records (`LOCAL`, organization-scoped).
+ * Rejected sync events are diverted here so the local outbox queue never blocks.
+ */
+export const localSyncConflicts = localSchemaRegistry.defineTable(
+  {
+    name: 'local_sync_conflicts',
+    tableClass: 'LOCAL',
+    tenantScope: 'organization',
+  },
+  (common) => ({
+    ...common,
+    storeId: sqliteUuidV7('store_id'),
+    eventId: sqliteUuidV7('event_id').notNull(),
+    entity: text('entity').notNull(),
+    entityId: sqliteUuidV7('entity_id').notNull(),
+    reason: text('reason').notNull(),
+    error: text('error'),
+    payload: text('payload').notNull(),
+    resolvedAtMs: sqliteUnixMs('resolved_at_ms'),
+  }),
+  (self) => [
+    index('idx_local_sync_conflicts_event').on(self.eventId),
+    index('idx_local_sync_conflicts_created').on(self.organizationId, self.createdAtMs),
+  ],
+);

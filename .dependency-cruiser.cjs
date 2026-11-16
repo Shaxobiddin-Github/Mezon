@@ -109,7 +109,7 @@ module.exports = {
     {
       name: 'db-cloud-src-imports',
       comment:
-        'packages/db-cloud source files can only import internal files, packages/domain, drizzle-orm, pg, node:child_process, node:crypto, and node:fs/node:path (no db-local, drivers, test-utils, or testcontainers)',
+        'packages/db-cloud source files can only import internal files, packages/domain, packages/sync, drizzle-orm, pg, node:child_process, node:crypto, and node:fs/node:path (no db-local, drivers, test-utils, or testcontainers)',
       severity: 'error',
       from: {
         path: '^packages/db-cloud/src/',
@@ -117,7 +117,7 @@ module.exports = {
       },
       to: {
         pathNot:
-          '^(packages/db-cloud/src/|packages/domain/|node_modules/(\\.pnpm/)?(drizzle-orm|pg)@|(node:)?(child_process|crypto|fs|path)$)',
+          '^(packages/db-cloud/src/|packages/(domain|sync)/|node_modules/(\\.pnpm/)?(drizzle-orm|pg)@|(node:)?(child_process|crypto|fs|path)$)',
       },
     },
     {
@@ -134,9 +134,22 @@ module.exports = {
       },
     },
     {
+      name: 'sync-src-imports',
+      comment:
+        'packages/sync source files can only import internal files, packages/domain, and packages/contracts',
+      severity: 'error',
+      from: {
+        path: '^packages/sync/src/',
+        pathNot: '\\.test\\.ts$',
+      },
+      to: {
+        pathNot: '^(packages/sync/src/|packages/(domain|contracts)/)',
+      },
+    },
+    {
       name: 'hub-src-imports',
       comment:
-        'apps/hub source files can only import internal files, domain, contracts, db-local, drivers, fastify, pino, @node-rs/argon2, zod, and node builtins (never db-cloud)',
+        'apps/hub source files can only import internal files, domain, contracts, db-local, drivers, sync, fastify, pino, @node-rs/argon2, zod, and node builtins (never db-cloud)',
       severity: 'error',
       from: {
         path: '^apps/hub/src/',
@@ -144,7 +157,7 @@ module.exports = {
       },
       to: {
         pathNot:
-          '^(apps/hub/src/|packages/(domain|contracts|db-local|drivers)/|node_modules/(\\.pnpm/)?(fastify|pino|@node-rs/argon2|@node-rs\\+argon2|zod|exceljs)@|(node:)?(crypto|fs|path|stream)$)',
+          '^(apps/hub/src/|packages/(domain|contracts|db-local|drivers|sync)/|node_modules/(\\.pnpm/)?(fastify|pino|@node-rs/argon2|@node-rs\\+argon2|zod|exceljs)@|(node:)?(crypto|fs|path|stream)$)',
       },
     },
     {

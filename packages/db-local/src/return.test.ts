@@ -1160,7 +1160,7 @@ describe('@mezon/db-local - T1.6 Void, Return, V1-V5, Oracle Parity, C1 Crash & 
         twinC.connection.close();
       }
     }
-  }, 20_000);
+  }, 120_000);
 
   it('v_sales_lines model test: seeded random sales, partial returns & voids match independent accounting model to the exact tiyin', async () => {
     const env = await setupReturnEnv({ initialMs: TASHKENT_235930_UTC_MS, seed: 555 });

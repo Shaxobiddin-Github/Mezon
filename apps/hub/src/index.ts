@@ -13,4 +13,9 @@ export { HubSupplierService } from './supplier-service.js';
 export { HubShiftService } from './shift-service.js';
 export { HubOrderService } from './order-service.js';
 export { HubPrinterService, type HubPrinterServiceOptions } from './printer-service.js';
+export {
+  HubSyncPushWorker,
+  type HubSyncPushWorkerOptions,
+  type PushBatchResult,
+} from './sync-push-worker.js';
 export { createHubServer, type CreateHubServerOptions, type HubServer } from './server.js';
