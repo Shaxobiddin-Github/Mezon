@@ -1,6 +1,6 @@
 import { useEffect, useCallback, useRef } from 'react';
 import type { UuidV7 } from '@mezon/domain';
-import { t } from '@mezon/i18n';
+import { LOCALE_LABELS, SUPPORTED_LOCALES, isLocale, t } from '@mezon/i18n';
 import { stepMilliQuantity } from '@mezon/ui';
 import { normalizeLoopbackHubBaseUrl } from './bridge.js';
 import { HubApiClient, HubApiError } from './api/hub-client.js';
@@ -64,6 +64,8 @@ export function App() {
   const setScreen = usePosStore((s) => s.setScreen);
   const theme = usePosStore((s) => s.theme);
   const toggleTheme = usePosStore((s) => s.toggleTheme);
+  const locale = usePosStore((s) => s.locale);
+  const setLocale = usePosStore((s) => s.setLocale);
   const user = usePosStore((s) => s.user);
   const clearSession = usePosStore((s) => s.clearSession);
   const setLoginOptions = usePosStore((s) => s.setLoginOptions);
@@ -98,6 +100,10 @@ export function App() {
   useEffect(() => {
     document.documentElement.setAttribute('data-theme', theme);
   }, [theme]);
+
+  useEffect(() => {
+    document.documentElement.setAttribute('lang', locale);
+  }, [locale]);
 
   const handleError = useCallback(
     (err: unknown) => {
@@ -566,7 +572,8 @@ export function App() {
   }, [api, setCustomerList, setActiveModal, handleError]);
 
   return (
-    <div className="pos-shell" data-testid="pos-shell">
+    // key={locale}: a language switch re-renders every screen with the new dictionary
+    <div className="pos-shell" data-testid="pos-shell" key={locale}>
       <header className="pos-header">
         <div className="pos-header-brand">
           <h1 className="pos-header-title">{t('app.title')}</h1>
@@ -628,6 +635,21 @@ export function App() {
               {t('app.hub.refresh')}
             </button>
           )}
+          <select
+            className="pos-btn"
+            data-testid="locale-select"
+            aria-label="Til / Тил / Язык"
+            value={locale}
+            onChange={(e) => {
+              if (isLocale(e.target.value)) setLocale(e.target.value);
+            }}
+          >
+            {SUPPORTED_LOCALES.map((l) => (
+              <option key={l} value={l}>
+                {LOCALE_LABELS[l]}
+              </option>
+            ))}
+          </select>
           <button
             type="button"
             className="pos-btn"

@@ -191,6 +191,17 @@ test.describe('@mezon/pos Playwright E2E — Kassa UI (T1.11)', () => {
       // 1. Setup Wizard screen
       await expect(page.getByTestId('setup-screen')).toBeVisible();
       await expect(page.getByTestId('non-fiscal-badge')).toHaveText('SINOV — FISKAL EMAS');
+      // T4.6: language switch re-renders the UI, survives a reload, and returns to Latin
+      await page.getByTestId('locale-select').selectOption('ru');
+      await expect(page.getByTestId('non-fiscal-badge')).toHaveText('ТЕСТ — НЕ ФИСКАЛЬНЫЙ');
+      await page.reload();
+      await expect(page.getByTestId('setup-screen')).toBeVisible();
+      await expect(page.getByTestId('non-fiscal-badge')).toHaveText('ТЕСТ — НЕ ФИСКАЛЬНЫЙ');
+      await expect(page.locator('html')).toHaveAttribute('lang', 'ru');
+      await page.getByTestId('locale-select').selectOption('uz-Cyrl');
+      await expect(page.getByTestId('non-fiscal-badge')).toHaveText('СИНОВ — ФИСКАЛ ЭМАС');
+      await page.getByTestId('locale-select').selectOption('uz-Latn');
+      await expect(page.getByTestId('non-fiscal-badge')).toHaveText('SINOV — FISKAL EMAS');
 
       await page.getByTestId('setup-fullname-input').fill('Sardor Egasi');
       await page.getByTestId('setup-username-input').fill('owner_sardor');
