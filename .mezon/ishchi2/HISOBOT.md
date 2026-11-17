@@ -1,3 +1,47 @@
+# Hisobot: T3.3 — merge tartibi bajarildi, PR #27 `main` bilan birlashtirildi
+
+Branch: `ishchi2/T3.3-fiscal`, PR [#27](https://github.com/Shaxobiddin-Github/Mezon/pull/27).
+Javob: `9c3efe2` (T3.3 QABUL, merge tartibi, T2.6+T2.5 reja topshirig'i).
+Holat: **HISOBOT**. Merge ruxsati kutilyapti. #27 ni merge qilmadim.
+
+## Merge tartibi
+
+| Qadam | Natija |
+|---|---|
+| 1. PR #26 (T4.6) | Head `079d8f7` tekshirildi, beshala job yashil (Installer ham). Squash commit: `f222d9c T4.6: Tillar va desktop paket tuzatishi`. `git diff 079d8f7 origin/main --stat` bo'sh. |
+| 2. PR #28 (T2.4) | `main` (`f222d9c`) `gemini/T2.4-sync-pull` ga **merge** qilindi (`a405ea8`), konflikt bo'lmadi. CI: ubuntu, windows va PG RLS yashil. Installer `skipping`, chunki desktop o'zgarmagan. Squash commit: `93c4f12 T2.4: Sinxron pull va pozitsiya dvigateli`. `git diff a405ea8 origin/main --stat` bo'sh. |
+| 3. PR #27 (T3.3) | `main` ikki marta merge qilindi (`4ad3c98` T4.6, `f7ef30c` T2.4), quyida batafsil. |
+
+**Branch o'chirish bajarilmadi.** `git push origin --delete claude/T4.6-i18n` ni muhitdagi ruxsat tizimi rad etdi. `gemini/T2.4-sync-pull` ga ham urinmadim. Ikkala branch masofada turibdi. Ularni egasi yoki nazoratchi o'chirishi kerak, yoki egasi menga ruxsat berishi kerak.
+
+## PR #27: `main` bilan birlashtirish
+
+- **`4d8a866`, ruscha matnlar.** `RU_MESSAGES` ga 31 kalit qo'shildi: `fiscal.*` hammasi, `error.FISCAL_BLOCKED`, `error.FISCALIZED_SALE_CANNOT_VOID`. Placeholderlar (`{h}`, `{m}`) mos. i18n testlari 27/27 o'tdi, ular kalitlar to'liqligi, kirill matni va placeholderlarni tekshiradi.
+- **`f7ef30c`, T2.4 bilan merge.**
+  - Konfliktlar: `apps/hub/src/server.ts` (pull va fiskal worker ikkalasi ishga tushadi va to'xtaydi), `schema/index.ts` (avval T2.4 ning sync jadvallari, keyin `fiscal_docs`), `index.test.ts` (registr ro'yxati, migratsiyalar soni 20).
+  - Migratsiya: T2.4 `0018_sync_pull` ni (idx 18) egalladi. Fiskal migratsiya `main` dagi journal va `0018_snapshot` ustidan `drizzle-kit generate` bilan qayta yaratildi. Natija: `0019_fiscal_docs.sql` (idx 19) va `meta/0019_snapshot.json`.
+  - `INSERT … SELECT` dagi yangi ustunlar avvalgidek literal standartlar bilan tuzatildi va triggerlar `buildFiscalDocsTriggersSql()` dan qo'shildi. **SQL fayl avvalgi `0019` bilan bayt-bayt bir xil** (diff bo'sh).
+  - `main` dagi migratsiyalarga tegilmadi.
+  - Bulut: `main` dagi oxirgi `0004`, fiskal migratsiyasi `0005` sifatida qoldi.
+- **T2.4 pull va `fiscal_docs`.** Pull MONOTONE jadvallarni umumiy usulda, `MONOTONE_TRANSITION_RULES` orqali qo'llaydi. `fiscal_docs` qoidasi bor (number, bigint va string `attempts` bilan), shuning uchun pull kodiga o'zgarish kerak bo'lmadi.
+
+## Tekshiruv
+
+- `pnpm verify` (lokal, `f7ef30c`):
+  - 102 test fayli, 649 test o'tdi;
+  - perf: 10 fayl, 13 test;
+  - E2E: 1 o'tdi;
+  - `db:check`: SQLite va PostgreSQL ikkalasida 0 diff;
+  - depcruise toza.
+- CI (`f7ef30c`): beshala job yashil, birinchi urinishda: Verify ubuntu, Verify windows, PG RLS, Detect va **Build & E2E Desktop Installer** (2m43s, T4.6 tuzatishi bilan endi o'tadi). Run: https://github.com/Shaxobiddin-Github/Mezon/actions/runs/44046125606
+
+## T2.6 / T2.5 ga o'tkaziladigan masalalar
+
+- **Test qarzi.** `FakeFiscalDriver` operator o'zgarmas qoidalarini majburlashi kerak: ochilmagan smenaga, yopilgan smenaga va `close` dan keyin kelgan chek `rejected` bo'ladi. Bu topshiriqqa ko'ra keyingi PR'ning (T2.6) birinchi commit'i bo'ladi va mutatsiyalaringiz qayta ishlatiladi.
+- **Ochiq savol (T2.5 rejasida).** Pull orqali boshqa hub yaratgan `fiscal_docs` qatori kelsa, lokal worker uni operatorga yubormasligi kerak. Hujjat bir martadan ortiq fiskallashmasligi uchun faqat o'z qurilmasi yaratgan hujjatlarni yuborish kerak. Bir do'konda ikki hub bo'lishi mumkinmi, men aniqlamadim. Tiklashda (T2.5) bu albatta muhim.
+
+---
+
 # Hisobot: T3.3 — kichik qayta ishlash (K1, K2) va egasining S1/S4 qarori
 
 Branch: `ishchi2/T3.3-fiscal`, PR [#27](https://github.com/Shaxobiddin-Github/Mezon/pull/27).
