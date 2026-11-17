@@ -52,6 +52,8 @@ export interface FakeFiscalDriverOptions {
   readonly statusMode?: FakeFiscalStatusMode;
   /** Optional hook invoked after a `throw-after-accept` submit is recorded (crash test (b)). */
   readonly onAcceptedBeforeReply?: () => void;
+  /** Simulated network latency for every submit / status / ping call (perf tests). */
+  readonly latencyMs?: number;
 }
 
 /**
@@ -68,12 +70,19 @@ export class FakeFiscalDriver implements FiscalDriver {
   private readonly queuedModes: FakeFiscalSubmitMode[] = [];
   private readonly onAcceptedBeforeReply: (() => void) | undefined;
   private attemptsTotal = 0;
+  private readonly latencyMs: number;
 
   public constructor(options: FakeFiscalDriverOptions = {}) {
     this.store = options.ledgerStore ?? new InMemoryFakeFiscalLedgerStore();
     this.submitMode = options.submitMode ?? 'ok';
     this.statusMode = options.statusMode ?? 'ok';
     this.onAcceptedBeforeReply = options.onAcceptedBeforeReply;
+    this.latencyMs = options.latencyMs ?? 0;
+  }
+
+  private delay<T>(run: () => Promise<T>): Promise<T> {
+    if (this.latencyMs <= 0) return run();
+    return new Promise<void>((resolve) => setTimeout(resolve, this.latencyMs)).then(run);
   }
 
   public setSubmitMode(mode: FakeFiscalSubmitMode): void {
@@ -105,6 +114,10 @@ export class FakeFiscalDriver implements FiscalDriver {
 
   public submit(request: FiscalSubmitRequest): Promise<FiscalSubmitResult> {
     this.attemptsTotal += 1;
+    return this.delay(() => this.submitNow(request));
+  }
+
+  private submitNow(request: FiscalSubmitRequest): Promise<FiscalSubmitResult> {
     const mode = this.queuedModes.shift() ?? this.submitMode;
     if (mode === 'offline') {
       return Promise.reject(
@@ -153,6 +166,10 @@ export class FakeFiscalDriver implements FiscalDriver {
   }
 
   public status(idempotencyKey: string): Promise<FiscalStatusResult> {
+    return this.delay(() => this.statusNow(idempotencyKey));
+  }
+
+  private statusNow(idempotencyKey: string): Promise<FiscalStatusResult> {
     if (this.statusMode === 'offline') {
       return Promise.reject(
         new FiscalDriverError('outcomeUnknown', 'FAKE_OFFLINE', 'Sinov drayveri: ulanish yo‘q'),
