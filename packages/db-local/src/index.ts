@@ -534,6 +534,7 @@ export {
 } from './sale-rules-port.js';
 export {
   SqliteFiscalStore,
+  FISCAL_PARKED_SHIFT_NOT_OPENED,
   assertFiscalSaleAllowedInTxSync,
   cancelSaleFiscalDocForVoidInTxSync,
   getFiscalDocByIdSync,

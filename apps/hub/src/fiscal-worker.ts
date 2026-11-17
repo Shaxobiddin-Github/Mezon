@@ -145,6 +145,11 @@ export class HubFiscalWorker {
     if (doc.status === 'sent') return this.resolveSent(doc);
     if (doc.status !== 'pending' && doc.status !== 'failed') return 'waiting';
 
+    // K1 shift order (S4): receipts only after the shift OPEN is confirmed on the driver; the Z
+    // (shift close) only after every receipt of that shift is terminal.
+    const gate = await this.shiftGate(doc);
+    if (gate !== 'go') return gate;
+
     // S3: a refund is sent only after its sale document is confirmed; it is cancelled when the
     // sale document ends up not fiscal (cancelled / rejected).
     if (doc.dependsOnDocId !== null) {
@@ -186,6 +191,45 @@ export class HubFiscalWorker {
       return this.onDriverError(sent, err);
     }
     return this.applyResult(sent, result);
+  }
+
+  private async shiftGate(doc: StoredFiscalDocRecord): Promise<'go' | 'waiting'> {
+    if (doc.docKind === 'shift_open') return 'go';
+    const store = this.opts.store;
+    const shiftId = store.shiftIdOfDocSync(doc);
+    if (shiftId === null) return 'go';
+    const open = store.shiftOpenDocSync(shiftId);
+    if (open !== null && open.status !== 'confirmed') {
+      if (open.status === 'rejected' || open.status === 'cancelled') {
+        // The sale really happened: never auto-cancel. Park it for manual resolution.
+        await store.park(doc, 'Fiskal smena ochilmadi (operator rad etdi); qoʻlda hal qiling');
+        return 'waiting';
+      }
+      await store.reschedule(
+        doc,
+        this.opts.nowMs() + this.statusRecheckMs,
+        'FISCAL_WAITING_SHIFT_OPEN',
+        'Fiskal smena hali ochilmagan',
+      );
+      return 'waiting';
+    }
+    if (doc.docKind === 'shift_close') {
+      const pending = store.shiftReceiptDocsNotTerminalSync(shiftId);
+      if (pending.parked > 0) {
+        await store.park(doc, 'Smenada hal qilinmagan cheklar bor; Z-hisobot kutmoqda');
+        return 'waiting';
+      }
+      if (pending.live > 0) {
+        await store.reschedule(
+          doc,
+          this.opts.nowMs() + this.statusRecheckMs,
+          'FISCAL_WAITING_RECEIPTS',
+          'Smenaning cheklari hali fiskallashmagan',
+        );
+        return 'waiting';
+      }
+    }
+    return 'go';
   }
 
   private async applyResult(sent: StoredFiscalDocRecord, result: FiscalSubmitResult) {

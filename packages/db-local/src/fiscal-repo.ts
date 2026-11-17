@@ -18,6 +18,13 @@ import { insertMonotone, updateMonotone } from './writers.js';
 
 export type FiscalGateAction = 'warn' | 'block';
 
+/**
+ * K1: a receipt / Z document whose fiscal shift OPEN ended rejected or cancelled is PARKED: it stays
+ * unsettled (never auto-cancelled — the sale really happened), is listed for manual resolution and
+ * is skipped by the queue head so it cannot freeze the queue.
+ */
+export const FISCAL_PARKED_SHIFT_NOT_OPENED = 'FISCAL_SHIFT_NOT_OPENED';
+
 const toAction = (v: string): FiscalGateAction => (v === 'block' ? 'block' : 'warn');
 
 export interface FiscalHubConfig {
@@ -432,12 +439,64 @@ export class SqliteFiscalStore {
         and(
           eq(fiscalDocs.organizationId, c.organizationId),
           inArray(fiscalDocs.status, ['pending', 'sent', 'failed']),
+          sql`(${fiscalDocs.lastErrorCode} IS NULL OR ${fiscalDocs.lastErrorCode} <> ${FISCAL_PARKED_SHIFT_NOT_OPENED})`,
         ),
       )
       .orderBy(asc(fiscalDocs.createdAtMs), asc(fiscalDocs.id))
       .limit(1)
       .all()[0];
     return row ? toRecord(row) : null;
+  }
+
+  /** Fiscal shift a document belongs to: the sale's / return's shift, or the shift doc itself. */
+  shiftIdOfDocSync(doc: StoredFiscalDocRecord): UuidV7 | null {
+    if (doc.shiftId !== null) return doc.shiftId;
+    const sqlText =
+      doc.docKind === 'refund'
+        ? 'SELECT shift_id AS s FROM returns WHERE id = ?'
+        : 'SELECT shift_id AS s FROM sales WHERE id = ?';
+    const key = doc.docKind === 'refund' ? doc.returnId : doc.saleId;
+    if (key === null) return null;
+    const row = this.connection.sqlite.prepare(sqlText).get(key) as
+      { s: UuidV7 | null } | undefined;
+    return row?.s ?? null;
+  }
+
+  shiftOpenDocSync(shiftId: UuidV7): StoredFiscalDocRecord | null {
+    const row = this.connection.db
+      .select()
+      .from(fiscalDocs)
+      .where(and(eq(fiscalDocs.shiftId, shiftId), eq(fiscalDocs.docKind, 'shift_open')))
+      .limit(1)
+      .all()[0];
+    return row ? toRecord(row) : null;
+  }
+
+  /** K1: receipt documents (sale / refund) of a shift that are not terminal yet. */
+  shiftReceiptDocsNotTerminalSync(shiftId: UuidV7): {
+    readonly live: number;
+    readonly parked: number;
+  } {
+    const rows = this.connection.sqlite
+      .prepare(
+        `SELECT fd.last_error_code AS code FROM fiscal_docs fd
+           LEFT JOIN sales s ON s.id = fd.sale_id
+           LEFT JOIN returns r ON r.id = fd.return_id
+         WHERE fd.status IN ('pending', 'sent', 'failed')
+           AND ((fd.doc_kind = 'sale' AND s.shift_id = ?) OR (fd.doc_kind = 'refund' AND r.shift_id = ?))`,
+      )
+      .all(shiftId, shiftId) as { code: string | null }[];
+    const parked = rows.filter((r) => r.code === FISCAL_PARKED_SHIFT_NOT_OPENED).length;
+    return { live: rows.length - parked, parked };
+  }
+
+  /** K1 park: stays pending/failed (never auto-cancelled), skipped by the queue head, listed. */
+  park(doc: StoredFiscalDocRecord, message: string) {
+    return this.update(
+      doc,
+      { lastErrorCode: FISCAL_PARKED_SHIFT_NOT_OPENED, lastErrorMessage: message },
+      'fiscal_doc.parked',
+    );
   }
 
   private update(

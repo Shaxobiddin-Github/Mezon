@@ -215,12 +215,12 @@ async function product(env: Env, over: Record<string, unknown> = {}) {
 }
 
 /** Opens a shift; by default the fiscal shift-open document is confirmed right away. */
-async function openShift(env: Env, flush = true) {
+async function openShift(env: Env, flush = true, openingCash = '0') {
   const r = await env.hub.app.inject({
     method: 'POST',
     url: '/shifts/open',
     headers: hdr(env.cashier),
-    payload: { clientRequestId: env.n(), openingCash: '0' },
+    payload: { clientRequestId: env.n(), openingCash },
   });
   expect(r.statusCode, r.body).toBe(201);
   if (flush) await env.hub.fiscalWorker.runOnce();
@@ -909,6 +909,70 @@ describe('T3.3 S4 owner decision: sales allowed with a warning, strict driver or
         one<{ n: bigint }>(env, "SELECT count(*) AS n FROM fiscal_docs WHERE status <> 'confirmed'")
           .n,
       ).toBe(0n);
+    } finally {
+      await env.hub.close();
+    }
+  });
+});
+
+describe('T3.3 K1 shift order: receipts after OPEN, Z after the last receipt', () => {
+  const closeShift = async (env: Env, shiftId: string, counted: string) => {
+    const r = await env.hub.app.inject({
+      method: 'POST',
+      url: `/shifts/${shiftId}/close`,
+      headers: hdr(env.cashier),
+      payload: { clientRequestId: env.n(), countedCash: counted },
+    });
+    expect(r.statusCode, r.body).toBe(200);
+  };
+
+  it('a receipt in backoff when the shift closes: the driver still gets open → receipt → close', async () => {
+    const env = await boot(4801);
+    try {
+      const pid = await product(env);
+      const shiftId = await openShift(env); // open confirmed
+      const sale = await sellOk(env, pid);
+      env.driver.queueSubmitModes('offline');
+      await env.hub.fiscalWorker.runOnce(); // receipt → failed (backoff)
+      expect((await saleFiscal(env, sale.id)).doc?.status).toBe('failed');
+      await closeShift(env, shiftId, '100000');
+      for (let i = 0; i < 3; i += 1) await tick(env);
+      expect(env.driver.ledgerKeys()).toEqual([`${shiftId}:open`, sale.id, `${shiftId}:close`]);
+    } finally {
+      await env.hub.close();
+    }
+  });
+
+  it('OPEN rejected → receipts and Z are PARKED (never auto-cancelled, listed), the next shift still flows', async () => {
+    const env = await boot(4802);
+    try {
+      const pid = await product(env);
+      env.driver.queueSubmitModes('reject');
+      const shift1 = await openShift(env); // the open document is rejected
+      const s1 = await sellOk(env, pid);
+      await closeShift(env, shift1, '100000');
+      const shift2 = await openShift(env, false, '100000');
+      const s2 = await sellOk(env, pid);
+      for (let i = 0; i < 4; i += 1) await tick(env);
+      const d1 = (await saleFiscal(env, s1.id)).doc;
+      expect(d1?.status).toBe('pending');
+      expect(d1?.lastErrorCode).toBe('FISCAL_SHIFT_NOT_OPENED');
+      expect((await saleFiscal(env, s2.id)).doc?.status).toBe('confirmed');
+      const keys = env.driver.ledgerKeys();
+      expect(keys).toEqual([`${shift1}:open`, `${shift2}:open`, s2.id]);
+      expect(keys).not.toContain(s1.id);
+      expect(keys).not.toContain(`${shift1}:close`);
+      const list = FiscalUnsettledListResponseSchema.parse(
+        (
+          await env.hub.app.inject({
+            method: 'GET',
+            url: '/fiscal/docs',
+            headers: hdr(env.manager),
+          })
+        ).json(),
+      );
+      const parked = list.docs.filter((d) => d.lastErrorCode === 'FISCAL_SHIFT_NOT_OPENED');
+      expect(parked.map((d) => d.docKind).sort()).toEqual(['sale', 'shift_close']);
     } finally {
       await env.hub.close();
     }
