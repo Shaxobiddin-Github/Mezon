@@ -11,6 +11,7 @@ import {
   CloudAuthStore,
   CloudDeviceStore,
   CloudEventWriter,
+  cloudSchemaRegistry,
   CloudSyncPushStore,
   CloudTenantStore,
   categories,
@@ -774,6 +775,85 @@ describePg('@mezon/cloud - Sync Push Engine (T2.3 & P1-P5)', () => {
         second.json<{ events: { storeId: string }[] }>().events.filter((e) => e.storeId === orgA),
       ).toEqual([]);
     });
+  });
+
+  // --------------------------------------------------------------------------
+  // T2.5: tenant filter for EVERY synced table, generated from the registry (a new table is covered
+  // automatically). Rule (T2.4 pullScope): another organization never; another store of the same
+  // organization only for organization tables (tenantScope or pullScope 'organization').
+  // --------------------------------------------------------------------------
+  it('T2.5: pull tenant filter holds for every synced table of the registry', async () => {
+    const otherStoreSameOrg = idGen.nextId();
+    const synced = cloudSchemaRegistry.all().filter((m) => m.tableClass !== 'LOCAL');
+    expect(synced.length).toBeGreaterThan(30);
+    const maxPos = async (org: string, store: string) =>
+      BigInt(
+        (
+          await adminConn.pool.query<{ m: string | null }>(
+            'SELECT max(position)::text AS m FROM cloud_sync_events WHERE organization_id = $1 AND store_id = $2',
+            [org, store],
+          )
+        ).rows[0]!.m ?? '0',
+      );
+    const streams: [string, string, bigint][] = [
+      [orgA, storeA, await maxPos(orgA, storeA)],
+      [orgA, otherStoreSameOrg, 0n],
+      [orgB, storeB, await maxPos(orgB, storeB)],
+    ];
+    const expected = new Set<string>();
+    const forbidden = new Set<string>();
+    for (const meta of synced) {
+      for (const s of streams) {
+        const [org, store] = s;
+        s[2] += 1n;
+        const entityId = idGen.nextId();
+        await adminConn.pool.query(
+          `INSERT INTO cloud_sync_events (id, organization_id, store_id, device_id, hlc, created_at_ms, device_seq, type, entity, entity_id, class, schema_version, payload, position, hlc_adjusted, received_at_ms)
+           VALUES ($1, $2, $3, $4, '001700000000000:00000:018bcfe5-6800-7000-8000-000000000111', $5, 1, $6, $7, $8, $9, 1, '{}', $10, false, $5)`,
+          [
+            idGen.nextId(),
+            org,
+            store,
+            deviceA,
+            nowMs.toString(),
+            `${meta.tableName}.created`,
+            meta.tableName,
+            entityId,
+            meta.tableClass,
+            s[2].toString(),
+          ],
+        );
+        const orgWide = meta.tenantScope === 'organization' || meta.pullScope === 'organization';
+        const visible = org === orgA && (store === storeA || orgWide);
+        (visible ? expected : forbidden).add(`${meta.tableName}:${entityId}`);
+      }
+    }
+
+    const seen = new Set<string>();
+    let cursors = '';
+    for (let page = 0; page < 200; page += 1) {
+      const res = await server.inject({
+        method: 'GET',
+        url: `/api/v1/sync/pull?limit=500${cursors ? `&cursors=${encodeURIComponent(cursors)}` : ''}`,
+        headers: { authorization: `Bearer ${deviceTokenA}` },
+      });
+      expect(res.statusCode, res.body).toBe(200);
+      const body = res.json<{
+        events: { entity: string; entityId: string; organizationId: string }[];
+        nextCursors: Record<string, string>;
+        hasMore: boolean;
+      }>();
+      for (const e of body.events) {
+        expect(e.organizationId).toBe(orgA);
+        seen.add(`${e.entity}:${e.entityId}`);
+      }
+      cursors = Object.entries(body.nextCursors)
+        .map(([s, p]) => `${s}:${p}`)
+        .join(',');
+      if (!body.hasMore) break;
+    }
+    for (const k of expected) expect(seen.has(k), `missing ${k}`).toBe(true);
+    for (const k of forbidden) expect(seen.has(k), `leaked ${k}`).toBe(false);
   });
 
   // --------------------------------------------------------------------------
