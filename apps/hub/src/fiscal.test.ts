@@ -1202,3 +1202,62 @@ describe('P1 random driver schedules: the operator never sees a broken shift ord
     },
   );
 });
+
+describe('T2.5 restore from a local backup keeps the device identity; fiscal resumes', () => {
+  it('a SENT document in the backup is resumed by status() after the restore: one submit, same device_id', async () => {
+    const env = await boot(4951);
+    let reopened: Env | null = null;
+    try {
+      const pid = await product(env);
+      const shiftId = await openShift(env);
+      const sale = await sellOk(env, pid);
+      env.driver.queueSubmitModes('throw-after-accept'); // the operator has it, the reply is lost
+      await env.hub.fiscalWorker.runOnce();
+      expect((await saleFiscal(env, sale.id)).doc?.status).toBe('sent');
+      expect(env.driver.submitCount(sale.id)).toBe(1);
+      const deviceBefore = one<{ d: string }>(
+        env,
+        'SELECT device_id AS d FROM local_device_state',
+      ).d;
+
+      const backup = await env.hub.app.inject({
+        method: 'POST',
+        url: '/backups/create',
+        headers: hdr(env.owner),
+        payload: { reason: 'T2.5 restore test' },
+      });
+      expect(backup.statusCode, backup.body).toBe(201);
+      const backupId = backup.json<{ backup: { id: string } }>().backup.id;
+      const close = await env.hub.app.inject({
+        method: 'POST',
+        url: `/shifts/${shiftId}/close`,
+        headers: hdr(env.cashier),
+        payload: { clientRequestId: env.n(), countedCash: '100000' },
+      });
+      expect(close.statusCode, close.body).toBe(200);
+      const staged = await env.hub.app.inject({
+        method: 'POST',
+        url: `/backups/${backupId}/restore`,
+        headers: hdr(env.owner),
+        payload: { reason: 'T2.5 restore test' },
+      });
+      expect(staged.statusCode, staged.body).toBe(200);
+      await env.hub.close();
+
+      // Restart: the staged restore runs before the hub opens its connections.
+      reopened = await boot(4952, { dbPath: env.dbPath, setup: false, driver: env.driver });
+      expect(one<{ d: string }>(reopened, 'SELECT device_id AS d FROM local_device_state').d).toBe(
+        deviceBefore,
+      );
+      expect((await saleFiscal(reopened, sale.id)).doc?.status).toBe('sent');
+      reopened.clock.advance(60_000n);
+      await reopened.hub.fiscalWorker.runOnce();
+      const after = (await saleFiscal(reopened, sale.id)).doc;
+      expect(after?.status).toBe('confirmed');
+      expect(env.driver.submitCount(sale.id)).toBe(1);
+    } finally {
+      if (reopened) await reopened.hub.close();
+      else await env.hub.close().catch(() => undefined);
+    }
+  });
+});
