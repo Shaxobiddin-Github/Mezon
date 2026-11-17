@@ -15,7 +15,7 @@ import {
   quantityFromMilli,
   unixMsFromBigInt,
 } from '@mezon/domain';
-import { FixedClock, SeededRandomSource } from '@mezon/test-utils';
+import { FixedClock, SeededRandomSource, allowAllSaleRulesEvaluator } from '@mezon/test-utils';
 import { afterEach, describe, expect, it } from 'vitest';
 import {
   type LocalSqliteConnection,
@@ -123,10 +123,18 @@ async function setupOrderEnv(options?: { readonly seed?: number }) {
   const stockStore = createSqliteStockStore({ connection, getRuntimeContext: getStoreCtx });
   const cartStore = createSqliteCartStore({ connection, getRuntimeContext: getStoreCtx });
   const customerStore = createSqliteCustomerStore({ connection, getRuntimeContext: getStoreCtx });
-  const saleStore = createSqliteSaleStore({ connection, getRuntimeContext: getStoreCtx });
+  const saleStore = createSqliteSaleStore({
+    connection,
+    rulesEvaluator: allowAllSaleRulesEvaluator,
+    getRuntimeContext: getStoreCtx,
+  });
   const returnStore = createSqliteReturnStore({ connection, getRuntimeContext: getStoreCtx });
   const shiftStore = createSqliteShiftStore({ connection, getRuntimeContext: getStoreCtx });
-  const orderStore = createSqliteOrderStore({ connection, getRuntimeContext: getStoreCtx });
+  const orderStore = createSqliteOrderStore({
+    connection,
+    rulesEvaluator: allowAllSaleRulesEvaluator,
+    getRuntimeContext: getStoreCtx,
+  });
 
   let seq = 1;
   const nextUuid = () => makeUuid(0x01a0, seq++);
@@ -708,6 +716,7 @@ describe('@mezon/db-local - T1.10 Customer Orders, Frozen Evaluation (O3), Advan
       }),
       orderStore: createSqliteOrderStore({
         connection: env.connection,
+        rulesEvaluator: allowAllSaleRulesEvaluator,
         getRuntimeContext: getStoreCtxB,
       }),
       returnStore: createSqliteReturnStore({

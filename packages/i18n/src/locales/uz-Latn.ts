@@ -273,6 +273,19 @@ export const UZ_LATN_MESSAGES = {
   'excelImport.error.invalidPackageCode': 'Qadoq kodi notoʻgʻri',
   'excelImport.error.invalidVat': 'QQS stavkasi notoʻgʻri',
   'excelImport.error.invalidRow': 'Notoʻgʻri qator',
+
+  // T3.2 Legal rules engine
+  'rules.EXPIRED_GOODS':
+    'Savatda yaroqlilik muddati oʻtgan tovar bor. Savdo davom etadi; uni rasxod sifatida chiqarish mumkin.',
+  'rules.MXIK_MISSING': 'Ayrim tovarlarda MXIK kodi yoʻq.',
+  'rules.PACKAGE_MISSING': 'Qonuniy qoidalar paketi oʻrnatilmagan.',
+  'rules.PACKAGE_EXPIRED': 'Qonuniy qoidalar paketining muddati tugagan. Yangilang.',
+  'rules.PACKAGE_INVALID': 'Qonuniy qoidalar paketi buzilgan (imzo tekshiruvidan oʻtmadi).',
+  'rules.CASH_FORBIDDEN_MXIK': 'Bu tovar uchun naqd toʻlov taqiqlangan.',
+  'rules.MIXED_RECEIPT_CASHLESS':
+    'Chekda naqdga taqiqlangan tovar bor: butun chek naqdsiz boʻlishi kerak.',
+  'rules.MXIK_CASH_LIMIT': 'Bitta MXIK boʻyicha naqd toʻlov limiti oshib ketdi.',
+  'error.RULES_BLOCKED': 'Savdo qonuniy qoidalar bilan bloklandi. Sababini koʻring.',
 } as const;
 
 export type I18nKey = keyof typeof UZ_LATN_MESSAGES;

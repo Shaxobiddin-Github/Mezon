@@ -192,6 +192,12 @@ export const localHubConfig = localSchemaRegistry.defineTable(
       .default(true),
     receiptHeaderTitle: text('receipt_header_title').notNull().default('GUZAR KASSA'),
     receiptFooterText: text('receipt_footer_text').notNull().default('Xaridingiz uchun rahmat!'),
+    /** T3.2 rollback protection: highest rules package version ever imported on this hub. */
+    maxRulePackageVersion: sqliteBigint('max_rule_package_version')
+      .notNull()
+      .default(sql`0`),
+    /** T3.2: fiscal mode flag (enabled only in tests until T3.3). Missing/invalid package blocks when on. */
+    fiscalModeEnabled: sqliteBoolean('fiscal_mode_enabled').notNull().default(false),
   }),
   (self) => [
     uniqueIndex('uidx_local_hub_config_singleton').on(self.singletonGuard),
@@ -240,6 +246,8 @@ export const localHubConfig = localSchemaRegistry.defineTable(
     ),
     check('chk_local_hub_config_auto_print', sql`${self.printerAutoPrintSale} IN (0, 1)`),
     check('chk_local_hub_config_drawer_auto', sql`${self.printerCashDrawerAutoOpen} IN (0, 1)`),
+    check('chk_local_hub_config_max_rule_ver', sql`${self.maxRulePackageVersion} >= 0`),
+    check('chk_local_hub_config_fiscal_mode', sql`${self.fiscalModeEnabled} IN (0, 1)`),
   ],
 );
 
@@ -2954,5 +2962,44 @@ export const localSyncConflicts = localSchemaRegistry.defineTable(
   (self) => [
     index('idx_local_sync_conflicts_event').on(self.eventId),
     index('idx_local_sync_conflicts_created').on(self.organizationId, self.createdAtMs),
+  ],
+);
+
+/**
+ * Signed legal rules packages imported on this hub (`LOCAL`, T3.2). Each package is an Ed25519-signed
+ * artefact verified by the hub on import AND on every load; the original canonical envelope bytes are
+ * kept so re-verification is exact. At most one active package per organization; versions are
+ * monotonic (rollback protection via `local_hub_config.max_rule_package_version`).
+ */
+export const localRulePackages = localSchemaRegistry.defineTable(
+  {
+    name: 'local_rule_packages',
+    tableClass: 'LOCAL',
+    tenantScope: 'organization',
+  },
+  (common) => ({
+    ...common,
+    packageVersion: sqliteBigint('package_version').notNull(),
+    keyId: text('key_id').notNull(),
+    issuedAtMs: sqliteUnixMs('issued_at_ms').notNull(),
+    validUntilMs: sqliteUnixMs('valid_until_ms').notNull(),
+    envelopeJson: text('envelope_json').notNull(),
+    importedByUserId: sqliteUuidV7('imported_by_user_id')
+      .notNull()
+      .references(() => users.id),
+    isActive: sqliteBoolean('is_active').notNull().default(false),
+  }),
+  (self) => [
+    uniqueIndex('uidx_local_rule_packages_org_version').on(
+      self.organizationId,
+      self.packageVersion,
+    ),
+    uniqueIndex('uidx_local_rule_packages_org_active')
+      .on(self.organizationId)
+      .where(sql`${self.isActive} = 1`),
+    check('chk_local_rule_packages_version_pos', sql`${self.packageVersion} >= 1`),
+    check('chk_local_rule_packages_is_active', sql`${self.isActive} IN (0, 1)`),
+    check('chk_local_rule_packages_valid_range', sql`${self.validUntilMs} > ${self.issuedAtMs}`),
+    check('chk_local_rule_packages_key_id', sql`length(${self.keyId}) BETWEEN 1 AND 64`),
   ],
 );

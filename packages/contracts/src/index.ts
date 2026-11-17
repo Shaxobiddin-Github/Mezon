@@ -772,3 +772,23 @@ export {
   SYNC_FOREIGN_REFERENCES,
   type ForeignKeyRef,
 } from './sync.js';
+
+export {
+  RulesPayloadWireSchema,
+  type RulesPayloadWireDto,
+  RulesPackageEnvelopeWireSchema,
+  type RulesPackageEnvelopeWireDto,
+  ImportRulesPackageRequestSchema,
+  type ImportRulesPackageRequestDto,
+  ImportRulesPackageResponseSchema,
+  type ImportRulesPackageResponseDto,
+  RulesPackageStateSchema,
+  ActiveRulesPackageResponseSchema,
+  type ActiveRulesPackageResponseDto,
+  RuleFindingSchema,
+  type RuleFindingDto,
+  RulesCheckRequestSchema,
+  type RulesCheckRequestDto,
+  RulesCheckResponseSchema,
+  type RulesCheckResponseDto,
+} from './rules.js';

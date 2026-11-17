@@ -300,6 +300,9 @@ importers:
       '@mezon/drivers':
         specifier: workspace:*
         version: link:../../packages/drivers
+      '@mezon/rules':
+        specifier: workspace:*
+        version: link:../../packages/rules
       '@mezon/sync':
         specifier: workspace:*
         version: link:../../packages/sync
@@ -483,6 +486,10 @@ importers:
       '@mezon/domain':
         specifier: workspace:*
         version: link:../domain
+    devDependencies:
+      fast-check:
+        specifier: 4.10.2
+        version: 4.10.2
 
   packages/sync:
     dependencies:
