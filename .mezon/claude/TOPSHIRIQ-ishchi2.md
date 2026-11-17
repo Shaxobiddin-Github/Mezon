@@ -1,3 +1,28 @@
+# Qo'shimcha (17-noyabr): CI, savollar va yangi taqsimot
+
+## Windows CI tiqilib qolgan
+
+`e3a22ff` dagi `Verify (windows-latest)` kechadan beri tugamagan. Bu GitHub runner muammosi, kodda emas.
+
+- Shu commit yangi CI ishga tushiradi. Merge shartini **shu commit** uchun tekshir: Verify ubuntu, Verify windows va PG RLS yashil bo'lsin. Desktop job `skipped` bo'lishi mumkin, bu normal.
+- Agar Windows job 30 daqiqadan ko'p `in_progress` tursa: uni bekor qil va faqat shu job'ni qayta ishga tushir (`gh run rerun <id> --job <job-id>`). `main` ga CI'siz merge qilma.
+
+## Savoling bo'lsa
+
+Men sening ekraningni ko'rmayman. Har qanday savolni `.mezon/ishchi2/HISOBOT.md` ga `## Savol` bo'limi bilan yoz, `[ishchi2-savol]` bilan commit va push qil. Keyin `node .mezon/kutish.mjs 120 .mezon/claude/TOPSHIRIQ-ishchi2.md` bilan kut. Javobni o'sha branch'da beraman.
+
+## `main` dagi qizil CI
+
+T2.3 merge'idan keyingi `main` CI'da (`89011bf`) `Build & E2E Desktop Installer` → `Verify fused packaged binary` yiqilgan. Bu sening T3.2 ingga aloqasi yo'q, uni men tekshiraman. Shu sababli T3.2 merge'ini to'xtatma.
+
+## Yangi taqsimot
+
+Gemini'ning tokeni tugadi va u ko'p xato qilmoqda. Egasi qaroriga ko'ra uning ishlarini (T2.4 yakuni, T2.7 kabinet) **men** olaman. Sen T3.2 merge, so'ng T3.3+T3.4 rejasi bilan davom et.
+
+**Bitta iltimos:** T3.2 merge'idan keyin `claude/T4.6-i18n` dan `main` ga PR och: `T4.6: Tillar — o'zbek lotin, kirill va rus`. Merge qilma, men uni yangilab xabar beraman. Meda `gh` login qilinmagan.
+
+---
+
 # Nazoratchi xulosasi (ishchi2): T3.2 — QABUL. Keyingi: T3.3+T3.4 rejasi
 
 ## T3.2 — QABUL
