@@ -978,3 +978,31 @@ describe('T3.3 K1 shift order: receipts after OPEN, Z after the last receipt', (
     }
   });
 });
+
+describe('T3.3 K1 no deadlock after a clock correction', () => {
+  it('Z created "earlier" than its receipt (clock moved back) waits for it without freezing the queue', async () => {
+    const env = await boot(4901);
+    try {
+      const pid = await product(env);
+      const shiftId = await openShift(env);
+      env.clock.advance(600_000n);
+      const sale = await sellOk(env, pid);
+      env.driver.queueSubmitModes('offline');
+      await env.hub.fiscalWorker.runOnce(); // receipt → failed (backoff)
+      env.clock.set(NOW + 300_000n); // Windows clock correction: back by 5 minutes
+      const close = await env.hub.app.inject({
+        method: 'POST',
+        url: `/shifts/${shiftId}/close`,
+        headers: hdr(env.cashier),
+        payload: { clientRequestId: env.n(), countedCash: '100000' },
+      });
+      expect(close.statusCode, close.body).toBe(200);
+      await env.hub.fiscalWorker.runOnce(); // Z is due, receipt not yet: Z must wait
+      expect(env.driver.submitCount(`${shiftId}:close`)).toBe(0);
+      for (let i = 0; i < 80; i += 1) await tick(env);
+      expect(env.driver.ledgerKeys()).toEqual([`${shiftId}:open`, sale.id, `${shiftId}:close`]);
+    } finally {
+      await env.hub.close();
+    }
+  });
+});

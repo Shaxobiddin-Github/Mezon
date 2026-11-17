@@ -429,6 +429,25 @@ export class SqliteFiscalStore {
    * creation order (S4: shift open → receipts → shift close; S3: sale → refund). `null` when empty
    * or before setup.
    */
+  queueSync(limit: number): readonly StoredFiscalDocRecord[] {
+    const c = this.ctx();
+    if (c === null) return [];
+    return this.connection.db
+      .select()
+      .from(fiscalDocs)
+      .where(
+        and(
+          eq(fiscalDocs.organizationId, c.organizationId),
+          inArray(fiscalDocs.status, ['pending', 'sent', 'failed']),
+          sql`(${fiscalDocs.lastErrorCode} IS NULL OR ${fiscalDocs.lastErrorCode} <> ${FISCAL_PARKED_SHIFT_NOT_OPENED})`,
+        ),
+      )
+      .orderBy(asc(fiscalDocs.createdAtMs), asc(fiscalDocs.id))
+      .limit(limit)
+      .all()
+      .map(toRecord);
+  }
+
   headUnsettledSync(): StoredFiscalDocRecord | null {
     const c = this.ctx();
     if (c === null) return null;
@@ -506,6 +525,13 @@ export class SqliteFiscalStore {
   ): Promise<StoredFiscalDocRecord> {
     const { uow } = this.requireCtx();
     return uow.execute((session) => {
+      // Optimistic check inside the write transaction: a concurrent void may have cancelled it.
+      const current = getFiscalDocByIdSync(session.db, doc.id);
+      if (current?.status !== doc.status) {
+        throw new DomainError('FISCAL_DOC_INVALID_STATE', 'Fiscal document changed concurrently', {
+          details: { expected: doc.status, actual: current?.status ?? null },
+        });
+      }
       const w = updateMonotone(session, fiscalDocs, {
         id: doc.id,
         organizationId: doc.organizationId,

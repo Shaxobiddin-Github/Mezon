@@ -1,5 +1,6 @@
 import type { SqliteFiscalStore, StoredFiscalDocRecord } from '@mezon/db-local';
 import { type FiscalDriver, type FiscalSubmitResult, isFiscalDriverError } from '@mezon/drivers';
+import { DomainError } from '@mezon/domain';
 import type { Logger } from 'pino';
 
 export interface HubFiscalWorkerOptions {
@@ -119,20 +120,43 @@ export class HubFiscalWorker {
    */
   private async pass(): Promise<FiscalWorkerRunResult> {
     const counts = { processed: 0, confirmed: 0, rejected: 0, failed: 0, unknown: 0 };
-    for (let i = 0; i < this.batchSize; i += 1) {
-      const head = this.opts.store.headUnsettledSync();
-      if (head === null || BigInt(head.nextCheckAtMs) > this.opts.nowMs()) break;
-      const outcome = await this.process(head);
+    // Oldest first. A document waiting for a dependency (shift open, its receipts, the sale of a
+    // refund) never blocks the others — the explicit gates keep the order — so nothing can deadlock
+    // (e.g. a Z created "earlier" after a clock correction).
+    for (const queued of this.opts.store.queueSync(this.batchSize * 4)) {
+      if (counts.processed >= this.batchSize) break;
+      if (BigInt(queued.nextCheckAtMs) > this.opts.nowMs()) continue;
+      const doc = this.opts.store.getDocSync(queued.id); // fresh state (void may have cancelled it)
+      if (
+        doc === null ||
+        (doc.status !== 'pending' && doc.status !== 'sent' && doc.status !== 'failed')
+      ) {
+        continue;
+      }
+      let outcome: Outcome;
+      try {
+        outcome = await this.process(doc);
+      } catch (err) {
+        if (err instanceof DomainError && err.code === 'FISCAL_DOC_INVALID_STATE') continue;
+        throw err;
+      }
+      if (outcome === 'waiting') continue;
       counts.processed += 1;
       if (outcome === 'confirmed') counts.confirmed += 1;
       else if (outcome === 'rejected') counts.rejected += 1;
       else if (outcome === 'failed') counts.failed += 1;
       else if (outcome === 'unknown') counts.unknown += 1;
-      // The head did not settle (offline / unknown / waiting): stop and retry on the next pass.
-      if (outcome === 'failed' || outcome === 'unknown' || outcome === 'waiting') break;
+      // Driver trouble: stop this pass; the backoff decides when to try again.
+      if (outcome === 'failed' || outcome === 'unknown') break;
       await yieldToEventLoop();
     }
     return counts;
+  }
+
+  /** Records why a document waits — written only when the reason changes (no outbox churn). */
+  private async noteWaiting(doc: StoredFiscalDocRecord, code: string, message: string) {
+    if (doc.lastErrorCode === code) return;
+    await this.opts.store.reschedule(doc, BigInt(doc.nextCheckAtMs), code, message);
   }
 
   private backoff(attempts: number): bigint {
@@ -159,9 +183,8 @@ export class HubFiscalWorker {
         return 'cancelled';
       }
       if (dep.status !== 'confirmed') {
-        await this.opts.store.reschedule(
+        await this.noteWaiting(
           doc,
-          this.opts.nowMs() + this.statusRecheckMs,
           'FISCAL_WAITING_DEPENDENCY',
           'Asl savdo hujjati hali tasdiqlanmagan',
         );
@@ -205,12 +228,7 @@ export class HubFiscalWorker {
         await store.park(doc, 'Fiskal smena ochilmadi (operator rad etdi); qoʻlda hal qiling');
         return 'waiting';
       }
-      await store.reschedule(
-        doc,
-        this.opts.nowMs() + this.statusRecheckMs,
-        'FISCAL_WAITING_SHIFT_OPEN',
-        'Fiskal smena hali ochilmagan',
-      );
+      await this.noteWaiting(doc, 'FISCAL_WAITING_SHIFT_OPEN', 'Fiskal smena hali ochilmagan');
       return 'waiting';
     }
     if (doc.docKind === 'shift_close') {
@@ -220,9 +238,8 @@ export class HubFiscalWorker {
         return 'waiting';
       }
       if (pending.live > 0) {
-        await store.reschedule(
+        await this.noteWaiting(
           doc,
-          this.opts.nowMs() + this.statusRecheckMs,
           'FISCAL_WAITING_RECEIPTS',
           'Smenaning cheklari hali fiskallashmagan',
         );
