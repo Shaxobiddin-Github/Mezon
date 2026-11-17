@@ -1,3 +1,87 @@
+# Nazoratchi xulosasi (ishchi2): T3.3+T3.4 — QABUL. Merge tartibi. Keyingi: T2.6 + T2.5 rejasi
+
+## T3.3+T3.4 — QABUL
+
+Tekshirildi: `cfec0a6`.
+
+K1 va K2 to'g'ri bajarildi. Qat'iy FIFO'dan "chetlab o'tish va aniq gate'lar" ga o'tish to'g'ri qaror bo'ldi, deadlock va F15 ni mutatsiyalar orqali o'zing topding. S1 testi ham ishonchli: navbat bo'shayotganda savdo p95 15,9 ms, driver tranzaksiya ichida chaqirilmaydi.
+
+**Mustaqil mutatsiyalarim:**
+
+| Mutatsiya | Natija |
+|---|---|
+| Z cheklarni kutmaydi (`pending.live` gate'i o'chirildi) | aniqlandi |
+| Cheklar `open` tasdiqlanishini kutmaydi | aniqlandi |
+
+**Test qarzi (keyingi PR'ning birinchi commit'i):** ikkala mutatsiyani ham faqat **bittadan** test ushladi. "OPEN offline" testi tartibni qat'iy tekshirmaydi.
+
+- `FakeFiscalDriver` haqiqiy operator kabi o'zgarmas qoidalarni majburlasin: ochilmagan smenaga chek → `rejected`, yopilgan smenaga chek → `rejected`, `close` dan keyin chek → `rejected`.
+- Shunda tartib buzilishini barcha testlar ushlaydi.
+- Shu mutatsiyalarni qayta ishlat.
+
+## Merge tartibi (sen bajarasan, `gh` sende)
+
+Uchala PR'ning CI'si tekshirildi:
+
+1. **PR #26** (T4.6, oxirgi commit `079d8f7`) — QABUL. Unda desktop installer tuzatishi bor: paketga `@mezon/sync` va `@mezon/rules` tushmagan edi, shuning uchun T2.3 dan beri o'rnatilgan dasturda Hub ishga tushmas edi. Beshala job yashil, Installer ham.
+   - Squash: `T4.6: Tillar va desktop paket tuzatishi`.
+   - `git diff 079d8f7 origin/main --stat` bo'sh bo'lsin.
+2. **PR #28** (T2.4, oxirgi commit `e0d63e0`) — QABUL. Gemini kodi, Y1 tekshirilgan (8/8 mutatsiya); `main` merge va `0018` men tomonimdan; CI yashil, PG testlari ham.
+   - #26 tushgach, `main` ni #28 ga **merge** qil (konflikt kutilmaydi), CI yashil bo'lishini kut.
+   - Squash: `T2.4: Sinxron pull va pozitsiya dvigateli`.
+   - Diff tekshiruvi.
+3. **PR #27** (T3.3): `main` ni merge qil.
+   - `0019` T2.4 ning `0018` idan keyin turadi.
+   - Yangi `fiscal.*` va `error.FISCAL*` kalitlari uchun ruscha matnlar.
+   - `pnpm verify`.
+   - CI yashil bo'lsin, Installer ham (endi o'tishi kerak).
+   - Hisobot yoz. Men oxirgi commit'ni ko'rib, merge ruxsatini beraman.
+
+Har merge'dan keyin `ishchi2/*` emas, `gemini/T2.4-sync-pull` va `claude/T4.6-i18n` branch'larini ham o'chir.
+
+## Keyingi: T2.6 + T2.5 — REJA
+
+Shu ishdan keyin sinxron yadrosi senga o'tadi. **Ruxsat:** `apps/cloud/**`, `packages/db-cloud/**`, `apps/hub/src/sync*`, `packages/sync/**`, `packages/contracts/src/sync.ts`. Kabinet fayllariga (`apps/admin`, `apps/cloud/src/admin-*`, `packages/db-cloud/src/admin-store.ts`) tegma: u men ishlayotgan T2.7.
+
+Ikkalasini bitta reja hujjatida yoz, lekin **ikki alohida PR** bo'ladi: avval T2.6, keyin T2.5.
+
+### T2.6 — Proyeksiyalar va konfliktlar
+
+GEMINI.md: faqat tegilgan yozuvlar qayta hisoblanadi, to'liq qayta qurish ham qoladi, konflikt UI. **Mezon:** qisman natija = to'liq natija.
+
+- **Hozirgi muammo** (T2.4 Y4): pull partiyasida bitta `stock_moves` yoki ledger hodisasi bo'lsa ham `rebuildProjections` **to'liq** ishlaydi va bu yozish tranzaksiyasi ichida. 50 ming mahsulot va 100 ming ledger qatorida 1,23 soniya, shu vaqt davomida kassa savdosi kutib turadi.
+- **Talab:** pull qo'llangan hodisalardan tegilgan kalitlar (`product_id` va `batch`, `customer_id`, `supplier_id`) yig'iladi va faqat ular qayta hisoblanadi.
+- **Isbot:** differensial test. Tasodifiy hodisalar ketma-ketligi (savdo, qaytarish, void, kirim, qarz to'lovi, boshqa do'kondan ledger) beriladi. Har partiyadan keyin qisman natija va noldan to'liq qayta qurish natijasi **barcha** proyeksiya jadvallarida bayt-bayt teng bo'lishi kerak. Kamida 200 ta tasodifiy ketma-ketlik, seed bilan qayta takrorlanadigan.
+- **Perf:** o'sha 50k/100k bazada bitta partiya < 50 ms (perf loyihasida).
+- **Konfliktlar:** hub `local_sync_conflicts` va bulut `cloud_sync_parked` uchun ko'rish va hal qilish API'si, POS'da manager uchun ekran. Hal qilish audit bilan bo'ladi, faqat ruxsat etilgan amallar: qayta urinish yoki "o'rganildi". Ma'lumotni qo'lda tahrirlash **yo'q**.
+- **Kabinet uchun port** (T2.7b menga kerak): bulutda yozilgan buyruq (narx, xodim, sozlama) kassalarga yetadigan **bulut hodisa yozuvchisi**. Rejada quyidagilarni asosla:
+  - bulutning HLC soati qanday saqlanadi (bir millisekundda ikki o'zgarish);
+  - tashkilot doirasidagi hodisaning pozitsiya oqimi (`{storeId → position}` kursoriga qanday tushadi);
+  - virtual qurilma login yoki push qila olmasligi;
+  - hodisa push bilan bir xil validatsiya yo'lidan o'tishi.
+
+  Bu alohida kichik PR bo'lishi mumkin. Taklifingni yoz.
+
+### T2.5 — Bootstrap va qayta tiklash
+
+GEMINI.md: yangi hub va mavjud hubni tiklash. **Mezonlar:** har jadval tenant bilan filtrlangan; yarim yuklashdan davom etadi.
+
+- **Snapshot va pull:**
+  - yangi hub bulutdan tashkilot va do'kon ma'lumotini qanday oladi (snapshot + undan keyingi pull)?
+  - snapshot qaysi pozitsiyada olinadi va kursorlar qanday o'rnatiladi, shunda bitta hodisa ham yo'qolmasin yoki ikki marta qo'llanmasin?
+- **Davom ettirish:** yarim yuklash uzilsa, qayerdan davom etadi? Test: yuklash N-sahifada uzilib, qayta ishga tushganda natija to'liq yuklash bilan teng.
+- **Tenant filtri:** har jadval uchun tenant filtri testi. Boshqa tashkilot yoki do'kon ma'lumoti kelmasligi T2.4 dagi `pullScope` qoidalari bilan bir xil.
+- **Mavjud hubni tiklash:** lokal zaxira (T1.13) va bulutdan qaysi biri ustun? Outbox'dagi hali yuborilmagan hodisalar nima bo'ladi?
+- **Fiskal:** tiklangan hubda fiskal navbat (`fiscal_docs`). `sent` holatdagi hujjatlar `status()` orqali davom etadimi?
+
+## Bajarish tartibi
+
+1. Merge tartibi: 1, 2, so'ng 3-qadam (PR #27 hisobot bilan).
+2. T2.6+T2.5 rejasini yoz. Branch: `main` dan `ishchi2/T2.6-projections`, commit `[ishchi2-reja] T2.6`.
+3. Kutish: `node .mezon/kutish.mjs 120 .mezon/claude/TOPSHIRIQ-ishchi2.md`. Javobni reja branch'ida beraman.
+
+---
+
 # Nazoratchi xulosasi (ishchi2): T3.3+T3.4 — KICHIK QAYTA ISHLASH
 
 Tekshirildi: `c115962` (PR #27). Ish sifatli: 17 ta mutatsiyaning hammasi aniqlandi, F-A to'g'ri amalga oshirilgan (`sent` oldin commit qilinadi, noma'lum natija `sent` da qoladi, `failed` faqat aniq holatda), qulash testlari bor, hisobot ochiq yozilgan.
