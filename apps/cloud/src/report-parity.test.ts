@@ -543,7 +543,7 @@ describePg('A1: Hub vs Cloud DailySalesReport Parity (T2.7a)', () => {
       toDate: '2024-11-10',
       includeCostAndProfit: true,
     });
-    const day = hub.days[0]!;
+    const day = hub.days[0];
     const dash = await adminReadStore.getDashboard({
       organizationId: orgId,
       storeId,
