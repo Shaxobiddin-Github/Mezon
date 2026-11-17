@@ -76,6 +76,9 @@ if (schemaPkg.assertShiftMigrationsComplete) {
 if (schemaPkg.assertOrderMigrationsComplete) {
   schemaPkg.assertOrderMigrationsComplete(migrationsDir);
 }
+if (schemaPkg.assertFiscalMigrationsComplete) {
+  schemaPkg.assertFiscalMigrationsComplete(migrationsDir);
+}
 
 const currSnapshot = await generateSQLiteDrizzleJson(schemaTables);
 const diffStatements = await generateSQLiteMigration(prevSnapshot, currSnapshot);

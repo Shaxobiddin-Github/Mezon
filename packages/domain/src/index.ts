@@ -478,3 +478,23 @@ export {
   canonicalizeDeliverOrderRequest,
   canonicalizeCancelOrderRequest,
 } from './order.js';
+
+export {
+  FISCAL_DOC_STATUSES,
+  FISCAL_DOC_KINDS,
+  FISCAL_DOC_TRANSITIONS,
+  FISCAL_DOC_BOOKKEEPING_STATES,
+  FISCAL_DOC_UNSETTLED_STATES,
+  FISCAL_RECEIPT_FIELD_KEYS,
+  type FiscalDocStatus,
+  type FiscalDocKind,
+  type FiscalReceiptFieldKey,
+  type FiscalReceiptFieldConfig,
+  type ReceiptFiscalMark,
+  type ReceiptFiscalInput,
+  type ReceiptFiscalBlock,
+  isFiscalDocStatus,
+  isFiscalDocTransitionAllowed,
+  canVoidWithFiscalStatus,
+  resolveReceiptFiscalBlock,
+} from './fiscal.js';

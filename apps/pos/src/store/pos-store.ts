@@ -53,7 +53,8 @@ export type PosModal =
   | 'shortcuts'
   | 'edit_qty'
   | 'diagnostics'
-  | 'catalog';
+  | 'catalog'
+  | 'fiscal_unsettled';
 
 export interface InsufficientStockLineDetail {
   readonly cartLineId: string;

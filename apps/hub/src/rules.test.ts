@@ -377,6 +377,49 @@ describe('T3.2a signed package import (real Ed25519)', () => {
       await env.hub.close();
     }
   });
+
+  it('C3: the stored package_version column changed in the DB → invalid with a COLD and a WARM cache', async () => {
+    const key = makeKey('test-k1');
+    const env = await boot(3205, [key.trusted]);
+    try {
+      // Warm cache: import (cache reset), then load once while the row is intact.
+      await importPkg(env, signEnvelope(wirePayload(1), key));
+      expect((await activeState(env)).state).toBe('ok');
+      env.hub.connection.sqlite.prepare('UPDATE local_rule_packages SET package_version = 7').run();
+      expect((await activeState(env)).state).toBe('invalid');
+    } finally {
+      await env.hub.close();
+    }
+    const env2 = await boot(3206, [key.trusted]);
+    try {
+      // Cold cache: the column is changed before the first load after import.
+      await importPkg(env2, signEnvelope(wirePayload(1), key));
+      env2.hub.connection.sqlite
+        .prepare('UPDATE local_rule_packages SET package_version = 7')
+        .run();
+      expect((await activeState(env2)).state).toBe('invalid');
+    } finally {
+      await env2.hub.close();
+    }
+  });
+
+  it('C4: package loaded once (warm cache), then the envelope is corrupted → next load is invalid', async () => {
+    const key = makeKey('test-k1');
+    const env = await boot(3207, [key.trusted]);
+    try {
+      await importPkg(env, signEnvelope(wirePayload(1), key));
+      expect((await activeState(env)).state).toBe('ok');
+      expect((await activeState(env)).state).toBe('ok');
+      env.hub.connection.sqlite
+        .prepare(
+          "UPDATE local_rule_packages SET envelope_json = replace(envelope_json, '99900000000000001', '99900000000000002')",
+        )
+        .run();
+      expect((await activeState(env)).state).toBe('invalid');
+    } finally {
+      await env.hub.close();
+    }
+  });
 });
 
 describe('T3.2a final rules check in every sale path', () => {

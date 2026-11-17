@@ -26,6 +26,7 @@ import {
 import {
   DomainError,
   type UnixMs,
+  type ReceiptFiscalBlock,
   type UuidV7,
   moneyToTiyin,
   parseUuidV7,
@@ -64,6 +65,11 @@ export interface HubPrinterServiceOptions {
   readonly printerDriverFactory?: (config: PrinterConfig) => PrinterDriver;
   readonly listWindowsPrintersFn?: () => Promise<readonly DiscoveredWindowsPrinter[]>;
   readonly nowMs?: () => bigint;
+  /** T3.4: fiscal block for a receipt (undefined → legacy non-fiscal receipt). */
+  readonly resolveFiscalBlock?: (ref: {
+    readonly saleId?: UuidV7;
+    readonly returnId?: UuidV7;
+  }) => ReceiptFiscalBlock | undefined;
 }
 
 interface SendOutcome {
@@ -185,6 +191,7 @@ export class HubPrinterService {
   private readonly driverFactory: ((config: PrinterConfig) => PrinterDriver) | undefined;
   private readonly listWindowsPrintersFn: () => Promise<readonly DiscoveredWindowsPrinter[]>;
   private readonly nowMs: () => bigint;
+  private readonly resolveFiscalBlock: NonNullable<HubPrinterServiceOptions['resolveFiscalBlock']>;
   private readonly inFlight = new Map<string, Promise<unknown>>();
 
   constructor(options: HubPrinterServiceOptions) {
@@ -196,6 +203,7 @@ export class HubPrinterService {
     this.driverFactory = options.printerDriverFactory;
     this.listWindowsPrintersFn = options.listWindowsPrintersFn ?? listInstalledWindowsPrinters;
     this.nowMs = options.nowMs ?? (() => BigInt(Date.now()));
+    this.resolveFiscalBlock = options.resolveFiscalBlock ?? (() => undefined);
   }
 
   private createDriver(config: PrinterConfig): PrinterDriver {
@@ -537,6 +545,7 @@ export class HubPrinterService {
             !isReprint &&
             config.cashDrawerAutoOpen &&
             sale.payments.some((p) => p.method === 'cash'),
+          fiscal: this.resolveFiscalBlock({ saleId: sale.id }),
         };
         return doc;
       },
@@ -602,6 +611,7 @@ export class HubPrinterService {
           })),
           openCashDrawer:
             !isReprint && config.cashDrawerAutoOpen && moneyToTiyin(ret.cashRefundAmount) > 0n,
+          fiscal: this.resolveFiscalBlock({ returnId: ret.id }),
         };
         return doc;
       },

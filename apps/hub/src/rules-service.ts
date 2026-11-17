@@ -72,8 +72,16 @@ export interface HubRulesServiceOptions {
  */
 export class HubRulesService {
   private readonly opts: HubRulesServiceOptions;
-  private cache: { readonly envelopeJson: string; readonly pkg: VerifiedRulesPackage } | null =
-    null;
+  /**
+   * Cache keyed by EVERY stored column that the verdict depends on (row id, version column and the
+   * exact envelope bytes). A change to any of them forces a full re-verification (C3/C4).
+   */
+  private cache: {
+    readonly rowId: string;
+    readonly packageVersion: bigint;
+    readonly envelopeJson: string;
+    readonly pkg: VerifiedRulesPackage;
+  } | null = null;
 
   constructor(opts: HubRulesServiceOptions) {
     this.opts = opts;
@@ -87,7 +95,12 @@ export class HubRulesService {
     if (row === null) {
       return { state: 'missing', fiscalMode, package: null };
     }
-    if (this.cache !== null && this.cache.envelopeJson === row.envelopeJson) {
+    if (
+      this.cache !== null &&
+      this.cache.rowId === row.id &&
+      this.cache.packageVersion === row.packageVersion &&
+      this.cache.envelopeJson === row.envelopeJson
+    ) {
       return {
         state: resolveRulesPackageState(this.cache.pkg, false, nowMs),
         fiscalMode,
@@ -103,7 +116,12 @@ export class HubRulesService {
       if (pkg.payload.packageVersion !== row.packageVersion) {
         throw new Error('stored version does not match signed payload');
       }
-      this.cache = { envelopeJson: row.envelopeJson, pkg };
+      this.cache = {
+        rowId: row.id,
+        packageVersion: row.packageVersion,
+        envelopeJson: row.envelopeJson,
+        pkg,
+      };
       return { state: resolveRulesPackageState(pkg, false, nowMs), fiscalMode, package: pkg };
     } catch (err) {
       this.cache = null;

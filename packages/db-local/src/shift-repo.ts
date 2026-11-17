@@ -50,6 +50,7 @@ import type Database from 'better-sqlite3';
 import { and, asc, desc, eq, gte, inArray, isNull, lt } from 'drizzle-orm';
 import type { BetterSQLite3Database } from 'drizzle-orm/better-sqlite3';
 import { type LocalSqliteConnection } from './connection.js';
+import { insertShiftFiscalDocIfEnabledInTxSync } from './fiscal-repo.js';
 import { type StoredCashMoveRecord, toStoredCashMove } from './customer-repo.js';
 import { advanceShiftSeqSync } from './device-state.js';
 import {
@@ -1492,6 +1493,13 @@ export class SqliteShiftStore {
         eventType: 'shift.opened',
         schemaVersion: 1,
       });
+      // T3.3 fiscal shift open goes through the fiscal queue; it never blocks the shift (§3.2).
+      insertShiftFiscalDocIfEnabledInTxSync(session, {
+        organizationId: ctx.organizationId,
+        storeId: ctx.storeId,
+        shiftId: shiftWrite.entityId,
+        op: 'open',
+      });
 
       const sessWrite = insertMonotone(session, shiftCashierSessions, {
         organizationId: ctx.organizationId,
@@ -1918,6 +1926,13 @@ export class SqliteShiftStore {
         },
         eventType: 'shift.closed',
         schemaVersion: 1,
+      });
+      // T3.3 fiscal shift close (Z report) via the queue: `sent` first, then `status()` only.
+      insertShiftFiscalDocIfEnabledInTxSync(session, {
+        organizationId: ctx.organizationId,
+        storeId: ctx.storeId,
+        shiftId: shiftRow.id,
+        op: 'close',
       });
 
       const closureWrite = insertFact(session, shiftClosures, {
