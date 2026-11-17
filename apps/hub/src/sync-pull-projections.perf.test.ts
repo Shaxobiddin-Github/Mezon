@@ -65,9 +65,10 @@ function cloneRows(
   );
   conn.sqlite.transaction(() => {
     for (let i = 0; i < n; i += 1) {
-      const r = { ...row, id: nextId() };
+      const r: Record<string, unknown> = { ...row, id: nextId() };
       mutate(r, i);
-      stmt.run(...cols.map((c) => r[c]));
+      const values: unknown[] = cols.map((c) => r[c]);
+      stmt.run(...values);
     }
   })();
 }
