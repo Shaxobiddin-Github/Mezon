@@ -4,6 +4,10 @@ import {
   type FiscalStatusResponse,
   FiscalStatusResponseSchema,
   FiscalUnsettledListResponseSchema,
+  ResolveSyncConflictResponseSchema,
+  type ResolveSyncConflictResponseDto,
+  type SyncConflictDto,
+  SyncConflictListResponseSchema,
   SaleFiscalResponseSchema,
   type RulesCheckRequestDto,
   RulesCheckResponseSchema,
@@ -430,6 +434,30 @@ export class HubApiClient {
       method: 'GET',
       path: '/fiscal/status',
       responseSchema: FiscalStatusResponseSchema,
+    });
+  }
+
+  /** T2.6: open sync conflicts (manager / owner). */
+  async listSyncConflicts(): Promise<readonly SyncConflictDto[]> {
+    const res = await this.request({
+      method: 'GET',
+      path: '/sync/conflicts?status=open',
+      responseSchema: SyncConflictListResponseSchema,
+    });
+    return res.conflicts;
+  }
+
+  /** T2.6: retry or acknowledge — the only actions; nothing edits data. */
+  async resolveSyncConflict(
+    id: string,
+    action: 'retry' | 'acknowledge',
+    note: string,
+  ): Promise<ResolveSyncConflictResponseDto> {
+    return this.request({
+      method: 'POST',
+      path: `/sync/conflicts/${encodeURIComponent(id)}/resolve`,
+      body: note.trim().length > 0 ? { action, note: note.trim() } : { action },
+      responseSchema: ResolveSyncConflictResponseSchema,
     });
   }
 
