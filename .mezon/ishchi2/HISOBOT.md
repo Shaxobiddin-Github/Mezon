@@ -1,3 +1,30 @@
+# T2.7b uchun port tayyor: `CloudEventWriter` (`b96fa91`)
+
+```ts
+import { CloudEventWriter, CloudSyncPushStore } from '@mezon/db-cloud';
+const writer = new CloudEventWriter(pool, new CloudSyncPushStore(pool), idGen);
+const { results } = await writer.write({
+  organizationId,
+  nowMs,
+  commands: [{ entity: 'products', entityId, type: 'products.updated', payload }],
+});
+// results[i]: { eventId, status: 'accepted' | 'rejected' | 'duplicate' | 'retry', reason?, error?, hlc }
+```
+
+| Mavzu | Qanday ishlaydi |
+|---|---|
+| Payload | Oddiy sync payload. Ichidagi `deviceId` va `hlc` yozuvchi tomonidan almashtiriladi. |
+| Ruxsat etilgan jadvallar | Faqat tashkilot jadvallari. Store jadvallari `ORG_STREAM_STORE_ENTITY` bilan rad etiladi. |
+| Validatsiya | Aynan push yo'li: `processSyncPushBatch`. |
+| HLC | `cloud_hlc_state`, `org_hlc:<org>` lock ostida. Bir millisekundda `logical` 0, 1, … beriladi. HLC yozuvning joriy HLC'sidan har doim yuqori. |
+| Oqim | `store_id = organization_id`. Hub pull kursorida tashkilot kaliti qabul qilinadi. |
+| Virtual qurilma | `cloud_devices.status = 'system'`, token yo'q. Soxta token 401/403 oladi (test bor). |
+| Testlar | `apps/cloud/src/sync-push.test.ts` → `T2.6b CloudEventWriter` (4 ta). Mutatsiyalar W1–W6 o'ldi. |
+
+**Auditni chaqiruvchi yozadi.** Kim o'zgartirgani (`actorUserId`) port parametri emas: payload'dagi `updatedByUserId` kabi maydonlar orqali o'tadi. Kabinet audit yozuvini o'zi saqlaydi.
+
+---
+
 # P1 — oraliq hisobot: T2.6 tayyor (kod + testlar), keyingisi bulut yozuvchi porti va T2.5
 
 Branch: `ishchi2/T2.6-projections`. PR hali ochilmagan, chunki P1 bitta PR bo'ladi. Kod ko'rinib turishi uchun push qilib boryapman.
