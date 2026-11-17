@@ -11,7 +11,7 @@ import {
   parseUuidV7,
   quantityFromMilli,
 } from '@mezon/domain';
-import { FixedClock, SeededRandomSource } from '@mezon/test-utils';
+import { FixedClock, SeededRandomSource, allowAllSaleRulesEvaluator } from '@mezon/test-utils';
 import { afterEach, describe, expect, it } from 'vitest';
 import {
   type SqliteCartStore,
@@ -106,6 +106,7 @@ async function setupSalePerfEnv(dbPath = createTempDbPath()) {
   });
   const saleStore: SqliteSaleStore = createSqliteSaleStore({
     connection,
+    rulesEvaluator: allowAllSaleRulesEvaluator,
     getRuntimeContext: getStoreCtx,
   });
   const shiftStore: SqliteShiftStore = createSqliteShiftStore({

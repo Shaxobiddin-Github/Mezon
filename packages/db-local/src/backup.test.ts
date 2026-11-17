@@ -11,7 +11,7 @@ import {
   parseUuidV7,
   quantityFromMilli,
 } from '@mezon/domain';
-import { FixedClock, SeededRandomSource } from '@mezon/test-utils';
+import { FixedClock, SeededRandomSource, allowAllSaleRulesEvaluator } from '@mezon/test-utils';
 import Database from 'better-sqlite3';
 import { afterEach, describe, expect, it } from 'vitest';
 import {
@@ -103,6 +103,7 @@ async function setupBackupEnv(options?: { readonly initialMs?: bigint }) {
   });
   const saleStore = createSqliteSaleStore({
     connection,
+    rulesEvaluator: allowAllSaleRulesEvaluator,
     getRuntimeContext: getStoreCtx,
   });
   const shiftStore = createSqliteShiftStore({
@@ -429,6 +430,7 @@ describe('T1.13: SqliteBackupService & R2/R3 Restore Lifecycle', () => {
     });
     const reSaleStore = createSqliteSaleStore({
       connection: reconnected,
+      rulesEvaluator: allowAllSaleRulesEvaluator,
       getRuntimeContext: getStoreCtx,
     });
 

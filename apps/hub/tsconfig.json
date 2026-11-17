@@ -19,6 +19,9 @@
     },
     {
       "path": "../../packages/drivers"
+    },
+    {
+      "path": "../../packages/rules"
     }
   ],
   "include": ["src/**/*"],

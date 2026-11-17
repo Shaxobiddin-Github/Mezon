@@ -11,7 +11,7 @@ import {
   parseUuidV7,
   quantityFromMilli,
 } from '@mezon/domain';
-import { FixedClock, SeededRandomSource } from '@mezon/test-utils';
+import { FixedClock, SeededRandomSource, allowAllSaleRulesEvaluator } from '@mezon/test-utils';
 import { afterEach, describe, expect, it } from 'vitest';
 import {
   type LocalSqliteConnection,
@@ -110,7 +110,11 @@ async function setupReturnPerfEnv(seed: number) {
   });
   const stockStore = createSqliteStockStore({ connection, getRuntimeContext: getStoreCtx });
   const cartStore = createSqliteCartStore({ connection, getRuntimeContext: getStoreCtx });
-  const saleStore = createSqliteSaleStore({ connection, getRuntimeContext: getStoreCtx });
+  const saleStore = createSqliteSaleStore({
+    connection,
+    rulesEvaluator: allowAllSaleRulesEvaluator,
+    getRuntimeContext: getStoreCtx,
+  });
   const returnStore = createSqliteReturnStore({ connection, getRuntimeContext: getStoreCtx });
   const shiftStore = createSqliteShiftStore({ connection, getRuntimeContext: getStoreCtx });
   await shiftStore.openShift({

@@ -3,6 +3,8 @@ import {
   type LocalSqliteConnection,
   SqliteCartStore,
   SqliteCatalogStore,
+  SqliteRulesStore,
+  consumeRulesHwmAfterRestore,
   SqliteTaxSettingsStore,
   SqliteCustomerStore,
   SqliteHubAuthStore,
@@ -16,6 +18,7 @@ import {
   SqliteBackupService,
   createSqliteCartStore,
   createSqliteCatalogStore,
+  createSqliteRulesStore,
   createSqliteTaxSettingsStore,
   createSqliteCustomerStore,
   createSqliteHubAuthStore,
@@ -72,6 +75,9 @@ import { CatalogImportCache } from './catalog-import-cache.js';
 import { AesGcmSafeStorageAdapter, type SafeStoragePort } from './safe-storage-port.js';
 import { HubCloudService } from './cloud-service.js';
 import { HubSyncPushWorker } from './sync-push-worker.js';
+import { PRODUCTION_TRUSTED_RULE_KEYS, type TrustedRuleKey } from '@mezon/rules';
+import { registerRulesRoutes } from './rules-routes.js';
+import { HubRulesService, nodeEd25519RulesVerifier } from './rules-service.js';
 
 export interface CreateHubServerOptions {
   readonly dbPath: string;
@@ -100,6 +106,11 @@ export interface CreateHubServerOptions {
   readonly safeStorage?: SafeStoragePort;
   readonly cloudFetchFn?: typeof fetch;
   readonly registerExtraTestRoutes?: (app: FastifyInstance) => void;
+  /**
+   * TEST/DI ONLY (T3.2): trusted rules public keys. Production uses the built-in
+   * `PRODUCTION_TRUSTED_RULE_KEYS`; passing this under NODE_ENV=production throws.
+   */
+  readonly trustedRuleKeys?: readonly TrustedRuleKey[];
 }
 
 export interface HubServer {
@@ -108,6 +119,8 @@ export interface HubServer {
   readonly store: SqliteHubAuthStore;
   readonly catalogStore: SqliteCatalogStore;
   readonly taxSettingsStore: SqliteTaxSettingsStore;
+  readonly rulesStore: SqliteRulesStore;
+  readonly rulesService: HubRulesService;
   readonly stockStore: SqliteStockStore;
   readonly cartStore: SqliteCartStore;
   readonly saleStore: SqliteSaleStore;
@@ -141,6 +154,9 @@ export interface HubServer {
 }
 
 export async function createHubServer(options: CreateHubServerOptions): Promise<HubServer> {
+  if (options.trustedRuleKeys !== undefined && process.env.NODE_ENV === 'production') {
+    throw new Error('trustedRuleKeys is a test/DI-only option and must not be set in production');
+  }
   const securityConfig = resolveHubSecurityConfig({
     host: options.host,
     port: options.port,
@@ -166,6 +182,8 @@ export async function createHubServer(options: CreateHubServerOptions): Promise<
   let store: SqliteHubAuthStore;
   let catalogStore: SqliteCatalogStore;
   let taxSettingsStore: SqliteTaxSettingsStore;
+  let rulesStore: SqliteRulesStore;
+  let rulesService: HubRulesService;
   let stockStore: SqliteStockStore;
   let cartStore: SqliteCartStore;
   let saleStore: SqliteSaleStore;
@@ -242,9 +260,29 @@ export async function createHubServer(options: CreateHubServerOptions): Promise<
           : null;
       },
     });
+    rulesStore = createSqliteRulesStore({
+      connection,
+      getRuntimeContext: () => {
+        const ctx = store.getActiveRuntimeContext();
+        return ctx ? { uow: ctx.uow, organizationId: ctx.config.organizationId } : null;
+      },
+    });
+    rulesService = new HubRulesService({
+      store: rulesStore,
+      trustedKeys: options.trustedRuleKeys ?? PRODUCTION_TRUSTED_RULE_KEYS,
+      verifier: nodeEd25519RulesVerifier,
+      getOrganizationId: () => store.getActiveRuntimeContext()?.config.organizationId ?? null,
+      nowMs: () => BigInt(clock.now()),
+      logger,
+    });
+    if (store.getActiveRuntimeContext() !== null) {
+      // Rollback high-water mark is never below any stored package (also after backup restore).
+      await rulesStore.recomputeMaxVersion(consumeRulesHwmAfterRestore(backupDir));
+    }
     // C1: Hub never injects `__testHooks` into SqliteSaleStore in production/server runtime
     saleStore = createSqliteSaleStore({
       connection,
+      rulesEvaluator: rulesService.saleEvaluator,
       getRuntimeContext: () => {
         const ctx = store.getActiveRuntimeContext();
         return ctx
@@ -310,6 +348,7 @@ export async function createHubServer(options: CreateHubServerOptions): Promise<
     });
     orderStore = createSqliteOrderStore({
       connection,
+      rulesEvaluator: rulesService.saleEvaluator,
       getRuntimeContext: () => {
         const ctx = store.getActiveRuntimeContext();
         return ctx
@@ -459,6 +498,7 @@ export async function createHubServer(options: CreateHubServerOptions): Promise<
       cloudService,
       taxSettingsStore,
     );
+    registerRulesRoutes(app, authService, rulesService, cartService, () => BigInt(clock.now()));
     options.registerExtraTestRoutes?.(app);
 
     let boundPort: number | null = securityConfig.port > 0 ? securityConfig.port : null;
@@ -469,6 +509,8 @@ export async function createHubServer(options: CreateHubServerOptions): Promise<
       store,
       catalogStore,
       taxSettingsStore,
+      rulesStore,
+      rulesService,
       stockStore,
       cartStore,
       saleStore,

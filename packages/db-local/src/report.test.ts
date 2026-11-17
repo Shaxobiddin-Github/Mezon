@@ -11,7 +11,7 @@ import {
   quantityFromMilli,
   quantityToMilli,
 } from '@mezon/domain';
-import { FixedClock, SeededRandomSource } from '@mezon/test-utils';
+import { FixedClock, SeededRandomSource, allowAllSaleRulesEvaluator } from '@mezon/test-utils';
 import { afterEach, describe, expect, it } from 'vitest';
 import {
   type LocalSqliteConnection,
@@ -101,6 +101,7 @@ async function setupReportEnv(options?: { readonly initialMs?: bigint }) {
   });
   const saleStore = createSqliteSaleStore({
     connection,
+    rulesEvaluator: allowAllSaleRulesEvaluator,
     getRuntimeContext: getStoreCtx,
   });
   const returnStore = createSqliteReturnStore({

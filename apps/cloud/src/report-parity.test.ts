@@ -37,7 +37,7 @@ import {
   quantityToMilli,
   unixMsFromBigInt,
 } from '@mezon/domain';
-import { FixedClock, SeededRandomSource } from '@mezon/test-utils';
+import { FixedClock, SeededRandomSource, allowAllSaleRulesEvaluator } from '@mezon/test-utils';
 import { PostgreSqlContainer, type StartedPostgreSqlContainer } from '@testcontainers/postgresql';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { provisionAppRole } from '../../../packages/db-cloud/ops/provision-app-role.mjs';
@@ -181,6 +181,7 @@ describePg('A1: Hub vs Cloud DailySalesReport Parity (T2.7a)', () => {
     const saleStore = createSqliteSaleStore({
       connection: localConn,
       getRuntimeContext: getStoreCtx,
+      rulesEvaluator: allowAllSaleRulesEvaluator,
     });
     const returnStore = createSqliteReturnStore({
       connection: localConn,
