@@ -59,6 +59,7 @@ export {
   cloudSyncEvents,
   cloudStoreSyncPositions,
   cloudSyncParked,
+  cloudHlcState,
   users,
   categories,
   products,
@@ -121,5 +122,11 @@ export { AdminReadStore, type AdminStoreOptions } from './admin-store.js';
 export { resolveIntlDateKey } from './timezone.js';
 export { CloudSyncPullStore, ForeignStoreError } from './sync-pull-store.js';
 export { CloudSyncParkedStore, type CloudParkedEventRecord } from './sync-parked-store.js';
+export {
+  CloudEventWriter,
+  type CloudCommand,
+  type CloudEventWriteResult,
+  CLOUD_VIRTUAL_DEVICE_STATUS,
+} from './cloud-event-writer.js';
 
 export { isDockerAvailable, shouldRunPgTests } from './pg-test-helper.js';

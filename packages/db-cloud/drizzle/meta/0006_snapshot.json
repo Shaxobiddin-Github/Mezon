@@ -1,5 +1,5 @@
 {
-  "id": "f2b46885-636c-4c27-9d31-168c9babcaa2",
+  "id": "6b513a42-b424-40c3-b3a4-b73e30bb5f7a",
   "prevId": "3d89a7ab-bd51-4d9d-b1af-6015a7dc56e4",
   "version": "7",
   "dialect": "postgresql",
@@ -379,6 +379,97 @@
         }
       },
       "checkConstraints": {},
+      "isRLSEnabled": true
+    },
+    "public.cloud_hlc_state": {
+      "name": "cloud_hlc_state",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "uuid",
+          "primaryKey": true,
+          "notNull": true
+        },
+        "organization_id": {
+          "name": "organization_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "created_at_ms": {
+          "name": "created_at_ms",
+          "type": "bigint",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "updated_at_ms": {
+          "name": "updated_at_ms",
+          "type": "bigint",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "device_id": {
+          "name": "device_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "physical_ms": {
+          "name": "physical_ms",
+          "type": "bigint",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "logical": {
+          "name": "logical",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "last_device_seq": {
+          "name": "last_device_seq",
+          "type": "bigint",
+          "primaryKey": false,
+          "notNull": true
+        }
+      },
+      "indexes": {
+        "uidx_cloud_hlc_state_org": {
+          "name": "uidx_cloud_hlc_state_org",
+          "columns": [
+            {
+              "expression": "organization_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": true,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        }
+      },
+      "foreignKeys": {},
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "policies": {
+        "cloud_hlc_state_tenant_isolation": {
+          "name": "cloud_hlc_state_tenant_isolation",
+          "as": "PERMISSIVE",
+          "for": "ALL",
+          "to": ["mezon_app"],
+          "using": "\"organization_id\" = mezon_current_organization_id()",
+          "withCheck": "\"organization_id\" = mezon_current_organization_id()"
+        }
+      },
+      "checkConstraints": {
+        "chk_cloud_hlc_state_logical": {
+          "name": "chk_cloud_hlc_state_logical",
+          "value": "\"cloud_hlc_state\".\"logical\" >= 0 AND \"cloud_hlc_state\".\"logical\" <= 65535"
+        }
+      },
       "isRLSEnabled": true
     },
     "public.cloud_login_identities": {

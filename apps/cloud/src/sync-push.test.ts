@@ -10,6 +10,7 @@ import {
   PG_APP_ROLE_NAME,
   CloudAuthStore,
   CloudDeviceStore,
+  CloudEventWriter,
   CloudSyncPushStore,
   CloudTenantStore,
   categories,
@@ -22,7 +23,8 @@ import {
   users,
   organizationTaxProfiles,
 } from '@mezon/db-cloud';
-import { parseUuidV7, serializeHlc, unixMsFromBigInt } from '@mezon/domain';
+import { parseHlc, parseUuidV7, serializeHlc, unixMsFromBigInt } from '@mezon/domain';
+import { createHash } from 'node:crypto';
 import { DeterministicUuidV7Generator } from '@mezon/test-utils';
 import * as argon2 from '@node-rs/argon2';
 import { PostgreSqlContainer, type StartedPostgreSqlContainer } from '@testcontainers/postgresql';
@@ -535,6 +537,243 @@ describePg('@mezon/cloud - Sync Push Engine (T2.3 & P1-P5)', () => {
     // Positions must be adjacent (diff = 1)
     const diff = p1 > p2 ? p1 - p2 : p2 - p1;
     expect(diff).toBe(1n);
+  });
+
+  // --------------------------------------------------------------------------
+  // T2.6b: cloud event writer (port for the cabinet, T2.7b)
+  // --------------------------------------------------------------------------
+  describe('T2.6b CloudEventWriter', () => {
+    const writer = () =>
+      new CloudEventWriter(appConn.pool, new CloudSyncPushStore(appConn.pool), idGen);
+
+    it('writes an org event through the push path into the organization stream; the virtual device has no usable token', async () => {
+      const catId = idGen.nextId();
+      const res = await writer().write({
+        organizationId: orgA,
+        nowMs,
+        commands: [
+          {
+            entity: 'categories',
+            entityId: catId,
+            type: 'categories.created',
+            payload: makeCategoryPayload(catId, 'Kabinetdan'),
+          },
+        ],
+      });
+      expect(res.results.map((r) => r.status)).toEqual(['accepted']);
+      const ev = await adminConn.pool.query<{
+        store_id: string;
+        device_id: string;
+        position: string;
+      }>(
+        'SELECT store_id, device_id, position::text AS position FROM cloud_sync_events WHERE id = $1',
+        [res.results[0].eventId],
+      );
+      expect(ev.rows[0].store_id).toBe(orgA); // organization stream key
+      const dev = await adminConn.pool.query<{ status: string; device_id: string }>(
+        'SELECT status, device_id FROM cloud_devices WHERE organization_id = $1 AND device_id = $2',
+        [orgA, ev.rows[0].device_id],
+      );
+      expect(dev.rows[0].status).toBe('system');
+      const cat = await adminConn.pool.query<{ name: string; device_id: string }>(
+        'SELECT name, device_id FROM categories WHERE id = $1',
+        [catId],
+      );
+      expect(cat.rows[0]).toEqual({ name: 'Kabinetdan', device_id: ev.rows[0].device_id });
+
+      // A token forged for the virtual device is refused by device auth.
+      const secret = 'forged-virtual-device-secret';
+      await adminConn.pool.query(
+        `INSERT INTO cloud_device_tokens (id, organization_id, created_at_ms, updated_at_ms, device_id, token_hash, expires_at_ms)
+         VALUES ($1, $2, $3, $3, $4, $5, $6)`,
+        [
+          idGen.nextId(),
+          orgA,
+          nowMs.toString(),
+          ev.rows[0].device_id,
+          createHash('sha256').update(secret).digest('hex'),
+          (BigInt(nowMs) + 86_400_000n).toString(),
+        ],
+      );
+      const forged = `${orgA}.${ev.rows[0].device_id}.${secret}`;
+      for (const [method, url] of [
+        ['GET', '/api/v1/sync/pull'],
+        ['GET', '/api/v1/sync/parked'],
+      ] as const) {
+        const r = await server.inject({
+          method,
+          url,
+          headers: { authorization: `Bearer ${forged}` },
+        });
+        expect([401, 403], `${url} ${r.body}`).toContain(r.statusCode);
+      }
+    });
+
+    it('HLC: two changes in one millisecond get logical 0 then 1; a row HLC from a hub clock ahead is overtaken', async () => {
+      const a = idGen.nextId();
+      const b = idGen.nextId();
+      const later = unixMsFromBigInt(BigInt(nowMs) + 10_000n);
+      const res = await writer().write({
+        organizationId: orgA,
+        nowMs: later,
+        commands: [a, b].map((id) => ({
+          entity: 'categories',
+          entityId: id,
+          type: 'categories.created',
+          payload: makeCategoryPayload(id, `Bir ms ${id.slice(-4)}`),
+        })),
+      });
+      const [h1, h2] = res.results.map((r) => parseHlc(r.hlc!));
+      expect(h1.physicalMs).toBe(h2.physicalMs);
+      expect(h2.logical).toBe(h1.logical + 1);
+
+      // Hub A writes the category with a clock 2 minutes ahead (inside the skew window).
+      const ahead = serializeHlc({
+        physicalMs: unixMsFromBigInt(BigInt(later) + 120_000n),
+        logical: 7,
+        nodeId: deviceA,
+      });
+      const push = await server.inject({
+        method: 'POST',
+        url: '/api/v1/sync/push',
+        headers: { authorization: `Bearer ${deviceTokenA}` },
+        payload: {
+          clientVersion: '1.0.0',
+          storeId: storeA,
+          deviceId: deviceA,
+          events: [
+            {
+              eventId: idGen.nextId(),
+              organizationId: orgA,
+              storeId: storeA,
+              deviceId: deviceA,
+              deviceSeq: '9601',
+              hlc: ahead,
+              type: 'categories.updated',
+              entity: 'categories',
+              entityId: a,
+              entityClass: 'ATTR',
+              schemaVersion: 1,
+              payload: { ...makeCategoryPayload(a, 'Hubdan'), hlc: ahead },
+            },
+          ],
+        },
+      });
+      expect(push.json<SyncPushResponseDto>().results[0].status).toBe('accepted');
+      const after = await writer().write({
+        organizationId: orgA,
+        nowMs: later,
+        commands: [
+          {
+            entity: 'categories',
+            entityId: a,
+            type: 'categories.updated',
+            payload: makeCategoryPayload(a, 'Kabinet yutadi'),
+          },
+        ],
+      });
+      expect(after.results[0].status).toBe('accepted');
+      const h3 = parseHlc(after.results[0].hlc!);
+      const rowAhead = parseHlc(ahead);
+      expect(
+        BigInt(h3.physicalMs) > BigInt(rowAhead.physicalMs) ||
+          (h3.physicalMs === rowAhead.physicalMs && h3.logical > rowAhead.logical),
+      ).toBe(true);
+      const cat = await adminConn.pool.query<{ name: string }>(
+        'SELECT name FROM categories WHERE id = $1',
+        [a],
+      );
+      expect(cat.rows[0].name).toBe('Kabinet yutadi');
+    });
+
+    it('store tables are refused; invalid payloads fail exactly like a hub push (same validation path)', async () => {
+      const moveId = idGen.nextId();
+      const store = await writer().write({
+        organizationId: orgA,
+        nowMs,
+        commands: [
+          {
+            entity: 'stock_moves',
+            entityId: moveId,
+            type: 'stock_moves.created',
+            payload: { id: moveId },
+          },
+        ],
+      });
+      expect(store.results[0]).toMatchObject({ status: 'rejected', reason: 'VALIDATION_ERROR' });
+      expect(store.results[0].error).toContain('ORG_STREAM_STORE_ENTITY');
+      const n = await adminConn.pool.query('SELECT 1 FROM cloud_sync_events WHERE entity_id = $1', [
+        moveId,
+      ]);
+      expect(n.rowCount).toBe(0);
+
+      const bad = idGen.nextId();
+      const badPayload = { ...makeCategoryPayload(bad, 'Yomon'), pinHash: 'x' };
+      const viaWriter = await writer().write({
+        organizationId: orgA,
+        nowMs,
+        commands: [
+          { entity: 'categories', entityId: bad, type: 'categories.created', payload: badPayload },
+        ],
+      });
+      const viaPush = await server.inject({
+        method: 'POST',
+        url: '/api/v1/sync/push',
+        headers: { authorization: `Bearer ${deviceTokenA}` },
+        payload: {
+          clientVersion: '1.0.0',
+          storeId: storeA,
+          deviceId: deviceA,
+          events: [
+            {
+              eventId: idGen.nextId(),
+              organizationId: orgA,
+              storeId: storeA,
+              deviceId: deviceA,
+              deviceSeq: '9602',
+              hlc: '001700000000000:00000:018bcfe5-6800-7000-8000-000000000111',
+              type: 'categories.created',
+              entity: 'categories',
+              entityId: bad,
+              entityClass: 'ATTR',
+              schemaVersion: 1,
+              payload: badPayload,
+            },
+          ],
+        },
+      });
+      const pushed = viaPush.json<SyncPushResponseDto>().results[0];
+      expect(viaWriter.results[0].status).toBe('rejected');
+      expect(viaWriter.results[0].reason).toBe(pushed.reason);
+      expect(pushed.status).toBe('rejected');
+    });
+
+    it('a hub pulls the organization stream with the organization id as a cursor key', async () => {
+      const first = await server.inject({
+        method: 'GET',
+        url: '/api/v1/sync/pull?limit=500',
+        headers: { authorization: `Bearer ${deviceTokenA}` },
+      });
+      expect(first.statusCode, first.body).toBe(200);
+      const body = first.json<{
+        events: { storeId: string }[];
+        nextCursors: Record<string, string>;
+      }>();
+      expect(body.events.some((e) => e.storeId === orgA)).toBe(true);
+      expect(body.nextCursors[orgA]).toBeDefined();
+      const cursors = Object.entries(body.nextCursors)
+        .map(([s, p]) => `${s}:${p}`)
+        .join(',');
+      const second = await server.inject({
+        method: 'GET',
+        url: `/api/v1/sync/pull?limit=500&cursors=${encodeURIComponent(cursors)}`,
+        headers: { authorization: `Bearer ${deviceTokenA}` },
+      });
+      expect(second.statusCode, second.body).toBe(200);
+      expect(
+        second.json<{ events: { storeId: string }[] }>().events.filter((e) => e.storeId === orgA),
+      ).toEqual([]);
+    });
   });
 
   // --------------------------------------------------------------------------

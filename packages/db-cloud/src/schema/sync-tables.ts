@@ -105,3 +105,29 @@ export const cloudSyncParked = cloudSchemaRegistry.defineTable(
     ),
   ],
 );
+
+/**
+ * T2.6b: the cloud's own HLC clock and device sequence per organization (`LOCAL`). The cloud writes
+ * cabinet commands (price, staff, settings) as sync events from a VIRTUAL device of the organization
+ * (`device_id`; status `system`, it never gets a token). Allocation runs under
+ * `pg_advisory_xact_lock(hashtext('org_hlc:' || organization_id))`, so two changes in the same
+ * millisecond get logical counters 0, 1, … and the order is total.
+ */
+export const cloudHlcState = cloudSchemaRegistry.defineTable(
+  {
+    name: 'cloud_hlc_state',
+    tableClass: 'LOCAL',
+    tenantScope: 'organization',
+  },
+  (common) => ({
+    ...common,
+    deviceId: pgUuidV7('device_id').notNull(),
+    physicalMs: pgBigint('physical_ms').notNull(),
+    logical: pgInt('logical').notNull(),
+    lastDeviceSeq: pgBigint('last_device_seq').notNull(),
+  }),
+  (self) => [
+    uniqueIndex('uidx_cloud_hlc_state_org').on(self.organizationId),
+    check('chk_cloud_hlc_state_logical', sql`${self.logical} >= 0 AND ${self.logical} <= 65535`),
+  ],
+);
