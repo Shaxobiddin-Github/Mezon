@@ -26,7 +26,7 @@ T2.7b (kabinetdan yozish) P1 dagi bulut "buyruq yozuvchi" portini kutadi, bu PR'
 - `packages/drivers/src/telegram/telegram-client.ts` (+ test): port, Fake, HTTP; xatolar `chatUnavailable` / `transient` / `permanent`; tarmoq xatosida token xabarga tushmaydi.
 - `packages/db-cloud`:
   - `schema/telegram-tables.ts`;
-  - migratsiya `0005_telegram_bot.sql` (**raqam PR #27 dan keyin qayta tekshiriladi**);
+  - migratsiya `0006_telegram_bot.sql` (fiskal `0005` dan keyin);
   - `telegram-store.ts`, `customer-debt.ts`; `admin-store.ts` da overdue.
 - `apps/cloud`:
   - `config.ts` (token va sir birga bo'lishi shart);

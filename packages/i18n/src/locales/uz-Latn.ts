@@ -428,6 +428,39 @@ export const UZ_LATN_MESSAGES = {
   'admin.telegram.disabled': 'Telegram bot sozlanmagan',
   'admin.telegram.openLink': 'Havolani 15 daqiqa ichida oching: {url}',
   'admin.telegram.customerLink': 'Eslatma havolasi',
+  // T3.3 / T3.4 Fiscal core
+  'fiscal.status.none': 'Fiskal emas',
+  'fiscal.status.pending': 'Fiskal kutilmoqda',
+  'fiscal.status.sent': 'Fiskal yuborildi, javob kutilmoqda',
+  'fiscal.status.confirmed': 'Fiskal tasdiqlandi',
+  'fiscal.status.failed': 'Fiskal xato, qayta yuboriladi',
+  'fiscal.status.rejected': 'Fiskal operator rad etdi',
+  'fiscal.status.cancelled': 'Fiskal bekor qilindi',
+  'fiscal.testDriver': 'SINOV drayveri — fiskal emas',
+  'fiscal.offline.approaching': 'Fiskallashmagan cheklar oflayn muddati tugashiga yaqin.',
+  'fiscal.offline.expired': 'Fiskallashmagan cheklar oflayn muddati tugadi!',
+  'fiscal.shiftNotOpen':
+    'Fiskal smena hali ochilmagan (internet yoʻq). Savdo davom etadi, internet qaytganda ochiladi.',
+  'fiscal.unsettled.openButton': 'Fiskallashmagan cheklar',
+  'fiscal.unsettled.title': 'Fiskallashmagan cheklar',
+  'fiscal.unsettled.empty': 'Hammasi fiskallashgan.',
+  'fiscal.unsettled.colReceipt': 'Chek',
+  'fiscal.unsettled.colKind': 'Turi',
+  'fiscal.unsettled.colStatus': 'Holat',
+  'fiscal.unsettled.colDeadline': 'Muddatgacha',
+  'fiscal.unsettled.colError': 'Xato',
+  'fiscal.unsettled.retry': 'Qayta yuborish',
+  'fiscal.unsettled.rejectedHint':
+    'Rad etilgan chek qaytarish (yoki bekor qilish) orqali hal qilinadi.',
+  'fiscal.unsettled.overdue': 'muddat oʻtgan',
+  'fiscal.unsettled.hours': '{h} soat {m} daqiqa',
+  'fiscal.kind.sale': 'Savdo',
+  'fiscal.kind.refund': 'Qaytarish',
+  'fiscal.kind.shift_open': 'Smena ochish',
+  'fiscal.kind.shift_close': 'Smena yopish (Z)',
+  'error.FISCAL_BLOCKED': 'Savdo fiskal holat sababli bloklandi.',
+  'error.FISCALIZED_SALE_CANNOT_VOID':
+    'Fiskallashgan (yoki yuborilgan) chekni bekor qilib boʻlmaydi — qaytarish qiling.',
 } as const;
 
 export type I18nKey = keyof typeof UZ_LATN_MESSAGES;

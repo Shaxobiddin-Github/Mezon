@@ -198,6 +198,27 @@ export const localHubConfig = localSchemaRegistry.defineTable(
       .default(sql`0`),
     /** T3.2: fiscal mode flag (enabled only in tests until T3.3). Missing/invalid package blocks when on. */
     fiscalModeEnabled: sqliteBoolean('fiscal_mode_enabled').notNull().default(false),
+    /**
+     * T3.3 offline window for unsettled fiscal documents. Default 24 h is a 2019 draft value and is
+     * marked [TASDIQLANSIN]; it is configuration only (never changed through the API).
+     */
+    fiscalOfflineWindowMs: sqliteBigint('fiscal_offline_window_ms')
+      .notNull()
+      .default(sql`86400000`),
+    /**
+     * S1 (owner: warn, work never stops): action when the oldest unsettled fiscal document passed
+     * its offline deadline. 'block' exists only for a future legal requirement; never enabled now.
+     */
+    fiscalOfflineExpiredAction: text('fiscal_offline_expired_action').notNull().default('warn'),
+    /** S4 (owner: allowed with a warning): action when the shift is not yet open on the driver. */
+    fiscalShiftNotOpenAction: text('fiscal_shift_not_open_action').notNull().default('warn'),
+    /**
+     * T3.4 receipt fiscal fields as JSON `[{ "key": ..., "label": ... }]` ([TASDIQLANSIN]). The list
+     * is configuration, never hard-coded; empty → a receipt can never be marked fiscal.
+     */
+    fiscalReceiptFieldsJson: text('fiscal_receipt_fields_json').notNull().default('[]'),
+    /** T3.3 fiscal driver id stamped on new documents. Only `fake` exists until T3.5 (§3.3). */
+    fiscalDriverId: text('fiscal_driver_id').notNull().default('fake'),
   }),
   (self) => [
     uniqueIndex('uidx_local_hub_config_singleton').on(self.singletonGuard),
@@ -248,6 +269,16 @@ export const localHubConfig = localSchemaRegistry.defineTable(
     check('chk_local_hub_config_drawer_auto', sql`${self.printerCashDrawerAutoOpen} IN (0, 1)`),
     check('chk_local_hub_config_max_rule_ver', sql`${self.maxRulePackageVersion} >= 0`),
     check('chk_local_hub_config_fiscal_mode', sql`${self.fiscalModeEnabled} IN (0, 1)`),
+    check('chk_local_hub_config_fiscal_window', sql`${self.fiscalOfflineWindowMs} >= 60000`),
+    check(
+      'chk_local_hub_config_fiscal_exp_action',
+      sql`${self.fiscalOfflineExpiredAction} IN ('warn', 'block')`,
+    ),
+    check(
+      'chk_local_hub_config_fiscal_shift_action',
+      sql`${self.fiscalShiftNotOpenAction} IN ('warn', 'block')`,
+    ),
+    check('chk_local_hub_config_fiscal_driver', sql`length(trim(${self.fiscalDriverId})) >= 1`),
   ],
 );
 
@@ -3074,6 +3105,85 @@ export const localSyncParked = localSchemaRegistry.defineTable(
       self.organizationId,
       self.missingRefEntity,
       self.missingRefId,
+    ),
+  ],
+);
+
+/**
+ * T3.3 fiscal documents (`MONOTONE`, store-scoped). One row per sale / refund / fiscal shift
+ * operation. Fiscal state lives here, never on `sales`, so retries never weaken the sales MONOTONE
+ * guarantee. Transitions follow `FISCAL_DOC_TRANSITIONS` (domain) and are enforced by triggers.
+ * Driver answers (`fiscal_sign`, `fiscal_number`, `qr_payload`) are OPAQUE strings written only on
+ * the transition to `confirmed` and frozen afterwards.
+ */
+export const fiscalDocs = localSchemaRegistry.defineTable(
+  {
+    name: 'fiscal_docs',
+    tableClass: 'MONOTONE',
+    tenantScope: 'store',
+    monotoneColumns: ['status'],
+  },
+  (common) => ({
+    ...common,
+    docKind: text('doc_kind').notNull(),
+    saleId: sqliteUuidV7('sale_id').references(() => sales.id),
+    returnId: sqliteUuidV7('return_id').references(() => returns.id),
+    shiftId: sqliteUuidV7('shift_id').references(() => shifts.id),
+    /** Refund waits for the sale document (S3): sent only after the dependency is confirmed. */
+    dependsOnDocId: sqliteUuidV7('depends_on_doc_id').references(
+      (): AnySQLiteColumn => fiscalDocs.id,
+    ),
+    idempotencyKey: text('idempotency_key').notNull(),
+    status: text('status').notNull(),
+    attempts: sqliteInt('attempts').notNull().default(0),
+    nextCheckAtMs: sqliteUnixMs('next_check_at_ms').notNull(),
+    lastErrorCode: text('last_error_code'),
+    lastErrorMessage: text('last_error_message'),
+    sentAtMs: sqliteUnixMs('sent_at_ms'),
+    confirmedAtMs: sqliteUnixMs('confirmed_at_ms'),
+    cancelledAtMs: sqliteUnixMs('cancelled_at_ms'),
+    fiscalSign: text('fiscal_sign'),
+    fiscalNumber: text('fiscal_number'),
+    qrPayload: text('qr_payload'),
+    driverId: text('driver_id').notNull(),
+    offlineDeadlineMs: sqliteUnixMs('offline_deadline_ms').notNull(),
+  }),
+  (self) => [
+    uniqueIndex('uidx_fiscal_docs_org_idem').on(self.organizationId, self.idempotencyKey),
+    uniqueIndex('uidx_fiscal_docs_sale')
+      .on(self.saleId)
+      .where(sql`${self.docKind} = 'sale'`),
+    uniqueIndex('uidx_fiscal_docs_return')
+      .on(self.returnId)
+      .where(sql`${self.returnId} IS NOT NULL`),
+    index('idx_fiscal_docs_queue').on(self.organizationId, self.status, self.nextCheckAtMs),
+    index('idx_fiscal_docs_sale_lookup').on(self.saleId),
+    check(
+      'chk_fiscal_docs_kind',
+      sql`${self.docKind} IN ('sale', 'refund', 'shift_open', 'shift_close')`,
+    ),
+    check(
+      'chk_fiscal_docs_status',
+      sql`${self.status} IN ('pending', 'sent', 'confirmed', 'failed', 'rejected', 'cancelled')`,
+    ),
+    check(
+      'chk_fiscal_docs_kind_refs',
+      sql`(${self.docKind} = 'sale' AND ${self.saleId} IS NOT NULL AND ${self.returnId} IS NULL AND ${self.shiftId} IS NULL AND ${self.dependsOnDocId} IS NULL) OR (${self.docKind} = 'refund' AND ${self.saleId} IS NOT NULL AND ${self.returnId} IS NOT NULL AND ${self.shiftId} IS NULL) OR (${self.docKind} IN ('shift_open', 'shift_close') AND ${self.shiftId} IS NOT NULL AND ${self.saleId} IS NULL AND ${self.returnId} IS NULL AND ${self.dependsOnDocId} IS NULL)`,
+    ),
+    check('chk_fiscal_docs_idem_nonempty', sql`length(trim(${self.idempotencyKey})) >= 1`),
+    check('chk_fiscal_docs_driver_nonempty', sql`length(trim(${self.driverId})) >= 1`),
+    check('chk_fiscal_docs_attempts', sql`${self.attempts} >= 0`),
+    check(
+      'chk_fiscal_docs_confirmed_fields',
+      sql`(${self.status} = 'confirmed' AND ${self.fiscalSign} IS NOT NULL AND length(trim(${self.fiscalSign})) >= 1 AND ${self.fiscalNumber} IS NOT NULL AND length(trim(${self.fiscalNumber})) >= 1 AND ${self.qrPayload} IS NOT NULL AND length(${self.qrPayload}) >= 1 AND ${self.confirmedAtMs} IS NOT NULL AND ${self.sentAtMs} IS NOT NULL) OR (${self.status} <> 'confirmed' AND ${self.fiscalSign} IS NULL AND ${self.fiscalNumber} IS NULL AND ${self.qrPayload} IS NULL AND ${self.confirmedAtMs} IS NULL)`,
+    ),
+    check(
+      'chk_fiscal_docs_sent_at',
+      sql`${self.status} NOT IN ('sent', 'rejected') OR ${self.sentAtMs} IS NOT NULL`,
+    ),
+    check(
+      'chk_fiscal_docs_cancelled_at',
+      sql`(${self.status} = 'cancelled') = (${self.cancelledAtMs} IS NOT NULL)`,
     ),
   ],
 );

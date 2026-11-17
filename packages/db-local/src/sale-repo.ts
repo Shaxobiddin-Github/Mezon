@@ -37,6 +37,10 @@ import {
   requireCartRowInDbSync,
 } from './cart-repo.js';
 import type { LocalSqliteConnection } from './connection.js';
+import {
+  assertFiscalSaleAllowedInTxSync,
+  insertSaleFiscalDocIfEnabledInTxSync,
+} from './fiscal-repo.js';
 import type { SaleRulesCheckLine, SaleRulesEvaluator } from './sale-rules-port.js';
 import {
   type StoredCashMoveRecord,
@@ -812,6 +816,12 @@ export function completeSaleCoreInTxSync(
     );
   }
 
+  // T3.3 fiscal gates (S1/S4 flags; warn-only unless configured). Never calls the driver.
+  assertFiscalSaleAllowedInTxSync(session, {
+    organizationId: input.organizationId,
+    shiftId: input.activeShift.shift.id,
+  });
+
   // Insert immutable `payments` (`FACT`) & atomic `cash_moves` (`FACT`) — `'advance'` NEVER emits `cash_moves`
   const insertedPayments: (typeof payments.$inferSelect)[] = [];
   for (const item of resolvedPayments.payments) {
@@ -889,6 +899,14 @@ export function completeSaleCoreInTxSync(
       nowMs: saleWrite.row.createdAtMs,
     });
   }
+
+  // T3.3: fiscal mode → `pending` fiscal document in THIS transaction (§3.1.10 atomicity). The
+  // driver is called later by the hub worker, never inside the sale (§3.2 continuity).
+  insertSaleFiscalDocIfEnabledInTxSync(session, {
+    organizationId: input.organizationId,
+    storeId: input.storeId,
+    saleId,
+  });
 
   return {
     sale: toStoredSale(saleWrite.row, insertedLines, insertedPayments),

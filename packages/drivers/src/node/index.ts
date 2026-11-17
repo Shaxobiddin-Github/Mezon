@@ -14,3 +14,4 @@ export {
   type WindowsRawPrinterDriverOptions,
   type WinspoolBindings,
 } from './printer/windows-raw-driver.js';
+export { FileFakeFiscalLedgerStore } from './fake-fiscal-ledger-file.js';
