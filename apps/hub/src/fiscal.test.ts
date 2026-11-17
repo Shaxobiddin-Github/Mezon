@@ -838,3 +838,40 @@ describe('T3.4 fiscal receipt through the real print path', () => {
     }
   });
 });
+
+describe('T3.3 database guarantees', () => {
+  it('F7: a confirmed document without the opaque driver fields is impossible (CHECK), opaque fields never appear before confirmation', async () => {
+    const env = await boot(4601);
+    try {
+      const pid = await product(env);
+      await openShift(env);
+      const sale = await sellOk(env, pid);
+      const docId = (await saleFiscal(env, sale.id)).doc!.id;
+      const db = env.hub.connection.sqlite;
+      db.prepare(
+        "UPDATE fiscal_docs SET status = 'sent', sent_at_ms = 1, attempts = 1 WHERE id = ?",
+      ).run(docId);
+      expect(() =>
+        db
+          .prepare("UPDATE fiscal_docs SET status = 'confirmed', confirmed_at_ms = 2 WHERE id = ?")
+          .run(docId),
+      ).toThrow(/CHECK constraint failed: chk_fiscal_docs_confirmed_fields/);
+      expect(() =>
+        db
+          .prepare(
+            "UPDATE fiscal_docs SET status = 'confirmed', confirmed_at_ms = 2, fiscal_sign = 'S', fiscal_number = 'N', qr_payload = '' WHERE id = ?",
+          )
+          .run(docId),
+      ).toThrow(/chk_fiscal_docs_confirmed_fields/);
+      expect(() =>
+        db.prepare("UPDATE fiscal_docs SET fiscal_sign = 'S' WHERE id = ?").run(docId),
+      ).toThrow(/chk_fiscal_docs_confirmed_fields/);
+      db.prepare(
+        "UPDATE fiscal_docs SET status = 'confirmed', confirmed_at_ms = 2, fiscal_sign = 'S', fiscal_number = 'N', qr_payload = 'Q' WHERE id = ?",
+      ).run(docId);
+      expect((await saleFiscal(env, sale.id)).doc?.status).toBe('confirmed');
+    } finally {
+      await env.hub.close();
+    }
+  });
+});
