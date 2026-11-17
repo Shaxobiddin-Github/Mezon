@@ -17,6 +17,7 @@ import { PG_APP_ROLE_NAME } from './rls.js';
 
 export type TableClass = 'FACT' | 'ATTR' | 'MONOTONE' | 'LOCAL';
 export type TenantScope = 'organization' | 'store' | 'none';
+export type PullScope = 'organization' | 'store';
 
 export interface PgTableDefinitionOptions<
   TClass extends TableClass = TableClass,
@@ -25,6 +26,7 @@ export interface PgTableDefinitionOptions<
   readonly name: string;
   readonly tableClass: TClass;
   readonly tenantScope: TScope;
+  readonly pullScope?: PullScope;
   readonly monotoneColumns?: readonly string[];
 }
 
@@ -32,6 +34,7 @@ export interface PgTableMetadata {
   readonly tableName: string;
   readonly tableClass: TableClass;
   readonly tenantScope: TenantScope;
+  readonly pullScope: PullScope;
   readonly rlsEnabled: boolean;
   readonly monotoneColumns: readonly string[];
   readonly table: PgTable;
@@ -211,10 +214,14 @@ export class PgSchemaRegistry {
       tbl.enableRLS();
     }
 
+    const pullScope: PullScope =
+      options.pullScope ?? (options.tenantScope === 'organization' ? 'organization' : 'store');
+
     this.entries.set(options.name, {
       tableName: options.name,
       tableClass: options.tableClass,
       tenantScope: options.tenantScope,
+      pullScope,
       rlsEnabled,
       monotoneColumns: [...(options.monotoneColumns ?? [])],
       table: tbl,

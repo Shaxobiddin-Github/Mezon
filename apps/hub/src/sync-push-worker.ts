@@ -25,6 +25,7 @@ export interface HubSyncPushWorkerOptions {
   readonly fetchFn?: typeof fetch;
   readonly minBackoffMs?: number;
   readonly maxBackoffMs?: number;
+  readonly pullWorker?: { pullBatch(): Promise<unknown> };
 }
 
 export interface PushBatchResult {
@@ -46,6 +47,7 @@ export class HubSyncPushWorker {
   private readonly fetchFn: typeof fetch;
   private readonly minBackoffMs: number;
   private readonly maxBackoffMs: number;
+  private readonly pullWorker?: { pullBatch(): Promise<unknown> };
 
   private timer: ReturnType<typeof setTimeout> | null = null;
   private running = false;
@@ -62,6 +64,7 @@ export class HubSyncPushWorker {
     this.fetchFn = options.fetchFn ?? globalThis.fetch;
     this.minBackoffMs = options.minBackoffMs ?? 1000;
     this.maxBackoffMs = options.maxBackoffMs ?? 60000;
+    this.pullWorker = options.pullWorker;
   }
 
   isRunning(): boolean {
@@ -132,6 +135,13 @@ export class HubSyncPushWorker {
     // Query pending events in strict deviceSeq ASC order
     const pendingRows = this.outboxStore.getPendingBatch(100);
     if (pendingRows.length === 0) {
+      if (this.pullWorker) {
+        try {
+          await this.pullWorker.pullBatch();
+        } catch {
+          // Handled inside pullWorker
+        }
+      }
       return { pushed: 0, acked: 0, rejected: 0, retried: 0, status: 'idle' };
     }
 
@@ -327,6 +337,15 @@ export class HubSyncPushWorker {
 
     // Update lastSyncAtMs
     await this.cloudStore.updateLastSyncAt(nowMs);
+
+    // T2.4: Trigger paired pullWorker in the same sync cycle (push first, then pull)
+    if (this.pullWorker) {
+      try {
+        await this.pullWorker.pullBatch();
+      } catch {
+        // Handled inside pullWorker
+      }
+    }
 
     return {
       pushed: batchRows.length,

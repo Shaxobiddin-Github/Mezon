@@ -4,6 +4,8 @@ import {
   MIN_CLIENT_VERSION,
   CURRENT_SCHEMA_VERSION,
   SyncPushRequestSchema,
+  SyncPullQuerySchema,
+  parseAndValidateSyncCursors,
   validateSyncEntityPayload,
 } from './sync.js';
 
@@ -234,6 +236,45 @@ describe('Contracts: Sync Module', () => {
         events,
       });
       expect(result.success).toBe(false);
+    });
+  });
+
+  describe('T2.4: Sync Pull Cursors & Query Validation', () => {
+    it('parses empty or undefined cursors string to empty map', () => {
+      expect(parseAndValidateSyncCursors(undefined)).toEqual({ success: true, cursors: {} });
+      expect(parseAndValidateSyncCursors('')).toEqual({ success: true, cursors: {} });
+      expect(parseAndValidateSyncCursors('   ')).toEqual({ success: true, cursors: {} });
+    });
+
+    it('parses valid multiple store cursors string', () => {
+      const input = `${dummyUuid1}:105,${dummyUuid2}:42`;
+      const res = parseAndValidateSyncCursors(input);
+      expect(res.success).toBe(true);
+      if (res.success) {
+        expect(res.cursors).toEqual({
+          [dummyUuid1]: 105n,
+          [dummyUuid2]: 42n,
+        });
+      }
+    });
+
+    it('rejects invalid cursor format, invalid UUID, or non-numeric position', () => {
+      expect(parseAndValidateSyncCursors('invalid_format').success).toBe(false);
+      expect(parseAndValidateSyncCursors('not-a-uuid:10').success).toBe(false);
+      expect(parseAndValidateSyncCursors(`${dummyUuid1}:abc`).success).toBe(false);
+      expect(parseAndValidateSyncCursors(`${dummyUuid1}:-5`).success).toBe(false);
+    });
+
+    it('validates SyncPullQuerySchema default limit and boundary', () => {
+      const parsedDefault = SyncPullQuerySchema.parse({});
+      expect(parsedDefault.limit).toBe(100);
+
+      const parsedCustom = SyncPullQuerySchema.parse({ limit: '250', cursors: `${dummyUuid1}:10` });
+      expect(parsedCustom.limit).toBe(250);
+      expect(parsedCustom.cursors).toBe(`${dummyUuid1}:10`);
+
+      expect(SyncPullQuerySchema.safeParse({ limit: 0 }).success).toBe(false);
+      expect(SyncPullQuerySchema.safeParse({ limit: 501 }).success).toBe(false);
     });
   });
 });

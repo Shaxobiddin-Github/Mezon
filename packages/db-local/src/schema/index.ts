@@ -1521,6 +1521,7 @@ export const customerLedger = localSchemaRegistry.defineTable(
     name: 'customer_ledger',
     tableClass: 'FACT',
     tenantScope: 'store',
+    pullScope: 'organization',
   },
   (common) => ({
     ...common,
@@ -2027,6 +2028,7 @@ export const supplierLedger = localSchemaRegistry.defineTable(
     name: 'supplier_ledger',
     tableClass: 'FACT',
     tenantScope: 'store',
+    pullScope: 'organization',
   },
   (common) => ({
     ...common,
@@ -3001,5 +3003,77 @@ export const localRulePackages = localSchemaRegistry.defineTable(
     check('chk_local_rule_packages_is_active', sql`${self.isActive} IN (0, 1)`),
     check('chk_local_rule_packages_valid_range', sql`${self.validUntilMs} > ${self.issuedAtMs}`),
     check('chk_local_rule_packages_key_id', sql`length(${self.keyId}) BETWEEN 1 AND 64`),
+  ],
+);
+
+/**
+ * Sync apply state singleton (`LOCAL`, organization-scoped).
+ * When `in_sync = 1`, local triggers permit syncing historical records into closed shifts.
+ * Automatically managed within applySyncPullBatch transaction.
+ */
+export const localSyncApplyState = localSchemaRegistry.defineTable(
+  {
+    name: 'local_sync_apply_state',
+    tableClass: 'LOCAL',
+    tenantScope: 'organization',
+  },
+  (common) => ({
+    ...common,
+    inSync: sqliteInt('in_sync').notNull().default(0),
+  }),
+  (self) => [check('chk_local_sync_apply_state_in_sync', sql`${self.inSync} IN (0, 1)`)],
+);
+
+/**
+ * Gapless position cursors per store (`LOCAL`, organization-scoped).
+ * Updated atomically alongside applied sync events in SQLite.
+ */
+export const localSyncCursors = localSchemaRegistry.defineTable(
+  {
+    name: 'local_sync_cursors',
+    tableClass: 'LOCAL',
+    tenantScope: 'organization',
+  },
+  (common) => ({
+    ...common,
+    storeId: sqliteUuidV7('store_id').notNull(),
+    lastPosition: sqliteBigint('last_position')
+      .notNull()
+      .default(sql`0`),
+  }),
+  (self) => [
+    uniqueIndex('uidx_local_sync_cursors_org_store').on(self.organizationId, self.storeId),
+  ],
+);
+
+/**
+ * Inbound sync events parked due to missing local foreign references (`LOCAL`, organization-scoped).
+ * Retried up to 20 times before escalating to a local sync conflict.
+ */
+export const localSyncParked = localSchemaRegistry.defineTable(
+  {
+    name: 'local_sync_parked',
+    tableClass: 'LOCAL',
+    tenantScope: 'organization',
+  },
+  (common) => ({
+    ...common,
+    storeId: sqliteUuidV7('store_id').notNull(),
+    eventId: sqliteUuidV7('event_id').notNull(),
+    entity: text('entity').notNull(),
+    entityId: sqliteUuidV7('entity_id').notNull(),
+    missingRefEntity: text('missing_ref_entity').notNull(),
+    missingRefId: sqliteUuidV7('missing_ref_id').notNull(),
+    attempts: sqliteInt('attempts').notNull().default(1),
+    payload: text('payload').notNull(),
+    lastError: text('last_error'),
+  }),
+  (self) => [
+    uniqueIndex('uidx_local_sync_parked_event').on(self.organizationId, self.eventId),
+    index('idx_local_sync_parked_missing_ref').on(
+      self.organizationId,
+      self.missingRefEntity,
+      self.missingRefId,
+    ),
   ],
 );
