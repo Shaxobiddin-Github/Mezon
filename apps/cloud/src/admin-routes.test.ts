@@ -397,6 +397,27 @@ describePg('@mezon/cloud - Admin Cabinet API & Security Integration (T2.7a)', ()
       expect(res.statusCode).toBe(401);
     });
 
+    it('every admin read endpoint answers the owner with 200 (no endpoint only tested for 403)', async () => {
+      const endpoints = [
+        '/api/v1/admin/dashboard',
+        '/api/v1/admin/receipts',
+        '/api/v1/admin/customers',
+        '/api/v1/admin/products',
+        '/api/v1/admin/reports/daily',
+        '/api/v1/admin/inventory/low-stock',
+        '/api/v1/admin/conflicts',
+        '/api/v1/admin/stores/freshness',
+      ];
+      for (const endpoint of endpoints) {
+        const res = await server.inject({
+          method: 'GET',
+          url: endpoint,
+          headers: { authorization: `Bearer ${ownerTokenA}` },
+        });
+        expect(res.statusCode, `${endpoint}: ${res.payload.slice(0, 200)}`).toBe(200);
+      }
+    });
+
     it('rejects cashier token from all admin endpoints with 403 (A4)', async () => {
       const endpoints = [
         '/api/v1/admin/dashboard',

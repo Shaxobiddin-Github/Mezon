@@ -50,7 +50,12 @@ import {
 import cors from '@fastify/cors';
 import rateLimit from '@fastify/rate-limit';
 import * as argon2 from '@node-rs/argon2';
-import Fastify, { type FastifyInstance, type FastifyReply, type FastifyRequest } from 'fastify';
+import Fastify, {
+  type FastifyInstance,
+  type FastifyReply,
+  type FastifyRequest,
+  type FastifyError,
+} from 'fastify';
 import type { CloudConfig } from './config.js';
 import { type CloudJwtPayload, CloudJwtService } from './jwt.js';
 
@@ -76,6 +81,19 @@ export interface BuildServerOptions {
 
 const FIVE_MINUTES_MS = 5 * 60 * 1000;
 const THIRTY_DAYS_MS = 30 * 24 * 60 * 60 * 1000;
+
+/**
+ * Server errors are logged in full but never sent to the client: Fastify's default handler put the
+ * raw message (SQL column names, PG error codes) into the 500 body.
+ */
+export function cloudErrorHandler(err: FastifyError, req: FastifyRequest, reply: FastifyReply) {
+  const statusCode = typeof err.statusCode === 'number' ? err.statusCode : 500;
+  if (statusCode >= 500) {
+    req.log.error({ err }, 'Unhandled server error');
+    return reply.code(500).send({ error: 'Internal Server Error' });
+  }
+  return reply.code(statusCode).send({ error: err.name, code: err.code, message: err.message });
+}
 
 export async function buildCloudServer(options: BuildServerOptions): Promise<FastifyInstance> {
   const { config, conn } = options;
@@ -108,11 +126,15 @@ export async function buildCloudServer(options: BuildServerOptions): Promise<Fas
           'refreshToken',
           'token',
           'secret',
+          'phone',
+          'body.phone',
         ],
         censor: '[REDACTED]',
       },
     },
   });
+
+  app.setErrorHandler(cloudErrorHandler);
 
   // CORS
   await app.register(cors, {

@@ -780,16 +780,17 @@ export class AdminReadStore {
           p.id,
           p.name,
           p.sku,
-          p.base_price,
+          p.sale_price,
           p.vat_rate_bp,
           p.unit,
-          p.min_stock_alert,
+          p.min_stock,
           p.created_at_ms,
-          COALESCE(SUM(sm.qty_delta), 0) AS current_stock_milli
+          (
+            SELECT COALESCE(SUM(sm.qty_delta), 0) FROM stock_moves sm
+             WHERE sm.product_id = p.id AND sm.organization_id = p.organization_id
+          ) AS current_stock_milli
         FROM products p
-        LEFT JOIN stock_moves sm ON sm.product_id = p.id AND sm.organization_id = p.organization_id
         WHERE ${conditions.join(' AND ')}
-        GROUP BY p.id, p.name, p.sku, p.base_price, p.vat_rate_bp, p.unit, p.min_stock_alert, p.created_at_ms
         ORDER BY p.created_at_ms DESC, p.id DESC
         LIMIT $${argIdx}
       `;
@@ -799,10 +800,10 @@ export class AdminReadStore {
         id: string;
         name: string;
         sku: string | null;
-        base_price: string;
+        sale_price: string;
         vat_rate_bp: number;
         unit: string;
-        min_stock_alert: string | null;
+        min_stock: string | null;
         created_at_ms: string;
         current_stock_milli: string;
       }>(sql, args);
@@ -825,10 +826,10 @@ export class AdminReadStore {
         sku: r.sku,
         barcode: null,
         unit: r.unit,
-        price: moneyFromTiyin(BigInt(r.base_price)),
+        price: moneyFromTiyin(BigInt(r.sale_price)),
         vatPercent: Math.round(r.vat_rate_bp / 100),
         currentStock: quantityFromMilli(BigInt(r.current_stock_milli)),
-        minStock: quantityFromMilli(BigInt(r.min_stock_alert ?? '0')),
+        minStock: quantityFromMilli(BigInt(r.min_stock ?? '0')),
       }));
 
       return { items, nextCursor };
@@ -849,7 +850,7 @@ export class AdminReadStore {
           p.name,
           p.sku,
           p.unit,
-          COALESCE(p.min_stock_alert, 0) AS min_stock,
+          COALESCE(p.min_stock, 0) AS min_stock,
           COALESCE(SUM(sm.qty_delta), 0) AS current_stock
         FROM products p
         LEFT JOIN stock_moves sm
@@ -858,11 +859,11 @@ export class AdminReadStore {
           AND ($2::uuid IS NULL OR sm.store_id = $2::uuid)
         WHERE p.organization_id = $1
           AND p.deleted_at_ms IS NULL
-          AND p.min_stock_alert IS NOT NULL
-          AND p.min_stock_alert > 0
-        GROUP BY p.id, p.name, p.sku, p.unit, p.min_stock_alert
-        HAVING COALESCE(SUM(sm.qty_delta), 0) < p.min_stock_alert
-        ORDER BY (p.min_stock_alert - COALESCE(SUM(sm.qty_delta), 0)) DESC
+          AND p.min_stock IS NOT NULL
+          AND p.min_stock > 0
+        GROUP BY p.id, p.name, p.sku, p.unit, p.min_stock
+        HAVING COALESCE(SUM(sm.qty_delta), 0) < p.min_stock
+        ORDER BY (p.min_stock - COALESCE(SUM(sm.qty_delta), 0)) DESC
         LIMIT 200
       `;
       const res = await client.query<{
