@@ -399,6 +399,16 @@ export class SqliteFiscalStore {
     return getSaleFiscalDocSync(this.connection.db, saleId);
   }
 
+  getReturnDocSync(returnId: UuidV7): StoredFiscalDocRecord | null {
+    const row = this.connection.db
+      .select()
+      .from(fiscalDocs)
+      .where(eq(fiscalDocs.returnId, returnId))
+      .limit(1)
+      .all()[0];
+    return row ? toRecord(row) : null;
+  }
+
   /** Documents the worker may act on now, oldest first. `null` before setup. */
   listDueSync(nowMs: bigint, limit: number): readonly StoredFiscalDocRecord[] {
     const c = this.ctx();

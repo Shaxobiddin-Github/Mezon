@@ -462,6 +462,7 @@ export async function createHubServer(options: CreateHubServerOptions): Promise<
       shiftStore,
       printerDriverFactory: options.printerDriverFactory,
       listWindowsPrintersFn: options.listWindowsPrintersFn,
+      resolveFiscalBlock: (ref) => fiscalService.receiptBlock(ref),
     });
     const reportStore = createSqliteReportStore({
       connection,

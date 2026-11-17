@@ -11,7 +11,12 @@ import type {
   SqliteFiscalStore,
   StoredFiscalDocRecord,
 } from '@mezon/db-local';
-import { DomainError, type UuidV7 } from '@mezon/domain';
+import {
+  DomainError,
+  type ReceiptFiscalBlock,
+  type UuidV7,
+  resolveReceiptFiscalBlock,
+} from '@mezon/domain';
 import type { FiscalDriver } from '@mezon/drivers';
 import type { Logger } from 'pino';
 import type { HubFiscalWorker } from './fiscal-worker.js';
@@ -118,6 +123,44 @@ export class HubFiscalService {
 
   saleDoc(saleId: UuidV7): StoredFiscalDocRecord | null {
     return this.o.store.getSaleDocSync(saleId);
+  }
+
+  /** T3.4 receipt block for a sale or return; `undefined` when no fiscal document exists. */
+  receiptBlock(ref: {
+    readonly saleId?: UuidV7;
+    readonly returnId?: UuidV7;
+  }): ReceiptFiscalBlock | undefined {
+    const doc =
+      ref.returnId !== undefined
+        ? this.o.store.getReturnDocSync(ref.returnId)
+        : ref.saleId !== undefined
+          ? this.o.store.getSaleDocSync(ref.saleId)
+          : null;
+    if (doc === null) return undefined;
+    const orgId = this.o.getOrganizationId();
+    const tin = orgId
+      ? ((
+          this.o.connection.sqlite
+            .prepare(
+              'SELECT tin FROM organization_tax_profiles WHERE organization_id = ? AND deleted_at_ms IS NULL',
+            )
+            .get(orgId) as { tin: string } | undefined
+        )?.tin ?? null)
+      : null;
+    return resolveReceiptFiscalBlock({
+      status: doc.status,
+      values: {
+        fiscalSign: doc.fiscalSign,
+        fiscalNumber: doc.fiscalNumber,
+        confirmedAt:
+          doc.confirmedAtMs === null ? null : new Date(Number(doc.confirmedAtMs)).toISOString(),
+        driverId: doc.driverId,
+        organizationTin: tin,
+      },
+      qrPayload: doc.qrPayload,
+      fields: this.receiptFields(),
+      isTestDriver: this.o.driver.isTestDriver,
+    });
   }
 
   receiptFields(): FiscalReceiptFieldsConfig {

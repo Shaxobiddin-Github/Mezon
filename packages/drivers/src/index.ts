@@ -58,8 +58,10 @@ export {
   ESC_BOLD_ON,
   ESC_INIT,
   GS_CUT_PARTIAL_FEED,
+  ESC_POS_QR_MAX_BYTES,
   encodeCashDrawerPulse,
   encodeEscPosDocument,
+  encodeEscPosQr,
 } from './printer/escpos-encoder.js';
 export { NullPrinterDriver } from './printer/null-driver.js';
 export {

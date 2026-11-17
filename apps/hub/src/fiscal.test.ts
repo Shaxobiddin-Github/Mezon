@@ -9,11 +9,12 @@ import {
   FiscalStatusResponseSchema,
   FiscalUnsettledListResponseSchema,
   LoginResponseSchema,
+  PrintDocumentResponseSchema,
   ProductDetailResponseSchema,
   SaleFiscalResponseSchema,
 } from '@mezon/contracts';
 import type { PinHasher } from '@mezon/domain';
-import { FakeFiscalDriver } from '@mezon/drivers';
+import { FakeFiscalDriver, FakePrinterDriver } from '@mezon/drivers';
 import { buildRulesSigningMessage, parseRulesPayload, type TrustedRuleKey } from '@mezon/rules';
 import { FixedClock, SeededRandomSource } from '@mezon/test-utils';
 import { afterEach, describe, expect, it } from 'vitest';
@@ -100,6 +101,7 @@ async function boot(
     dbPath?: string;
     setup?: boolean;
     afterSent?: () => void;
+    printer?: FakePrinterDriver;
   } = {},
 ): Promise<Env> {
   let p = opts.dbPath;
@@ -120,6 +122,7 @@ async function boot(
     sessionTtlMs: 30n * DAY,
     trustedRuleKeys: [key.trusted],
     fiscalDriver: driver,
+    ...(opts.printer ? { printerDriverFactory: () => opts.printer! } : {}),
     fiscalWorkerOptions: {
       statusRecheckMs: 1_000n,
       minBackoffMs: 1_000n,
@@ -780,6 +783,56 @@ describe('T3.3 offline window, flags and fiscal mode switch', () => {
       });
       expect(r.statusCode).toBe(422);
       expect(r.body).toContain('RULES_PACKAGE_NOT_OK');
+    } finally {
+      await env.hub.close();
+    }
+  });
+});
+
+describe('T3.4 fiscal receipt through the real print path', () => {
+  it('pending → "FISKAL KUTILMOQDA"; after confirmation the reprint carries the fiscal rows + QR; missing config → incomplete', async () => {
+    const printer = new FakePrinterDriver();
+    const env = await boot(4501, { printer });
+    try {
+      const set = await env.hub.app.inject({
+        method: 'PATCH',
+        url: '/printer/settings',
+        headers: hdr(env.owner),
+        payload: { mode: 'network_tcp', host: '127.0.0.1', port: 9100 },
+      });
+      expect(set.statusCode, set.body).toBe(200);
+      const pid = await product(env);
+      await openShift(env);
+      const sale = await sellOk(env, pid);
+      const print = async () =>
+        PrintDocumentResponseSchema.parse(
+          (
+            await env.hub.app.inject({
+              method: 'POST',
+              url: `/sales/${sale.id}/print`,
+              headers: hdr(env.cashier),
+              payload: { clientRequestId: env.n() },
+            })
+          ).json(),
+        ).printRecord.textPreview;
+      const p1 = await print();
+      expect(p1).toContain('FISKAL KUTILMOQDA');
+      expect(p1).toContain('SINOV');
+      expect(p1).not.toContain('FISKAL CHEK');
+      await env.hub.fiscalWorker.runOnce();
+      const p2 = await print();
+      expect(p2).toContain('FISKAL CHEK');
+      expect(p2).toContain('SINTETIK-FB:');
+      expect(p2).toContain('NUSXA');
+      const lastJob = printer.getSentJobs().at(-1)!.bytes;
+      // The opaque QR text from the driver is embedded verbatim in the printed bytes.
+      expect(Buffer.from(lastJob).includes(Buffer.from(`SINOV|${sale.id}|`))).toBe(true);
+      env.hub.connection.sqlite
+        .prepare("UPDATE local_hub_config SET fiscal_receipt_fields_json = '[]'")
+        .run();
+      const p3 = await print();
+      expect(p3).toContain("FISKAL MA'LUMOT TO'LIQ EMAS");
+      expect(p3).not.toContain('FISKAL CHEK');
     } finally {
       await env.hub.close();
     }
