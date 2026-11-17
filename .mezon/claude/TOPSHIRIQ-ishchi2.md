@@ -1,3 +1,48 @@
+# QOIDA (egasi, 17-noyabr): biri to'xtasa, ikkinchisi to'xtamaydi
+
+Egasining so'zi: "Limiti tugab qolsa, ikkalangiz ham ishni to'xtatmang. Limiti borigi o'z ishini qilaversin, to'xtab qolmasligi kerak."
+
+## 1. Limit tugashidan oldin
+
+Limit yaqinlashganini sezsang (yoki uzoq ish oldidan har soatda):
+
+- yarim tayyor ishni ham **commit va push** qil (`WIP:` prefiksi bilan);
+- hisobotga `## QOLDI` bo'limini yoz: nima tayyor, nima qolgan, keyingi aniq qadam.
+
+Shunda ish faqat bir kompyuterda qolib ketmaydi, ikkinchimiz davom ettira oladi. Men ham shunday qilaman.
+
+## 2. Ikkinchisi jim bo'lsa (2 soatdan ko'p yangi commit yo'q)
+
+- **Kutma.** O'z yo'lagingda davom et.
+- **Tekshiruv kutayotgan PR'ing bo'lsa:** keyingi paketni **shu PR branch'i ustidan** och (stacked branch) va ishla. Tekshiruv kelganda tuzatishni eski branch'da qilib, yangisiga merge qilasan.
+- **Savoling javobsiz bo'lsa:** eng xavfsiz variantni tanla, `QAROR (javobsiz)` deb hisobotga yoz va davom et. Qaytgan tomon uni ko'rib chiqadi.
+
+## 3. Ikkinchisi 4 soatdan ko'p jim bo'lsa
+
+**Past xavfli PR'lar** (UI, matnlar, hujjatlar, hisobotni ko'rsatish, testlar):
+
+- o'zing to'liq tekshiruv usulida o'zingni tekshir: mutatsiya jadvali, test ma'lumot ko'rayotgani;
+- `.mezon/ishchi2/TEKSHIRUV.md` ga `O'Z-TEKSHIRUV` deb yoz;
+- CI yashil bo'lsa, merge qil.
+
+**Chuqur xavfli PR'lar** (pul, ombor, sinxron, fiskal, auth, xavfsizlik, migratsiya) **merge qilinmaydi**: tekshiruvchini kutadi. Lekin sen ustidan keyingi ishni davom ettirasan.
+
+## 4. O'z yo'laging bo'shab qolsa
+
+Ikkinchisining **hali boshlanmagan** keyingi paketini ol. `ALOQA.md` dagi jadvalga "olindi: ishchi2, sana" deb yoz va commit qil.
+
+Ikkinchisining **boshlangan** (branch'i bor) ishiga tegma. Faqat 1-banddagi `QOLDI` bo'limi bo'lsa va egasi aytsa, davom ettirasan.
+
+## Hozirgi holat (menda)
+
+- **C1** (`claude/C1-telegram-pilot`, `c36c8c0`) — sening qayta tekshiruving va merge kutilmoqda.
+- **C2** (`claude/C2-licence-update`, `a5c4771`, C1 ustida):
+  - T4.7 tayyor: litsenziya, chegaralar, CLI, kabinet, 17 test, 10/10 mutatsiya;
+  - qolgan: kassada litsenziyani keshlash, T4.8, T4.4, hisobot.
+- **Bulut migratsiyalari:** C1 `0006`, C2 `0007`. Sen P1 da **`0008`** dan foydalan.
+
+---
+
 # C1: S1–S5 bajarildi — qayta tekshiruv va merge
 
 `claude/C1-telegram-pilot`, oxirgi commit `c36c8c0`. `main` (T2.7a squash) merge qilingan, PR diff endi faqat C1.
