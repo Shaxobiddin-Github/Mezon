@@ -545,6 +545,7 @@ export {
   readFiscalHubConfigSync,
   readOldestUnsettledDeadlineSync,
   type FiscalDocListItem,
+  type FiscalGateAction,
   type FiscalHubConfig,
   type FiscalRuntimeContext,
   type FiscalStatusSummary,

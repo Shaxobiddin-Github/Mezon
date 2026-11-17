@@ -109,8 +109,9 @@ export class HubFiscalService {
         s.offlineWindowMs,
         this.o.nowMs(),
       ),
-      blockOnOfflineExpired: s.blockOnOfflineExpired,
-      requireOpenShift: s.requireOpenShift,
+      offlineExpiredAction: s.offlineExpiredAction,
+      shiftNotOpenAction: s.shiftNotOpenAction,
+      shiftNotOpenOnDriver: s.shiftNotOpenOnDriver,
       receiptFieldsValid: parseReceiptFieldsConfig(cfg.receiptFieldsJson) !== null,
     };
   }

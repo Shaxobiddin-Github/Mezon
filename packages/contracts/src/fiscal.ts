@@ -59,8 +59,9 @@ export const FiscalStatusResponseSchema = z.strictObject({
   oldestDeadlineMs: MsStringSchema.nullable(),
   offlineWindowMs: MsStringSchema,
   offlineWarning: FiscalOfflineWarningSchema,
-  blockOnOfflineExpired: z.boolean(),
-  requireOpenShift: z.boolean(),
+  offlineExpiredAction: z.enum(['warn', 'block']),
+  shiftNotOpenAction: z.enum(['warn', 'block']),
+  shiftNotOpenOnDriver: z.boolean(),
   receiptFieldsValid: z.boolean(),
 });
 export type FiscalStatusResponse = z.infer<typeof FiscalStatusResponseSchema>;

@@ -64,10 +64,11 @@ export function ReceiptFiscalBadge(props: { readonly api: HubApiClient; readonly
   );
 }
 
-/** T3.3 header warning from the OLDEST unsettled document's offline deadline. */
+/** T3.3 header warnings: offline deadline (oldest unsettled doc, S1) and shift not open on the driver (S4). */
 export function FiscalOfflineBanner(props: { readonly api: HubApiClient }) {
   const { api } = props;
   const [warning, setWarning] = useState<FiscalOfflineWarning>('none');
+  const [shiftNotOpen, setShiftNotOpen] = useState(false);
 
   useEffect(() => {
     let cancelled = false;
@@ -75,7 +76,9 @@ export function FiscalOfflineBanner(props: { readonly api: HubApiClient }) {
       api
         .getFiscalStatus()
         .then((s) => {
-          if (!cancelled) setWarning(s.modeEnabled ? s.offlineWarning : 'none');
+          if (cancelled) return;
+          setWarning(s.modeEnabled ? s.offlineWarning : 'none');
+          setShiftNotOpen(s.modeEnabled && s.shiftNotOpenOnDriver);
         })
         .catch(() => undefined);
     };
@@ -87,16 +90,24 @@ export function FiscalOfflineBanner(props: { readonly api: HubApiClient }) {
     };
   }, [api]);
 
-  if (warning === 'none') return null;
   return (
-    <div
-      className="pos-error-banner"
-      role="alert"
-      data-testid="fiscal-offline-warning"
-      data-level={warning}
-    >
-      {t(warning === 'expired' ? 'fiscal.offline.expired' : 'fiscal.offline.approaching')}
-    </div>
+    <>
+      {warning !== 'none' && (
+        <div
+          className="pos-error-banner"
+          role="alert"
+          data-testid="fiscal-offline-warning"
+          data-level={warning}
+        >
+          {t(warning === 'expired' ? 'fiscal.offline.expired' : 'fiscal.offline.approaching')}
+        </div>
+      )}
+      {shiftNotOpen && (
+        <div className="pos-error-banner" role="status" data-testid="fiscal-shift-not-open-warning">
+          {t('fiscal.shiftNotOpen')}
+        </div>
+      )}
+    </>
   );
 }
 

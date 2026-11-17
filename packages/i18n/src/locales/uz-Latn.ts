@@ -298,6 +298,8 @@ export const UZ_LATN_MESSAGES = {
   'fiscal.testDriver': 'SINOV drayveri — fiskal emas',
   'fiscal.offline.approaching': 'Fiskallashmagan cheklar oflayn muddati tugashiga yaqin.',
   'fiscal.offline.expired': 'Fiskallashmagan cheklar oflayn muddati tugadi!',
+  'fiscal.shiftNotOpen':
+    'Fiskal smena hali ochilmagan (internet yoʻq). Savdo davom etadi, internet qaytganda ochiladi.',
   'fiscal.unsettled.openButton': 'Fiskallashmagan cheklar',
   'fiscal.unsettled.title': 'Fiskallashmagan cheklar',
   'fiscal.unsettled.empty': 'Hammasi fiskallashgan.',

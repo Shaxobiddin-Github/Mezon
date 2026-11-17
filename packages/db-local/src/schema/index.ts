@@ -205,12 +205,13 @@ export const localHubConfig = localSchemaRegistry.defineTable(
     fiscalOfflineWindowMs: sqliteBigint('fiscal_offline_window_ms')
       .notNull()
       .default(sql`86400000`),
-    /** S1 (owner pending): when on, an expired offline window blocks new sales in fiscal mode. */
-    fiscalBlockOnOfflineExpired: sqliteBoolean('fiscal_block_on_offline_expired')
-      .notNull()
-      .default(false),
-    /** S4 (owner pending): when on, a shift whose fiscal open is not confirmed blocks sales. */
-    fiscalRequireOpenShift: sqliteBoolean('fiscal_require_open_shift').notNull().default(false),
+    /**
+     * S1 (owner: warn, work never stops): action when the oldest unsettled fiscal document passed
+     * its offline deadline. 'block' exists only for a future legal requirement; never enabled now.
+     */
+    fiscalOfflineExpiredAction: text('fiscal_offline_expired_action').notNull().default('warn'),
+    /** S4 (owner: allowed with a warning): action when the shift is not yet open on the driver. */
+    fiscalShiftNotOpenAction: text('fiscal_shift_not_open_action').notNull().default('warn'),
     /**
      * T3.4 receipt fiscal fields as JSON `[{ "key": ..., "label": ... }]` ([TASDIQLANSIN]). The list
      * is configuration, never hard-coded; empty → a receipt can never be marked fiscal.
@@ -270,11 +271,14 @@ export const localHubConfig = localSchemaRegistry.defineTable(
     check('chk_local_hub_config_fiscal_mode', sql`${self.fiscalModeEnabled} IN (0, 1)`),
     check('chk_local_hub_config_fiscal_window', sql`${self.fiscalOfflineWindowMs} >= 60000`),
     check(
-      'chk_local_hub_config_fiscal_block_exp',
-      sql`${self.fiscalBlockOnOfflineExpired} IN (0, 1)`,
+      'chk_local_hub_config_fiscal_exp_action',
+      sql`${self.fiscalOfflineExpiredAction} IN ('warn', 'block')`,
+    ),
+    check(
+      'chk_local_hub_config_fiscal_shift_action',
+      sql`${self.fiscalShiftNotOpenAction} IN ('warn', 'block')`,
     ),
     check('chk_local_hub_config_fiscal_driver', sql`length(trim(${self.fiscalDriverId})) >= 1`),
-    check('chk_local_hub_config_fiscal_req_shift', sql`${self.fiscalRequireOpenShift} IN (0, 1)`),
   ],
 );
 

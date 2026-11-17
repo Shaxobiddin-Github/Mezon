@@ -11,6 +11,8 @@ export interface HubFiscalWorkerOptions {
   readonly statusRecheckMs?: bigint;
   readonly minBackoffMs?: bigint;
   readonly maxBackoffMs?: bigint;
+  /** Max documents per pass; a full pass schedules the next one immediately. */
+  readonly batchSize?: number;
   /**
    * Test-only seam: invoked right after `sent` is COMMITTED and before the driver call
    * (crash test (a), mutation F1). Never wired in production.
@@ -24,6 +26,10 @@ export interface FiscalWorkerRunResult {
   readonly rejected: number;
   readonly failed: number;
   readonly unknown: number;
+}
+
+function yieldToEventLoop(): Promise<void> {
+  return new Promise((resolve) => setImmediate(resolve));
 }
 
 type Outcome = 'confirmed' | 'rejected' | 'failed' | 'unknown' | 'waiting' | 'cancelled';
@@ -43,6 +49,7 @@ export class HubFiscalWorker {
   private readonly statusRecheckMs: bigint;
   private readonly minBackoffMs: bigint;
   private readonly maxBackoffMs: bigint;
+  private readonly batchSize: number;
   private timer: ReturnType<typeof setTimeout> | null = null;
   private running = false;
   private inFlight: Promise<FiscalWorkerRunResult> | null = null;
@@ -52,25 +59,31 @@ export class HubFiscalWorker {
     this.statusRecheckMs = opts.statusRecheckMs ?? 30_000n;
     this.minBackoffMs = opts.minBackoffMs ?? 5_000n;
     this.maxBackoffMs = opts.maxBackoffMs ?? 300_000n;
+    this.batchSize = opts.batchSize ?? 50;
   }
 
   start(intervalMs = 3000): void {
     if (this.running) return;
     this.running = true;
-    const next = () => {
+    const next = (delayMs: number) => {
       if (!this.running) return;
       this.timer = setTimeout(() => {
+        let full = false;
         void this.runOnce()
+          .then((r) => {
+            full = r.processed >= this.batchSize;
+          })
           .catch((err: unknown) =>
             this.opts.logger?.error(
               { event: 'fiscal.worker_error', err },
               'Fiscal worker run failed',
             ),
           )
-          .finally(next);
-      }, intervalMs);
+          // A backlog (after an outage) drains pass after pass without the idle interval.
+          .finally(() => next(full ? 0 : intervalMs));
+      }, delayMs);
     };
-    next();
+    next(intervalMs);
   }
 
   stop(): void {
@@ -98,16 +111,26 @@ export class HubFiscalWorker {
     return run;
   }
 
+  /**
+   * S1 backlog drain (owner: "must not freeze"): strictly ONE document at a time, oldest first;
+   * every state change is its own short transaction, the driver call is never inside one, and the
+   * event loop gets a turn between documents so sales are never starved by a large queue.
+   * The head blocks the queue until it settles, which keeps the S4 / S3 order.
+   */
   private async pass(): Promise<FiscalWorkerRunResult> {
     const counts = { processed: 0, confirmed: 0, rejected: 0, failed: 0, unknown: 0 };
-    const due = this.opts.store.listDueSync(this.opts.nowMs(), 20);
-    for (const doc of due) {
-      const outcome = await this.process(doc);
+    for (let i = 0; i < this.batchSize; i += 1) {
+      const head = this.opts.store.headUnsettledSync();
+      if (head === null || BigInt(head.nextCheckAtMs) > this.opts.nowMs()) break;
+      const outcome = await this.process(head);
       counts.processed += 1;
       if (outcome === 'confirmed') counts.confirmed += 1;
       else if (outcome === 'rejected') counts.rejected += 1;
       else if (outcome === 'failed') counts.failed += 1;
       else if (outcome === 'unknown') counts.unknown += 1;
+      // The head did not settle (offline / unknown / waiting): stop and retry on the next pass.
+      if (outcome === 'failed' || outcome === 'unknown' || outcome === 'waiting') break;
+      await yieldToEventLoop();
     }
     return counts;
   }

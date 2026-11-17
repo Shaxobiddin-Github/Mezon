@@ -650,7 +650,7 @@ describe('T3.3 offline window, flags and fiscal mode switch', () => {
       await sellOk(env, pid);
       // S1 flag ON: expired blocks new sales in fiscal mode.
       env.hub.connection.sqlite
-        .prepare('UPDATE local_hub_config SET fiscal_block_on_offline_expired = 1')
+        .prepare("UPDATE local_hub_config SET fiscal_offline_expired_action = 'block'")
         .run();
       const blocked = await sell(env, pid, 422);
       expect(errCode(blocked)).toBe('FISCAL_BLOCKED');
@@ -677,7 +677,7 @@ describe('T3.3 offline window, flags and fiscal mode switch', () => {
       ).toBe('pending');
       await sellOk(env, pid);
       env.hub.connection.sqlite
-        .prepare('UPDATE local_hub_config SET fiscal_require_open_shift = 1')
+        .prepare("UPDATE local_hub_config SET fiscal_shift_not_open_action = 'block'")
         .run();
       const r = await sell(env, pid, 422);
       expect(r.body).toContain('FISCAL_SHIFT_NOT_OPEN');
@@ -870,6 +870,45 @@ describe('T3.3 database guarantees', () => {
         "UPDATE fiscal_docs SET status = 'confirmed', confirmed_at_ms = 2, fiscal_sign = 'S', fiscal_number = 'N', qr_payload = 'Q' WHERE id = ?",
       ).run(docId);
       expect((await saleFiscal(env, sale.id)).doc?.status).toBe('confirmed');
+    } finally {
+      await env.hub.close();
+    }
+  });
+});
+
+describe('T3.3 S4 owner decision: sales allowed with a warning, strict driver order', () => {
+  it('shift not open on the driver → sales proceed (warn), then the driver gets open → receipts → close (Z)', async () => {
+    const env = await boot(4701);
+    try {
+      const pid = await product(env);
+      env.driver.setSubmitMode('offline');
+      const shiftId = await openShift(env, false);
+      await env.hub.fiscalWorker.runOnce(); // shift open fails (driver offline)
+      const st = await status(env);
+      expect(st.shiftNotOpenAction).toBe('warn');
+      expect(st.shiftNotOpenOnDriver).toBe(true);
+      const s1 = await sellOk(env, pid);
+      const s2 = await sellOk(env, pid);
+      const close = await env.hub.app.inject({
+        method: 'POST',
+        url: `/shifts/${shiftId}/close`,
+        headers: hdr(env.cashier),
+        payload: { clientRequestId: env.n(), countedCash: '200000' },
+      });
+      expect(close.statusCode, close.body).toBe(200);
+      env.driver.setSubmitMode('ok');
+      for (let i = 0; i < 3; i += 1) await tick(env);
+      expect(env.driver.ledgerKeys()).toEqual([
+        `${shiftId}:open`,
+        s1.id,
+        s2.id,
+        `${shiftId}:close`,
+      ]);
+      expect((await status(env)).shiftNotOpenOnDriver).toBe(false);
+      expect(
+        one<{ n: bigint }>(env, "SELECT count(*) AS n FROM fiscal_docs WHERE status <> 'confirmed'")
+          .n,
+      ).toBe(0n);
     } finally {
       await env.hub.close();
     }

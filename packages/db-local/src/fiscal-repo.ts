@@ -9,18 +9,24 @@ import {
   isFiscalDocStatus,
   unixMsFromBigInt,
 } from '@mezon/domain';
-import { and, asc, eq, inArray, lte, sql } from 'drizzle-orm';
+import { and, asc, eq, inArray, sql } from 'drizzle-orm';
 import type { BetterSQLite3Database } from 'drizzle-orm/better-sqlite3';
 import type { LocalSqliteConnection } from './connection.js';
 import { fiscalDocs, localHubConfig, sales } from './schema/index.js';
 import type { SqliteUnitOfWork, SqliteUnitOfWorkSession } from './uow.js';
 import { insertMonotone, updateMonotone } from './writers.js';
 
+export type FiscalGateAction = 'warn' | 'block';
+
+const toAction = (v: string): FiscalGateAction => (v === 'block' ? 'block' : 'warn');
+
 export interface FiscalHubConfig {
   readonly modeEnabled: boolean;
   readonly offlineWindowMs: bigint;
-  readonly blockOnOfflineExpired: boolean;
-  readonly requireOpenShift: boolean;
+  /** S1: 'warn' (owner decision) or 'block' (future legal requirement only). */
+  readonly offlineExpiredAction: FiscalGateAction;
+  /** S4: 'warn' (owner decision) or 'block'. */
+  readonly shiftNotOpenAction: FiscalGateAction;
   /** Raw JSON from configuration; validated by the hub (contracts) before printing. */
   readonly receiptFieldsJson: string;
   readonly driverId: string;
@@ -90,8 +96,8 @@ export function readFiscalHubConfigSync(db: BetterSQLite3Database): FiscalHubCon
     .select({
       on: localHubConfig.fiscalModeEnabled,
       window: localHubConfig.fiscalOfflineWindowMs,
-      blockExp: localHubConfig.fiscalBlockOnOfflineExpired,
-      reqShift: localHubConfig.fiscalRequireOpenShift,
+      expAction: localHubConfig.fiscalOfflineExpiredAction,
+      shiftAction: localHubConfig.fiscalShiftNotOpenAction,
       fields: localHubConfig.fiscalReceiptFieldsJson,
       driverId: localHubConfig.fiscalDriverId,
     })
@@ -102,8 +108,8 @@ export function readFiscalHubConfigSync(db: BetterSQLite3Database): FiscalHubCon
     return {
       modeEnabled: false,
       offlineWindowMs: 86_400_000n,
-      blockOnOfflineExpired: false,
-      requireOpenShift: false,
+      offlineExpiredAction: 'warn',
+      shiftNotOpenAction: 'warn',
       receiptFieldsJson: '[]',
       driverId: 'fake',
     };
@@ -111,8 +117,8 @@ export function readFiscalHubConfigSync(db: BetterSQLite3Database): FiscalHubCon
   return {
     modeEnabled: Boolean(row.on),
     offlineWindowMs: BigInt(row.window),
-    blockOnOfflineExpired: Boolean(row.blockExp),
-    requireOpenShift: Boolean(row.reqShift),
+    offlineExpiredAction: toAction(row.expAction),
+    shiftNotOpenAction: toAction(row.shiftAction),
     receiptFieldsJson: row.fields,
     driverId: row.driverId,
   };
@@ -220,7 +226,7 @@ export function assertFiscalSaleAllowedInTxSync(
   const cfg = readFiscalHubConfigSync(session.db);
   if (!cfg.modeEnabled) return cfg;
   const nowMs = BigInt(session.nowUnixMs());
-  if (cfg.blockOnOfflineExpired) {
+  if (cfg.offlineExpiredAction === 'block') {
     const oldest = readOldestUnsettledDeadlineSync(session.db, input.organizationId);
     if (oldest !== null && BigInt(oldest) <= nowMs) {
       throw new DomainError('FISCAL_BLOCKED', 'Fiscal offline window expired', {
@@ -228,7 +234,7 @@ export function assertFiscalSaleAllowedInTxSync(
       });
     }
   }
-  if (cfg.requireOpenShift) {
+  if (cfg.shiftNotOpenAction === 'block') {
     const open = session.db
       .select({ status: fiscalDocs.status })
       .from(fiscalDocs)
@@ -357,8 +363,10 @@ export interface FiscalStatusSummary {
   readonly counts: Readonly<Record<FiscalDocStatus, number>>;
   readonly oldestDeadlineMs: UnixMs | null;
   readonly offlineWindowMs: bigint;
-  readonly blockOnOfflineExpired: boolean;
-  readonly requireOpenShift: boolean;
+  readonly offlineExpiredAction: FiscalGateAction;
+  readonly shiftNotOpenAction: FiscalGateAction;
+  /** S4 warning: an OPEN shift whose fiscal open is not confirmed on the driver yet. */
+  readonly shiftNotOpenOnDriver: boolean;
 }
 
 /**
@@ -409,24 +417,27 @@ export class SqliteFiscalStore {
     return row ? toRecord(row) : null;
   }
 
-  /** Documents the worker may act on now, oldest first. `null` before setup. */
-  listDueSync(nowMs: bigint, limit: number): readonly StoredFiscalDocRecord[] {
+  /**
+   * Head of the fiscal queue: the OLDEST unsettled document (pending / sent / failed), strictly in
+   * creation order (S4: shift open → receipts → shift close; S3: sale → refund). `null` when empty
+   * or before setup.
+   */
+  headUnsettledSync(): StoredFiscalDocRecord | null {
     const c = this.ctx();
-    if (c === null) return [];
-    return this.connection.db
+    if (c === null) return null;
+    const row = this.connection.db
       .select()
       .from(fiscalDocs)
       .where(
         and(
           eq(fiscalDocs.organizationId, c.organizationId),
           inArray(fiscalDocs.status, ['pending', 'sent', 'failed']),
-          lte(fiscalDocs.nextCheckAtMs, unixMsFromBigInt(nowMs)),
         ),
       )
-      .orderBy(asc(fiscalDocs.nextCheckAtMs), asc(fiscalDocs.createdAtMs), asc(fiscalDocs.id))
-      .limit(limit)
-      .all()
-      .map(toRecord);
+      .orderBy(asc(fiscalDocs.createdAtMs), asc(fiscalDocs.id))
+      .limit(1)
+      .all()[0];
+    return row ? toRecord(row) : null;
   }
 
   private update(
@@ -583,6 +594,7 @@ export class SqliteFiscalStore {
     };
     const c = this.ctx();
     let oldest: UnixMs | null = null;
+    let shiftNotOpenOnDriver = false;
     if (c !== null) {
       const rows = this.connection.db
         .select({ status: fiscalDocs.status, n: sql<bigint>`count(*)` })
@@ -594,6 +606,16 @@ export class SqliteFiscalStore {
         if (isFiscalDocStatus(r.status)) counts[r.status] = Number(r.n);
       }
       oldest = readOldestUnsettledDeadlineSync(this.connection.db, c.organizationId);
+      shiftNotOpenOnDriver =
+        (
+          this.connection.sqlite
+            .prepare(
+              `SELECT count(*) AS n FROM fiscal_docs fd JOIN shifts s ON s.id = fd.shift_id
+               WHERE fd.organization_id = ? AND fd.doc_kind = 'shift_open' AND s.status = 'open'
+                 AND fd.status IN ('pending', 'sent', 'failed')`,
+            )
+            .get(c.organizationId) as { n: bigint }
+        ).n > 0n;
     }
     return {
       modeEnabled: cfg.modeEnabled,
@@ -601,8 +623,9 @@ export class SqliteFiscalStore {
       counts,
       oldestDeadlineMs: oldest,
       offlineWindowMs: cfg.offlineWindowMs,
-      blockOnOfflineExpired: cfg.blockOnOfflineExpired,
-      requireOpenShift: cfg.requireOpenShift,
+      offlineExpiredAction: cfg.offlineExpiredAction,
+      shiftNotOpenAction: cfg.shiftNotOpenAction,
+      shiftNotOpenOnDriver,
     };
   }
 
