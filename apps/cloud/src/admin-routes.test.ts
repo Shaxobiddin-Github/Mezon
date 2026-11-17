@@ -397,6 +397,34 @@ describePg('@mezon/cloud - Admin Cabinet API & Security Integration (T2.7a)', ()
       expect(res.statusCode).toBe(401);
     });
 
+    it('malformed query parameters are a 400, never a 500 (review K1, K2)', async () => {
+      const bad = [
+        '/api/v1/admin/dashboard?storeId=not-a-uuid',
+        '/api/v1/admin/dashboard?tz=Not/AZone',
+        '/api/v1/admin/inventory/low-stock?storeId=not-a-uuid',
+        '/api/v1/admin/receipts?cursor=abc:def',
+        '/api/v1/admin/receipts?cursor=123:not-a-uuid',
+        '/api/v1/admin/customers?cursor=abc:def',
+        '/api/v1/admin/products?cursor=abc:def',
+        '/api/v1/admin/reports/daily?storeId=nope',
+      ];
+      for (const url of bad) {
+        const res = await server.inject({
+          method: 'GET',
+          url,
+          headers: { authorization: `Bearer ${ownerTokenA}` },
+        });
+        expect(res.statusCode, url).toBe(400);
+      }
+      // K2: the daily report accepts the store filter and zone.
+      const ok = await server.inject({
+        method: 'GET',
+        url: `/api/v1/admin/reports/daily?storeId=${storeA}&tz=Asia/Tashkent`,
+        headers: { authorization: `Bearer ${ownerTokenA}` },
+      });
+      expect(ok.statusCode).toBe(200);
+    });
+
     it('every admin read endpoint answers the owner with 200 (no endpoint only tested for 403)', async () => {
       const endpoints = [
         '/api/v1/admin/dashboard',

@@ -225,13 +225,11 @@ describePg('@mezon/cloud - T2.8 Telegram bot (link, consent, digest, reminders)'
   });
 
   it('a cashier cannot create a link; the owner gets a one-time t.me link', async () => {
-    // A cashier cannot log into the cabinet at all; a device-login token must still be refused.
-    const cashierLogin = await server.inject({
-      method: 'POST',
-      url: '/api/v1/auth/login',
-      payload: { login: 'tg_cashier@guzar.uz', password },
-    });
-    const cashierToken = (JSON.parse(cashierLogin.payload) as { accessToken: string }).accessToken;
+    // Cashiers cannot log in to the cloud at all; a (forged-for-test) cashier token must still be
+    // refused by the route itself (defence in depth).
+    const cashierToken = await new CloudJwtService(
+      'telegram-test-jwt-secret-at-least-32-chars',
+    ).signAccessToken({ sub: cashier, org, role: 'cashier', name: 'tg_cashier' });
     const denied = await server.inject({
       method: 'POST',
       url: '/api/v1/admin/telegram/link',

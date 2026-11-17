@@ -3,8 +3,7 @@ import { z } from 'zod';
 
 export { normalizeCloudLogin };
 
-/** Cloud users may be cashiers too (device login); owner-only routes check the role (review K3). */
-export const CloudUserRoleSchema = z.enum(['owner', 'manager', 'cashier']);
+export const CloudUserRoleSchema = z.enum(['owner', 'manager']);
 export type CloudUserRole = z.infer<typeof CloudUserRoleSchema>;
 
 export const CloudLoginRequestSchema = z.object({

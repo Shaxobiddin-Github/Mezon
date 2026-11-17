@@ -245,6 +245,15 @@ export async function buildCloudServer(options: BuildServerOptions): Promise<Fas
         return reply.code(403).send({ error: 'Forbidden', message: 'User account is suspended' });
       }
 
+      // Cloud accounts are owners and managers only (T2.1 C3): a cashier row never gets a cloud
+      // token (ishchi2 review K3).
+      if (lookup.userRole !== 'owner' && lookup.userRole !== 'manager') {
+        return reply.code(403).send({
+          error: 'Forbidden',
+          message: 'Only owners and managers have cloud accounts',
+        });
+      }
+
       // Check progressive lockout
       if (lookup.lockedUntilMs !== null && lookup.lockedUntilMs > BigInt(nowMs)) {
         return reply.code(429).send({
@@ -370,6 +379,7 @@ export async function buildCloudServer(options: BuildServerOptions): Promise<Fas
         newTokenHash: nextHash,
         newExpiresAtMs,
         nowMs,
+        allowedRoles: ['owner', 'manager'],
       });
 
       // S1: claims are re-read from the user row on every refresh.
@@ -389,6 +399,12 @@ export async function buildCloudServer(options: BuildServerOptions): Promise<Fas
     } catch (err) {
       if (err instanceof DomainError && err.code === 'AUTH_UNAUTHORIZED') {
         return reply.code(401).send({ error: 'Unauthorized', message: err.message });
+      }
+      if (err instanceof DomainError && err.code === 'AUTH_FORBIDDEN') {
+        return reply.code(403).send({
+          error: 'Forbidden',
+          message: 'Only owners and managers have cloud accounts',
+        });
       }
       throw err;
     }
@@ -433,6 +449,9 @@ export async function buildCloudServer(options: BuildServerOptions): Promise<Fas
       return;
     }
 
+    if (auth.role !== 'owner' && auth.role !== 'manager') {
+      return reply.code(403).send({ error: 'Forbidden', message: 'Not a cloud account' });
+    }
     const user: CloudUserDto = {
       id: auth.sub,
       organizationId: auth.org,

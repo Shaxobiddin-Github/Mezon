@@ -14,6 +14,15 @@ import { withPgTenantContext } from './connection.js';
 import { loadCustomerDebts } from './customer-debt.js';
 import { resolveIntlDateKey } from './timezone.js';
 
+/**
+ * `ILIKE` "contains" pattern for user input: `%`, `_` and the escape character itself are
+ * escaped (PostgreSQL's default `ILIKE` escape is the backslash), so "50%" finds "50%",
+ * not everything starting with "50" (ishchi2 review K5).
+ */
+export function containsPattern(input: string): string {
+  return `%${input.replace(/[\\%_]/g, (c) => `\\${c}`)}%`;
+}
+
 export function maskPhoneNumber(phone: string | null | undefined): string | null {
   if (!phone) return null;
   const digitsOnly = phone.replace(/\D/g, '');
@@ -587,7 +596,7 @@ export class AdminReadStore {
         conditions.push(
           `(c.full_name ILIKE $${argIdx} OR c.phone_normalized ILIKE $${argIdx} OR c.name_search ILIKE $${argIdx})`,
         );
-        args.push(`%${query.search}%`);
+        args.push(containsPattern(query.search));
         argIdx++;
       }
 
@@ -777,7 +786,7 @@ export class AdminReadStore {
 
       if (query.search) {
         conditions.push(`(p.name ILIKE $${argIdx} OR p.sku ILIKE $${argIdx})`);
-        args.push(`%${query.search}%`);
+        args.push(containsPattern(query.search));
         argIdx++;
       }
 
