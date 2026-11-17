@@ -3,6 +3,8 @@ import type {
   SyncEventEnvelopeDto,
   SyncPushRequestDto,
   SyncPushResponseDto,
+  CloudParkedEventDto,
+  CloudParkedListResponseDto,
 } from '@mezon/contracts';
 import {
   PG_APP_ROLE_NAME,
@@ -533,6 +535,125 @@ describePg('@mezon/cloud - Sync Push Engine (T2.3 & P1-P5)', () => {
     // Positions must be adjacent (diff = 1)
     const diff = p1 > p2 ? p1 - p2 : p2 - p1;
     expect(diff).toBe(1n);
+  });
+
+  // --------------------------------------------------------------------------
+  // T2.6: parked push events are visible to the hub that pushed them, and can be retried
+  // (attempt window reset) or acknowledged (audited) — never edited, never seen by another tenant.
+  // --------------------------------------------------------------------------
+  it('T2.6: GET /sync/parked + resolve (retry resets attempts, acknowledge closes); tenant isolated; strict body', async () => {
+    const parentCatId = idGen.nextId();
+    const childProdId = idGen.nextId();
+    const childEventId = idGen.nextId();
+    const hubUser = idGen.nextId();
+    const push = await server.inject({
+      method: 'POST',
+      url: '/api/v1/sync/push',
+      headers: { authorization: `Bearer ${deviceTokenA}` },
+      payload: {
+        clientVersion: '1.0.0',
+        storeId: storeA,
+        deviceId: deviceA,
+        events: [
+          {
+            eventId: childEventId,
+            organizationId: orgA,
+            storeId: storeA,
+            deviceId: deviceA,
+            deviceSeq: '9401',
+            hlc: '001700000000000:00000:018bcfe5-6800-7000-8000-000000000111',
+            type: 'products.created',
+            entity: 'products',
+            entityId: childProdId,
+            entityClass: 'ATTR',
+            schemaVersion: 1,
+            payload: makeProductPayload(childProdId, parentCatId, 'Parked child'),
+          },
+        ],
+      },
+    });
+    expect(push.json<SyncPushResponseDto>().results[0].status).toBe('retry');
+
+    const list = async (token: string) =>
+      server.inject({
+        method: 'GET',
+        url: '/api/v1/sync/parked',
+        headers: { authorization: `Bearer ${token}` },
+      });
+    const listA = await list(deviceTokenA);
+    expect(listA.statusCode).toBe(200);
+    const mine = listA
+      .json<CloudParkedListResponseDto>()
+      .parked.find((p) => p.eventId === childEventId)!;
+    expect(mine).toMatchObject({
+      entity: 'products',
+      missingRefEntity: 'categories',
+      missingRefId: parentCatId,
+      status: 'parked',
+      resolution: null,
+    });
+    // Another tenant's hub sees nothing of it and cannot resolve it.
+    expect(
+      (await list(deviceTokenB)).json<CloudParkedListResponseDto>().parked.map((p) => p.eventId),
+    ).not.toContain(childEventId);
+    const resolve = (token: string, id: string, payload: Record<string, unknown>) =>
+      server.inject({
+        method: 'POST',
+        url: `/api/v1/sync/parked/${id}/resolve`,
+        headers: { authorization: `Bearer ${token}` },
+        payload,
+      });
+    expect(
+      (await resolve(deviceTokenB, mine.id, { action: 'acknowledge', userId: hubUser })).statusCode,
+    ).toBe(404);
+    expect((await list('not-a-token')).statusCode).toBe(401);
+    // Strict body: no field to edit the parked payload.
+    expect(
+      (
+        await resolve(deviceTokenA, mine.id, {
+          action: 'retry',
+          userId: hubUser,
+          eventPayload: '{}',
+        })
+      ).statusCode,
+    ).toBe(400);
+
+    await adminConn.db
+      .update(cloudSyncParked)
+      .set({ attempts: 19 })
+      .where(
+        and(eq(cloudSyncParked.organizationId, orgA), eq(cloudSyncParked.eventId, childEventId)),
+      );
+    const retried = await resolve(deviceTokenA, mine.id, {
+      action: 'retry',
+      userId: hubUser,
+      note: 'Kategoriya keyin keladi',
+    });
+    expect(retried.statusCode, retried.body).toBe(200);
+    expect(retried.json<{ parked: CloudParkedEventDto }>().parked).toMatchObject({
+      attempts: 0,
+      status: 'parked',
+      resolution: 'retried',
+      resolvedByUserId: hubUser,
+      resolutionNote: 'Kategoriya keyin keladi',
+    });
+
+    const acked = await resolve(deviceTokenA, mine.id, { action: 'acknowledge', userId: hubUser });
+    expect(acked.statusCode).toBe(200);
+    expect(acked.json<{ parked: CloudParkedEventDto }>().parked).toMatchObject({
+      status: 'resolved',
+      resolution: 'acknowledged',
+    });
+    expect(
+      (await list(deviceTokenA)).json<CloudParkedListResponseDto>().parked.map((p) => p.eventId),
+    ).not.toContain(childEventId);
+    const again = await resolve(deviceTokenA, mine.id, { action: 'retry', userId: hubUser });
+    expect(again.statusCode).toBe(409);
+    const missing = await resolve(deviceTokenA, idGen.nextId(), {
+      action: 'acknowledge',
+      userId: hubUser,
+    });
+    expect(missing.statusCode).toBe(404);
   });
 
   // --------------------------------------------------------------------------

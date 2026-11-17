@@ -1,4 +1,4 @@
-import type { SyncConflictDto } from '@mezon/contracts';
+import type { CloudParkedEventDto, SyncConflictDto } from '@mezon/contracts';
 import { type I18nKey, t } from '@mezon/i18n';
 import { useCallback, useEffect, useState } from 'react';
 import type { HubApiClient } from '../api/hub-client.js';
@@ -31,9 +31,15 @@ export function SyncConflictsModal(props: {
   const [notes, setNotes] = useState<Record<string, string>>({});
   const [busy, setBusy] = useState<string | null>(null);
   const [failed, setFailed] = useState<string | null>(null);
+  const [cloud, setCloud] = useState<readonly CloudParkedEventDto[] | null>(null);
 
   const load = useCallback(() => {
     api.listSyncConflicts().then(setItems).catch(onError);
+    // The cloud part is best-effort: offline or unpaired simply hides it.
+    api
+      .listCloudParked()
+      .then(setCloud)
+      .catch(() => setCloud(null));
   }, [api, onError]);
 
   useEffect(() => {
@@ -47,6 +53,19 @@ export function SyncConflictsModal(props: {
     try {
       const res = await api.resolveSyncConflict(id, action, notes[id] ?? '');
       if (action === 'retry' && !res.applied) setFailed(id);
+      load();
+    } catch (err) {
+      onError(err);
+    } finally {
+      setBusy(null);
+    }
+  };
+
+  const actCloud = async (id: string, action: 'retry' | 'acknowledge') => {
+    if (busy !== null) return;
+    setBusy(id);
+    try {
+      await api.resolveCloudParked(id, action, notes[id] ?? '');
       load();
     } catch (err) {
       onError(err);
@@ -129,6 +148,43 @@ export function SyncConflictsModal(props: {
               ))}
             </tbody>
           </table>
+        )}
+        {cloud !== null && cloud.length > 0 && (
+          <>
+            <h4>{t('sync.cloudParked.title')}</h4>
+            <table className="pos-cart-table" data-testid="sync-cloud-parked">
+              <tbody>
+                {cloud.map((p) => (
+                  <tr key={p.id} data-testid={`sync-cloud-parked-${p.id}`}>
+                    <td>{new Date(Number(p.createdAtMs)).toLocaleString()}</td>
+                    <td>{p.entity}</td>
+                    <td>
+                      {t('sync.cloudParked.waitingFor', { entity: p.missingRefEntity })} ·{' '}
+                      {p.attempts}
+                    </td>
+                    <td>
+                      <button
+                        type="button"
+                        className="pos-btn"
+                        disabled={busy !== null}
+                        onClick={() => void actCloud(p.id, 'retry')}
+                      >
+                        {t('sync.conflicts.retry')}
+                      </button>
+                      <button
+                        type="button"
+                        className="pos-btn"
+                        disabled={busy !== null}
+                        onClick={() => void actCloud(p.id, 'acknowledge')}
+                      >
+                        {t('sync.conflicts.acknowledge')}
+                      </button>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </>
         )}
       </div>
     </div>

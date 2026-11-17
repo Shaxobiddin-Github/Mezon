@@ -5,6 +5,9 @@ import {
   FiscalStatusResponseSchema,
   FiscalUnsettledListResponseSchema,
   ResolveSyncConflictResponseSchema,
+  type CloudParkedEventDto,
+  CloudParkedListResponseSchema,
+  CloudResolveParkedResponseSchema,
   type ResolveSyncConflictResponseDto,
   type SyncConflictDto,
   SyncConflictListResponseSchema,
@@ -435,6 +438,30 @@ export class HubApiClient {
       path: '/fiscal/status',
       responseSchema: FiscalStatusResponseSchema,
     });
+  }
+
+  /** T2.6: this hub's pushes parked in the cloud (proxied by the hub). */
+  async listCloudParked(): Promise<readonly CloudParkedEventDto[]> {
+    const res = await this.request({
+      method: 'GET',
+      path: '/sync/cloud-parked',
+      responseSchema: CloudParkedListResponseSchema,
+    });
+    return res.parked;
+  }
+
+  async resolveCloudParked(
+    id: string,
+    action: 'retry' | 'acknowledge',
+    note: string,
+  ): Promise<CloudParkedEventDto> {
+    const res = await this.request({
+      method: 'POST',
+      path: `/sync/cloud-parked/${encodeURIComponent(id)}/resolve`,
+      body: note.trim().length > 0 ? { action, note: note.trim() } : { action },
+      responseSchema: CloudResolveParkedResponseSchema,
+    });
+    return res.parked;
   }
 
   /** T2.6: open sync conflicts (manager / owner). */

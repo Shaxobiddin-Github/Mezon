@@ -450,6 +450,8 @@ export const RU_MESSAGES: Readonly<Record<I18nKey, string>> = {
   'sync.reason.FACT_CONTENT_HASH_MISMATCH': 'Одна запись пришла с разным содержимым',
   'sync.reason.DEPENDENCY_UNRESOLVED': 'Связанная запись не пришла',
   'sync.reason.other': 'Отклонено облаком или другой кассой',
+  'sync.cloudParked.title': 'Ожидают связанную запись в облаке',
+  'sync.cloudParked.waitingFor': 'Ожидается: {entity}',
   'error.FISCAL_BLOCKED': 'Продажа заблокирована из-за фискального статуса.',
   'error.FISCALIZED_SALE_CANNOT_VOID':
     'Фискализированный (или отправленный) чек нельзя аннулировать — оформите возврат.',

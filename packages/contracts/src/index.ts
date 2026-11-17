@@ -794,6 +794,13 @@ export {
   SyncParkedDtoSchema,
   SyncParkedListResponseSchema,
   type SyncParkedListResponseDto,
+  CloudParkedEventDtoSchema,
+  type CloudParkedEventDto,
+  CloudParkedListResponseSchema,
+  type CloudParkedListResponseDto,
+  CloudResolveParkedRequestSchema,
+  type CloudResolveParkedRequestDto,
+  CloudResolveParkedResponseSchema,
 } from './sync.js';
 
 export {

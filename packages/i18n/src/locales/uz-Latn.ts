@@ -447,6 +447,8 @@ export const UZ_LATN_MESSAGES = {
   'sync.reason.FACT_CONTENT_HASH_MISMATCH': 'Bir xil yozuv turli mazmun bilan keldi',
   'sync.reason.DEPENDENCY_UNRESOLVED': 'Bogʻliq yozuv kelmadi',
   'sync.reason.other': 'Bulut yoki boshqa kassa rad etdi',
+  'sync.cloudParked.title': 'Bulutda bogʻliq yozuvni kutayotganlar',
+  'sync.cloudParked.waitingFor': 'Kutilmoqda: {entity}',
   'error.FISCAL_BLOCKED': 'Savdo fiskal holat sababli bloklandi.',
   'error.FISCALIZED_SALE_CANNOT_VOID':
     'Fiskallashgan (yoki yuborilgan) chekni bekor qilib boʻlmaydi — qaytarish qiling.',

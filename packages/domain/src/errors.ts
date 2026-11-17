@@ -145,7 +145,8 @@ export type DomainErrorCode =
   | 'FISCAL_DOC_INVALID_STATE'
   | 'SYNC_CONFLICT_NOT_FOUND'
   | 'SYNC_CONFLICT_ALREADY_RESOLVED'
-  | 'SYNC_CONFLICT_ACTION_NOT_ALLOWED';
+  | 'SYNC_CONFLICT_ACTION_NOT_ALLOWED'
+  | 'CLOUD_NOT_PAIRED';
 
 export type DomainErrorDetails = Readonly<Record<string, unknown>>;
 

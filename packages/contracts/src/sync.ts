@@ -1667,3 +1667,39 @@ export const SyncParkedListResponseSchema = z.strictObject({
   parked: z.array(SyncParkedDtoSchema),
 });
 export type SyncParkedListResponseDto = z.infer<typeof SyncParkedListResponseSchema>;
+
+// --- T2.6: cloud-side parked push events (device token; hub proxies them to the POS) ---
+
+export const CloudParkedEventDtoSchema = z.strictObject({
+  id: UuidV7Schema,
+  eventId: UuidV7Schema,
+  entity: z.string(),
+  entityId: UuidV7Schema,
+  missingRefEntity: z.string(),
+  missingRefId: z.string(),
+  attempts: z.number().int(),
+  status: z.enum(['parked', 'conflict', 'resolved']),
+  resolution: z.enum(['retried', 'acknowledged']).nullable(),
+  resolvedByUserId: UuidV7Schema.nullable(),
+  resolvedAtMs: BigIntStringSchema.nullable(),
+  resolutionNote: z.string().nullable(),
+  createdAtMs: BigIntStringSchema,
+});
+export type CloudParkedEventDto = z.infer<typeof CloudParkedEventDtoSchema>;
+
+export const CloudParkedListResponseSchema = z.strictObject({
+  parked: z.array(CloudParkedEventDtoSchema),
+});
+export type CloudParkedListResponseDto = z.infer<typeof CloudParkedListResponseSchema>;
+
+/** Strict: retry or acknowledge only; `userId` is the hub user who decided (audit). */
+export const CloudResolveParkedRequestSchema = z.strictObject({
+  action: z.enum(SYNC_CONFLICT_ACTIONS),
+  userId: UuidV7Schema,
+  note: z.string().trim().max(500).optional(),
+});
+export type CloudResolveParkedRequestDto = z.infer<typeof CloudResolveParkedRequestSchema>;
+
+export const CloudResolveParkedResponseSchema = z.strictObject({
+  parked: CloudParkedEventDtoSchema,
+});

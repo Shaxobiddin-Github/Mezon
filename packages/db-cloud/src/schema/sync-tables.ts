@@ -1,5 +1,5 @@
 import { sql } from 'drizzle-orm';
-import { index, text, uniqueIndex } from 'drizzle-orm/pg-core';
+import { check, index, text, uniqueIndex } from 'drizzle-orm/pg-core';
 import { pgBigint, pgBoolean, pgInt, pgUnixMs, pgUuidV7 } from '../columns.js';
 import { cloudSchemaRegistry } from './registry-instance.js';
 
@@ -86,9 +86,18 @@ export const cloudSyncParked = cloudSchemaRegistry.defineTable(
     attempts: pgInt('attempts').notNull().default(1),
     eventPayload: text('event_payload').notNull(),
     status: text('status').notNull().default('parked'), // 'parked' | 'resolved' | 'conflict'
+    /** T2.6 audit: `retried` (attempts reset) or `acknowledged`; who (hub user) and when. */
+    resolution: text('resolution'),
+    resolvedByUserId: pgUuidV7('resolved_by_user_id'),
+    resolvedAtMs: pgUnixMs('resolved_at_ms'),
+    resolutionNote: text('resolution_note'),
   }),
   (self) => [
     uniqueIndex('uidx_cloud_sync_parked_event').on(self.organizationId, self.eventId),
+    check(
+      'chk_cloud_sync_parked_resolution',
+      sql`${self.resolution} IS NULL OR ${self.resolution} IN ('retried', 'acknowledged')`,
+    ),
     index('idx_cloud_sync_parked_missing_ref').on(
       self.organizationId,
       self.missingRefEntity,

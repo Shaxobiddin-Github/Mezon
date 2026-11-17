@@ -9,6 +9,7 @@ import { type HubPermission, parseUuidV7 } from '@mezon/domain';
 import type { FastifyInstance, FastifyRequest } from 'fastify';
 import { z } from 'zod';
 import type { HubAuthService } from './auth-service.js';
+import type { HubCloudParkedService } from './sync-cloud-parked.js';
 import type { HubSyncConflictService } from './sync-conflicts-service.js';
 
 async function authorize(
@@ -34,7 +35,37 @@ export function registerSyncConflictRoutes(
   app: FastifyInstance,
   authService: HubAuthService,
   service: HubSyncConflictService,
+  cloudParked?: HubCloudParkedService,
 ): void {
+  if (cloudParked) {
+    // The cloud side of this hub's parked pushes (device token; own store only).
+    app.get('/sync/cloud-parked', async (request) => {
+      await authorize(authService, request, 'sync:read');
+      return { parked: await cloudParked.list() };
+    });
+    app.post('/sync/cloud-parked/:id/resolve', async (request) => {
+      const session = await authorize(authService, request, 'sync:resolve');
+      const { id } = IdParamsSchema.parse(request.params);
+      const body = ResolveSyncConflictRequestSchema.parse(request.body);
+      const parked = await cloudParked.resolve({
+        id: parseUuidV7(id),
+        action: body.action,
+        note: body.note && body.note.length > 0 ? body.note : null,
+        userId: session.user.id,
+      });
+      request.log.info(
+        {
+          event: 'sync.cloud_parked_resolved',
+          parkedId: parked.id,
+          action: body.action,
+          userId: session.user.id,
+        },
+        'Cloud parked event resolved',
+      );
+      return { parked };
+    });
+  }
+
   app.get('/sync/conflicts', async (request): Promise<SyncConflictListResponseDto> => {
     await authorize(authService, request, 'sync:read');
     const q = SyncConflictListQuerySchema.parse(request.query ?? {});
