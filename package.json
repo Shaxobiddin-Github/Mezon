@@ -11,7 +11,7 @@
     "typecheck": "turbo run typecheck",
     "lint": "node scripts/lint-workspaces.mjs",
     "lint:fix": "node scripts/lint-workspaces.mjs --fix",
-    "test:unit": "vitest run --project unit --project sqlite-hub",
+    "test:unit": "vitest run --project unit --project sqlite-hub --project pg-cloud",
     "test:perf": "vitest run --project perf",
     "test:e2e:pos": "pnpm --filter @mezon/pos test:e2e",
     "test": "pnpm run test:unit && pnpm run test:perf && pnpm run test:e2e:pos",

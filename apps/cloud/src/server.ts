@@ -20,12 +20,17 @@ import {
   type CloudRotateDeviceTokenResponseDto,
   type CloudStoreDto,
   type CloudUserDto,
+  SyncPullQuerySchema,
+  parseAndValidateSyncCursors,
+  type SyncPullResponseDto,
 } from '@mezon/contracts';
 import {
   AdminReadStore,
   CloudAuthStore,
   CloudDeviceStore,
   CloudSyncPushStore,
+  CloudSyncPullStore,
+  ForeignStoreError,
   CloudTenantStore,
   type CloudPgConnection,
   type VerifiedDeviceContext,
@@ -75,6 +80,7 @@ export interface BuildServerOptions {
   readonly deviceStore?: CloudDeviceStore;
   readonly syncPushStore?: CloudSyncPushStore;
   readonly adminStore?: AdminReadStore;
+  readonly syncPullStore?: CloudSyncPullStore;
   readonly idGen?: { nextId(): UuidV7 };
   readonly clock?: { nowMs(): UnixMs };
 }
@@ -107,6 +113,7 @@ export async function buildCloudServer(options: BuildServerOptions): Promise<Fas
   const deviceStore = options.deviceStore ?? new CloudDeviceStore(conn.pool);
   const syncPushStore = options.syncPushStore ?? new CloudSyncPushStore(conn.pool);
   const adminStore = options.adminStore ?? new AdminReadStore({ pool: conn.pool });
+  const syncPullStore = options.syncPullStore ?? new CloudSyncPullStore(conn.pool);
   const defaultIdGen: IdGenerator = new MonotonicUuidV7Generator({
     clock: { now: () => unixMsFromBigInt(BigInt(Date.now())) },
     random: { nextBytes: (n: number) => randomBytes(n) },
@@ -866,6 +873,55 @@ export async function buildCloudServer(options: BuildServerOptions): Promise<Fas
     adminStore,
     clock,
   });
+  // GET /api/v1/sync/pull (Hub sync pull engine - T2.4)
+  app.get<{ Querystring: { cursors?: string; limit?: string } }>(
+    '/api/v1/sync/pull',
+    async (req, reply) => {
+      let auth: { device: VerifiedDeviceContext; token: string };
+      try {
+        auth = await requireDeviceAuth(req, reply);
+      } catch {
+        return;
+      }
+
+      const parseQuery = SyncPullQuerySchema.safeParse(req.query);
+      if (!parseQuery.success) {
+        return reply.code(400).send({
+          error: 'Bad Request',
+          code: 'INVALID_QUERY',
+          message: parseQuery.error.message,
+        });
+      }
+
+      const { cursors: cursorsStr, limit } = parseQuery.data;
+      const parsedCursors = parseAndValidateSyncCursors(cursorsStr);
+      if (!parsedCursors.success) {
+        return reply.code(400).send({
+          error: 'Bad Request',
+          code: 'INVALID_CURSORS',
+          message: parsedCursors.error,
+        });
+      }
+
+      try {
+        const pullResult: SyncPullResponseDto = await syncPullStore.getSyncPullEvents({
+          context: auth.device,
+          cursors: parsedCursors.cursors,
+          limit,
+        });
+        return reply.code(200).send(pullResult);
+      } catch (err: unknown) {
+        if (err instanceof ForeignStoreError) {
+          return reply.code(400).send({
+            error: 'Bad Request',
+            code: 'FOREIGN_STORE_ID',
+            message: err instanceof Error ? err.message : String(err),
+          });
+        }
+        throw err;
+      }
+    },
+  );
 
   return app;
 }

@@ -915,6 +915,86 @@ export function reverseSaleDebtOnVoidInTxSync(
   });
 }
 
+export function executeCustomerBalancesRebuildSync(
+  sqlite: LocalSqliteConnection['sqlite'],
+  db: LocalSqliteConnection['db'],
+  organizationId?: UuidV7,
+  nowMs: UnixMs = unixMsFromBigInt(0n),
+): RebuildCustomerBalancesOutcome {
+  const validOrgId = organizationId !== undefined ? parseUuidV7(organizationId) : null;
+  const allCustomers =
+    validOrgId !== null
+      ? db
+          .select({ id: customers.id, organizationId: customers.organizationId })
+          .from(customers)
+          .where(eq(customers.organizationId, validOrgId))
+          .all()
+      : db
+          .select({ id: customers.id, organizationId: customers.organizationId })
+          .from(customers)
+          .all();
+
+  const orgTimezones = new Map<string, string>();
+  const getTz = (orgId: UuidV7): string => {
+    const cached = orgTimezones.get(orgId);
+    if (cached) return cached;
+    const tz = readHubCustomerConfigSync(db, orgId).storeTimezone;
+    orgTimezones.set(orgId, tz);
+    return tz;
+  };
+
+  const insertStmt = sqlite.prepare(
+    `INSERT INTO "local_customer_balances" (
+       "id", "organization_id", "created_at_ms", "updated_at_ms",
+       "customer_id", "balance", "total_debt_accrued", "total_settled",
+       "earliest_open_due_at_ms", "last_activity_at_ms"
+     ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+  );
+
+  let balancesUpdated = 0;
+  if (validOrgId !== null) {
+    sqlite
+      .prepare('DELETE FROM "local_customer_balances" WHERE "organization_id" = ?')
+      .run(validOrgId);
+  } else {
+    sqlite.prepare('DELETE FROM "local_customer_balances"').run();
+  }
+
+  for (let i = 0; i < allCustomers.length; i += 1) {
+    const c = allCustomers[i];
+    if (!c) continue;
+    const tz = getTz(c.organizationId);
+    const { fifo, lastActivityAtMs } = readCustomerLedgerFifoSync(sqlite, {
+      organizationId: c.organizationId,
+      customerId: c.id,
+      asOfMs: nowMs,
+      storeTimezone: tz,
+    });
+    // Deterministic synthetic row ID derived without outbox mutation
+    const rowId = parseUuidV7(
+      `01979999-${(i + 1).toString().padStart(4, '0').slice(-4)}-7000-8000-${(i + 1).toString().padStart(12, '0')}`,
+    );
+    insertStmt.run(
+      rowId,
+      c.organizationId,
+      BigInt(nowMs),
+      BigInt(nowMs),
+      c.id,
+      moneyToTiyin(fifo.balance),
+      moneyToTiyin(fifo.totalDebtAccrued),
+      moneyToTiyin(fifo.totalSettled),
+      fifo.earliestOpenDueAtMs !== null ? BigInt(fifo.earliestOpenDueAtMs) : null,
+      lastActivityAtMs !== null ? BigInt(lastActivityAtMs) : null,
+    );
+    balancesUpdated += 1;
+  }
+
+  return {
+    customersProcessed: allCustomers.length,
+    balancesUpdated,
+  };
+}
+
 export class SqliteCustomerStore {
   private readonly connection: LocalSqliteConnection;
   private readonly getRuntimeContext: () => CustomerRuntimeContext | null;
@@ -1846,77 +1926,7 @@ export class SqliteCustomerStore {
     const nowMs = ctx ? ctx.uow.nowUnixMs() : unixMsFromBigInt(0n);
 
     return runConnectionProjectionMaintenance(this.connection, (sqlite, db) => {
-      const allCustomers =
-        validOrgId !== null
-          ? db
-              .select({ id: customers.id, organizationId: customers.organizationId })
-              .from(customers)
-              .where(eq(customers.organizationId, validOrgId))
-              .all()
-          : db
-              .select({ id: customers.id, organizationId: customers.organizationId })
-              .from(customers)
-              .all();
-
-      const orgTimezones = new Map<string, string>();
-      const getTz = (orgId: UuidV7): string => {
-        const cached = orgTimezones.get(orgId);
-        if (cached) return cached;
-        const tz = readHubCustomerConfigSync(db, orgId).storeTimezone;
-        orgTimezones.set(orgId, tz);
-        return tz;
-      };
-
-      const insertStmt = sqlite.prepare(
-        `INSERT INTO "local_customer_balances" (
-           "id", "organization_id", "created_at_ms", "updated_at_ms",
-           "customer_id", "balance", "total_debt_accrued", "total_settled",
-           "earliest_open_due_at_ms", "last_activity_at_ms"
-         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-      );
-
-      let balancesUpdated = 0;
-      if (validOrgId !== null) {
-        sqlite
-          .prepare('DELETE FROM "local_customer_balances" WHERE "organization_id" = ?')
-          .run(validOrgId);
-      } else {
-        sqlite.prepare('DELETE FROM "local_customer_balances"').run();
-      }
-
-      for (let i = 0; i < allCustomers.length; i += 1) {
-        const c = allCustomers[i];
-        if (!c) continue;
-        const tz = getTz(c.organizationId);
-        const { fifo, lastActivityAtMs } = readCustomerLedgerFifoSync(sqlite, {
-          organizationId: c.organizationId,
-          customerId: c.id,
-          asOfMs: nowMs,
-          storeTimezone: tz,
-        });
-        // Deterministic synthetic row ID derived without outbox mutation
-        const rowId = parseUuidV7(
-          `01979999-${(i + 1).toString().padStart(4, '0').slice(-4)}-7000-8000-${(i + 1).toString().padStart(12, '0')}`,
-        );
-        insertStmt.run(
-          rowId,
-          c.organizationId,
-          BigInt(nowMs),
-          BigInt(nowMs),
-          c.id,
-          moneyToTiyin(fifo.balance),
-          moneyToTiyin(fifo.totalDebtAccrued),
-          moneyToTiyin(fifo.totalSettled),
-          fifo.earliestOpenDueAtMs !== null ? BigInt(fifo.earliestOpenDueAtMs) : null,
-          lastActivityAtMs !== null ? BigInt(lastActivityAtMs) : null,
-        );
-        balancesUpdated += 1;
-      }
-
-      return {
-        customersProcessed: allCustomers.length,
-        balancesUpdated,
-      };
+      return executeCustomerBalancesRebuildSync(sqlite, db, validOrgId ?? undefined, nowMs);
     });
   }
 

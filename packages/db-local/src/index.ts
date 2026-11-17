@@ -19,9 +19,12 @@ export {
   type TableDefinitionOptions,
   type SqliteTableMetadata,
   type SqliteCommonColumns,
+  type SqliteForeignKeyRef,
   SchemaValidationError,
   SqliteSchemaRegistry,
   validateSqliteSchemaRegistry,
+  snakeToCamel,
+  buildSqliteForeignReferencesMap,
 } from './registry.js';
 
 export {
@@ -104,6 +107,8 @@ export {
   updateMonotone,
 } from './writers.js';
 
+export { getTableColumns } from 'drizzle-orm';
+
 export {
   localSchemaRegistry,
   localDeviceState,
@@ -163,6 +168,9 @@ export {
   organizationTaxProfiles,
   localSyncConflicts,
   localRulePackages,
+  localSyncApplyState,
+  localSyncCursors,
+  localSyncParked,
 } from './schema/index.js';
 
 export {
@@ -257,6 +265,7 @@ export {
   applyInboundStockMoveSync,
   applyCostConfirmationStockRevaluationSync,
   applySupplierReturnStockOutboundSync,
+  executeStockProjectionsRebuildSync,
   rebuildStockProjections,
   SqliteStockStore,
   createSqliteStockStore,
@@ -389,6 +398,7 @@ export {
   type CustomerLedgerListOutcome,
   type RebuildCustomerBalancesOutcome,
   type RebuildCustomerSearchIndexOutcome,
+  executeCustomerBalancesRebuildSync,
   readCustomerLedgerFifoSync,
   SqliteCustomerStore,
   createSqliteCustomerStore,
@@ -431,6 +441,7 @@ export {
   type RecordSupplierAdjustmentInput,
   type SupplierLedgerMutationOutcome,
   type RebuildSupplierBalancesOutcome,
+  executeSupplierBalancesRebuildSync,
   type RebuildSupplierSearchIndexOutcome,
   readSupplierLedgerFifoSync,
   SqliteSupplierStore,
