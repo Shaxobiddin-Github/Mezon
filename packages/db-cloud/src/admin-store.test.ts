@@ -1,7 +1,4 @@
-import {
-  moneyFromTiyin,
-  unixMsFromBigInt,
-} from '@mezon/domain';
+import { moneyFromTiyin, unixMsFromBigInt } from '@mezon/domain';
 import { DeterministicUuidV7Generator } from '@mezon/test-utils';
 import { PostgreSqlContainer, type StartedPostgreSqlContainer } from '@testcontainers/postgresql';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';

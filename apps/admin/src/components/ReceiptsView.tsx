@@ -32,7 +32,7 @@ export const ReceiptsView: React.FC = () => {
     try {
       const res: AdminReceiptsResponseDto = await adminApi.getReceipts({
         status: statusFilter === 'all' ? undefined : (statusFilter as 'completed' | 'voided'),
-        cursor: reset ? undefined : nextCursor ?? undefined,
+        cursor: reset ? undefined : (nextCursor ?? undefined),
         limit: 15,
       });
 
@@ -127,7 +127,9 @@ export const ReceiptsView: React.FC = () => {
                     <td className="px-6 py-3 font-semibold text-indigo-600">{r.receiptNumber}</td>
                     <td className="px-6 py-3">{r.storeName}</td>
                     <td className="px-6 py-3">{r.cashierName || '—'}</td>
-                    <td className="px-6 py-3 font-bold text-slate-900">{formatTiyin(r.totalTiyin)}</td>
+                    <td className="px-6 py-3 font-bold text-slate-900">
+                      {formatTiyin(r.totalTiyin)}
+                    </td>
                     <td className="px-6 py-3 capitalize">{r.paymentMethods.join(', ')}</td>
                     <td className="px-6 py-3">
                       {r.status === 'voided' ? (
@@ -140,7 +142,9 @@ export const ReceiptsView: React.FC = () => {
                         </span>
                       )}
                     </td>
-                    <td className="px-6 py-3 text-xs text-slate-500">{formatDateTime(r.createdAtMs)}</td>
+                    <td className="px-6 py-3 text-xs text-slate-500">
+                      {formatDateTime(r.createdAtMs)}
+                    </td>
                   </tr>
                 ))
               )}
@@ -168,12 +172,16 @@ export const ReceiptsView: React.FC = () => {
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/40 backdrop-blur-sm">
           <div className="bg-white rounded-xl shadow-2xl max-w-2xl w-full max-h-[90vh] overflow-y-auto p-6 border border-slate-200">
             {detailLoading || !detail ? (
-              <div className="py-12 text-center text-slate-400">Chek ma’lumotlari yuklanmoqda...</div>
+              <div className="py-12 text-center text-slate-400">
+                Chek ma’lumotlari yuklanmoqda...
+              </div>
             ) : (
               <div className="space-y-6">
                 <div className="flex justify-between items-start border-b border-slate-100 pb-4">
                   <div>
-                    <h3 className="text-lg font-bold text-slate-900">Chek № {detail.receiptNumber}</h3>
+                    <h3 className="text-lg font-bold text-slate-900">
+                      Chek № {detail.receiptNumber}
+                    </h3>
                     <p className="text-xs text-slate-500 mt-1">
                       {detail.storeName} | {formatDateTime(detail.createdAtMs)}
                     </p>
@@ -191,8 +199,9 @@ export const ReceiptsView: React.FC = () => {
 
                 {detail.status === 'voided' && (
                   <div className="p-3 bg-red-50 text-red-700 rounded-lg text-xs">
-                    <span className="font-bold">Bekor qilingan:</span> {detail.voidReason || 'Sabab koʻrsatilmagan'}{' '}
-                    ({formatDateTime(detail.voidedAtMs)})
+                    <span className="font-bold">Bekor qilingan:</span>{' '}
+                    {detail.voidReason || 'Sabab koʻrsatilmagan'} (
+                    {formatDateTime(detail.voidedAtMs)})
                   </div>
                 )}
 
@@ -215,13 +224,17 @@ export const ReceiptsView: React.FC = () => {
                         <tr key={l.id}>
                           <td className="py-2">
                             <div className="font-semibold text-slate-800">{l.productName}</div>
-                            {l.sku && <div className="text-[10px] text-slate-400">SKU: {l.sku}</div>}
+                            {l.sku && (
+                              <div className="text-[10px] text-slate-400">SKU: {l.sku}</div>
+                            )}
                           </td>
                           <td className="py-2 text-right">
                             {(Number(l.qtyMilli) / 1000).toLocaleString('uz-UZ')} {l.unit}
                           </td>
                           <td className="py-2 text-right">{formatTiyin(l.unitPriceTiyin)}</td>
-                          <td className="py-2 text-right font-bold text-slate-900">{formatTiyin(l.totalTiyin)}</td>
+                          <td className="py-2 text-right font-bold text-slate-900">
+                            {formatTiyin(l.totalTiyin)}
+                          </td>
                         </tr>
                       ))}
                     </tbody>
@@ -257,9 +270,14 @@ export const ReceiptsView: React.FC = () => {
                   </h4>
                   <div className="space-y-1 text-xs">
                     {detail.payments.map((p) => (
-                      <div key={p.id} className="flex justify-between py-1 bg-slate-50 px-3 rounded">
+                      <div
+                        key={p.id}
+                        className="flex justify-between py-1 bg-slate-50 px-3 rounded"
+                      >
                         <span className="capitalize font-medium text-slate-700">{p.method}</span>
-                        <span className="font-bold text-slate-900">{formatTiyin(p.amountTiyin)}</span>
+                        <span className="font-bold text-slate-900">
+                          {formatTiyin(p.amountTiyin)}
+                        </span>
                       </div>
                     ))}
                   </div>

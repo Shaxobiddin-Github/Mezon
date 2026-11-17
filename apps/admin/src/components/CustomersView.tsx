@@ -32,7 +32,7 @@ export const CustomersView: React.FC = () => {
     try {
       const res: AdminCustomersResponseDto = await adminApi.getCustomers({
         search: search.trim() || undefined,
-        cursor: reset ? undefined : nextCursor ?? undefined,
+        cursor: reset ? undefined : (nextCursor ?? undefined),
         limit: 15,
       });
 
@@ -134,7 +134,9 @@ export const CustomersView: React.FC = () => {
                     <td className="px-6 py-3 text-xs text-red-500 font-semibold">
                       {c.overdueAmountTiyin !== '0' ? formatTiyin(c.overdueAmountTiyin) : '—'}
                     </td>
-                    <td className="px-6 py-3 text-xs text-slate-500">{formatDateTime(c.createdAtMs)}</td>
+                    <td className="px-6 py-3 text-xs text-slate-500">
+                      {formatDateTime(c.createdAtMs)}
+                    </td>
                   </tr>
                 ))
               )}
@@ -162,7 +164,9 @@ export const CustomersView: React.FC = () => {
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/40 backdrop-blur-sm">
           <div className="bg-white rounded-xl shadow-2xl max-w-md w-full p-6 border border-slate-200">
             {detailLoading || !detail ? (
-              <div className="py-12 text-center text-slate-400">Mijoz ma’lumotlari yuklanmoqda...</div>
+              <div className="py-12 text-center text-slate-400">
+                Mijoz ma’lumotlari yuklanmoqda...
+              </div>
             ) : (
               <div className="space-y-6">
                 <div className="flex justify-between items-start border-b border-slate-100 pb-4">
@@ -192,14 +196,18 @@ export const CustomersView: React.FC = () => {
                   <div className="flex justify-between py-1 border-b border-slate-50">
                     <span className="text-slate-500 text-xs">Qarz balansi:</span>
                     <span className="font-bold text-red-600">
-                      {detail.balanceTiyin !== '0' ? `-${formatTiyin(detail.balanceTiyin)}` : '0 soʻm'}
+                      {detail.balanceTiyin !== '0'
+                        ? `-${formatTiyin(detail.balanceTiyin)}`
+                        : '0 soʻm'}
                     </span>
                   </div>
 
                   <div className="flex justify-between py-1 border-b border-slate-50">
                     <span className="text-slate-500 text-xs">Muddati oʻtgan:</span>
                     <span className="text-red-500 font-semibold">
-                      {detail.overdueAmountTiyin !== '0' ? formatTiyin(detail.overdueAmountTiyin) : '0 soʻm'}
+                      {detail.overdueAmountTiyin !== '0'
+                        ? formatTiyin(detail.overdueAmountTiyin)
+                        : '0 soʻm'}
                     </span>
                   </div>
 

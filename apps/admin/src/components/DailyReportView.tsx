@@ -5,9 +5,7 @@ import { formatTiyin } from '../utils/format.js';
 
 export const DailyReportView: React.FC = () => {
   const today = new Date().toISOString().slice(0, 10);
-  const thirtyDaysAgo = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000)
-    .toISOString()
-    .slice(0, 10);
+  const thirtyDaysAgo = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString().slice(0, 10);
 
   const [fromDate, setFromDate] = useState(thirtyDaysAgo);
   const [toDate, setToDate] = useState(today);
@@ -118,7 +116,9 @@ export const DailyReportView: React.FC = () => {
                     <td className="px-4 py-2.5 text-right font-bold text-slate-900">
                       {formatTiyin(d.netSales)}
                     </td>
-                    <td className="px-4 py-2.5 text-right text-slate-500">{formatTiyin(d.vatTotal)}</td>
+                    <td className="px-4 py-2.5 text-right text-slate-500">
+                      {formatTiyin(d.vatTotal)}
+                    </td>
                     <td className="px-4 py-2.5 text-right">{formatTiyin(d.cashSales)}</td>
                     <td className="px-4 py-2.5 text-right">{formatTiyin(d.nonCashSales)}</td>
                     <td className="px-4 py-2.5 text-right text-slate-500">
@@ -137,13 +137,16 @@ export const DailyReportView: React.FC = () => {
                 <tr>
                   <td className="px-4 py-3 font-sans">JAMI:</td>
                   <td className="px-4 py-3 text-right font-sans">
-                    {report.totalSalesCount} / <span className="text-red-600">{report.totalReturnsCount}</span>
+                    {report.totalSalesCount} /{' '}
+                    <span className="text-red-600">{report.totalReturnsCount}</span>
                   </td>
                   <td className="px-4 py-3 text-right">{formatTiyin(report.totalGrossSales)}</td>
                   <td className="px-4 py-3 text-right text-red-600">
                     {report.totalReturns !== '0' ? `-${formatTiyin(report.totalReturns)}` : '0'}
                   </td>
-                  <td className="px-4 py-3 text-right text-indigo-700">{formatTiyin(report.totalNetSales)}</td>
+                  <td className="px-4 py-3 text-right text-indigo-700">
+                    {formatTiyin(report.totalNetSales)}
+                  </td>
                   <td className="px-4 py-3 text-right">{formatTiyin(report.totalVat)}</td>
                   <td className="px-4 py-3 text-right">{formatTiyin(report.totalCashSales)}</td>
                   <td className="px-4 py-3 text-right">{formatTiyin(report.totalNonCashSales)}</td>

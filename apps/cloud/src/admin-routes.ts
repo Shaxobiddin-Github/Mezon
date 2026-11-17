@@ -7,11 +7,7 @@ import {
   CloudLoginRequestSchema,
   DailySalesReportQuerySchema,
 } from '@mezon/contracts';
-import {
-  AdminReadStore,
-  type CloudAuthStore,
-  type CloudPgConnection,
-} from '@mezon/db-cloud';
+import { AdminReadStore, type CloudAuthStore, type CloudPgConnection } from '@mezon/db-cloud';
 import {
   DomainError,
   type IdGenerator,
@@ -117,7 +113,7 @@ export async function registerAdminRoutes(
         return reply.code(401).send({ error: 'Unauthorized', message: 'Invalid credentials' });
       }
 
-      if (lookup.userStatus === 'blocked') {
+      if (lookup.userStatus !== 'active') {
         return reply.code(403).send({ error: 'Forbidden', message: 'User account is suspended' });
       }
 
@@ -205,28 +201,29 @@ export async function registerAdminRoutes(
   );
 
   // 2. POST /api/v1/admin/auth/refresh (A3 Cookie + CSRF protection: Origin + X-Mezon-Admin)
-  app.post('/api/v1/admin/auth/refresh', async (req, reply) => {
-    // CSRF Check: require X-Mezon-Admin header (A3)
-    const adminHeader = req.headers['x-mezon-admin'];
-    if (!adminHeader || adminHeader !== '1') {
-      return reply.code(400).send({
+  /**
+   * A3 CSRF guard for every cookie-authenticated admin route: a custom header that a cross-site
+   * form cannot set, plus an Origin allowlist when the browser sends Origin.
+   * Returns true when the request was rejected (reply already sent).
+   */
+  const rejectAdminCsrf = (req: FastifyRequest, reply: FastifyReply): boolean => {
+    if (req.headers['x-mezon-admin'] !== '1') {
+      void reply.code(400).send({
         error: 'Bad Request',
         message: 'Missing or invalid X-Mezon-Admin security header',
       });
+      return true;
     }
-
-    // CSRF Check: verify Origin header if present (A3)
     const origin = req.headers.origin;
-    if (origin) {
-      const isAllowed =
-        config.corsOrigins.includes('*') || config.corsOrigins.includes(origin);
-      if (!isAllowed) {
-        return reply.code(403).send({
-          error: 'Forbidden',
-          message: 'Cross-origin request rejected',
-        });
-      }
+    if (origin && !config.corsOrigins.includes('*') && !config.corsOrigins.includes(origin)) {
+      void reply.code(403).send({ error: 'Forbidden', message: 'Cross-origin request rejected' });
+      return true;
     }
+    return false;
+  };
+
+  app.post('/api/v1/admin/auth/refresh', async (req, reply) => {
+    if (rejectAdminCsrf(req, reply)) return reply;
 
     // Read refreshToken from HttpOnly cookie
     const cookies = parseCookie(req.headers.cookie);
@@ -261,23 +258,24 @@ export async function registerAdminRoutes(
     const nextExpiresAtMs = unixMsFromBigInt(BigInt(nowMs) + BigInt(THIRTY_DAYS_MS));
 
     try {
-      const { userId } = await authStore.rotateRefreshToken({
+      const rotated = await authStore.rotateRefreshToken({
         organizationId,
         oldTokenHash: oldHash,
         newTokenId: nextTokenId,
         newTokenHash: nextHash,
         newExpiresAtMs: nextExpiresAtMs,
         nowMs,
+        allowedRoles: ['owner', 'manager'],
       });
 
       const nextRefreshToken = `${organizationId}.${nextRawSecret}`;
 
-      // Issue new access token
+      // S1: claims are re-read from the user row on every refresh.
       const newAccessToken = await jwtService.signAccessToken({
-        sub: userId,
+        sub: rotated.userId,
         org: organizationId,
-        role: 'owner',
-        name: 'Admin User',
+        role: rotated.role,
+        name: rotated.userName,
       });
 
       setRefreshCookie(reply, nextRefreshToken);
@@ -290,12 +288,19 @@ export async function registerAdminRoutes(
       if (err instanceof DomainError && err.code === 'AUTH_UNAUTHORIZED') {
         return reply.code(401).send({ error: 'Unauthorized', message: err.message });
       }
+      if (err instanceof DomainError && err.code === 'AUTH_FORBIDDEN') {
+        return reply.code(403).send({
+          error: 'Forbidden',
+          message: 'Cashier accounts cannot access the admin cabinet',
+        });
+      }
       throw err;
     }
   });
 
   // 3. POST /api/v1/admin/auth/logout
   app.post('/api/v1/admin/auth/logout', async (req, reply) => {
+    if (rejectAdminCsrf(req, reply)) return reply;
     const cookies = parseCookie(req.headers.cookie);
     const refreshToken = cookies[REFRESH_COOKIE_NAME];
     if (refreshToken) {
@@ -347,327 +352,293 @@ export async function registerAdminRoutes(
   };
 
   // 4. GET /api/v1/admin/dashboard
-  app.get(
-    '/api/v1/admin/dashboard',
-    { preHandler: [requireAdminAuth] },
-    async (req, reply) => {
-      const user = req.user!;
-      const query = req.query as { storeId?: string; tz?: string };
-      const storeId = query.storeId ? parseUuidV7(query.storeId) : undefined;
+  app.get('/api/v1/admin/dashboard', { preHandler: [requireAdminAuth] }, async (req, reply) => {
+    const user = req.user!;
+    const query = req.query as { storeId?: string; tz?: string };
+    const storeId = query.storeId ? parseUuidV7(query.storeId) : undefined;
 
-      const metrics = await adminStore.getDashboard({
-        organizationId: user.org,
-        storeId,
-        tz: query.tz,
-        includeProfit: true,
-        nowMs: clock.nowMs(),
-      });
+    const metrics = await adminStore.getDashboard({
+      organizationId: user.org,
+      storeId,
+      tz: query.tz,
+      includeProfit: true,
+      nowMs: clock.nowMs(),
+    });
 
-      return reply.code(200).send({
-        todayDate: metrics.todayDate,
-        grossSales: moneyToTiyin(metrics.grossSales).toString(),
-        returnsTotal: moneyToTiyin(metrics.returnsTotal).toString(),
-        netSales: moneyToTiyin(metrics.netSales).toString(),
-        receiptsCount: metrics.receiptsCount,
-        avgReceipt: moneyToTiyin(metrics.avgReceipt).toString(),
-        grossProfit: metrics.grossProfit
-          ? moneyToTiyin(metrics.grossProfit).toString()
-          : undefined,
-        marginBp: metrics.marginBp,
-        stores: metrics.stores.map((s) => ({
-          storeId: s.storeId,
-          storeName: s.storeName,
-          lastEventAtMs: s.lastEventAtMs !== null ? s.lastEventAtMs.toString() : null,
-          isStale: s.isStale,
-        })),
-      });
-    },
-  );
+    return reply.code(200).send({
+      todayDate: metrics.todayDate,
+      grossSales: moneyToTiyin(metrics.grossSales).toString(),
+      returnsTotal: moneyToTiyin(metrics.returnsTotal).toString(),
+      netSales: moneyToTiyin(metrics.netSales).toString(),
+      receiptsCount: metrics.receiptsCount,
+      avgReceipt: moneyToTiyin(metrics.avgReceipt).toString(),
+      grossProfit: metrics.grossProfit ? moneyToTiyin(metrics.grossProfit).toString() : undefined,
+      marginBp: metrics.marginBp,
+      stores: metrics.stores.map((s) => ({
+        storeId: s.storeId,
+        storeName: s.storeName,
+        lastEventAtMs: s.lastEventAtMs !== null ? s.lastEventAtMs.toString() : null,
+        isStale: s.isStale,
+      })),
+    });
+  });
 
   // 5. GET /api/v1/admin/reports/daily (A1 Report parity)
-  app.get(
-    '/api/v1/admin/reports/daily',
-    { preHandler: [requireAdminAuth] },
-    async (req, reply) => {
-      const user = req.user!;
-      const parseResult = DailySalesReportQuerySchema.safeParse(req.query);
-      if (!parseResult.success) {
-        return reply.code(400).send({
-          error: 'Validation Error',
-          details: parseResult.error.flatten(),
-        });
-      }
-      const q = parseResult.data;
-      const rawQuery = req.query as { storeId?: string; tz?: string };
-      const storeId = rawQuery.storeId ? parseUuidV7(rawQuery.storeId) : undefined;
-
-      const rep = await adminStore.getDailySalesReport({
-        organizationId: user.org,
-        storeId,
-        fromDate: q.fromDate,
-        toDate: q.toDate,
-        limit: q.limit,
-        tz: rawQuery.tz,
-        includeCostAndProfit: true,
+  app.get('/api/v1/admin/reports/daily', { preHandler: [requireAdminAuth] }, async (req, reply) => {
+    const user = req.user!;
+    const parseResult = DailySalesReportQuerySchema.safeParse(req.query);
+    if (!parseResult.success) {
+      return reply.code(400).send({
+        error: 'Validation Error',
+        details: parseResult.error.flatten(),
       });
+    }
+    const q = parseResult.data;
+    const rawQuery = req.query as { storeId?: string; tz?: string };
+    const storeId = rawQuery.storeId ? parseUuidV7(rawQuery.storeId) : undefined;
 
-      return reply.code(200).send({
-        days: rep.days.map((d) => ({
-          date: d.date,
-          salesCount: d.salesCount,
-          returnsCount: d.returnsCount,
-          grossSales: moneyToTiyin(d.grossSales).toString(),
-          returnsTotal: moneyToTiyin(d.returnsTotal).toString(),
-          netSales: moneyToTiyin(d.netSales).toString(),
-          vatTotal: moneyToTiyin(d.vatTotal).toString(),
-          totalQtyMilli: quantityToMilli(d.totalQty).toString(),
-          cashSales: moneyToTiyin(d.cashSales).toString(),
-          nonCashSales: moneyToTiyin(d.nonCashSales).toString(),
-          costValue: d.costValue ? moneyToTiyin(d.costValue).toString() : undefined,
-          grossProfit: d.grossProfit ? moneyToTiyin(d.grossProfit).toString() : undefined,
-        })),
-        totalSalesCount: rep.totalSalesCount,
-        totalReturnsCount: rep.totalReturnsCount,
-        totalGrossSales: moneyToTiyin(rep.totalGrossSales).toString(),
-        totalReturns: moneyToTiyin(rep.totalReturns).toString(),
-        totalNetSales: moneyToTiyin(rep.totalNetSales).toString(),
-        totalVat: moneyToTiyin(rep.totalVat).toString(),
-        totalCashSales: moneyToTiyin(rep.totalCashSales).toString(),
-        totalNonCashSales: moneyToTiyin(rep.totalNonCashSales).toString(),
-        totalCostValue: rep.totalCostValue
-          ? moneyToTiyin(rep.totalCostValue).toString()
-          : undefined,
-        totalGrossProfit: rep.totalGrossProfit
-          ? moneyToTiyin(rep.totalGrossProfit).toString()
-          : undefined,
-      });
-    },
-  );
+    const rep = await adminStore.getDailySalesReport({
+      organizationId: user.org,
+      storeId,
+      fromDate: q.fromDate,
+      toDate: q.toDate,
+      limit: q.limit,
+      tz: rawQuery.tz,
+      includeCostAndProfit: true,
+    });
+
+    return reply.code(200).send({
+      days: rep.days.map((d) => ({
+        date: d.date,
+        salesCount: d.salesCount,
+        returnsCount: d.returnsCount,
+        grossSales: moneyToTiyin(d.grossSales).toString(),
+        returnsTotal: moneyToTiyin(d.returnsTotal).toString(),
+        netSales: moneyToTiyin(d.netSales).toString(),
+        vatTotal: moneyToTiyin(d.vatTotal).toString(),
+        totalQtyMilli: quantityToMilli(d.totalQty).toString(),
+        cashSales: moneyToTiyin(d.cashSales).toString(),
+        nonCashSales: moneyToTiyin(d.nonCashSales).toString(),
+        costValue: d.costValue ? moneyToTiyin(d.costValue).toString() : undefined,
+        grossProfit: d.grossProfit ? moneyToTiyin(d.grossProfit).toString() : undefined,
+      })),
+      totalSalesCount: rep.totalSalesCount,
+      totalReturnsCount: rep.totalReturnsCount,
+      totalGrossSales: moneyToTiyin(rep.totalGrossSales).toString(),
+      totalReturns: moneyToTiyin(rep.totalReturns).toString(),
+      totalNetSales: moneyToTiyin(rep.totalNetSales).toString(),
+      totalVat: moneyToTiyin(rep.totalVat).toString(),
+      totalCashSales: moneyToTiyin(rep.totalCashSales).toString(),
+      totalNonCashSales: moneyToTiyin(rep.totalNonCashSales).toString(),
+      totalCostValue: rep.totalCostValue ? moneyToTiyin(rep.totalCostValue).toString() : undefined,
+      totalGrossProfit: rep.totalGrossProfit
+        ? moneyToTiyin(rep.totalGrossProfit).toString()
+        : undefined,
+    });
+  });
 
   // 6. GET /api/v1/admin/receipts (A5 Keyset pagination)
-  app.get(
-    '/api/v1/admin/receipts',
-    { preHandler: [requireAdminAuth] },
-    async (req, reply) => {
-      const user = req.user!;
-      const parseResult = AdminReceiptsQuerySchema.safeParse(req.query);
-      if (!parseResult.success) {
-        return reply.code(400).send({
-          error: 'Validation Error',
-          details: parseResult.error.flatten(),
-        });
-      }
-      const q = parseResult.data;
-
-      const res = await adminStore.getReceiptsList(user.org, {
-        storeId: q.storeId ? parseUuidV7(q.storeId) : undefined,
-        status: q.status === 'voided' ? 'voided' : q.status === 'completed' ? 'completed' : undefined,
-        cursor: q.cursor,
-        limit: q.limit,
+  app.get('/api/v1/admin/receipts', { preHandler: [requireAdminAuth] }, async (req, reply) => {
+    const user = req.user!;
+    const parseResult = AdminReceiptsQuerySchema.safeParse(req.query);
+    if (!parseResult.success) {
+      return reply.code(400).send({
+        error: 'Validation Error',
+        details: parseResult.error.flatten(),
       });
+    }
+    const q = parseResult.data;
 
-      return reply.code(200).send({
-        items: res.items.map((i) => ({
-          id: i.id,
-          receiptNumber: i.receiptNumber,
-          storeId: i.storeId,
-          storeName: i.storeName,
-          cashierName: i.cashierName,
-          totalTiyin: moneyToTiyin(i.total).toString(),
-          status: i.status,
-          paymentMethods: [...i.paymentMethods],
-          createdAtMs: i.createdAtMs.toString(),
-          voidedAtMs: i.voidedAtMs !== null ? i.voidedAtMs.toString() : null,
-        })),
-        nextCursor: res.nextCursor,
-      });
-    },
-  );
+    const res = await adminStore.getReceiptsList(user.org, {
+      storeId: q.storeId ? parseUuidV7(q.storeId) : undefined,
+      status: q.status === 'voided' ? 'voided' : q.status === 'completed' ? 'completed' : undefined,
+      cursor: q.cursor,
+      limit: q.limit,
+    });
+
+    return reply.code(200).send({
+      items: res.items.map((i) => ({
+        id: i.id,
+        receiptNumber: i.receiptNumber,
+        storeId: i.storeId,
+        storeName: i.storeName,
+        cashierName: i.cashierName,
+        totalTiyin: moneyToTiyin(i.total).toString(),
+        status: i.status,
+        paymentMethods: [...i.paymentMethods],
+        createdAtMs: i.createdAtMs.toString(),
+        voidedAtMs: i.voidedAtMs !== null ? i.voidedAtMs.toString() : null,
+      })),
+      nextCursor: res.nextCursor,
+    });
+  });
 
   // 7. GET /api/v1/admin/receipts/:id
-  app.get(
-    '/api/v1/admin/receipts/:id',
-    { preHandler: [requireAdminAuth] },
-    async (req, reply) => {
-      const user = req.user!;
-      const { id } = req.params as { id: string };
-      let receiptId: UuidV7;
-      try {
-        receiptId = parseUuidV7(id);
-      } catch {
-        return reply.code(400).send({ error: 'Bad Request', message: 'Invalid receipt UUID' });
-      }
+  app.get('/api/v1/admin/receipts/:id', { preHandler: [requireAdminAuth] }, async (req, reply) => {
+    const user = req.user!;
+    const { id } = req.params as { id: string };
+    let receiptId: UuidV7;
+    try {
+      receiptId = parseUuidV7(id);
+    } catch {
+      return reply.code(400).send({ error: 'Bad Request', message: 'Invalid receipt UUID' });
+    }
 
-      const receipt = await adminStore.getReceiptDetail(user.org, receiptId);
-      if (!receipt) {
-        return reply.code(404).send({ error: 'Not Found', message: 'Receipt not found' });
-      }
+    const receipt = await adminStore.getReceiptDetail(user.org, receiptId);
+    if (!receipt) {
+      return reply.code(404).send({ error: 'Not Found', message: 'Receipt not found' });
+    }
 
-      return reply.code(200).send({
-        id: receipt.id,
-        receiptNumber: receipt.receiptNumber,
-        storeId: receipt.storeId,
-        storeName: receipt.storeName,
-        cashierName: receipt.cashierName,
-        customerName: receipt.customerName,
-        status: receipt.status,
-        grossTotalTiyin: moneyToTiyin(receipt.grossTotal).toString(),
-        discountTotalTiyin: moneyToTiyin(receipt.discountTotal).toString(),
-        netTotalTiyin: moneyToTiyin(receipt.netTotal).toString(),
-        vatTotalTiyin: moneyToTiyin(receipt.vatTotal).toString(),
-        createdAtMs: receipt.createdAtMs.toString(),
-        voidedAtMs: receipt.voidedAtMs !== null ? receipt.voidedAtMs.toString() : null,
-        voidReason: receipt.voidReason,
-        lines: receipt.lines.map((l) => ({
-          id: l.id,
-          productId: l.productId,
-          productName: l.productName,
-          sku: l.sku,
-          barcode: l.barcode,
-          unit: l.unit,
-          qtyMilli: quantityToMilli(l.qty).toString(),
-          unitPriceTiyin: moneyToTiyin(l.unitPrice).toString(),
-          totalTiyin: moneyToTiyin(l.total).toString(),
-          vatPercent: l.vatPercent,
-          vatTiyin: moneyToTiyin(l.vatAmount).toString(),
-          discountTiyin: moneyToTiyin(l.discountAmount).toString(),
-          mxikCode: l.mxikCode,
-        })),
-        payments: receipt.payments.map((p) => ({
-          id: p.id,
-          method: p.method,
-          amountTiyin: moneyToTiyin(p.amount).toString(),
-          createdAtMs: p.createdAtMs.toString(),
-        })),
-      });
-    },
-  );
+    return reply.code(200).send({
+      id: receipt.id,
+      receiptNumber: receipt.receiptNumber,
+      storeId: receipt.storeId,
+      storeName: receipt.storeName,
+      cashierName: receipt.cashierName,
+      customerName: receipt.customerName,
+      status: receipt.status,
+      grossTotalTiyin: moneyToTiyin(receipt.grossTotal).toString(),
+      discountTotalTiyin: moneyToTiyin(receipt.discountTotal).toString(),
+      netTotalTiyin: moneyToTiyin(receipt.netTotal).toString(),
+      vatTotalTiyin: moneyToTiyin(receipt.vatTotal).toString(),
+      createdAtMs: receipt.createdAtMs.toString(),
+      voidedAtMs: receipt.voidedAtMs !== null ? receipt.voidedAtMs.toString() : null,
+      voidReason: receipt.voidReason,
+      lines: receipt.lines.map((l) => ({
+        id: l.id,
+        productId: l.productId,
+        productName: l.productName,
+        sku: l.sku,
+        barcode: l.barcode,
+        unit: l.unit,
+        qtyMilli: quantityToMilli(l.qty).toString(),
+        unitPriceTiyin: moneyToTiyin(l.unitPrice).toString(),
+        totalTiyin: moneyToTiyin(l.total).toString(),
+        vatPercent: l.vatPercent,
+        vatTiyin: moneyToTiyin(l.vatAmount).toString(),
+        discountTiyin: moneyToTiyin(l.discountAmount).toString(),
+        mxikCode: l.mxikCode,
+      })),
+      payments: receipt.payments.map((p) => ({
+        id: p.id,
+        method: p.method,
+        amountTiyin: moneyToTiyin(p.amount).toString(),
+        createdAtMs: p.createdAtMs.toString(),
+      })),
+    });
+  });
 
   // 8. GET /api/v1/admin/customers (A6 Masked phone)
-  app.get(
-    '/api/v1/admin/customers',
-    { preHandler: [requireAdminAuth] },
-    async (req, reply) => {
-      const user = req.user!;
-      const parseResult = AdminCustomersQuerySchema.safeParse(req.query);
-      if (!parseResult.success) {
-        return reply.code(400).send({
-          error: 'Validation Error',
-          details: parseResult.error.flatten(),
-        });
-      }
-      const q = parseResult.data;
-
-      const res = await adminStore.getCustomersList(user.org, {
-        search: q.search,
-        hasDebtOnly: q.hasDebtOnly,
-        cursor: q.cursor,
-        limit: q.limit,
+  app.get('/api/v1/admin/customers', { preHandler: [requireAdminAuth] }, async (req, reply) => {
+    const user = req.user!;
+    const parseResult = AdminCustomersQuerySchema.safeParse(req.query);
+    if (!parseResult.success) {
+      return reply.code(400).send({
+        error: 'Validation Error',
+        details: parseResult.error.flatten(),
       });
+    }
+    const q = parseResult.data;
 
-      return reply.code(200).send({
-        items: res.items.map((c) => ({
-          id: c.id,
-          fullName: c.fullName,
-          maskedPhone: c.maskedPhone,
-          balanceTiyin: moneyToTiyin(c.balance).toString(),
-          overdueAmountTiyin: moneyToTiyin(c.overdueAmount).toString(),
-          createdAtMs: c.createdAtMs.toString(),
-        })),
-        nextCursor: res.nextCursor,
-      });
-    },
-  );
+    const res = await adminStore.getCustomersList(user.org, {
+      search: q.search,
+      hasDebtOnly: q.hasDebtOnly,
+      cursor: q.cursor,
+      limit: q.limit,
+    });
+
+    return reply.code(200).send({
+      items: res.items.map((c) => ({
+        id: c.id,
+        fullName: c.fullName,
+        maskedPhone: c.maskedPhone,
+        balanceTiyin: moneyToTiyin(c.balance).toString(),
+        overdueAmountTiyin: moneyToTiyin(c.overdueAmount).toString(),
+        createdAtMs: c.createdAtMs.toString(),
+      })),
+      nextCursor: res.nextCursor,
+    });
+  });
 
   // 9. GET /api/v1/admin/customers/:id (A6 Unmasked phone for manager/owner)
-  app.get(
-    '/api/v1/admin/customers/:id',
-    { preHandler: [requireAdminAuth] },
-    async (req, reply) => {
-      const user = req.user!;
-      const { id } = req.params as { id: string };
-      let customerId: UuidV7;
-      try {
-        customerId = parseUuidV7(id);
-      } catch {
-        return reply.code(400).send({ error: 'Bad Request', message: 'Invalid customer UUID' });
-      }
+  app.get('/api/v1/admin/customers/:id', { preHandler: [requireAdminAuth] }, async (req, reply) => {
+    const user = req.user!;
+    const { id } = req.params as { id: string };
+    let customerId: UuidV7;
+    try {
+      customerId = parseUuidV7(id);
+    } catch {
+      return reply.code(400).send({ error: 'Bad Request', message: 'Invalid customer UUID' });
+    }
 
-      const isPrivileged = user.role === 'owner' || user.role === 'manager';
-      const cust = await adminStore.getCustomerDetail({
-        organizationId: user.org,
-        customerId,
-        isPrivilegedRole: isPrivileged,
-      });
+    const isPrivileged = user.role === 'owner' || user.role === 'manager';
+    const cust = await adminStore.getCustomerDetail({
+      organizationId: user.org,
+      customerId,
+      isPrivilegedRole: isPrivileged,
+    });
 
-      if (!cust) {
-        return reply.code(404).send({ error: 'Not Found', message: 'Customer not found' });
-      }
+    if (!cust) {
+      return reply.code(404).send({ error: 'Not Found', message: 'Customer not found' });
+    }
 
-      return reply.code(200).send({
-        id: cust.id,
-        fullName: cust.fullName,
-        phone: cust.phone,
-        balanceTiyin: moneyToTiyin(cust.balance).toString(),
-        overdueAmountTiyin: moneyToTiyin(cust.overdueAmount).toString(),
-        earliestOverdueDueAtMs:
-          cust.earliestOverdueDueAtMs !== null
-            ? cust.earliestOverdueDueAtMs.toString()
-            : null,
-        notes: cust.notes,
-        createdAtMs: cust.createdAtMs.toString(),
-        ledger: cust.ledger.map((l) => ({
-          id: l.id,
-          entryType: l.entryType,
-          amountTiyin: moneyToTiyin(l.amount).toString(),
-          balanceAfterTiyin: moneyToTiyin(l.balanceAfter).toString(),
-          sourceType: l.sourceType,
-          sourceId: l.sourceId,
-          reason: l.reason,
-          createdAtMs: l.createdAtMs.toString(),
-        })),
-      });
-    },
-  );
+    return reply.code(200).send({
+      id: cust.id,
+      fullName: cust.fullName,
+      phone: cust.phone,
+      balanceTiyin: moneyToTiyin(cust.balance).toString(),
+      overdueAmountTiyin: moneyToTiyin(cust.overdueAmount).toString(),
+      earliestOverdueDueAtMs:
+        cust.earliestOverdueDueAtMs !== null ? cust.earliestOverdueDueAtMs.toString() : null,
+      notes: cust.notes,
+      createdAtMs: cust.createdAtMs.toString(),
+      ledger: cust.ledger.map((l) => ({
+        id: l.id,
+        entryType: l.entryType,
+        amountTiyin: moneyToTiyin(l.amount).toString(),
+        balanceAfterTiyin: moneyToTiyin(l.balanceAfter).toString(),
+        sourceType: l.sourceType,
+        sourceId: l.sourceId,
+        reason: l.reason,
+        createdAtMs: l.createdAtMs.toString(),
+      })),
+    });
+  });
 
   // 10. GET /api/v1/admin/products
-  app.get(
-    '/api/v1/admin/products',
-    { preHandler: [requireAdminAuth] },
-    async (req, reply) => {
-      const user = req.user!;
-      const parseResult = AdminProductsQuerySchema.safeParse(req.query);
-      if (!parseResult.success) {
-        return reply.code(400).send({
-          error: 'Validation Error',
-          details: parseResult.error.flatten(),
-        });
-      }
-      const q = parseResult.data;
-
-      const res = await adminStore.getProductsList(user.org, {
-        search: q.search,
-        categoryId: q.categoryId ? parseUuidV7(q.categoryId) : undefined,
-        cursor: q.cursor,
-        limit: q.limit,
+  app.get('/api/v1/admin/products', { preHandler: [requireAdminAuth] }, async (req, reply) => {
+    const user = req.user!;
+    const parseResult = AdminProductsQuerySchema.safeParse(req.query);
+    if (!parseResult.success) {
+      return reply.code(400).send({
+        error: 'Validation Error',
+        details: parseResult.error.flatten(),
       });
+    }
+    const q = parseResult.data;
 
-      return reply.code(200).send({
-        items: res.items.map((p) => ({
-          id: p.id,
-          name: p.name,
-          sku: p.sku,
-          barcode: p.barcode,
-          unit: p.unit,
-          priceTiyin: moneyToTiyin(p.price).toString(),
-          vatPercent: p.vatPercent,
-          currentStockMilli: quantityToMilli(p.currentStock).toString(),
-          minStockMilli: quantityToMilli(p.minStock).toString(),
-        })),
-        nextCursor: res.nextCursor,
-      });
-    },
-  );
+    const res = await adminStore.getProductsList(user.org, {
+      search: q.search,
+      categoryId: q.categoryId ? parseUuidV7(q.categoryId) : undefined,
+      cursor: q.cursor,
+      limit: q.limit,
+    });
+
+    return reply.code(200).send({
+      items: res.items.map((p) => ({
+        id: p.id,
+        name: p.name,
+        sku: p.sku,
+        barcode: p.barcode,
+        unit: p.unit,
+        priceTiyin: moneyToTiyin(p.price).toString(),
+        vatPercent: p.vatPercent,
+        currentStockMilli: quantityToMilli(p.currentStock).toString(),
+        minStockMilli: quantityToMilli(p.minStock).toString(),
+      })),
+      nextCursor: res.nextCursor,
+    });
+  });
 
   // 11. GET /api/v1/admin/inventory/low-stock
   app.get(
@@ -696,28 +667,24 @@ export async function registerAdminRoutes(
   );
 
   // 12. GET /api/v1/admin/conflicts
-  app.get(
-    '/api/v1/admin/conflicts',
-    { preHandler: [requireAdminAuth] },
-    async (req, reply) => {
-      const user = req.user!;
-      const items = await adminStore.getConflictsList(user.org);
+  app.get('/api/v1/admin/conflicts', { preHandler: [requireAdminAuth] }, async (req, reply) => {
+    const user = req.user!;
+    const items = await adminStore.getConflictsList(user.org);
 
-      return reply.code(200).send({
-        items: items.map((c) => ({
-          eventId: c.eventId,
-          storeId: c.storeId,
-          deviceId: c.deviceId,
-          type: c.type,
-          entity: c.entity,
-          entityId: c.entityId,
-          reason: c.reason,
-          attempts: c.attempts,
-          parkedAtMs: c.parkedAtMs.toString(),
-        })),
-      });
-    },
-  );
+    return reply.code(200).send({
+      items: items.map((c) => ({
+        eventId: c.eventId,
+        storeId: c.storeId,
+        deviceId: c.deviceId,
+        type: c.type,
+        entity: c.entity,
+        entityId: c.entityId,
+        reason: c.reason,
+        attempts: c.attempts,
+        parkedAtMs: c.parkedAtMs.toString(),
+      })),
+    });
+  });
 
   // 13. GET /api/v1/admin/stores/freshness
   app.get(

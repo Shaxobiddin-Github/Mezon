@@ -197,7 +197,7 @@ export async function buildCloudServer(options: BuildServerOptions): Promise<Fas
         return reply.code(401).send({ error: 'Unauthorized', message: 'Invalid credentials' });
       }
 
-      if (lookup.userStatus === 'blocked') {
+      if (lookup.userStatus !== 'active') {
         return reply.code(403).send({ error: 'Forbidden', message: 'User account is suspended' });
       }
 
@@ -319,7 +319,7 @@ export async function buildCloudServer(options: BuildServerOptions): Promise<Fas
     const newExpiresAtMs = unixMsFromBigInt(BigInt(nowMs) + BigInt(THIRTY_DAYS_MS));
 
     try {
-      const { userId } = await authStore.rotateRefreshToken({
+      const rotated = await authStore.rotateRefreshToken({
         organizationId: orgId,
         oldTokenHash: oldHash,
         newTokenId: nextTokenId,
@@ -328,12 +328,12 @@ export async function buildCloudServer(options: BuildServerOptions): Promise<Fas
         nowMs,
       });
 
-      // Issue new access token
+      // S1: claims are re-read from the user row on every refresh.
       const newAccessToken = await jwtService.signAccessToken({
-        sub: userId,
+        sub: rotated.userId,
         org: orgId,
-        role: 'owner', // Default claim; tenant context restricts database access anyway
-        name: 'Authorized User',
+        role: rotated.role,
+        name: rotated.userName,
       });
 
       const newRefreshToken = `${orgId}.${nextSecret}`;

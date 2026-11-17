@@ -1,9 +1,7 @@
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import {
-  type SyncEventEnvelopeDto,
-} from '@mezon/contracts';
+import { type SyncEventEnvelopeDto } from '@mezon/contracts';
 import {
   AdminReadStore,
   CloudSyncPushStore,
@@ -138,7 +136,13 @@ describePg('A1: Hub vs Cloud DailySalesReport Parity (T2.7a)', () => {
       await client.query(
         `INSERT INTO cloud_devices (id, organization_id, store_id, device_id, name, platform, app_version, status, last_seen_at_ms, created_at_ms, updated_at_ms)
          VALUES ($1, $2, $3, $4, 'Main POS Terminal', 'windows', '1.0.0', 'active', $5, $5, $5)`,
-        [parseUuidV7('01950000-0000-7000-8000-000000000088'), orgId, storeId, deviceId, nowMs.toString()],
+        [
+          parseUuidV7('01950000-0000-7000-8000-000000000088'),
+          orgId,
+          storeId,
+          deviceId,
+          nowMs.toString(),
+        ],
       );
     });
 
@@ -162,13 +166,34 @@ describePg('A1: Hub vs Cloud DailySalesReport Parity (T2.7a)', () => {
       return ctx ? { uow: ctx.uow, organizationId: ctx.config.organizationId } : null;
     };
 
-    const catalogStore = createSqliteCatalogStore({ connection: localConn, getRuntimeContext: getOrgCtx });
-    const stockStore = createSqliteStockStore({ connection: localConn, getRuntimeContext: getStoreCtx });
-    const cartStore = createSqliteCartStore({ connection: localConn, getRuntimeContext: getStoreCtx });
-    const saleStore = createSqliteSaleStore({ connection: localConn, getRuntimeContext: getStoreCtx });
-    const returnStore = createSqliteReturnStore({ connection: localConn, getRuntimeContext: getStoreCtx });
-    const shiftStore = createSqliteShiftStore({ connection: localConn, getRuntimeContext: getStoreCtx });
-    hubReportStore = createSqliteReportStore({ connection: localConn, getRuntimeContext: getStoreCtx });
+    const catalogStore = createSqliteCatalogStore({
+      connection: localConn,
+      getRuntimeContext: getOrgCtx,
+    });
+    const stockStore = createSqliteStockStore({
+      connection: localConn,
+      getRuntimeContext: getStoreCtx,
+    });
+    const cartStore = createSqliteCartStore({
+      connection: localConn,
+      getRuntimeContext: getStoreCtx,
+    });
+    const saleStore = createSqliteSaleStore({
+      connection: localConn,
+      getRuntimeContext: getStoreCtx,
+    });
+    const returnStore = createSqliteReturnStore({
+      connection: localConn,
+      getRuntimeContext: getStoreCtx,
+    });
+    const shiftStore = createSqliteShiftStore({
+      connection: localConn,
+      getRuntimeContext: getStoreCtx,
+    });
+    hubReportStore = createSqliteReportStore({
+      connection: localConn,
+      getRuntimeContext: getStoreCtx,
+    });
 
     // Item 1: Samarqand non (12% VAT = 1200 bp), Sale Price: 10,000 tiyin, Cost: 6,000 tiyin
     const p1 = (
@@ -352,7 +377,9 @@ describePg('A1: Hub vs Cloud DailySalesReport Parity (T2.7a)', () => {
 
     // Payment breakdown (Cash vs Non-cash)
     expect(moneyToTiyin(cloudReport.totalCashSales)).toBe(moneyToTiyin(hubReport.totalCashSales));
-    expect(moneyToTiyin(cloudReport.totalNonCashSales)).toBe(moneyToTiyin(hubReport.totalNonCashSales));
+    expect(moneyToTiyin(cloudReport.totalNonCashSales)).toBe(
+      moneyToTiyin(hubReport.totalNonCashSales),
+    );
 
     // Cost of goods sold & Gross Profit
     expect(cloudReport.totalCostValue).toBeDefined();
@@ -364,7 +391,9 @@ describePg('A1: Hub vs Cloud DailySalesReport Parity (T2.7a)', () => {
     expect(cloudReport.totalGrossProfit).toBeDefined();
     expect(hubReport.totalGrossProfit).toBeDefined();
     if (cloudReport.totalGrossProfit && hubReport.totalGrossProfit) {
-      expect(moneyToTiyin(cloudReport.totalGrossProfit)).toBe(moneyToTiyin(hubReport.totalGrossProfit));
+      expect(moneyToTiyin(cloudReport.totalGrossProfit)).toBe(
+        moneyToTiyin(hubReport.totalGrossProfit),
+      );
     }
 
     // Daily buckets count and exact values

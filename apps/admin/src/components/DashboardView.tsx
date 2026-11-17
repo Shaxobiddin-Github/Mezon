@@ -81,30 +81,44 @@ export const DashboardView: React.FC = () => {
       {/* Metric Cards Grid */}
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
         <div className="bg-white p-5 rounded-xl border border-slate-200 shadow-sm">
-          <span className="text-xs font-semibold text-slate-500 uppercase tracking-wider">Sof savdo</span>
+          <span className="text-xs font-semibold text-slate-500 uppercase tracking-wider">
+            Sof savdo
+          </span>
           <div className="text-2xl font-bold text-slate-900 mt-2">{formatTiyin(data.netSales)}</div>
           <div className="text-xs text-slate-400 mt-1">Yalpi: {formatTiyin(data.grossSales)}</div>
         </div>
 
         <div className="bg-white p-5 rounded-xl border border-slate-200 shadow-sm">
-          <span className="text-xs font-semibold text-slate-500 uppercase tracking-wider">Cheklar soni</span>
+          <span className="text-xs font-semibold text-slate-500 uppercase tracking-wider">
+            Cheklar soni
+          </span>
           <div className="text-2xl font-bold text-slate-900 mt-2">{data.receiptsCount} ta</div>
-          <div className="text-xs text-slate-400 mt-1">Oʻrtacha chek: {formatTiyin(data.avgReceipt)}</div>
+          <div className="text-xs text-slate-400 mt-1">
+            Oʻrtacha chek: {formatTiyin(data.avgReceipt)}
+          </div>
         </div>
 
         <div className="bg-white p-5 rounded-xl border border-slate-200 shadow-sm">
-          <span className="text-xs font-semibold text-slate-500 uppercase tracking-wider">Qaytarishlar</span>
-          <div className="text-2xl font-bold text-red-600 mt-2">{formatTiyin(data.returnsTotal)}</div>
+          <span className="text-xs font-semibold text-slate-500 uppercase tracking-wider">
+            Qaytarishlar
+          </span>
+          <div className="text-2xl font-bold text-red-600 mt-2">
+            {formatTiyin(data.returnsTotal)}
+          </div>
           <div className="text-xs text-slate-400 mt-1">Mijozlarga qaytarilgan mablagʻ</div>
         </div>
 
         <div className="bg-white p-5 rounded-xl border border-slate-200 shadow-sm">
-          <span className="text-xs font-semibold text-slate-500 uppercase tracking-wider">Yalpi foyda</span>
+          <span className="text-xs font-semibold text-slate-500 uppercase tracking-wider">
+            Yalpi foyda
+          </span>
           <div className="text-2xl font-bold text-emerald-600 mt-2">
             {showProfit ? (data.grossProfit ? formatTiyin(data.grossProfit) : '—') : '••••••••'}
           </div>
           <div className="text-xs text-slate-400 mt-1">
-            {showProfit ? `Marja: ${data.marginBp ? (data.marginBp / 100).toFixed(1) + '%' : '—'}` : 'Maxfiy'}
+            {showProfit
+              ? `Marja: ${data.marginBp ? (data.marginBp / 100).toFixed(1) + '%' : '—'}`
+              : 'Maxfiy'}
           </div>
         </div>
       </div>
@@ -113,7 +127,9 @@ export const DashboardView: React.FC = () => {
       <div className="bg-white rounded-xl border border-slate-200 shadow-sm p-6">
         <h3 className="text-base font-bold text-slate-800 mb-4">Filiallar va kassa holati</h3>
         {data.stores.length === 0 ? (
-          <p className="text-sm text-slate-500">Hozircha birorta ham faol doʻkon roʻyxatdan oʻtmagan.</p>
+          <p className="text-sm text-slate-500">
+            Hozircha birorta ham faol doʻkon roʻyxatdan oʻtmagan.
+          </p>
         ) : (
           <div className="divide-y divide-slate-100">
             {data.stores.map((s) => (
@@ -121,7 +137,8 @@ export const DashboardView: React.FC = () => {
                 <div>
                   <div className="text-sm font-semibold text-slate-800">{s.storeName}</div>
                   <div className="text-xs text-slate-500 mt-0.5">
-                    Oxirgi sinxron: {s.lastEventAtMs ? formatDateTime(s.lastEventAtMs) : 'Hali ulanmagan'}
+                    Oxirgi sinxron:{' '}
+                    {s.lastEventAtMs ? formatDateTime(s.lastEventAtMs) : 'Hali ulanmagan'}
                   </div>
                 </div>
 

@@ -69,7 +69,9 @@ export const Navbar: React.FC<NavbarProps> = ({ currentTab, onSelectTab }) => {
 
           <div className="flex items-center space-x-4">
             <div className="text-right hidden sm:block">
-              <div className="text-sm font-semibold text-slate-800">{user?.name || 'Administrator'}</div>
+              <div className="text-sm font-semibold text-slate-800">
+                {user?.name || 'Administrator'}
+              </div>
               <div className="text-xs text-slate-500 capitalize">{user?.role || 'owner'}</div>
             </div>
 

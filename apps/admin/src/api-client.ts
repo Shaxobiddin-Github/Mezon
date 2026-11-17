@@ -113,13 +113,17 @@ export class AdminApiClient {
       await fetch('/api/v1/admin/auth/logout', {
         method: 'POST',
         credentials: 'include',
+        headers: { 'X-Mezon-Admin': '1' }, // A3 CSRF guard
       });
     } finally {
       this.accessToken = null;
     }
   }
 
-  async getDashboard(params?: { storeId?: string; tz?: string }): Promise<AdminDashboardResponseDto> {
+  async getDashboard(params?: {
+    storeId?: string;
+    tz?: string;
+  }): Promise<AdminDashboardResponseDto> {
     const query = new URLSearchParams();
     if (params?.storeId) query.set('storeId', params.storeId);
     if (params?.tz) query.set('tz', params.tz);
@@ -154,7 +158,9 @@ export class AdminApiClient {
     return this.request<AdminCustomerDetailResponseDto>(`/api/v1/admin/customers/${customerId}`);
   }
 
-  async getDailySalesReport(params?: DailySalesReportQueryDto): Promise<DailySalesReportResponseDto> {
+  async getDailySalesReport(
+    params?: DailySalesReportQueryDto,
+  ): Promise<DailySalesReportResponseDto> {
     const query = new URLSearchParams();
     if (params?.fromDate) query.set('fromDate', params.fromDate);
     if (params?.toDate) query.set('toDate', params.toDate);

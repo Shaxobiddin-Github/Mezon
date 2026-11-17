@@ -393,9 +393,7 @@ export class AdminReadStore {
         if (parts.length === 2 && parts[0] && parts[1]) {
           const cursorMs = BigInt(parts[0]);
           const cursorId = parts[1];
-          conditions.push(
-            `(s.created_at_ms, s.id) < ($${argIdx++}::bigint, $${argIdx++}::uuid)`,
-          );
+          conditions.push(`(s.created_at_ms, s.id) < ($${argIdx++}::bigint, $${argIdx++}::uuid)`);
           args.push(cursorMs.toString(), cursorId);
         }
       }
@@ -640,9 +638,7 @@ export class AdminReadStore {
         if (parts.length === 2 && parts[0] && parts[1]) {
           const cursorMs = BigInt(parts[0]);
           const cursorId = parts[1];
-          conditions.push(
-            `(c.created_at_ms, c.id) < ($${argIdx++}::bigint, $${argIdx++}::uuid)`,
-          );
+          conditions.push(`(c.created_at_ms, c.id) < ($${argIdx++}::bigint, $${argIdx++}::uuid)`);
           args.push(cursorMs.toString(), cursorId);
         }
       }
@@ -819,9 +815,7 @@ export class AdminReadStore {
         if (parts.length === 2 && parts[0] && parts[1]) {
           const cursorMs = BigInt(parts[0]);
           const cursorId = parts[1];
-          conditions.push(
-            `(p.created_at_ms, p.id) < ($${argIdx++}::bigint, $${argIdx++}::uuid)`,
-          );
+          conditions.push(`(p.created_at_ms, p.id) < ($${argIdx++}::bigint, $${argIdx++}::uuid)`);
           args.push(cursorMs.toString(), cursorId);
         }
       }

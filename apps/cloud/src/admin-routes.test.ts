@@ -286,6 +286,7 @@ describePg('@mezon/cloud - Admin Cabinet API & Security Integration (T2.7a)', ()
         method: 'POST',
         url: '/api/v1/admin/auth/logout',
         headers: {
+          'x-mezon-admin': '1',
           cookie: 'mezon_admin_refresh=dummy',
         },
       });
@@ -345,7 +346,17 @@ describePg('@mezon/cloud - Admin Cabinet API & Security Integration (T2.7a)', ()
             'none', 0, 0,
             2000000, 1785714, 214286, 2000000, 0, 0
           )`,
-          [saleId, orgA, storeA, deviceA, dummyHlc, nowMs.toString(), ownerA, custId, idGen.nextId()],
+          [
+            saleId,
+            orgA,
+            storeA,
+            deviceA,
+            dummyHlc,
+            nowMs.toString(),
+            ownerA,
+            custId,
+            idGen.nextId(),
+          ],
         );
 
         await client.query(
