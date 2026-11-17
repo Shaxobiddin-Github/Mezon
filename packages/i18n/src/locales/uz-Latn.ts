@@ -307,7 +307,8 @@ export const UZ_LATN_MESSAGES = {
   'fiscal.unsettled.colDeadline': 'Muddatgacha',
   'fiscal.unsettled.colError': 'Xato',
   'fiscal.unsettled.retry': 'Qayta yuborish',
-  'fiscal.unsettled.rejectedHint': 'Rad etilgan chek qaytarish (yoki bekor qilish) orqali hal qilinadi.',
+  'fiscal.unsettled.rejectedHint':
+    'Rad etilgan chek qaytarish (yoki bekor qilish) orqali hal qilinadi.',
   'fiscal.unsettled.overdue': 'muddat oʻtgan',
   'fiscal.unsettled.hours': '{h} soat {m} daqiqa',
   'fiscal.kind.sale': 'Savdo',

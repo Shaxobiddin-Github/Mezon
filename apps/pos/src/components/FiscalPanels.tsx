@@ -15,9 +15,10 @@ const SETTLED = new Set(['confirmed', 'rejected', 'cancelled']);
  */
 export function ReceiptFiscalBadge(props: { readonly api: HubApiClient; readonly saleId: string }) {
   const { api, saleId } = props;
-  const [state, setState] = useState<{ status: FiscalDocDto['status'] | null; test: boolean } | null>(
-    null,
-  );
+  const [state, setState] = useState<{
+    status: FiscalDocDto['status'] | null;
+    test: boolean;
+  } | null>(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -48,7 +49,11 @@ export function ReceiptFiscalBadge(props: { readonly api: HubApiClient; readonly
 
   if (state === null) return null;
   return (
-    <div className="pos-totals-row" data-testid="receipt-fiscal-status" data-status={state.status ?? 'none'}>
+    <div
+      className="pos-totals-row"
+      data-testid="receipt-fiscal-status"
+      data-status={state.status ?? 'none'}
+    >
       <span>{statusText(state.status)}</span>
       {state.test && state.status !== null && (
         <span className="pos-non-fiscal-badge" data-testid="receipt-fiscal-test-driver">
@@ -84,7 +89,12 @@ export function FiscalOfflineBanner(props: { readonly api: HubApiClient }) {
 
   if (warning === 'none') return null;
   return (
-    <div className="pos-error-banner" role="alert" data-testid="fiscal-offline-warning" data-level={warning}>
+    <div
+      className="pos-error-banner"
+      role="alert"
+      data-testid="fiscal-offline-warning"
+      data-level={warning}
+    >
       {t(warning === 'expired' ? 'fiscal.offline.expired' : 'fiscal.offline.approaching')}
     </div>
   );
@@ -135,7 +145,12 @@ export function FiscalUnsettledModal(props: {
       <div className="pos-modal-card">
         <div className="pos-modal-header">
           <h3 className="pos-modal-title">{t('fiscal.unsettled.title')}</h3>
-          <button type="button" className="pos-btn" data-testid="fiscal-unsettled-close" onClick={onClose}>
+          <button
+            type="button"
+            className="pos-btn"
+            data-testid="fiscal-unsettled-close"
+            onClick={onClose}
+          >
             ✕
           </button>
         </div>
