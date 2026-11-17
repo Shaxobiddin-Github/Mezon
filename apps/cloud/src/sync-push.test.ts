@@ -793,7 +793,7 @@ describePg('@mezon/cloud - Sync Push Engine (T2.3 & P1-P5)', () => {
             'SELECT max(position)::text AS m FROM cloud_sync_events WHERE organization_id = $1 AND store_id = $2',
             [org, store],
           )
-        ).rows[0]!.m ?? '0',
+        ).rows[0].m ?? '0',
       );
     const streams: [string, string, bigint][] = [
       [orgA, storeA, await maxPos(orgA, storeA)],
