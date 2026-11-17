@@ -11,10 +11,34 @@ import type {
   UserSummaryDto,
 } from '@mezon/contracts';
 import type { UuidV7 } from '@mezon/domain';
+import { DEFAULT_LOCALE, type Locale, isLocale, setLocale as setI18nLocale } from '@mezon/i18n';
 import { create } from 'zustand';
 import { generateBrowserUuidV7 } from '../utils/browser-uuid.js';
 
 export type PosTheme = 'light' | 'dark';
+
+/** T4.6: per-device UI language, remembered in localStorage (best effort, never required). */
+export const LOCALE_STORAGE_KEY = 'mezon.pos.locale';
+
+export function readStoredLocale(): Locale {
+  try {
+    const raw = globalThis.localStorage?.getItem(LOCALE_STORAGE_KEY);
+    return isLocale(raw) ? raw : DEFAULT_LOCALE;
+  } catch {
+    return DEFAULT_LOCALE;
+  }
+}
+
+function persistLocale(locale: Locale): void {
+  try {
+    globalThis.localStorage?.setItem(LOCALE_STORAGE_KEY, locale);
+  } catch {
+    // storage unavailable (private mode, blocked): the choice simply is not remembered
+  }
+}
+
+const initialLocale = readStoredLocale();
+setI18nLocale(initialLocale);
 export type PosScreen = 'loading' | 'setup' | 'login' | 'open_shift' | 'pos';
 export type PosModal =
   | 'none'
@@ -58,6 +82,7 @@ export interface PosStoreState {
 
   // Theme & Navigation
   readonly theme: PosTheme;
+  readonly locale: Locale;
   readonly screen: PosScreen;
   readonly activeModal: PosModal;
 
@@ -106,6 +131,7 @@ export interface PosStoreState {
   }) => void;
   readonly setHealthInfo: (info: { readonly status: string; readonly needsSetup: boolean }) => void;
   readonly toggleTheme: () => void;
+  readonly setLocale: (locale: Locale) => void;
   readonly setScreen: (screen: PosScreen) => void;
   readonly setActiveModal: (modal: PosModal) => void;
   readonly setLoginOptions: (options: readonly LoginOptionDto[]) => void;
@@ -147,6 +173,7 @@ export const usePosStore = create<PosStoreState>((set) => ({
   healthCheckCount: 0,
 
   theme: 'light',
+  locale: initialLocale,
   screen: 'loading',
   activeModal: 'none',
 
@@ -194,6 +221,12 @@ export const usePosStore = create<PosStoreState>((set) => ({
       needsSetup: info.needsSetup,
       healthCheckCount: state.healthCheckCount + 1,
     })),
+
+  setLocale: (locale) => {
+    setI18nLocale(locale);
+    persistLocale(locale);
+    set({ locale });
+  },
 
   toggleTheme: () =>
     set((state) => ({
