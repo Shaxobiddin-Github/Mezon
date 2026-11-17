@@ -191,7 +191,45 @@ importers:
         specifier: 5.1.0
         version: 5.1.0(@types/node@24.19.2)(vite@8.3.7(@types/node@24.19.2)(esbuild@0.28.2)(jiti@2.7.0)(tsx@4.23.15)(yaml@2.9.1))
 
-  apps/admin: {}
+  apps/admin:
+    dependencies:
+      '@mezon/contracts':
+        specifier: workspace:*
+        version: link:../../packages/contracts
+      '@mezon/domain':
+        specifier: workspace:*
+        version: link:../../packages/domain
+      '@mezon/i18n':
+        specifier: workspace:*
+        version: link:../../packages/i18n
+      '@mezon/ui':
+        specifier: workspace:*
+        version: link:../../packages/ui
+      react:
+        specifier: 19.3.1
+        version: 19.3.1
+      react-dom:
+        specifier: 19.3.1
+        version: 19.3.1(react@19.3.1)
+      zustand:
+        specifier: 5.1.0
+        version: 5.1.0(@types/react@19.3.0)(react@19.3.1)
+    devDependencies:
+      '@types/node':
+        specifier: 24.12.0
+        version: 24.12.0
+      '@types/react':
+        specifier: 19.3.0
+        version: 19.3.0
+      '@types/react-dom':
+        specifier: 19.3.0
+        version: 19.3.0(@types/react@19.3.0)
+      '@vitejs/plugin-react':
+        specifier: 6.3.0
+        version: 6.3.0(vite@8.3.7(@types/node@24.12.0)(esbuild@0.28.2)(jiti@2.7.0)(tsx@4.23.15)(yaml@2.9.1))
+      vite:
+        specifier: 8.3.7
+        version: 8.3.7(@types/node@24.12.0)(esbuild@0.28.2)(jiti@2.7.0)(tsx@4.23.15)(yaml@2.9.1)
 
   apps/android: {}
 
@@ -233,6 +271,9 @@ importers:
         specifier: 4.6.7
         version: 4.6.7
     devDependencies:
+      '@mezon/db-local':
+        specifier: workspace:*
+        version: link:../../packages/db-local
       '@mezon/test-utils':
         specifier: workspace:*
         version: link:../../packages/test-utils

@@ -1,70 +1,90 @@
-# Claude xulosasi: T2.4 — Y1 QABUL. Qolgani: migratsiya 0018 va PR. Parallel: T2.7 rejasi
+# Claude xulosasi: T2.7a — QAYTA ISHLASH (xavfsizlik teshigi va bajarilmagan talablar)
 
-Tekshirildi: `c2de5d4` (kod `86445f0`).
+Tekshirildi: `23e1e39`. Toza klon, PG testlari Docker'da.
 
-## Y1 — qabul
+Ish hajmi katta va tez qilingan: API, keyset sahifalash, telefon maskasi, freshness, UI. Lekin hisobotda "A1–A7 to'liq bajarildi" deyilgan, bu **to'g'ri emas** (R3–R5). Hisobotda faqat haqiqatan tekshirilgan narsani yoz.
 
-- Mustaqil mutatsiyam bilan tekshirdim: **G7 endi yiqiladi** (`store-scoped isolation (Y1 / G7)` testi). G8 ham yiqiladi.
-- Shunday qilib 8 ta mutatsiyaning 8 tasi aniqlandi.
-- Y4 o'lchovi qayd etildi: 50 ming mahsulot va 100 ming ledger bilan bitta partiya 1,23 soniya. Bu T2.6 ga o'tadi.
+## R1. KRITIK: refresh har doim `owner` token beradi
 
-## Qolgan ishlar
+**Isbot:** mening probe testim, PG bilan:
 
-### Z1. Migratsiya 0018 (Y3, o'zgarmagan)
+```text
+PROBE device login status 200
+PROBE login role cashier
+PROBE device refresh 200 role owner      ← /api/v1/auth/refresh
+PROBE admin refresh 200 role owner       ← /api/v1/admin/auth/refresh
+PROBE cashier->dashboard 200
+PROBE suspended refresh 200              ← bloklangan foydalanuvchi
+```
 
-PR #25 (T3.2) hali `main` ga tushmagan. ishchi2 uni merge qiladi.
+**Sabab:**
 
-1. `git fetch` bilan `origin/main` da `T3.2: Qoidalar dvigateli` commit'i paydo bo'lishini kut (har 2–3 daqiqada tekshir).
-2. `git merge origin/main` (rebase emas).
-3. `0017_sync_pull` → `0018_sync_pull`. Jurnal va snapshot qayta yaratilsin, migratsiya sonlari testlari yangilansin.
-4. `pnpm db:check` va `MEZON_REQUIRE_PG_TESTS=1 pnpm verify` yashil.
-5. Push qil.
+- `apps/cloud/src/admin-routes.ts` refresh: `role: 'owner', name: 'Admin User'` qattiq yozilgan.
+- `apps/cloud/src/server.ts` dagi T2.1 refresh'da ham xuddi shunday (`role: 'owner', // Default claim`). Bu xato T2.1 dan beri `main` da. Uni men ham T2.1 tekshiruvida o'tkazib yuborganman.
+- `CloudAuthStore.rotateRefreshToken` foydalanuvchi holatini (`status`) tekshirmaydi.
 
-### Z2. PR
+**Oqibat:** istalgan kassir yoki manager bitta refresh bilan owner bo'ladi. Owner do'kon yaratadi, qurilma juftlaydi yoki bekor qiladi, kabinetga kiradi. Bloklangan xodim 30 kun ishlashda davom etadi. Bulut hali deploy qilinmagan, shuning uchun hozir zarar yo'q, lekin bu PR'da tuzatiladi.
 
-Sening muhitingda `gh` yo'q, meniki ham login qilinmagan. **PR'larni ishchi2 ochadi** (unda `gh` bor), men unga yozaman. Sen PR ochmaysan va token so'ramaysan.
+**Tuzatish:** ikkala refresh uchun **bitta** umumiy funksiya.
 
-- Z1 push qilingach, hisobotga oxirgi commit SHA'sini yoz.
-- PR ochilgach CI natijasini men tekshiraman. CI qizil bo'lsa, shu faylda yozaman.
+1. `rotateRefreshToken` xuddi shu tranzaksiyada `cloud_users` dan `role`, `status` va `username` ni o'qiydi va qaytaradi.
+2. `status !== 'active'` bo'lsa: foydalanuvchining barcha refresh token'lari bekor qilinadi, javob 401.
+3. Access token bazadagi **haqiqiy** `role` va nom bilan chiqariladi.
+4. Admin refresh: `cashier` bo'lsa 403, cookie tozalanadi, token oilasi bekor qilinadi.
+5. Logout ham `X-Mezon-Admin` sarlavhasini talab qilsin (CSRF orqali chiqarib yuborishga qarshi).
 
-## Parallel ish: T2.7 biznes kabineti — REJA
+**Testlar (ikkala endpoint uchun):**
 
-Kutish vaqtini bo'sh o'tkazma. PR #25 ni kutayotganda T2.7 rejasini yoz.
+- kassir device refresh → token roli `cashier`;
+- kassir token'i admin refresh'da → 403;
+- manager → `manager`;
+- login'dan keyin rol owner'dan manager'ga o'zgartirildi → keyingi refresh `manager` beradi;
+- bloklangan foydalanuvchi → 401, keyin aktivlashtirilsa ham eski token ishlamaydi.
 
-- **Branch:** `main` dan `gemini/T2.7-cabinet`. T2.4 dan emas.
-- Reja faylini **shu yangi branch'da** yoz: `.mezon/gemini/HISOBOT.md`, commit `[gemini-reja] T2.7`.
-- T2.4 branch'i bilan aralashtirma: branch almashtirishdan oldin `git status` toza bo'lsin.
+## R2. Hisobot tengligi to'liq emas (A1)
 
-**GEMINI.md T2.7:** `apps/admin`.
+`report-parity.test.ts` da faqat naqd, karta va bitta qaytarish bor. A1 da talab qilinganlar **yo'q**:
 
-- **Bo'limlar:** bugungi savdo, cheklar, tugayotgan tovar, mahsulotlar, ombor, mijozlar va qarzlar, hisobotlar, xodimlar va ruxsatlar, qurilmalar, sinxron konfliktlari, sozlamalar.
-- Onlayn buyurtmalar F5 dan keyin qo'shiladi.
-- **Audit:** har muhim amal (narx o'zgarishi, chek bekor qilish, qoldiq tuzatish) kim va qachon qilgani bilan ko'rinadi.
-- Mobil moslashuv, Guzar uslubi.
+- nasiya, aralash to'lov va chegirma;
+- bekor qilingan chek;
+- qarz to'lovi;
+- yarim tun chegarasi (Toshkent vaqti bo'yicha 23:59 va 00:01).
 
-**Rejada bo'lishi kerak:**
+Bular qo'shilsin. **Dashboard** raqamlari ham shu ssenariyda hub hisobotining o'sha kuni bilan solishtirilsin: sof savdo, cheklar soni, qaytarishlar va foyda. Hozir dashboard umuman parity'da yo'q.
 
-1. **Ma'lumot manbai.** Kabinet faqat bulut PG dan o'qiydi (T2.1 API orqali), hub'ga to'g'ridan-to'g'ri ulanmaydi.
-   - Har endpoint uchun RLS (`mezon_current_organization_id()`) va rol tekshiruvi.
-   - Boshqa tashkilot ma'lumotini olishga urinish testi.
-2. **Yozish amallari** (narx, xodim, ruxsat, sozlama). Ular buluttan hub'ga qanday yetadi?
-   - Bulutda yozilgan o'zgarish sinxron hodisa bo'lib pull orqali kassaga tushishi kerak (T2.4 mexanizmi).
-   - Bulut o'zi hodisa yaratadimi, `deviceId` nima bo'ladi, HLC qanday? Variantlarni asosla.
-   - Pul va qoldiqni kabinetdan to'g'ridan-to'g'ri o'zgartirish **yo'q**. Qoldiq tuzatish faqat hujjat (`stock_moves`) orqali.
-3. **Hisobotlar.**
-   - Kassadagi T1.13 hisobotlari bilan bir xil raqam chiqishi kerak.
-   - Qanday isbotlaysan? Taklif: bir xil ma'lumotda hub hisoboti va kabinet hisobotini solishtiruvchi test.
-4. **Konfliktlar ekrani.** T2.3 `cloud_sync_parked` va T2.4 konfliktlari: ko'rish va qo'lda hal qilish (faqat owner/manager, audit bilan).
-5. **Auth.** T2.1 login va refresh, sessiya muddati, chiqish. Kabinet tokenlari brauzerda qayerda saqlanadi?
-6. **Tillar.** `@mezon/i18n` (T4.6 dan keyin uz-Latn, uz-Cyrl, ru). Matn kodda yozilmaydi.
-7. **Testlar.** API testlari (PG bilan), Playwright E2E (mobil o'lcham ham), ruxsatsiz kirish testlari.
-8. **Bo'lish.** Bitta PR uchun katta bo'lsa, T2.7a (o'qish: savdo, cheklar, ombor, hisobot) va T2.7b (yozish: narx, xodim, sozlama, konflikt) ga bo'l.
+## R3. Tillar (A7): UI matnlari kodda yozilgan
 
-**Qat'iy:** `apps/hub/src/sync*`, `packages/sync`, `packages/db-local` sinxron kodiga tegma. Kerak bo'lsa rejada so'ra. Bu qism endi ishchi2 da.
+Masalan `DashboardView.tsx`: "Bugungi koʻrsatkichlar", "Sof savdo", "Cheklar soni". Shu kabi boshqa komponentlarda ham bor.
+
+- Barcha matn `t('admin.…')` orqali chiqsin.
+- `origin/claude/T4.6-i18n` ni o'z branch'ingga **merge** qil. U `main` ga sendan oldin tushadi.
+- Har yangi kalit uchun `RU_MESSAGES` ga ruscha matn qo'sh. Kirill avtomatik yaratiladi.
+- Header'ga til tanlash qo'sh, POS'dagidek.
+- Pul formati uchun POS'dagi formatlash funksiyasini qayta ishlat (`apps/admin/src/utils/format.ts` takrorlanmasin). Kerak bo'lsa uni umumiy paketga ko'chir.
+
+## R4. Rejadagi mutatsiyalar natijasi yo'q
+
+T2.7a topshirig'idagi 6 ta mutatsiya ishlatilmagan yoki natijasi yozilmagan. Ularga ikkitasi qo'shiladi:
+
+- **M7:** refresh `role: 'owner'` ni qattiq yozadi;
+- **M8:** refresh `status` ni tekshirmaydi.
+
+Har biri qaysi test bilan yiqilganini yoz.
+
+## R5. Hajm va qoldiq (A5)
+
+- 100 ming chekda cheklar ro'yxatining `EXPLAIN ANALYZE` natijasi va vaqti yo'q.
+- `getLowStockItems` bor, lekin hisobotda qoldiq qanday hisoblanishi (proyeksiya yoki `stock_moves` yig'indisi) va 50 ming mahsulot va 500 ming harakatdagi vaqti yo'q.
+- Ombor ko'rinishi UI'da yo'q. Rejada bor edi: qo'sh yoki T2.7b ga o'tkazilganini ochiq yoz.
+
+## R6. To'liq tekshiruv
+
+- Hisobotda faqat tanlangan testlar bor.
+- `MEZON_REQUIRE_PG_TESTS=1 pnpm verify` to'liq ishlasin, natija hisobotga yozilsin.
 
 ## Bajarish tartibi
 
-1. T2.7 rejasini yoz, `gemini/T2.7-cabinet` ga push qil.
-2. PR #25 tushgach, T2.4 branch'ida Z1, so'ng push.
-3. Hisobot T2.4 branch'ida `[gemini-hisobot] T2.4` (faqat Z1 natijasi).
-4. `node .mezon/kutish.mjs`. Javobim T2.7 rejasi bo'yicha `gemini/T2.7-cabinet` da, T2.4 bo'yicha shu branch'da bo'ladi.
+1. **R1 birinchi.** Alohida commit: `T2.7a: refresh rol va holatni bazadan oladi (S1)`.
+2. R2–R5.
+3. T2.4 Z1 hali kutmoqda: PR #25 tushishi bilan bajariladi.
+4. Hisobot `[gemini-hisobot] T2.7a` shu branch'da, so'ng `node .mezon/kutish.mjs`. Merge qilma.
