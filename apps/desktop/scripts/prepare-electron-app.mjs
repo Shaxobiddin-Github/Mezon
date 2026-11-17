@@ -14,17 +14,57 @@ if (typeof electronVersion !== 'string' || electronVersion.length === 0) {
   throw new Error('Expected exact electron version in apps/desktop/package.json devDependencies');
 }
 
-const WORKSPACE_RUNTIME_PACKAGES = [
-  { name: '@mezon/domain', dir: path.join(repoRoot, 'packages', 'domain'), copyDrizzle: false },
-  {
-    name: '@mezon/contracts',
-    dir: path.join(repoRoot, 'packages', 'contracts'),
-    copyDrizzle: false,
-  },
-  { name: '@mezon/drivers', dir: path.join(repoRoot, 'packages', 'drivers'), copyDrizzle: false },
-  { name: '@mezon/db-local', dir: path.join(repoRoot, 'packages', 'db-local'), copyDrizzle: true },
-  { name: '@mezon/hub', dir: path.join(repoRoot, 'apps', 'hub'), copyDrizzle: false },
-];
+/**
+ * Every `@mezon/*` package the packaged app needs at runtime: the closure of `dependencies`
+ * (not devDependencies) starting from the desktop shell and the Hub it spawns.
+ *
+ * It used to be a hand-written list. T2.3 (`@mezon/sync`) and T3.2 (`@mezon/rules`) added Hub
+ * runtime dependencies that were never staged, so the packaged Hub crashed on start with
+ * ERR_MODULE_NOT_FOUND and the installer smoke launch timed out. Deriving the list keeps it in
+ * sync with package.json automatically.
+ */
+function listWorkspacePackageDirs() {
+  const byName = new Map();
+  for (const group of ['packages', 'apps']) {
+    const groupDir = path.join(repoRoot, group);
+    for (const entry of fs.readdirSync(groupDir, { withFileTypes: true })) {
+      const pkgJsonPath = path.join(groupDir, entry.name, 'package.json');
+      if (entry.isDirectory() && fs.existsSync(pkgJsonPath)) {
+        byName.set(readJson(pkgJsonPath).name, path.join(groupDir, entry.name));
+      }
+    }
+  }
+  return byName;
+}
+
+function collectWorkspaceRuntimePackages() {
+  const dirsByName = listWorkspacePackageDirs();
+  const result = [];
+  const seen = new Set();
+  const queue = [
+    ...Object.keys(readJson(path.join(desktopDir, 'package.json')).dependencies ?? {}),
+  ];
+  queue.push('@mezon/hub');
+  while (queue.length > 0) {
+    const name = queue.shift();
+    if (name === undefined || !name.startsWith('@mezon/') || seen.has(name)) {
+      continue;
+    }
+    seen.add(name);
+    const dir = dirsByName.get(name);
+    if (dir === undefined) {
+      throw new Error(`Runtime workspace dependency ${name} not found under packages/ or apps/`);
+    }
+    result.push({ name, dir, copyDrizzle: fs.existsSync(path.join(dir, 'drizzle')) });
+    queue.push(...Object.keys(readJson(path.join(dir, 'package.json')).dependencies ?? {}));
+  }
+  return result;
+}
+
+const WORKSPACE_RUNTIME_PACKAGES = collectWorkspaceRuntimePackages();
+console.log(
+  `Staging workspace runtime packages: ${WORKSPACE_RUNTIME_PACKAGES.map((p) => p.name).join(', ')}`,
+);
 
 const WORKSPACE_SEEDS = [desktopDir, ...WORKSPACE_RUNTIME_PACKAGES.map((pkg) => pkg.dir)];
 
