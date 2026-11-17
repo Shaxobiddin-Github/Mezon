@@ -1,3 +1,53 @@
+# YANGI ISH TARTIBI (17-noyabr, egasi qarori) — avval shuni o'qi
+
+Gemini loyihadan chiqarildi. Endi ikki ishchi bor: **sen (ishchi2)** va **men (Claude)**. Ikkalamiz ham Opus 5.5. Egasining talabi: **tezroq**, mayda vazifalarni birlashtirib, kutib o'tirmasdan.
+
+## 1. Katta paketlar
+
+Mayda vazifalar bitta paketda: **bitta reja, bitta branch, bitta PR.** Paket ichida mantiqiy commit'lar bo'lsin.
+
+| Paket | Kimda | Ichida |
+|---|---|---|
+| **P1** | sen | T2.6 (proyeksiya va konfliktlar), T2.5 (bootstrap va tiklash), bulut "buyruq yozuvchi" porti (kabinet uchun), fiskal test qarzi va `device_id` qoidasi |
+| **P2** | sen | T3.6 (UzQR va to'lov yadrosi, Fake), T3.7 (markirovka, Fake), T3.8 (audit xesh zanjiri) |
+| **P3** | sen | T4.1 (LAN hub, pinned TLS), T4.2 (ko'p kassa), T4.3 (terminal printeri va yashik), T2.8 yakuniy integratsion testi |
+| **C1** | men | T2.7b (kabinetdan yozish, P1 dagi port ustida), T2.8 Telegram bot, T3.9 pilot hujjatlari |
+| **C2** | men | T4.4 (Android qobig'i va web-kassa), T4.7 (obuna va litsenziya), T4.8 (imzolangan yangilanish) |
+| **C3** | men | F5: T5.1–T5.4 va T5.6 (biznes profili, ochiq proyeksiya, Market API, mijoz akkaunti, mijoz ilovasi) |
+
+Keyingilari (T5.5 band qilish, T5.7 onlayn to'lov, F6+) shu paketlar tugagach taqsimlanadi.
+
+**Hujjat yoki egasining qarorini kutadigan qismlar** (haqiqiy fiskal yoki to'lov drayveri, tarif narxlari, domen) faqat port va Fake orqali yoziladi va keyinga qoladi (§3.3, §17).
+
+## 2. Kutib o'tirma
+
+- **Reja alohida bosqich emas**, u PR boshidagi `HISOBOT.md` bo'limi bo'lib qoladi. Dizayn savoli bo'lmasa, rejani yoz va **darhol kodga o't**. Men rejani kod bilan birga ko'raman.
+- **Savol bo'lsa:** `[ishchi2-savol]` commit'i bilan so'ra va javobni kutmasdan paketning boshqa qismida ishlashda davom et.
+- **PR ko'rib chiqilayotganda:** `main` dan keyingi paketning branch'ini och va ishla. Tuzatish so'rasam, eski branch'ga qaytib tuzatasan.
+- **Kutish skripti:** har paket o'z branch'ida. `node .mezon/kutish.mjs 120 .mezon/claude/TOPSHIRIQ-ishchi2.md` ni faqat qiladigan ish qolmaganda ishga tushir.
+
+## 3. O'zaro tekshiruv
+
+Endi **sen ham mening PR'larimni tekshirasan**, men seniklarini.
+
+- **Men senga tekshiruv so'rovini** `TOPSHIRIQ-ishchi2.md` da `## Tekshiruv so'rovi: PR #N` bo'limi bilan yozaman.
+- **Sening xulosang** `.mezon/ishchi2/TEKSHIRUV.md` ga, `[ishchi2-tekshiruv] PR #N` commit'i bilan, o'sha PR'ning branch'iga yoziladi.
+- **Usul** (men qanday tekshirsam, xuddi shunday):
+  1. Toza build.
+  2. Mustaqil **oracle** testi: kodni ko'chirmasdan, spetsifikatsiyadan alohida hisoblaydigan test.
+  3. **Haqiqiy mutatsiyalar:** kod buziladi, test yiqilishi kerak. Natija jadval bilan.
+  4. Pul, ombor, sinxron, fiskal, auth va xavfsizlik bo'lsa — chuqur tekshiruv.
+  5. Test haqiqatan ma'lumotni ko'radimi, tekshir (bo'sh hisobotni bo'sh hisobotga solishtirmasin — T2.7a da shunday bo'lgan). Har endpoint uchun muvaffaqiyatli yo'l testi bormi?
+- **Natija:** `QABUL`, `SHARTLI QABUL` yoki `QAYTA ISHLASH`. Topilmalar aniq ssenariy bilan yoziladi.
+- **Merge** faqat tekshiruvchining QABULi va yashil CI'dan keyin. Mening PR'larimni sen merge qilasan (sende `gh` bor), seniklarini ham men ruxsat bergach sen merge qilasan.
+
+## 4. Kanal fayllari
+
+- Gemini fayllari (`TOPSHIRIQ.md`, `gemini/HISOBOT.md`) endi ishlatilmaydi. Men o'z hisobotlarimni PR branch'imda `.mezon/claude/HISOBOT.md` ga yozaman.
+- `ALOQA.md` dagi yo'laklar jadvalini keyingi PR'ingda shu bo'limga moslab yangila: Gemini qatorini olib tashla, P1–P3 va C1–C3 ni yoz.
+
+---
+
 # Nazoratchi xulosasi (ishchi2): PR #27 — MERGE RUXSATI. T2.7a uchun PR. Keyin T2.6+T2.5 rejasi
 
 ## PR #27 (T3.3+T3.4) — merge qil
