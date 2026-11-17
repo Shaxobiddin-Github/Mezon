@@ -1,4 +1,117 @@
-# Hisobot: T3.3 + T3.4 — Fiskal yadro va fiskal chek
+# Hisobot: T3.3 — kichik qayta ishlash (K1, K2) va egasining S1/S4 qarori
+
+Branch: `ishchi2/T3.3-fiscal`, PR [#27](https://github.com/Shaxobiddin-Github/Mezon/pull/27).
+Javob: `f442f6f` (S1/S4 qarori, T2.4 PR) va `6ba7af6` (K1, K2, K3).
+Holat: **HISOBOT**. Ko'rib chiqish kutilyapti. Merge qilmayman (K3 va merge tartibi).
+
+## Bajarildi
+
+| Commit | Mazmun |
+|---|---|
+| `2947650` | S1/S4: `fiscal_offline_expired_action` va `fiscal_shift_not_open_action` (`'warn'` / `'block'`, standart `'warn'`), `0019` qayta yaratildi; `/fiscal/status` da `shiftNotOpenOnDriver`; POS'da S4 ogohlantirishi |
+| `b59245f` | **K2 / S1 perf testi** |
+| `0ad656c` | **K1:** smena gate'i va "park" holati |
+| `26d8254` | **K1:** kutayotgan hujjat navbatni to'smaydi (deadlock yo'q), void bilan poyga xavfsiz |
+| `e47dc33` | navbat tartibi testlari (F15, S1c) |
+
+- **T2.4 PR:** [#28](https://github.com/Shaxobiddin-Github/Mezon/pull/28) (`gemini/T2.4-sync-pull` → `main`), merge qilinmagan.
+
+## K1 — smena va cheklar tartibi
+
+**Qoida** (worker `shiftGate`, `apps/hub/src/fiscal-worker.ts`):
+
+| Hujjat | Shart |
+|---|---|
+| Savdo / refund | Chekning smenasi `sales.shift_id` / `returns.shift_id`. Shu smenaning `shift_open` hujjati `confirmed` bo'lmaguncha yuborilmaydi. |
+| `shift_close` (Z) | Shu smenaning barcha savdo va refund hujjatlari terminal holatga kelgachgina yuboriladi (`confirmed`, `cancelled`, `rejected`). |
+| `shift_open` `rejected` yoki `cancelled` | Chek va Z **avtomatik bekor qilinmaydi**. Ular `FISCAL_SHIFT_NOT_OPENED` kodi bilan **park** qilinadi: holat `pending` qoladi, `/fiscal/docs` ro'yxatida ko'rinadi va navbat boshidan chetlatiladi, shuning uchun keyingi smenalar to'xtamaydi. |
+| Refund `depends_on` | Saqlangan. |
+
+**Rejadan muhim o'zgarish.** Avval qat'iy FIFO qildim: navbat boshidagi hujjat hal bo'lmaguncha boshqalar kutardi. Bunda mutatsiyalar ko'rsatdi:
+- F15 va F17 omon qoldi, ya'ni gate'lar amalda ishlamagan;
+- soat orqaga tuzatilsa, Z o'z chekidan "oldin" yaratiladi. Shunda Z navbat boshida chekni kutadi, chek esa Z ortida qoladi — deadlock.
+
+Hozirgi ishlash:
+- worker eng eskisidan boshlab yuradi, lekin bog'liqlikni kutayotgan hujjatni **chetlab o'tadi**;
+- tartibni aniq gate'lar saqlaydi;
+- driver xatosi (`failed` yoki noma'lum natija) pass'ni to'xtatadi va backoff qachon qayta urinishni hal qiladi;
+- kutish sababi faqat o'zgarganda yoziladi, shuning uchun outbox keraksiz hodisalar bilan to'lmaydi;
+- hujjat holati yozuv tranzaksiyasi ichida qayta tekshiriladi: void bilan poyga bo'lsa, worker o'tkazib yuboradi.
+
+**K1 testlari** (`apps/hub/src/fiscal.test.ts`):
+
+| Test | Tekshiradi |
+|---|---|
+| backoff'dagi chek bilan yopilgan smena | drayver daftari `open`, chek, `close` tartibida (F17 shu bilan o'ldi) |
+| OPEN offline | cheklar kutadi; driver qaytgach `open`, `s1`, `s2`, `close` (S4 testi) |
+| OPEN rad etilgan | chek va Z park qilinadi, ro'yxatda ko'rinadi, yuborilmaydi; keyingi smenaning `open` va cheki o'tadi (K1b shu bilan o'ldi) |
+| soat 5 daqiqa orqaga | Z chekdan "oldin" yaratiladi, lekin kutadi; navbat qotmaydi; tartib `open`, chek, `close` |
+| refund backoff'dagi savdoni kutadi | `FISCAL_WAITING_DEPENDENCY`, keyin savdo, refund (F15) |
+| mustaqil cheklar eng eskisidan | eski chek qayta urinishda bo'lsa ham `s1`, `s2`, `s3` tartibida (S1c) |
+
+## K2 / S1 — navbat kassani qotirmaydi
+
+Test: `apps/hub/src/fiscal-queue.perf.test.ts` (perf loyihasi).
+
+Stsenariy:
+1. 500 ta savdo driver ishlamay turganda qilinadi, natijada 500 ta `pending` hujjat yig'iladi.
+2. Driver har chaqiruvda 50 ms kechikadi (`FakeFiscalDriver.latencyMs`).
+3. Navbat fonda bo'shatiladi, shu paytda 20 ta savdo bajariladi.
+
+Natija:
+
+| O'lchov | Qiymat |
+|---|---|
+| Navbat bo'sh paytdagi savdo p95 | 16.2 ms |
+| Navbat bo'shayotgan paytdagi savdo p95 | **15.9 ms** (eng ko'pi 16.4 ms) |
+| Chegara | 300 ms |
+| Savdolar tugaganda navbatda | 509 hujjat (savdolar haqiqatan drain paytida bo'lgan) |
+
+Qo'shimcha tekshiruvlar:
+- driver hech qachon SQLite yozish tranzaksiyasi ichida chaqirilmaydi: proba `sqlite.inTransaction` ni har chaqiruvda tekshiradi;
+- oxirida barcha hujjatlar `confirmed`, daftardagi kalitlar soni hujjatlar soniga teng, har kalitning `submitCount = 1`.
+
+Worker'ning ishlash qoidalari:
+- har hujjat uchun alohida qisqa tranzaksiyalar;
+- hujjatlar orasida `setImmediate` (event loop'ga navbat beriladi);
+- `batchSize` (50) to'liq bo'lsa, keyingi pass interval kutmasdan boshlanadi.
+
+**Mutatsiya S1a:** driver chaqiruvi `uow.execute` ichiga ko'chirildi → perf testi yiqildi (O'LDIRILDI).
+
+## Mutatsiyalar: 21/21 o'ldirildi
+
+Oldingi 17 tasi (`c115962` dagi jadval) qayta ishga tushirildi va hammasi yana o'ldirildi. Yangilari:
+
+| # | Mutatsiya | O'ldirgan test |
+|---|---|---|
+| S1a | driver chaqiruvi tranzaksiya ichida | perf: `inTransaction` probasi |
+| S1c | navbat `next_check_at` bo'yicha (yaratilish tartibi emas) | "mustaqil cheklar eng eskisidan" |
+| F17 | Z o'z smenasining cheklarini kutmaydi | backoff'dagi chek bilan yopilgan smena |
+| K1b | cheklar OPEN tasdiqlanmasdan yuboriladi | OPEN rad etilgan → park |
+
+F15 oldingi navbatda omon qolgan edi (qat'iy FIFO uni yashirib qo'ygan). Gate'lar chetlab o'tish rejimiga o'tkazilgach, refund backoff testi bilan o'ldirildi.
+
+## Tekshiruv
+
+- **`pnpm verify`** (lokal, PG bilan) yashil:
+  - asosiy testlar: 97 fayl / **584 test**;
+  - perf: 10 fayl / 13 test (S1 testi bilan);
+  - E2E: 1/1;
+  - depcruise: 0 buzilish;
+  - `db:check`: lokal va bulut, 0 diff.
+- **CI:** shu commit uchun natija pastda. Desktop installer K3 bo'yicha kutiladi; men `apps/desktop` ga tegmadim.
+
+## Keyingi qadamlar (merge qilmayman)
+
+- `main` ga T4.6 (PR #26), so'ng T2.4 (PR #28) tushgach, `main` ni **merge** qilaman:
+  - lokal migratsiya `0019` T2.4 dagi `0018_sync_pull` dan keyin turadi; jurnal idx va snapshot qayta yoziladi;
+  - bulut `0005` T2.4 da bulut migratsiyasi yo'q, raqam qayta tekshiriladi;
+  - T4.6 dagi `RU_MESSAGES` ga yangi `fiscal.*` va `error.FISCAL*` kalitlari qo'shiladi.
+- Installer `main` da tuzatilgach, `main` ni merge qilaman va CI'ni qayta ishga tushiraman.
+
+---
+
+# (oldingi hisobot, c115962) T3.3 + T3.4 — Fiskal yadro va fiskal chek
 
 Branch: `ishchi2/T3.3-fiscal`. PR: [#27](https://github.com/Shaxobiddin-Github/Mezon/pull/27) (base `main`, `18d4a41`).
 Bajaruvchi: ishchi2.
