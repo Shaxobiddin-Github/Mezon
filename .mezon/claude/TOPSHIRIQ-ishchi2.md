@@ -1,3 +1,42 @@
+# Javob: S6 (mijoz balansi manfiy bo'lsa pull to'xtaydi) — A variant TASDIQLANDI
+
+Topilma juda muhim. Pull'ning cheksiz to'xtashi do'kon uchun eng yomon holatlardan biri, uni differensial test ochib berdi. Testni qizil qoldirib zaiflashtirmaganing to'g'ri.
+
+## Qaror: A
+
+Ledger haqiqat, proyeksiya uni aks ettiradi. Ikki do'kon oflaynda bir qarzni to'lasa, bu **haqiqiy** ortiqcha to'lov. Uni yashirib yoki park qilib bo'lmaydi: B varianti lokal ledgerni bulutdan ajratadi, men ham uni rad etaman.
+
+**Bajariladigan ishlar:**
+
+1. **Migratsiya `0020`** (lokal, fiskal `0019` dan keyin): `local_customer_balances` dan `balance >= 0` CHECK'i olib tashlanadi, jadval qayta yaratiladi. Boshqa CHECK'lar (`accrued`, `settled` ≥ 0 va hokazo) qoladi.
+2. **Manfiy balans ma'nosi:** mijozning haqqi (ortiqcha to'lov). Quyidagilarda tekshir va testla:
+   - **kredit limiti** tekshiruvi manfiy balansni "qarz 0" deb hisoblasin. Manfiy balans yangi nasiya uchun qo'shimcha limit bo'lmasin;
+   - **POS va kabinet** manfiy balansni "Ortiqcha to'lov: X so'm (mijoz haqqi)" deb ko'rsatsin, qizil qarz deb emas;
+   - **`OVERPAYMENT_NOT_ALLOWED`** (lokal to'lov qoidasi) o'zgarmaydi.
+3. **Konflikt:** `CUSTOMER_OVERPAID` turi, faqat ko'rish va "o'rganildi". Ortiqcha pul qanday qaytarilishini egasi keyin hal qiladi, hozir ledger'ga avtomatik yozuv **yo'q**.
+4. **Umumiy himoya** (bu S6 dan ham muhimroq): proyeksiyani qayta hisoblashdagi **har qanday** CHECK yoki constraint xatosi pull partiyasini `transient` deb cheksiz qaytarmasin.
+   - Bunday xato `permanent` deb tasniflanadi.
+   - Partiyadagi hodisalar qo'llanadi, proyeksiya xatosi konfliktga yoziladi (`PROJECTION_FAILED`, kalit bilan).
+   - Pull davom etadi, keyingi muvaffaqiyatli qayta hisoblashda konflikt yopiladi.
+   - Kelajakda boshqa CHECK ham shunday to'siq bo'lmasligi uchun **test:** sun'iy CHECK qo'yilgan proyeksiya bilan pull to'xtamaydi.
+5. **Testlar:**
+   - ikki do'kon oflaynda bir qarzni to'laydi → pull to'xtamaydi, balans manfiy, `CUSTOMER_OVERPAID` konflikti bor, ikki hub va bulutda balans teng;
+   - differensial test 200 seed bilan yashil.
+6. **Mutatsiyalar:**
+   - CHECK qaytariladi → test yiqiladi;
+   - proyeksiya xatosi yana `transient` qilinadi → "pull to'xtamaydi" testi yiqiladi;
+   - kredit limiti manfiy balansni qo'shimcha limit deb oladi → test yiqiladi.
+
+## Bulut
+
+Bulutda mijoz balansi proyeksiyasi yo'q: kabinet va Telegram FIFO'ni o'qishda hisoblaydi (C1, `loadCustomerDebts`). Manfiy balansni kabinet hozir `-X so'm` deb ko'rsatadi. Matnni "Ortiqcha to'lov" qilib men C1 yoki T2.7b da tuzataman, bu senga tegishli emas.
+
+## D1, D2, D6 mutatsiyalari
+
+Ular 40 seed'dan 21, 3 va 3 tasida ushlangan. O'ldirilgan, lekin kam seed'da. Har biri uchun bitta **aniq (deterministik)** test qo'sh, shunda bitta seed omadsiz chiqsa ham ushlanadi. D6 (park'dan retry) ayniqsa muhim.
+
+---
+
 # Tekshiruv so'rovi (17-noyabr): PR #29 (T2.7a) va C1
 
 P1 ishini to'xtatma. Bu ikkita tekshiruvni P1 orasida qil, ular `main` ga tushish navbatini kutib turibdi.
