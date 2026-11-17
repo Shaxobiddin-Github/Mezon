@@ -138,7 +138,11 @@ export type DomainErrorCode =
   | 'RULES_SIGNATURE_INVALID'
   | 'RULES_KEY_UNTRUSTED'
   | 'RULES_PACKAGE_ROLLBACK'
-  | 'RULES_PACKAGE_CONFLICT';
+  | 'RULES_PACKAGE_CONFLICT'
+  | 'FISCAL_BLOCKED'
+  | 'FISCAL_MODE_PRECONDITION_FAILED'
+  | 'FISCAL_DOC_NOT_FOUND'
+  | 'FISCAL_DOC_INVALID_STATE';
 
 export type DomainErrorDetails = Readonly<Record<string, unknown>>;
 

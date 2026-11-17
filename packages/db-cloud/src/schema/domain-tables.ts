@@ -1909,3 +1909,76 @@ export const organizationTaxProfiles = cloudSchemaRegistry.defineTable(
     ),
   ],
 );
+
+/**
+ * T3.3 fiscal documents (`MONOTONE`, store-scoped) — cloud mirror of the hub table. The hub that
+ * made the sale is the only writer; the cloud accepts transitions (`MONOTONE_TRANSITION_RULES`)
+ * but never changes fiscal state itself. Opaque driver fields exist only on `confirmed`.
+ */
+export const fiscalDocs = cloudSchemaRegistry.defineTable(
+  {
+    name: 'fiscal_docs',
+    tableClass: 'MONOTONE',
+    tenantScope: 'store',
+    monotoneColumns: ['status'],
+  },
+  (common) => ({
+    ...common,
+    docKind: text('doc_kind').notNull(),
+    saleId: pgUuidV7('sale_id').references(() => sales.id),
+    returnId: pgUuidV7('return_id').references(() => returns.id),
+    shiftId: pgUuidV7('shift_id').references(() => shifts.id),
+    dependsOnDocId: pgUuidV7('depends_on_doc_id').references((): AnyPgColumn => fiscalDocs.id),
+    idempotencyKey: text('idempotency_key').notNull(),
+    status: text('status').notNull(),
+    attempts: pgInt('attempts').notNull().default(0),
+    nextCheckAtMs: pgUnixMs('next_check_at_ms').notNull(),
+    lastErrorCode: text('last_error_code'),
+    lastErrorMessage: text('last_error_message'),
+    sentAtMs: pgUnixMs('sent_at_ms'),
+    confirmedAtMs: pgUnixMs('confirmed_at_ms'),
+    cancelledAtMs: pgUnixMs('cancelled_at_ms'),
+    fiscalSign: text('fiscal_sign'),
+    fiscalNumber: text('fiscal_number'),
+    qrPayload: text('qr_payload'),
+    driverId: text('driver_id').notNull(),
+    offlineDeadlineMs: pgUnixMs('offline_deadline_ms').notNull(),
+  }),
+  (self) => [
+    uniqueIndex('uidx_fiscal_docs_org_idem').on(self.organizationId, self.idempotencyKey),
+    uniqueIndex('uidx_fiscal_docs_sale')
+      .on(self.saleId)
+      .where(sql`${self.docKind} = 'sale'`),
+    uniqueIndex('uidx_fiscal_docs_return')
+      .on(self.returnId)
+      .where(sql`${self.returnId} IS NOT NULL`),
+    index('idx_fiscal_docs_status').on(self.organizationId, self.storeId, self.status),
+    check(
+      'chk_fiscal_docs_kind',
+      sql`${self.docKind} IN ('sale', 'refund', 'shift_open', 'shift_close')`,
+    ),
+    check(
+      'chk_fiscal_docs_status',
+      sql`${self.status} IN ('pending', 'sent', 'confirmed', 'failed', 'rejected', 'cancelled')`,
+    ),
+    check(
+      'chk_fiscal_docs_kind_refs',
+      sql`(${self.docKind} = 'sale' AND ${self.saleId} IS NOT NULL AND ${self.returnId} IS NULL AND ${self.shiftId} IS NULL AND ${self.dependsOnDocId} IS NULL) OR (${self.docKind} = 'refund' AND ${self.saleId} IS NOT NULL AND ${self.returnId} IS NOT NULL AND ${self.shiftId} IS NULL) OR (${self.docKind} IN ('shift_open', 'shift_close') AND ${self.shiftId} IS NOT NULL AND ${self.saleId} IS NULL AND ${self.returnId} IS NULL AND ${self.dependsOnDocId} IS NULL)`,
+    ),
+    check('chk_fiscal_docs_idem_nonempty', sql`length(trim(${self.idempotencyKey})) >= 1`),
+    check('chk_fiscal_docs_driver_nonempty', sql`length(trim(${self.driverId})) >= 1`),
+    check('chk_fiscal_docs_attempts', sql`${self.attempts} >= 0`),
+    check(
+      'chk_fiscal_docs_confirmed_fields',
+      sql`(${self.status} = 'confirmed' AND ${self.fiscalSign} IS NOT NULL AND length(trim(${self.fiscalSign})) >= 1 AND ${self.fiscalNumber} IS NOT NULL AND length(trim(${self.fiscalNumber})) >= 1 AND ${self.qrPayload} IS NOT NULL AND length(${self.qrPayload}) >= 1 AND ${self.confirmedAtMs} IS NOT NULL AND ${self.sentAtMs} IS NOT NULL) OR (${self.status} <> 'confirmed' AND ${self.fiscalSign} IS NULL AND ${self.fiscalNumber} IS NULL AND ${self.qrPayload} IS NULL AND ${self.confirmedAtMs} IS NULL)`,
+    ),
+    check(
+      'chk_fiscal_docs_sent_at',
+      sql`${self.status} NOT IN ('sent', 'rejected') OR ${self.sentAtMs} IS NOT NULL`,
+    ),
+    check(
+      'chk_fiscal_docs_cancelled_at',
+      sql`(${self.status} = 'cancelled') = (${self.cancelledAtMs} IS NOT NULL)`,
+    ),
+  ],
+);

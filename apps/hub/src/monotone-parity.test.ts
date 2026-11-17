@@ -1,4 +1,9 @@
 import { MONOTONE_TRANSITION_RULES } from '@mezon/contracts';
+import {
+  FISCAL_DOC_STATUSES,
+  type FiscalDocStatus,
+  isFiscalDocTransitionAllowed,
+} from '@mezon/domain';
 import { migrateLocalDatabase, openLocalSqliteDatabase } from '@mezon/db-local';
 import { describe, expect, it } from 'vitest';
 
@@ -428,6 +433,133 @@ describe('@mezon/hub - MONOTONE SQLite Triggers & Cloud Engine Parity (R2)', () 
       ).run(lineId);
     }).toThrow();
 
+    conn.close();
+  });
+
+  it('T3.3 fiscal_docs (7th MONOTONE table): SQLite triggers, cloud rule and domain table agree on all 36 status pairs', () => {
+    const conn = openLocalSqliteDatabase(':memory:');
+    migrateLocalDatabase(conn.db);
+    const db = conn.sqlite;
+    const orgId = '018bcfe5-6800-7000-8000-000000000001';
+    const storeId = '018bcfe5-6800-7000-8000-000000000011';
+    const deviceId = '018bcfe5-6800-7000-8000-000000000111';
+    const userId = '018bcfe5-6800-7000-8000-000000000003';
+    const hlc0 = '001700000000000:00000:018bcfe5-6800-7000-8000-000000000111';
+    const nowMs = 1700000000000n;
+    const shiftId = '018bcfe5-6800-7000-8000-000000000922';
+    db.prepare(
+      `INSERT INTO users (id, organization_id, device_id, hlc, created_at_ms, updated_at_ms, username, full_name, role, is_active)
+       VALUES (?, ?, ?, ?, ?, ?, 'test_user', 'Test User', 'owner', 1)`,
+    ).run(userId, orgId, deviceId, hlc0, nowMs, nowMs);
+    db.prepare(
+      `INSERT INTO shifts (id, organization_id, store_id, device_id, hlc, created_at_ms, updated_at_ms, shift_no, shift_code, status, opened_by_user_id, opening_cash, opened_at_ms, open_client_request_id, open_request_hash)
+       VALUES (?, ?, ?, ?, ?, ?, ?, 1, 'SHF-901', 'open', ?, 0, ?, '018bcfe5-6800-7000-8000-000000000923', 'hash123456')`,
+    ).run(shiftId, orgId, storeId, deviceId, hlc0, nowMs, nowMs, userId, nowMs);
+
+    /** Column values a row in `status` must carry to satisfy the CHECKs. */
+    const fieldsFor = (status: FiscalDocStatus) => ({
+      sent_at_ms: status === 'pending' ? null : nowMs,
+      confirmed_at_ms: status === 'confirmed' ? nowMs : null,
+      cancelled_at_ms: status === 'cancelled' ? nowMs : null,
+      fiscal_sign: status === 'confirmed' ? 'SINOV-FB-1' : null,
+      fiscal_number: status === 'confirmed' ? 'SINOV-FD-1' : null,
+      qr_payload: status === 'confirmed' ? 'SINOV|q' : null,
+    });
+    let n = 0;
+    const insertDoc = (status: FiscalDocStatus): string => {
+      n += 1;
+      const id = `018bcfe5-6800-7000-8000-${(0x900000000000 + n).toString(16).padStart(12, '0')}`;
+      const f = fieldsFor(status);
+      db.prepare(
+        `INSERT INTO fiscal_docs (id, organization_id, store_id, device_id, hlc, created_at_ms, updated_at_ms,
+           doc_kind, shift_id, idempotency_key, status, attempts, next_check_at_ms, sent_at_ms, confirmed_at_ms,
+           cancelled_at_ms, fiscal_sign, fiscal_number, qr_payload, driver_id, offline_deadline_ms)
+         VALUES (?, ?, ?, ?, ?, ?, ?, 'shift_open', ?, ?, ?, 1, ?, ?, ?, ?, ?, ?, ?, 'fake', ?)`,
+      ).run(
+        id,
+        orgId,
+        storeId,
+        deviceId,
+        hlc0,
+        nowMs,
+        nowMs,
+        shiftId,
+        `k-${n}`,
+        status,
+        nowMs,
+        f.sent_at_ms,
+        f.confirmed_at_ms,
+        f.cancelled_at_ms,
+        f.fiscal_sign,
+        f.fiscal_number,
+        f.qr_payload,
+        nowMs + 86_400_000n,
+      );
+      return id;
+    };
+    const rule = MONOTONE_TRANSITION_RULES.fiscal_docs;
+    const row = (id: string) =>
+      db.prepare('SELECT * FROM fiscal_docs WHERE id = ?').get(id) as Record<string, unknown>;
+    for (const from of FISCAL_DOC_STATUSES) {
+      for (const to of FISCAL_DOC_STATUSES) {
+        const id = insertDoc(from);
+        const existing = row(id);
+        const f = fieldsFor(to);
+        const attempts = from === to ? 2 : 1;
+        const incoming = { ...existing, status: to, ...f, attempts };
+        const cloud = rule.checkTransition(existing, incoming);
+        let localError: unknown = null;
+        try {
+          db.prepare(
+            `UPDATE fiscal_docs SET status = ?, attempts = ?, sent_at_ms = ?, confirmed_at_ms = ?, cancelled_at_ms = ?,
+               fiscal_sign = ?, fiscal_number = ?, qr_payload = ? WHERE id = ?`,
+          ).run(
+            to,
+            attempts,
+            f.sent_at_ms,
+            f.confirmed_at_ms,
+            f.cancelled_at_ms,
+            f.fiscal_sign,
+            f.fiscal_number,
+            f.qr_payload,
+            id,
+          );
+        } catch (e) {
+          localError = e;
+        }
+        const live = from === 'pending' || from === 'sent' || from === 'failed';
+        const expectedOk = from === to ? live : isFiscalDocTransitionAllowed(from, to);
+        expect(localError === null, `sqlite ${from}->${to}`).toBe(expectedOk);
+        if (!expectedOk) {
+          // Must be the MONOTONE trigger, not merely a CHECK constraint.
+          expect(String(localError), `${from}->${to}`).toContain('MONOTONE table "fiscal_docs"');
+        }
+        if (from === to && !live) {
+          expect(cloud, `cloud ${from}->${to}`).toBe('duplicate');
+        } else {
+          expect(cloud, `cloud ${from}->${to}`).toBe(expectedOk ? 'accepted' : 'rejected');
+        }
+      }
+    }
+    // Opaque fields: cloud rejects confirmed without them and any opaque field on a non-confirmed state.
+    const sentId = insertDoc('sent');
+    const sentRow = row(sentId);
+    expect(
+      rule.checkTransition(sentRow, { ...sentRow, status: 'confirmed', confirmed_at_ms: nowMs }),
+    ).toBe('rejected');
+    expect(rule.checkTransition(sentRow, { ...sentRow, status: 'failed', fiscal_sign: 'X' })).toBe(
+      'rejected',
+    );
+    // Attempts never decrease (both sides).
+    expect(rule.checkTransition(sentRow, { ...sentRow, attempts: 0 })).toBe('rejected');
+    expect(() =>
+      db.prepare('UPDATE fiscal_docs SET attempts = 0 WHERE id = ?').run(sentId),
+    ).toThrow('MONOTONE table "fiscal_docs"');
+    // Immutable core and no physical delete.
+    expect(() =>
+      db.prepare(`UPDATE fiscal_docs SET idempotency_key = 'other' WHERE id = ?`).run(sentId),
+    ).toThrow('MONOTONE table "fiscal_docs"');
+    expect(() => db.prepare('DELETE FROM fiscal_docs WHERE id = ?').run(sentId)).toThrow();
     conn.close();
   });
 });

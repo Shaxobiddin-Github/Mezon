@@ -37,6 +37,10 @@ import { and, asc, eq, lt } from 'drizzle-orm';
 import type { BetterSQLite3Database } from 'drizzle-orm/better-sqlite3';
 import { type LocalSqliteConnection } from './connection.js';
 import {
+  cancelSaleFiscalDocForVoidInTxSync,
+  insertRefundFiscalDocIfNeededInTxSync,
+} from './fiscal-repo.js';
+import {
   applyReturnDebtOffsetInTxSync,
   prepareReturnSaleDebtContextInTxSync,
   reverseSaleDebtOnVoidInTxSync,
@@ -328,15 +332,14 @@ function sumNetCashPayments(paymentRows: readonly (typeof payments.$inferSelect)
 }
 
 /**
- * F3 FISCALIZATION GATE HOOK:
- * Once `fiscal_docs` is introduced in F3, checks whether `sale` has already been fiscalized.
- * Per `GEMINI.md`, a fiscalized receipt CANNOT be voided — it must be reversed via `createReturn`.
+ * T3.3 void gate. A sent/confirmed receipt CANNOT be voided (only a return reverses it); a
+ * pending/failed/rejected document is moved to `cancelled` in this same void transaction.
  */
 function assertSaleNotFiscalizedForVoidSync(
-  _session: SqliteUnitOfWorkSession,
-  _saleRow: typeof sales.$inferSelect,
+  session: SqliteUnitOfWorkSession,
+  saleRow: typeof sales.$inferSelect,
 ): void {
-  // F1/T1.6 has no fiscal driver yet; F3 queries `fiscal_docs` here and throws `FISCALIZED_SALE_CANNOT_VOID`.
+  cancelSaleFiscalDocForVoidInTxSync(session, saleRow);
 }
 
 /**
@@ -1332,6 +1335,14 @@ export class SqliteReturnStore {
           nowMs,
         });
       }
+
+      // T3.3 (S3 queue): refund document waits for the sale document; the return never blocks.
+      insertRefundFiscalDocIfNeededInTxSync(session, {
+        organizationId: ctx.organizationId,
+        storeId: ctx.storeId,
+        saleId: saleRow.id,
+        returnId,
+      });
 
       this.testHooks?.onBeforeCommit?.();
 

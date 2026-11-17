@@ -561,6 +561,16 @@ describe('@mezon/rules — general properties', () => {
     expect(res.warn.find((f) => f.code === 'MXIK_MISSING')?.lineIds).toEqual(['a', 'c']);
   });
 
+  it('T3.3: MXIK_MISSING BLOCKS in fiscal mode (F6) and only warns outside it', () => {
+    const cart = { lines: [line('a', { mxik: null }), line('b')] };
+    const on = evaluate(cart, [], ctx({ fiscalMode: true }));
+    expect(on.block.find((f) => f.code === 'MXIK_MISSING')?.lineIds).toEqual(['a']);
+    expect(on.warn.some((f) => f.code === 'MXIK_MISSING')).toBe(false);
+    const off = evaluate(cart, [], ctx({ fiscalMode: false }));
+    expect(off.block.some((f) => f.code === 'MXIK_MISSING')).toBe(false);
+    expect(off.warn.some((f) => f.code === 'MXIK_MISSING')).toBe(true);
+  });
+
   it('property: line order never changes the set of finding codes; cashless receipts are never blocked by a package rule', () => {
     fc.assert(
       fc.property(

@@ -8,6 +8,7 @@ import {
   tiyinToSomInputString,
 } from '@mezon/ui';
 import { type FormEvent, useEffect, useRef, useState } from 'react';
+import { ReceiptFiscalBadge } from './FiscalPanels.js';
 import { RulesPanel } from './RulesPanel.js';
 import { type HubApiClient, HubApiError } from '../api/hub-client.js';
 import { type InsufficientStockLineDetail, usePosStore } from '../store/pos-store.js';
@@ -607,6 +608,8 @@ export function ReceiptModal({ api }: { readonly api?: HubApiClient } = {}) {
           <h3 className="pos-modal-title">{t('receipt.title')}</h3>
           <span data-testid="receipt-code">{sale.receiptCode}</span>
         </div>
+
+        {api && <ReceiptFiscalBadge api={api} saleId={sale.id} />}
 
         <div className="pos-totals-row">
           <span>{t('receipt.receiptNo')}:</span>

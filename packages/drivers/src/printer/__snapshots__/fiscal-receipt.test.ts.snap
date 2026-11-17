@@ -1,0 +1,357 @@
+// Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
+
+exports[`T3.4 fiscal receipt byte snapshots (58 / 80 mm) > confirmed @ 58mm 1`] = `
+{
+  "preview": "      *** FISKAL CHEK ***
+          GUZAR KASSA
+================================
+Chek:                R-0007 (#7)
+Smena:                    S-0001
+Sana:           2026-11-17 10:00
+Kassir:                   Kassir
+--------------------------------
+1. Mahsulot
+   1 dona x 1 000          1 000
+   QQS (12%):             107.14
+--------------------------------
+JAMI TO'LOV:          1 000 so'm
+Shu jumladan QQS:    107.14 so'm
+--------------------------------
+Naqd (berildi):       1 000 so'm
+--------------------------------
+SINTETIK-FB:     SINOV-FB-000001
+SINTETIK-FD:     SINOV-FD-000001
+              [QR]
+================================
+    Xaridingiz uchun rahmat!",
+  "sha256": "56831d48de720773808eacaa00de86656b07174f20ba8601abe87afad33a07c4",
+}
+`;
+
+exports[`T3.4 fiscal receipt byte snapshots (58 / 80 mm) > confirmed @ 80mm 1`] = `
+{
+  "preview": "              *** FISKAL CHEK ***
+                  GUZAR KASSA
+================================================
+Chek:                                R-0007 (#7)
+Smena:                                    S-0001
+Sana:                           2026-11-17 10:00
+Kassir:                                   Kassir
+------------------------------------------------
+1. Mahsulot
+   1 dona x 1 000                          1 000
+   QQS (12%):                             107.14
+------------------------------------------------
+JAMI TO'LOV:                          1 000 so'm
+Shu jumladan QQS:                    107.14 so'm
+------------------------------------------------
+Naqd (berildi):                       1 000 so'm
+------------------------------------------------
+SINTETIK-FB:                     SINOV-FB-000001
+SINTETIK-FD:                     SINOV-FD-000001
+                      [QR]
+================================================
+            Xaridingiz uchun rahmat!",
+  "sha256": "871d658c8fe3590f96aa024558e8387622ffd46b2ab680fde88c58bd957ce69e",
+}
+`;
+
+exports[`T3.4 fiscal receipt byte snapshots (58 / 80 mm) > confirmed-test-driver @ 58mm 1`] = `
+{
+  "preview": "  *** SINOV - FISKAL EMAS ***
+      *** FISKAL CHEK ***
+          GUZAR KASSA
+================================
+Chek:                R-0007 (#7)
+Smena:                    S-0001
+Sana:           2026-11-17 10:00
+Kassir:                   Kassir
+--------------------------------
+1. Mahsulot
+   1 dona x 1 000          1 000
+   QQS (12%):             107.14
+--------------------------------
+JAMI TO'LOV:          1 000 so'm
+Shu jumladan QQS:    107.14 so'm
+--------------------------------
+Naqd (berildi):       1 000 so'm
+--------------------------------
+SINTETIK-FB:     SINOV-FB-000001
+SINTETIK-FD:     SINOV-FD-000001
+              [QR]
+================================
+    Xaridingiz uchun rahmat!
+  *** SINOV - FISKAL EMAS ***",
+  "sha256": "ad3621a96a4270f53dc5c310339025e50d0ff8176297ed9c0e8a0dc9db1b12c3",
+}
+`;
+
+exports[`T3.4 fiscal receipt byte snapshots (58 / 80 mm) > confirmed-test-driver @ 80mm 1`] = `
+{
+  "preview": "          *** SINOV - FISKAL EMAS ***
+              *** FISKAL CHEK ***
+                  GUZAR KASSA
+================================================
+Chek:                                R-0007 (#7)
+Smena:                                    S-0001
+Sana:                           2026-11-17 10:00
+Kassir:                                   Kassir
+------------------------------------------------
+1. Mahsulot
+   1 dona x 1 000                          1 000
+   QQS (12%):                             107.14
+------------------------------------------------
+JAMI TO'LOV:                          1 000 so'm
+Shu jumladan QQS:                    107.14 so'm
+------------------------------------------------
+Naqd (berildi):                       1 000 so'm
+------------------------------------------------
+SINTETIK-FB:                     SINOV-FB-000001
+SINTETIK-FD:                     SINOV-FD-000001
+                      [QR]
+================================================
+            Xaridingiz uchun rahmat!
+          *** SINOV - FISKAL EMAS ***",
+  "sha256": "1286516438cc4a8cdac0cf78bec807e276f9a235c1ac5c86d22ed4d80674463f",
+}
+`;
+
+exports[`T3.4 fiscal receipt byte snapshots (58 / 80 mm) > failed @ 58mm 1`] = `
+{
+  "preview": "   *** FISKAL KUTILMOQDA ***
+          GUZAR KASSA
+================================
+Chek:                R-0007 (#7)
+Smena:                    S-0001
+Sana:           2026-11-17 10:00
+Kassir:                   Kassir
+--------------------------------
+1. Mahsulot
+   1 dona x 1 000          1 000
+   QQS (12%):             107.14
+--------------------------------
+JAMI TO'LOV:          1 000 so'm
+Shu jumladan QQS:    107.14 so'm
+--------------------------------
+Naqd (berildi):       1 000 so'm
+================================
+    Xaridingiz uchun rahmat!",
+  "sha256": "9ffdaa74e889ed068d26731d037d3db93f6a706634d9424b2dd18c6984a80956",
+}
+`;
+
+exports[`T3.4 fiscal receipt byte snapshots (58 / 80 mm) > failed @ 80mm 1`] = `
+{
+  "preview": "           *** FISKAL KUTILMOQDA ***
+                  GUZAR KASSA
+================================================
+Chek:                                R-0007 (#7)
+Smena:                                    S-0001
+Sana:                           2026-11-17 10:00
+Kassir:                                   Kassir
+------------------------------------------------
+1. Mahsulot
+   1 dona x 1 000                          1 000
+   QQS (12%):                             107.14
+------------------------------------------------
+JAMI TO'LOV:                          1 000 so'm
+Shu jumladan QQS:                    107.14 so'm
+------------------------------------------------
+Naqd (berildi):                       1 000 so'm
+================================================
+            Xaridingiz uchun rahmat!",
+  "sha256": "c06a695c72ea6eafc3ae1a537468db8720fb64fc04d47a7f1d15a50a933d7631",
+}
+`;
+
+exports[`T3.4 fiscal receipt byte snapshots (58 / 80 mm) > incomplete-field @ 58mm 1`] = `
+{
+  "preview": "*** FISKAL MA'LUMOT TO'LIQ EMAS 
+          GUZAR KASSA
+================================
+Chek:                R-0007 (#7)
+Smena:                    S-0001
+Sana:           2026-11-17 10:00
+Kassir:                   Kassir
+--------------------------------
+1. Mahsulot
+   1 dona x 1 000          1 000
+   QQS (12%):             107.14
+--------------------------------
+JAMI TO'LOV:          1 000 so'm
+Shu jumladan QQS:    107.14 so'm
+--------------------------------
+Naqd (berildi):       1 000 so'm
+================================
+    Xaridingiz uchun rahmat!",
+  "sha256": "151fbbe12848f2f15b2d1ffca060d4bc80732c8ab91ec8f435292ccc81f13b16",
+}
+`;
+
+exports[`T3.4 fiscal receipt byte snapshots (58 / 80 mm) > incomplete-field @ 80mm 1`] = `
+{
+  "preview": "      *** FISKAL MA'LUMOT TO'LIQ EMAS ***
+                  GUZAR KASSA
+================================================
+Chek:                                R-0007 (#7)
+Smena:                                    S-0001
+Sana:                           2026-11-17 10:00
+Kassir:                                   Kassir
+------------------------------------------------
+1. Mahsulot
+   1 dona x 1 000                          1 000
+   QQS (12%):                             107.14
+------------------------------------------------
+JAMI TO'LOV:                          1 000 so'm
+Shu jumladan QQS:                    107.14 so'm
+------------------------------------------------
+Naqd (berildi):                       1 000 so'm
+================================================
+            Xaridingiz uchun rahmat!",
+  "sha256": "0411adcf7653ccd7e594693248c5395e099073b7ba786bc3a6b6b9447192a384",
+}
+`;
+
+exports[`T3.4 fiscal receipt byte snapshots (58 / 80 mm) > incomplete-qr @ 58mm 1`] = `
+{
+  "preview": "*** FISKAL MA'LUMOT TO'LIQ EMAS 
+          GUZAR KASSA
+================================
+Chek:                R-0007 (#7)
+Smena:                    S-0001
+Sana:           2026-11-17 10:00
+Kassir:                   Kassir
+--------------------------------
+1. Mahsulot
+   1 dona x 1 000          1 000
+   QQS (12%):             107.14
+--------------------------------
+JAMI TO'LOV:          1 000 so'm
+Shu jumladan QQS:    107.14 so'm
+--------------------------------
+Naqd (berildi):       1 000 so'm
+================================
+    Xaridingiz uchun rahmat!",
+  "sha256": "151fbbe12848f2f15b2d1ffca060d4bc80732c8ab91ec8f435292ccc81f13b16",
+}
+`;
+
+exports[`T3.4 fiscal receipt byte snapshots (58 / 80 mm) > incomplete-qr @ 80mm 1`] = `
+{
+  "preview": "      *** FISKAL MA'LUMOT TO'LIQ EMAS ***
+                  GUZAR KASSA
+================================================
+Chek:                                R-0007 (#7)
+Smena:                                    S-0001
+Sana:                           2026-11-17 10:00
+Kassir:                                   Kassir
+------------------------------------------------
+1. Mahsulot
+   1 dona x 1 000                          1 000
+   QQS (12%):                             107.14
+------------------------------------------------
+JAMI TO'LOV:                          1 000 so'm
+Shu jumladan QQS:                    107.14 so'm
+------------------------------------------------
+Naqd (berildi):                       1 000 so'm
+================================================
+            Xaridingiz uchun rahmat!",
+  "sha256": "0411adcf7653ccd7e594693248c5395e099073b7ba786bc3a6b6b9447192a384",
+}
+`;
+
+exports[`T3.4 fiscal receipt byte snapshots (58 / 80 mm) > pending @ 58mm 1`] = `
+{
+  "preview": "   *** FISKAL KUTILMOQDA ***
+          GUZAR KASSA
+================================
+Chek:                R-0007 (#7)
+Smena:                    S-0001
+Sana:           2026-11-17 10:00
+Kassir:                   Kassir
+--------------------------------
+1. Mahsulot
+   1 dona x 1 000          1 000
+   QQS (12%):             107.14
+--------------------------------
+JAMI TO'LOV:          1 000 so'm
+Shu jumladan QQS:    107.14 so'm
+--------------------------------
+Naqd (berildi):       1 000 so'm
+================================
+    Xaridingiz uchun rahmat!",
+  "sha256": "9ffdaa74e889ed068d26731d037d3db93f6a706634d9424b2dd18c6984a80956",
+}
+`;
+
+exports[`T3.4 fiscal receipt byte snapshots (58 / 80 mm) > pending @ 80mm 1`] = `
+{
+  "preview": "           *** FISKAL KUTILMOQDA ***
+                  GUZAR KASSA
+================================================
+Chek:                                R-0007 (#7)
+Smena:                                    S-0001
+Sana:                           2026-11-17 10:00
+Kassir:                                   Kassir
+------------------------------------------------
+1. Mahsulot
+   1 dona x 1 000                          1 000
+   QQS (12%):                             107.14
+------------------------------------------------
+JAMI TO'LOV:                          1 000 so'm
+Shu jumladan QQS:                    107.14 so'm
+------------------------------------------------
+Naqd (berildi):                       1 000 so'm
+================================================
+            Xaridingiz uchun rahmat!",
+  "sha256": "c06a695c72ea6eafc3ae1a537468db8720fb64fc04d47a7f1d15a50a933d7631",
+}
+`;
+
+exports[`T3.4 fiscal receipt byte snapshots (58 / 80 mm) > rejected @ 58mm 1`] = `
+{
+  "preview": "      *** FISKAL EMAS ***
+          GUZAR KASSA
+================================
+Chek:                R-0007 (#7)
+Smena:                    S-0001
+Sana:           2026-11-17 10:00
+Kassir:                   Kassir
+--------------------------------
+1. Mahsulot
+   1 dona x 1 000          1 000
+   QQS (12%):             107.14
+--------------------------------
+JAMI TO'LOV:          1 000 so'm
+Shu jumladan QQS:    107.14 so'm
+--------------------------------
+Naqd (berildi):       1 000 so'm
+================================
+    Xaridingiz uchun rahmat!",
+  "sha256": "cb5fb017c951b1eea2023423d998dc0af16ca6b210080410407e3bc918354d00",
+}
+`;
+
+exports[`T3.4 fiscal receipt byte snapshots (58 / 80 mm) > rejected @ 80mm 1`] = `
+{
+  "preview": "              *** FISKAL EMAS ***
+                  GUZAR KASSA
+================================================
+Chek:                                R-0007 (#7)
+Smena:                                    S-0001
+Sana:                           2026-11-17 10:00
+Kassir:                                   Kassir
+------------------------------------------------
+1. Mahsulot
+   1 dona x 1 000                          1 000
+   QQS (12%):                             107.14
+------------------------------------------------
+JAMI TO'LOV:                          1 000 so'm
+Shu jumladan QQS:                    107.14 so'm
+------------------------------------------------
+Naqd (berildi):                       1 000 so'm
+================================================
+            Xaridingiz uchun rahmat!",
+  "sha256": "bc51088ac753c98eaa9e4a5c612dc6664e550a5ad03c066472fce5902a4d746e",
+}
+`;
