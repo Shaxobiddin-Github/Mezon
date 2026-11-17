@@ -129,10 +129,11 @@ export function evaluate(
     }
   }
 
-  // MXIK_MISSING — informational (T3.1); fiscal behaviour belongs to T3.3.
+  // MXIK_MISSING — T3.3: a fiscal receipt cannot carry a line without MXIK, so fiscal mode BLOCKS;
+  // outside fiscal mode it stays informational (T3.1).
   const missing = cart.lines.filter((l) => l.mxik === null).map((l) => l.lineId);
   if (missing.length > 0) {
-    warn.push(finding('MXIK_MISSING', missing));
+    (context.fiscalMode ? block : warn).push(finding('MXIK_MISSING', missing));
   }
 
   return {

@@ -1,4 +1,10 @@
 import {
+  type FiscalDocDto,
+  FiscalDocResponseSchema,
+  type FiscalStatusResponse,
+  FiscalStatusResponseSchema,
+  FiscalUnsettledListResponseSchema,
+  SaleFiscalResponseSchema,
   type RulesCheckRequestDto,
   RulesCheckResponseSchema,
   type RulesCheckResponseDto,
@@ -416,6 +422,41 @@ export class HubApiClient {
       path: `/carts/${encodeURIComponent(cartId)}/rules-check`,
       body: input,
       responseSchema: RulesCheckResponseSchema,
+    });
+  }
+
+  async getFiscalStatus(): Promise<FiscalStatusResponse> {
+    return this.request({
+      method: 'GET',
+      path: '/fiscal/status',
+      responseSchema: FiscalStatusResponseSchema,
+    });
+  }
+
+  async listUnsettledFiscalDocs(): Promise<readonly FiscalDocDto[]> {
+    const res = await this.request({
+      method: 'GET',
+      path: '/fiscal/docs',
+      responseSchema: FiscalUnsettledListResponseSchema,
+    });
+    return res.docs;
+  }
+
+  /** Re-queues a failed document; the hub worker (never the POS) calls the driver. */
+  async retryFiscalDoc(docId: string): Promise<FiscalDocDto> {
+    const res = await this.request({
+      method: 'POST',
+      path: `/fiscal/docs/${encodeURIComponent(docId)}/retry`,
+      responseSchema: FiscalDocResponseSchema,
+    });
+    return res.doc;
+  }
+
+  async getSaleFiscal(saleId: string) {
+    return this.request({
+      method: 'GET',
+      path: `/sales/${encodeURIComponent(saleId)}/fiscal`,
+      responseSchema: SaleFiscalResponseSchema,
     });
   }
 

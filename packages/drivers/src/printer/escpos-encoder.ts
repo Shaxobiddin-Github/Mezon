@@ -9,6 +9,7 @@ import {
   repeatDivider,
   wrapTextLines,
 } from './layout.js';
+import type { ReceiptFiscalBlock } from '@mezon/domain';
 import type {
   EncodedReceiptOutput,
   PrintableDocument,
@@ -63,6 +64,96 @@ function translatePaymentMethodLabel(method: string): string {
 interface StyledLine {
   readonly text: string;
   readonly bold?: boolean;
+  /** When set, the line is a QR code (printer-native `GS ( k`), `text` is only the preview. */
+  readonly qr?: string;
+}
+
+/** Max QR model 2 data length accepted by `GS ( k` store (bytes). */
+export const ESC_POS_QR_MAX_BYTES = 7089;
+
+/**
+ * ESC/POS QR (model 2, error correction M) using the printer's own `GS ( k` functions — a printer
+ * standard, not a fiscal API. The payload bytes are the opaque driver QR text as UTF-8, verbatim.
+ */
+export function encodeEscPosQr(payload: string, moduleSize: number): Uint8Array {
+  const data = new TextEncoder().encode(payload);
+  if (data.length < 1 || data.length > ESC_POS_QR_MAX_BYTES) {
+    throw new RangeError(
+      `QR payload must be 1..${String(ESC_POS_QR_MAX_BYTES)} bytes, got ${String(data.length)}`,
+    );
+  }
+  if (!Number.isInteger(moduleSize) || moduleSize < 1 || moduleSize > 16) {
+    throw new RangeError('QR module size must be 1..16');
+  }
+  const storeLen = data.length + 3;
+  // prettier-ignore
+  const head = [
+    0x1b, 0x61, 0x01, // ESC a 1 (center)
+    0x1d, 0x28, 0x6b, 0x04, 0x00, 0x31, 0x41, 0x32, 0x00, // model 2
+    0x1d, 0x28, 0x6b, 0x03, 0x00, 0x31, 0x43, moduleSize, // module size
+    0x1d, 0x28, 0x6b, 0x03, 0x00, 0x31, 0x45, 0x31, // error correction M
+    0x1d, 0x28, 0x6b, storeLen & 0xff, (storeLen >> 8) & 0xff, 0x31, 0x50, 0x30, // store
+  ];
+  // prettier-ignore
+  const tail = [
+    0x1d, 0x28, 0x6b, 0x03, 0x00, 0x31, 0x51, 0x30, // print
+    0x0a,
+    0x1b, 0x61, 0x00, // ESC a 0 (left)
+  ];
+  const out = new Uint8Array(head.length + data.length + tail.length);
+  out.set(head, 0);
+  out.set(data, head.length);
+  out.set(tail, head.length + data.length);
+  return out;
+}
+
+const FISCAL_MARK_TEXT: Readonly<Record<ReceiptFiscalBlock['mark'], string>> = {
+  FISCAL: '*** FISKAL CHEK ***',
+  FISCAL_INCOMPLETE: "*** FISKAL MA'LUMOT TO'LIQ EMAS ***",
+  FISCAL_PENDING: '*** FISKAL KUTILMOQDA ***',
+  NOT_FISCAL: '*** FISKAL EMAS ***',
+};
+
+/** Top banner lines: legacy test banner (no fiscal block) or test banner + fiscal mark. */
+function fiscalHeaderLines(
+  fiscal: ReceiptFiscalBlock | undefined,
+  width: 32 | 48,
+  norm: (s: string) => string,
+): StyledLine[] {
+  const test = { text: centerLine(norm('*** SINOV — FISKAL EMAS ***'), width), bold: true };
+  if (fiscal === undefined) return [test];
+  const out: StyledLine[] = fiscal.testBanner ? [test] : [];
+  out.push({ text: centerLine(norm(FISCAL_MARK_TEXT[fiscal.mark]), width), bold: true });
+  return out;
+}
+
+/** Fiscal rows + QR (only for a complete FISCAL block). */
+function fiscalBodyLines(
+  fiscal: ReceiptFiscalBlock | undefined,
+  width: 32 | 48,
+  norm: (s: string) => string,
+): StyledLine[] {
+  if (fiscal?.mark !== 'FISCAL') return [];
+  const out: StyledLine[] = [{ text: repeatDivider('-', width) }];
+  for (const r of fiscal.rows) {
+    for (const row of formatKeyValueRows(norm(`${r.label}:`), norm(r.value), width)) {
+      out.push({ text: row });
+    }
+  }
+  if (fiscal.qrPayload !== null) {
+    out.push({ text: centerLine('[QR]', width), qr: fiscal.qrPayload });
+  }
+  return out;
+}
+
+/** Bottom banner: kept for the test driver / legacy receipts only. */
+function fiscalFooterLines(
+  fiscal: ReceiptFiscalBlock | undefined,
+  width: 32 | 48,
+  norm: (s: string) => string,
+): StyledLine[] {
+  if (fiscal !== undefined && !fiscal.testBanner) return [];
+  return [{ text: centerLine(norm('*** SINOV — FISKAL EMAS ***'), width), bold: true }];
 }
 
 function buildSaleReceiptLines(
@@ -73,7 +164,7 @@ function buildSaleReceiptLines(
   const norm = (s: string) => normalizeTextForEncoding(s, encoding);
   const out: StyledLine[] = [];
 
-  out.push({ text: centerLine(norm('*** SINOV — FISKAL EMAS ***'), width), bold: true });
+  out.push(...fiscalHeaderLines(doc.fiscal, width, norm));
   if (doc.isReprint || doc.copyNumber > 1) {
     out.push({
       text: centerLine(norm(`*** NUSXA #${String(doc.copyNumber)} (QAYTA CHOP ETILDI) ***`), width),
@@ -238,6 +329,7 @@ function buildSaleReceiptLines(
     }
   }
 
+  out.push(...fiscalBodyLines(doc.fiscal, width, norm));
   out.push({ text: repeatDivider('=', width) });
   for (const footerLine of wrapTextLines(
     norm(doc.footerText || 'Xaridingiz uchun rahmat!'),
@@ -245,7 +337,7 @@ function buildSaleReceiptLines(
   )) {
     out.push({ text: centerLine(footerLine, width) });
   }
-  out.push({ text: centerLine(norm('*** SINOV — FISKAL EMAS ***'), width), bold: true });
+  out.push(...fiscalFooterLines(doc.fiscal, width, norm));
 
   return out;
 }
@@ -258,7 +350,7 @@ function buildReturnReceiptLines(
   const norm = (s: string) => normalizeTextForEncoding(s, encoding);
   const out: StyledLine[] = [];
 
-  out.push({ text: centerLine(norm('*** SINOV — FISKAL EMAS ***'), width), bold: true });
+  out.push(...fiscalHeaderLines(doc.fiscal, width, norm));
   out.push({ text: centerLine(norm('=== TOVAR QAYTARISH CHEKI ==='), width), bold: true });
   if (doc.isReprint || doc.copyNumber > 1) {
     out.push({
@@ -341,7 +433,8 @@ function buildReturnReceiptLines(
   }
 
   out.push({ text: repeatDivider('=', width) });
-  out.push({ text: centerLine(norm('*** SINOV — FISKAL EMAS ***'), width), bold: true });
+  out.push(...fiscalBodyLines(doc.fiscal, width, norm));
+  out.push(...fiscalFooterLines(doc.fiscal, width, norm));
 
   return out;
 }
@@ -602,6 +695,10 @@ export function encodeEscPosDocument(params: {
     if (wantBold !== isBoldActive) {
       chunks.push(wantBold ? ESC_BOLD_ON : ESC_BOLD_OFF);
       isBoldActive = wantBold;
+    }
+    if (line.qr !== undefined) {
+      chunks.push(encodeEscPosQr(line.qr, params.paperWidthMm === 58 ? 4 : 6));
+      continue;
     }
     chunks.push(encodeLineBytes(line.text, encoding));
     chunks.push(new Uint8Array([0x0a])); // LF

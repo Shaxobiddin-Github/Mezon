@@ -206,6 +206,7 @@ export {
 export { buildShiftTriggersSql, assertShiftMigrationsComplete } from './shift-migrations.js';
 
 export { buildOrderTriggersSql, assertOrderMigrationsComplete } from './order-migrations.js';
+export { buildFiscalDocsTriggersSql, assertFiscalMigrationsComplete } from './fiscal-migrations.js';
 
 export {
   type HubConfigSnapshot,
@@ -542,3 +543,24 @@ export {
   type SaleRulesCheckResult,
   type SaleRulesEvaluator,
 } from './sale-rules-port.js';
+export {
+  SqliteFiscalStore,
+  FISCAL_PARKED_SHIFT_NOT_OPENED,
+  assertFiscalSaleAllowedInTxSync,
+  cancelSaleFiscalDocForVoidInTxSync,
+  getFiscalDocByIdSync,
+  getSaleFiscalDocSync,
+  insertFiscalDocInTxSync,
+  insertRefundFiscalDocIfNeededInTxSync,
+  insertSaleFiscalDocIfEnabledInTxSync,
+  insertShiftFiscalDocIfEnabledInTxSync,
+  readFiscalHubConfigSync,
+  readOldestUnsettledDeadlineSync,
+  type FiscalDocListItem,
+  type FiscalGateAction,
+  type FiscalHubConfig,
+  type FiscalRuntimeContext,
+  type FiscalStatusSummary,
+  type InsertFiscalDocInput,
+  type StoredFiscalDocRecord,
+} from './fiscal-repo.js';

@@ -1,3 +1,4 @@
+import type { ReceiptFiscalBlock } from '@mezon/domain';
 import { DomainError } from '@mezon/domain';
 
 export const PRINTER_MODES = ['disabled', 'windows_raw', 'network_tcp'] as const;
@@ -120,6 +121,11 @@ export interface SaleReceiptDocument {
   readonly changeAmountTiyin: bigint;
   readonly payments: readonly SaleReceiptPaymentInput[];
   readonly openCashDrawer: boolean;
+  /**
+   * T3.4 fiscal block. Absent → the legacy non-fiscal receipt (unchanged bytes). Present → mark
+   * line, fiscal rows and QR follow `resolveReceiptFiscalBlock` (domain).
+   */
+  readonly fiscal?: ReceiptFiscalBlock;
 }
 
 export interface ReturnReceiptLineInput {
@@ -156,6 +162,8 @@ export interface ReturnReceiptDocument {
   readonly totalVatTiyin: bigint;
   readonly payments: readonly ReturnReceiptPaymentInput[];
   readonly openCashDrawer: boolean;
+  /** T3.4 fiscal block of the refund document (same rules as the sale receipt). */
+  readonly fiscal?: ReceiptFiscalBlock;
 }
 
 export interface ShiftCloseNonCashMethodInput {
