@@ -348,6 +348,8 @@ export class AdminReadStore {
         }
       }
 
+      // LIMIT applies to the sales themselves (index order); payments are aggregated only for the
+      // returned page, not for every sale of the organization.
       const sql = `
         SELECT
           s.id,
@@ -355,17 +357,19 @@ export class AdminReadStore {
           s.store_id,
           st.name AS store_name,
           u.full_name AS cashier_name,
-          s.subtotal_after_promo,
+          s.total_final,
           CASE WHEN s.voided_at_ms IS NOT NULL THEN 'voided' ELSE 'completed' END AS status,
           s.created_at_ms,
           s.voided_at_ms,
-          ARRAY_REMOVE(ARRAY_AGG(DISTINCT p.method), NULL) AS payment_methods
+          ARRAY(
+            SELECT DISTINCT p.method FROM payments p
+             WHERE p.sale_id = s.id AND p.organization_id = s.organization_id
+             ORDER BY 1
+          ) AS payment_methods
         FROM sales s
         INNER JOIN cloud_stores st ON st.id = s.store_id AND st.organization_id = s.organization_id
         LEFT JOIN users u ON u.id = s.cashier_user_id AND u.organization_id = s.organization_id
-        LEFT JOIN payments p ON p.sale_id = s.id AND p.organization_id = s.organization_id
         WHERE ${conditions.join(' AND ')}
-        GROUP BY s.id, s.receipt_code, s.store_id, st.name, u.full_name, s.subtotal_after_promo, s.created_at_ms, s.voided_at_ms
         ORDER BY s.created_at_ms DESC, s.id DESC
         LIMIT $${argIdx}
       `;
@@ -377,7 +381,7 @@ export class AdminReadStore {
         store_id: string;
         store_name: string;
         cashier_name: string | null;
-        subtotal_after_promo: string;
+        total_final: string;
         status: string;
         created_at_ms: string;
         voided_at_ms: string | null;
@@ -402,7 +406,7 @@ export class AdminReadStore {
         storeId: parseUuidV7(r.store_id),
         storeName: r.store_name,
         cashierName: r.cashier_name,
-        total: moneyFromTiyin(BigInt(r.subtotal_after_promo)),
+        total: moneyFromTiyin(BigInt(r.total_final)),
         status: r.status === 'voided' ? 'voided' : 'completed',
         paymentMethods: r.payment_methods ?? [],
         createdAtMs: unixMsFromBigInt(BigInt(r.created_at_ms)),
@@ -432,7 +436,7 @@ export class AdminReadStore {
           CASE WHEN s.voided_at_ms IS NOT NULL THEN 'voided' ELSE 'completed' END AS status,
           s.subtotal_gross,
           s.total_promo_discount,
-          s.subtotal_after_promo,
+          s.total_final,
           s.total_vat,
           s.created_at_ms,
           s.voided_at_ms,
@@ -453,7 +457,7 @@ export class AdminReadStore {
         status: string;
         subtotal_gross: string;
         total_promo_discount: string;
-        subtotal_after_promo: string;
+        total_final: string;
         total_vat: string;
         created_at_ms: string;
         voided_at_ms: string | null;
@@ -544,8 +548,9 @@ export class AdminReadStore {
         customerName: s.customer_name,
         status: s.status === 'voided' ? 'voided' : 'completed',
         grossTotal: moneyFromTiyin(BigInt(s.subtotal_gross)),
-        discountTotal: moneyFromTiyin(BigInt(s.total_promo_discount)),
-        netTotal: moneyFromTiyin(BigInt(s.subtotal_after_promo)),
+        // All discounts (promo + manual/order), so gross - discount = what the customer paid.
+        discountTotal: moneyFromTiyin(BigInt(s.subtotal_gross) - BigInt(s.total_final)),
+        netTotal: moneyFromTiyin(BigInt(s.total_final)),
         vatTotal: moneyFromTiyin(BigInt(s.total_vat)),
         createdAtMs: unixMsFromBigInt(BigInt(s.created_at_ms)),
         voidedAtMs: s.voided_at_ms !== null ? unixMsFromBigInt(BigInt(s.voided_at_ms)) : null,

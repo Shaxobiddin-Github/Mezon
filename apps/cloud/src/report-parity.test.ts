@@ -560,4 +560,34 @@ describePg('A1: Hub vs Cloud DailySalesReport Parity (T2.7a)', () => {
       day.grossProfit && moneyToTiyin(day.grossProfit),
     );
   });
+
+  it('R2: receipt amounts are what the customer paid (after every discount)', async () => {
+    const hub = await hubReportStore.getDailySalesReport({
+      fromDate: '2024-11-01',
+      toDate: '2024-11-30',
+      includeCostAndProfit: false,
+    });
+    const list = await adminReadStore.getReceiptsList(orgId, { storeId, limit: 200 });
+    const completed = list.items.filter((r) => r.status === 'completed');
+    expect(completed.length).toBe(hub.totalSalesCount);
+    const sum = completed.reduce((acc, r) => acc + moneyToTiyin(r.total), 0n);
+    expect(sum).toBe(moneyToTiyin(hub.totalGrossSales));
+
+    // Every receipt detail is internally consistent: gross - discount = net = sum of lines.
+    for (const r of list.items) {
+      const d = await adminReadStore.getReceiptDetail(orgId, r.id);
+      expect(d).not.toBeNull();
+      const lines = d!.lines.reduce((acc, l) => acc + moneyToTiyin(l.total), 0n);
+      expect(moneyToTiyin(d!.netTotal)).toBe(lines);
+      expect(moneyToTiyin(d!.grossTotal) - moneyToTiyin(d!.discountTotal)).toBe(
+        moneyToTiyin(d!.netTotal),
+      );
+      expect(moneyToTiyin(d!.netTotal)).toBe(moneyToTiyin(r.total));
+    }
+    // The cart-discounted sale really has a discount.
+    const discounted = await Promise.all(
+      list.items.map((r) => adminReadStore.getReceiptDetail(orgId, r.id)),
+    );
+    expect(discounted.some((d) => d !== null && moneyToTiyin(d.discountTotal) > 0n)).toBe(true);
+  });
 });
