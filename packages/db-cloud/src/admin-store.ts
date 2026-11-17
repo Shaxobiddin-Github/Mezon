@@ -4,6 +4,7 @@ import {
   type UnixMs,
   type UuidV7,
   moneyFromTiyin,
+  moneyToTiyin,
   parseUuidV7,
   quantityFromMilli,
   unixMsFromBigInt,
@@ -274,86 +275,35 @@ export class AdminReadStore {
 
     const storesFreshness = await this.getStoreFreshness(params.organizationId, nowMs);
 
-    return withPgTenantContext(this.pool, params.organizationId, async (_tx, client) => {
-      const salesSql = `
-        SELECT
-          s.id,
-          s.created_at_ms,
-          s.subtotal_after_promo,
-          s.subtotal_gross,
-          s.total_vat,
-          COALESCE(SUM(l.cost_value), 0) AS total_cost
-        FROM sales s
-        LEFT JOIN sale_lines l ON l.sale_id = s.id AND l.organization_id = s.organization_id
-        WHERE s.organization_id = $1
-          AND s.voided_at_ms IS NULL
-          AND ($2::uuid IS NULL OR s.store_id = $2::uuid)
-        GROUP BY s.id, s.created_at_ms, s.subtotal_after_promo, s.subtotal_gross, s.total_vat
-      `;
-      const salesRes = await client.query<{
-        id: string;
-        created_at_ms: string;
-        subtotal_after_promo: string;
-        subtotal_gross: string;
-        total_vat: string;
-        total_cost: string;
-      }>(salesSql, [params.organizationId, params.storeId ?? null]);
-
-      let grossTiyin = 0n;
-      let costTiyin = 0n;
-      let count = 0;
-
-      for (const row of salesRes.rows) {
-        const ms = unixMsFromBigInt(BigInt(row.created_at_ms));
-        const d = resolveIntlDateKey(ms, tz);
-        if (d === todayDate) {
-          grossTiyin += BigInt(row.subtotal_after_promo);
-          costTiyin += BigInt(row.total_cost);
-          count++;
-        }
-      }
-
-      const retSql = `
-        SELECT
-          r.id,
-          r.created_at_ms,
-          r.total_refund
-        FROM returns r
-        WHERE r.organization_id = $1
-          AND ($2::uuid IS NULL OR r.store_id = $2::uuid)
-      `;
-      const retRes = await client.query<{
-        id: string;
-        created_at_ms: string;
-        total_refund: string;
-      }>(retSql, [params.organizationId, params.storeId ?? null]);
-
-      let returnsTiyin = 0n;
-      for (const row of retRes.rows) {
-        const ms = unixMsFromBigInt(BigInt(row.created_at_ms));
-        const d = resolveIntlDateKey(ms, tz);
-        if (d === todayDate) {
-          returnsTiyin += BigInt(row.total_refund);
-        }
-      }
-
-      const netTiyin = grossTiyin - returnsTiyin;
-      const avgTiyin = count > 0 ? netTiyin / BigInt(count) : 0n;
-      const profitTiyin = netTiyin - costTiyin;
-      const marginBp = netTiyin > 0n ? Number((profitTiyin * 10000n) / netTiyin) : 0;
-
-      return {
-        todayDate,
-        grossSales: moneyFromTiyin(grossTiyin),
-        returnsTotal: moneyFromTiyin(returnsTiyin),
-        netSales: moneyFromTiyin(netTiyin),
-        receiptsCount: count,
-        avgReceipt: moneyFromTiyin(avgTiyin),
-        grossProfit: params.includeProfit ? moneyFromTiyin(profitTiyin) : undefined,
-        marginBp: params.includeProfit ? marginBp : undefined,
-        stores: storesFreshness,
-      };
+    // Same figures as the daily report (and therefore as the hub) for the store's today.
+    const report = await this.getDailySalesReport({
+      organizationId: params.organizationId,
+      storeId: params.storeId,
+      fromDate: todayDate,
+      toDate: todayDate,
+      tz,
+      includeCostAndProfit: true,
     });
+    const day = report.days[0];
+    const grossTiyin = day ? moneyToTiyin(day.grossSales) : 0n;
+    const returnsTiyin = day ? moneyToTiyin(day.returnsTotal) : 0n;
+    const netTiyin = day ? moneyToTiyin(day.netSales) : 0n;
+    const profitTiyin = day?.grossProfit ? moneyToTiyin(day.grossProfit) : 0n;
+    const count = day ? day.salesCount : 0;
+    const avgTiyin = count > 0 ? netTiyin / BigInt(count) : 0n;
+    const marginBp = netTiyin > 0n ? Number((profitTiyin * 10000n) / netTiyin) : 0;
+
+    return {
+      todayDate,
+      grossSales: moneyFromTiyin(grossTiyin),
+      returnsTotal: moneyFromTiyin(returnsTiyin),
+      netSales: moneyFromTiyin(netTiyin),
+      receiptsCount: count,
+      avgReceipt: moneyFromTiyin(avgTiyin),
+      grossProfit: params.includeProfit ? moneyFromTiyin(profitTiyin) : undefined,
+      marginBp: params.includeProfit ? marginBp : undefined,
+      stores: storesFreshness,
+    };
   }
 
   /**
@@ -989,7 +939,13 @@ export class AdminReadStore {
   }
 
   /**
-   * 10. Daily Sales Report (Exact parity with Hub report-repo.ts) (A1)
+   * 10. Daily Sales Report — the same formula as the hub (`report-repo.ts` over `v_sales_lines`):
+   * signed sale lines (non-voided sales) and return lines, revenue = line `final_total` (after every
+   * discount), returns negative, profit = signed `net_ex_vat` minus signed `cost_value` (a return
+   * gives its cost back). Cash/non-cash from sale payments minus return payments.
+   *
+   * Rows are fetched only around the requested range (2 days of margin in UTC, then filtered exactly
+   * by the store day), not the organization's whole history.
    */
   async getDailySalesReport(params: {
     organizationId: UuidV7;
@@ -1002,10 +958,23 @@ export class AdminReadStore {
   }): Promise<CloudDailySalesReport> {
     const tz = params.tz ?? this.defaultTz;
     const limit = Math.min(params.limit ?? 31, 366);
+    const DAY = 86_400_000;
+    const lo = params.fromDate ? Date.parse(`${params.fromDate}T00:00:00Z`) - 2 * DAY : null;
+    const hi = params.toDate ? Date.parse(`${params.toDate}T00:00:00Z`) + 3 * DAY : null;
+    const inRange = (dateKey: string) =>
+      !(params.fromDate && dateKey < params.fromDate) &&
+      !(params.toDate && dateKey > params.toDate);
+    const args = [
+      params.organizationId,
+      params.storeId ?? null,
+      lo === null ? null : String(lo),
+      hi === null ? null : String(hi),
+    ];
+    const timeFilter = (col: string) =>
+      `($3::bigint IS NULL OR ${col} >= $3::bigint) AND ($4::bigint IS NULL OR ${col} < $4::bigint)`;
 
     return withPgTenantContext(this.pool, params.organizationId, async (_tx, client) => {
       interface DayBucket {
-        readonly date: string;
         readonly saleIds: Set<string>;
         readonly returnIds: Set<string>;
         grossSalesTiyin: bigint;
@@ -1013,211 +982,137 @@ export class AdminReadStore {
         netSalesTiyin: bigint;
         vatTiyin: bigint;
         qtyMilli: bigint;
-        cashSalesTiyin: bigint;
-        nonCashSalesTiyin: bigint;
         costTiyin: bigint;
         grossProfitTiyin: bigint;
+        cashSalesTiyin: bigint;
+        nonCashSalesTiyin: bigint;
       }
-
-      const dayBuckets = new Map<string, DayBucket>();
-      const getOrCreateBucket = (dateKey: string): DayBucket => {
-        let b = dayBuckets.get(dateKey);
+      const buckets = new Map<string, DayBucket>();
+      const bucket = (d: string): DayBucket => {
+        let b = buckets.get(d);
         if (!b) {
           b = {
-            date: dateKey,
-            saleIds: new Set<string>(),
-            returnIds: new Set<string>(),
+            saleIds: new Set(),
+            returnIds: new Set(),
             grossSalesTiyin: 0n,
             returnsTiyin: 0n,
             netSalesTiyin: 0n,
             vatTiyin: 0n,
             qtyMilli: 0n,
-            cashSalesTiyin: 0n,
-            nonCashSalesTiyin: 0n,
             costTiyin: 0n,
             grossProfitTiyin: 0n,
+            cashSalesTiyin: 0n,
+            nonCashSalesTiyin: 0n,
           };
-          dayBuckets.set(dateKey, b);
+          buckets.set(d, b);
         }
         return b;
       };
 
-      const salesSql = `
-        SELECT
-          s.id AS sale_id,
-          s.created_at_ms,
-          s.subtotal_after_promo,
-          s.total_vat,
-          COALESCE(SUM(l.qty), 0) AS total_qty,
-          COALESCE(SUM(l.cost_value), 0) AS total_cost
-        FROM sales s
-        LEFT JOIN sale_lines l ON l.sale_id = s.id AND l.organization_id = s.organization_id
-        WHERE s.organization_id = $1
-          AND s.voided_at_ms IS NULL
-          AND ($2::uuid IS NULL OR s.store_id = $2::uuid)
-        GROUP BY s.id, s.created_at_ms, s.subtotal_after_promo, s.total_vat
-      `;
-      const salesRes = await client.query<{
-        sale_id: string;
-        created_at_ms: string;
-        subtotal_after_promo: string;
-        total_vat: string;
-        total_qty: string;
-        total_cost: string;
-      }>(salesSql, [params.organizationId, params.storeId ?? null]);
-
-      for (const row of salesRes.rows) {
-        const ms = unixMsFromBigInt(BigInt(row.created_at_ms));
-        const dateKey = resolveIntlDateKey(ms, tz);
-        if (params.fromDate && dateKey < params.fromDate) continue;
-        if (params.toDate && dateKey > params.toDate) continue;
-
-        const b = getOrCreateBucket(dateKey);
-        b.saleIds.add(row.sale_id);
-        const gross = BigInt(row.subtotal_after_promo);
-        const vat = BigInt(row.total_vat);
-        const qty = BigInt(row.total_qty);
-        const cost = BigInt(row.total_cost);
-
-        b.grossSalesTiyin += gross;
-        b.netSalesTiyin += gross;
-        b.vatTiyin += vat;
-        b.qtyMilli += qty;
-        b.costTiyin += cost;
-        b.grossProfitTiyin += gross - cost;
+      const lines = await client.query<{
+        record_kind: 'sale' | 'return';
+        event_at_ms: string;
+        document_id: string;
+        signed_qty: string;
+        signed_final_total: string;
+        signed_net_ex_vat: string;
+        signed_vat_total: string;
+        signed_cost_value: string;
+      }>(
+        `SELECT 'sale' AS record_kind, s.created_at_ms AS event_at_ms, s.id AS document_id,
+                sl.qty AS signed_qty, sl.final_total AS signed_final_total,
+                sl.net_ex_vat AS signed_net_ex_vat, sl.vat_total AS signed_vat_total,
+                COALESCE(sl.cost_value, 0) AS signed_cost_value
+           FROM sale_lines sl
+           JOIN sales s ON s.id = sl.sale_id AND s.organization_id = sl.organization_id
+          WHERE s.organization_id = $1 AND s.voided_at_ms IS NULL
+            AND ($2::uuid IS NULL OR s.store_id = $2::uuid) AND ${timeFilter('s.created_at_ms')}
+         UNION ALL
+         SELECT 'return', r.created_at_ms, r.id,
+                -rl.qty, -rl.refund_amount, -rl.net_ex_vat, -rl.vat_total,
+                -COALESCE(rl.cost_value, 0)
+           FROM return_lines rl
+           JOIN returns r ON r.id = rl.return_id AND r.organization_id = rl.organization_id
+          WHERE r.organization_id = $1
+            AND ($2::uuid IS NULL OR r.store_id = $2::uuid) AND ${timeFilter('r.created_at_ms')}`,
+        args,
+      );
+      for (const row of lines.rows) {
+        const dateKey = resolveIntlDateKey(unixMsFromBigInt(BigInt(row.event_at_ms)), tz);
+        if (!inRange(dateKey)) continue;
+        const b = bucket(dateKey);
+        const sFinal = BigInt(row.signed_final_total);
+        if (row.record_kind === 'sale') {
+          b.saleIds.add(row.document_id);
+          b.grossSalesTiyin += sFinal;
+        } else {
+          b.returnIds.add(row.document_id);
+          b.returnsTiyin += -sFinal;
+        }
+        b.netSalesTiyin += sFinal;
+        b.vatTiyin += BigInt(row.signed_vat_total);
+        b.qtyMilli += BigInt(row.signed_qty);
+        b.costTiyin += BigInt(row.signed_cost_value);
+        b.grossProfitTiyin += BigInt(row.signed_net_ex_vat) - BigInt(row.signed_cost_value);
       }
 
-      const returnsSql = `
-        SELECT
-          r.id AS return_id,
-          r.created_at_ms,
-          r.total_refund,
-          r.total_vat
-        FROM returns r
-        WHERE r.organization_id = $1
-          AND ($2::uuid IS NULL OR r.store_id = $2::uuid)
-      `;
-      const returnsRes = await client.query<{
-        return_id: string;
-        created_at_ms: string;
-        total_refund: string;
-        total_vat: string;
-      }>(returnsSql, [params.organizationId, params.storeId ?? null]);
-
-      for (const row of returnsRes.rows) {
-        const ms = unixMsFromBigInt(BigInt(row.created_at_ms));
-        const dateKey = resolveIntlDateKey(ms, tz);
-        if (params.fromDate && dateKey < params.fromDate) continue;
-        if (params.toDate && dateKey > params.toDate) continue;
-
-        const b = getOrCreateBucket(dateKey);
-        b.returnIds.add(row.return_id);
-        const refund = BigInt(row.total_refund);
-        const vat = BigInt(row.total_vat);
-
-        b.returnsTiyin += refund;
-        b.netSalesTiyin -= refund;
-        b.vatTiyin -= vat;
-        b.grossProfitTiyin -= refund;
-      }
-
-      const paySql = `
-        SELECT
-          s.created_at_ms,
-          p.method,
-          p.amount
-        FROM payments p
-        INNER JOIN sales s ON s.id = p.sale_id AND s.organization_id = p.organization_id
-        WHERE p.organization_id = $1
-          AND s.voided_at_ms IS NULL
-          AND ($2::uuid IS NULL OR s.store_id = $2::uuid)
-      `;
-      const payRes = await client.query<{
+      const pays = await client.query<{
+        sign: string;
         created_at_ms: string;
         method: string;
         amount: string;
-      }>(paySql, [params.organizationId, params.storeId ?? null]);
-
-      for (const row of payRes.rows) {
-        const ms = unixMsFromBigInt(BigInt(row.created_at_ms));
-        const dateKey = resolveIntlDateKey(ms, tz);
-        if (params.fromDate && dateKey < params.fromDate) continue;
-        if (params.toDate && dateKey > params.toDate) continue;
-
-        const b = getOrCreateBucket(dateKey);
-        const amt = BigInt(row.amount);
-        if (row.method === 'cash') {
-          b.cashSalesTiyin += amt;
-        } else {
-          b.nonCashSalesTiyin += amt;
-        }
+      }>(
+        `SELECT '1' AS sign, s.created_at_ms, p.method, p.amount
+           FROM payments p
+           JOIN sales s ON s.id = p.sale_id AND s.organization_id = p.organization_id
+          WHERE p.organization_id = $1 AND s.voided_at_ms IS NULL
+            AND ($2::uuid IS NULL OR s.store_id = $2::uuid) AND ${timeFilter('s.created_at_ms')}
+         UNION ALL
+         SELECT '-1', r.created_at_ms, rp.method, rp.amount
+           FROM return_payments rp
+           JOIN returns r ON r.id = rp.return_id AND r.organization_id = rp.organization_id
+          WHERE rp.organization_id = $1
+            AND ($2::uuid IS NULL OR r.store_id = $2::uuid) AND ${timeFilter('r.created_at_ms')}`,
+        args,
+      );
+      for (const row of pays.rows) {
+        const dateKey = resolveIntlDateKey(unixMsFromBigInt(BigInt(row.created_at_ms)), tz);
+        if (!inRange(dateKey)) continue;
+        const b = bucket(dateKey);
+        const amt = BigInt(row.amount) * BigInt(row.sign);
+        if (row.method === 'cash') b.cashSalesTiyin += amt;
+        else b.nonCashSalesTiyin += amt;
       }
 
-      const retPaySql = `
-        SELECT
-          r.created_at_ms,
-          rp.method,
-          rp.amount
-        FROM return_payments rp
-        INNER JOIN returns r ON r.id = rp.return_id AND r.organization_id = rp.organization_id
-        WHERE rp.organization_id = $1
-          AND ($2::uuid IS NULL OR r.store_id = $2::uuid)
-      `;
-      const retPayRes = await client.query<{
-        created_at_ms: string;
-        method: string;
-        amount: string;
-      }>(retPaySql, [params.organizationId, params.storeId ?? null]);
-
-      for (const row of retPayRes.rows) {
-        const ms = unixMsFromBigInt(BigInt(row.created_at_ms));
-        const dateKey = resolveIntlDateKey(ms, tz);
-        if (params.fromDate && dateKey < params.fromDate) continue;
-        if (params.toDate && dateKey > params.toDate) continue;
-
-        const b = getOrCreateBucket(dateKey);
-        const amt = BigInt(row.amount);
-        if (row.method === 'cash') {
-          b.cashSalesTiyin -= amt;
-        } else {
-          b.nonCashSalesTiyin -= amt;
-        }
-      }
-
-      const sortedDates = [...dayBuckets.keys()].sort().reverse().slice(0, limit);
-      const days: CloudDailySalesDaySummary[] = [];
-
-      let totSalesCount = 0;
-      let totReturnsCount = 0;
-      let totGross = 0n;
-      let totReturns = 0n;
-      let totNet = 0n;
-      let totVat = 0n;
-      let totCash = 0n;
-      let totNonCash = 0n;
-      let totCost = 0n;
-      let totProfit = 0n;
-
-      for (const d of sortedDates) {
-        const b = dayBuckets.get(d)!;
-        const sCount = b.saleIds.size;
-        const rCount = b.returnIds.size;
-
-        totSalesCount += sCount;
-        totReturnsCount += rCount;
-        totGross += b.grossSalesTiyin;
-        totReturns += b.returnsTiyin;
-        totNet += b.netSalesTiyin;
-        totVat += b.vatTiyin;
-        totCash += b.cashSalesTiyin;
-        totNonCash += b.nonCashSalesTiyin;
-        totCost += b.costTiyin;
-        totProfit += b.grossProfitTiyin;
-
+      const days: CloudDailySalesReport['days'][number][] = [];
+      const tot = {
+        sales: 0,
+        returns: 0,
+        gross: 0n,
+        ret: 0n,
+        net: 0n,
+        vat: 0n,
+        cash: 0n,
+        nonCash: 0n,
+        cost: 0n,
+        profit: 0n,
+      };
+      for (const d of [...buckets.keys()].sort().reverse().slice(0, limit)) {
+        const b = buckets.get(d)!;
+        tot.sales += b.saleIds.size;
+        tot.returns += b.returnIds.size;
+        tot.gross += b.grossSalesTiyin;
+        tot.ret += b.returnsTiyin;
+        tot.net += b.netSalesTiyin;
+        tot.vat += b.vatTiyin;
+        tot.cash += b.cashSalesTiyin;
+        tot.nonCash += b.nonCashSalesTiyin;
+        tot.cost += b.costTiyin;
+        tot.profit += b.grossProfitTiyin;
         days.push({
           date: d,
-          salesCount: sCount,
-          returnsCount: rCount,
+          salesCount: b.saleIds.size,
+          returnsCount: b.returnIds.size,
           grossSales: moneyFromTiyin(b.grossSalesTiyin),
           returnsTotal: moneyFromTiyin(b.returnsTiyin),
           netSales: moneyFromTiyin(b.netSalesTiyin),
@@ -1232,16 +1127,16 @@ export class AdminReadStore {
 
       return {
         days,
-        totalSalesCount: totSalesCount,
-        totalReturnsCount: totReturnsCount,
-        totalGrossSales: moneyFromTiyin(totGross),
-        totalReturns: moneyFromTiyin(totReturns),
-        totalNetSales: moneyFromTiyin(totNet),
-        totalVat: moneyFromTiyin(totVat),
-        totalCashSales: moneyFromTiyin(totCash),
-        totalNonCashSales: moneyFromTiyin(totNonCash),
-        totalCostValue: params.includeCostAndProfit ? moneyFromTiyin(totCost) : undefined,
-        totalGrossProfit: params.includeCostAndProfit ? moneyFromTiyin(totProfit) : undefined,
+        totalSalesCount: tot.sales,
+        totalReturnsCount: tot.returns,
+        totalGrossSales: moneyFromTiyin(tot.gross),
+        totalReturns: moneyFromTiyin(tot.ret),
+        totalNetSales: moneyFromTiyin(tot.net),
+        totalVat: moneyFromTiyin(tot.vat),
+        totalCashSales: moneyFromTiyin(tot.cash),
+        totalNonCashSales: moneyFromTiyin(tot.nonCash),
+        totalCostValue: params.includeCostAndProfit ? moneyFromTiyin(tot.cost) : undefined,
+        totalGrossProfit: params.includeCostAndProfit ? moneyFromTiyin(tot.profit) : undefined,
       };
     });
   }

@@ -17,6 +17,7 @@ import {
   type LocalSqliteConnection,
   createSqliteCartStore,
   createSqliteCatalogStore,
+  createSqliteCustomerStore,
   createSqliteHubAuthStore,
   createSqliteReportStore,
   createSqliteReturnStore,
@@ -71,7 +72,7 @@ describePg('A1: Hub vs Cloud DailySalesReport Parity (T2.7a)', () => {
   let deviceId: UuidV7;
   let deviceContext: VerifiedDeviceContext;
 
-  const nowMs = unixMsFromBigInt(1731232800000n); // 2026-11-10 10:00:00 UTC (15:00 Asia/Tashkent)
+  const nowMs = unixMsFromBigInt(1731232800000n); // 2024-11-10 10:00:00 UTC (15:00 Asia/Tashkent)
   const clock = new FixedClock(1731232800000n);
   const random = new SeededRandomSource(42);
 
@@ -300,6 +301,102 @@ describePg('A1: Hub vs Cloud DailySalesReport Parity (T2.7a)', () => {
       ],
     });
 
+    // ---- R2: the rest of the A1 scenario ----
+    const customerStore = createSqliteCustomerStore({
+      connection: localConn,
+      getRuntimeContext: getStoreCtx,
+    });
+    const owner = hubSetup.owner.id;
+    let reqSeq = 0x100;
+    const nextReq = () =>
+      parseUuidV7(`01950000-0000-7000-8000-${(reqSeq++).toString(16).padStart(12, '0')}`);
+    const sellBread = async (
+      qtyMilli: bigint,
+      pay: (total: bigint) => {
+        payments: Parameters<typeof saleStore.completeSale>[0]['payments'];
+        debtAmount?: ReturnType<typeof moneyFromTiyin>;
+        customerId?: UuidV7;
+      },
+      discountTiyin?: bigint,
+    ) => {
+      const cart = await cartStore.openCart(owner);
+      let detail = await cartStore.addLine(cart.id, {
+        kind: 'catalog',
+        productId: p1.id,
+        variantId: null,
+        qty: quantityFromMilli(qtyMilli),
+      });
+      if (discountTiyin !== undefined) {
+        detail = await cartStore.setDiscount(cart.id, {
+          mode: 'amount',
+          amount: moneyFromTiyin(discountTiyin),
+          reason: 'parity',
+          approvedSupervisorUserId: owner,
+        });
+      }
+      const total = moneyToTiyin(detail.totalFinal);
+      const p = pay(total);
+      return saleStore.completeSale({
+        cartId: cart.id,
+        actorUserId: owner,
+        clientRequestId: nextReq(),
+        expectedTotal: moneyFromTiyin(total),
+        ...p,
+      });
+    };
+
+    // Sale 3: 3x bread, 3,000 so'm cart discount, mixed cash + card.
+    await sellBread(
+      3_000n,
+      (total) => ({
+        payments: [
+          { method: 'cash', tenderedAmount: moneyFromTiyin(10_000_00n) },
+          { method: 'card', amount: moneyFromTiyin(total - 10_000_00n) },
+        ],
+      }),
+      3_000_00n,
+    );
+
+    // Sale 4: nasiya (credit) for a customer, then a partial debt payment.
+    const customer = await customerStore.createCustomer({
+      fullName: 'Parity Mijoz',
+      phone: '+998901234567',
+      creditLimit: moneyFromTiyin(1_000_000_00n),
+    });
+    await sellBread(2_000n, (total) => ({
+      payments: [],
+      debtAmount: moneyFromTiyin(total),
+      customerId: customer.id,
+    }));
+    await customerStore.recordDebtPayment({
+      customerId: customer.id,
+      actorUserId: owner,
+      clientRequestId: nextReq(),
+      method: 'cash',
+      amount: moneyFromTiyin(5_000_00n),
+    });
+
+    // Sale 5: completed then voided — must not count anywhere.
+    const voided = await sellBread(1_000n, (total) => ({
+      payments: [{ method: 'cash', tenderedAmount: moneyFromTiyin(total) }],
+    }));
+    await returnStore.voidSale({
+      saleId: voided.sale.id,
+      actorUserId: owner,
+      reason: 'parity void',
+      clientRequestId: nextReq(),
+    });
+
+    // Sales 6 and 7 straddle Tashkent midnight (UTC+5): 23:59:30 on the 10th, 00:00:30 on the 11th.
+    clock.set(1731265170000n); // 2024-11-10 18:59:30 UTC
+    await sellBread(1_000n, (total) => ({
+      payments: [{ method: 'card', amount: moneyFromTiyin(total) }],
+    }));
+    clock.set(1731265230000n); // 2024-11-10 19:00:30 UTC = 2024-11-11 00:00:30 Tashkent
+    await sellBread(1_000n, (total) => ({
+      payments: [{ method: 'cash', tenderedAmount: moneyFromTiyin(total) }],
+    }));
+
     // 5. Read Outbox from SQLite and Push to Cloud
     const outboxRows = listAllOutboxRecordsSync(localConn.db);
     expect(outboxRows.length).toBeGreaterThan(0);
@@ -348,8 +445,8 @@ describePg('A1: Hub vs Cloud DailySalesReport Parity (T2.7a)', () => {
   it('matches Hub DailySalesReport and Cloud DailySalesReport tiyin-to-tiyin across all metrics', async () => {
     // 1. Fetch Hub Report
     const hubReport = await hubReportStore.getDailySalesReport({
-      fromDate: '2026-11-01',
-      toDate: '2026-11-30',
+      fromDate: '2024-11-01',
+      toDate: '2024-11-30',
       includeCostAndProfit: true,
     });
 
@@ -357,8 +454,8 @@ describePg('A1: Hub vs Cloud DailySalesReport Parity (T2.7a)', () => {
     const cloudReport = await adminReadStore.getDailySalesReport({
       organizationId: orgId,
       storeId,
-      fromDate: '2026-11-01',
-      toDate: '2026-11-30',
+      fromDate: '2024-11-01',
+      toDate: '2024-11-30',
       tz: 'Asia/Tashkent',
       includeCostAndProfit: true,
     });
@@ -397,6 +494,10 @@ describePg('A1: Hub vs Cloud DailySalesReport Parity (T2.7a)', () => {
       );
     }
 
+    // Guard against a vacuous comparison (the dates once pointed at an empty month).
+    expect(hubReport.days.length).toBeGreaterThan(0);
+    expect(hubReport.totalSalesCount).toBeGreaterThan(0);
+
     // Daily buckets count and exact values
     expect(cloudReport.days.length).toBe(hubReport.days.length);
     for (let i = 0; i < hubReport.days.length; i++) {
@@ -422,5 +523,41 @@ describePg('A1: Hub vs Cloud DailySalesReport Parity (T2.7a)', () => {
         expect(moneyToTiyin(cDay.grossProfit)).toBe(moneyToTiyin(hDay.grossProfit));
       }
     }
+  });
+
+  it('R2: the scenario really covers both Tashkent days and leaves the voided sale out', async () => {
+    const hub = await hubReportStore.getDailySalesReport({
+      fromDate: '2024-11-01',
+      toDate: '2024-11-30',
+      includeCostAndProfit: true,
+    });
+    expect(hub.days.map((d) => [d.date, d.salesCount, d.returnsCount])).toEqual([
+      ['2024-11-11', 1, 0],
+      ['2024-11-10', 5, 1],
+    ]);
+  });
+
+  it('R2: dashboard figures for a day equal the hub report for that day', async () => {
+    const hub = await hubReportStore.getDailySalesReport({
+      fromDate: '2024-11-10',
+      toDate: '2024-11-10',
+      includeCostAndProfit: true,
+    });
+    const day = hub.days[0]!;
+    const dash = await adminReadStore.getDashboard({
+      organizationId: orgId,
+      storeId,
+      tz: 'Asia/Tashkent',
+      nowMs: unixMsFromBigInt(1731232800000n),
+      includeProfit: true,
+    });
+    expect(dash.todayDate).toBe('2024-11-10');
+    expect(dash.receiptsCount).toBe(day.salesCount);
+    expect(moneyToTiyin(dash.grossSales)).toBe(moneyToTiyin(day.grossSales));
+    expect(moneyToTiyin(dash.returnsTotal)).toBe(moneyToTiyin(day.returnsTotal));
+    expect(moneyToTiyin(dash.netSales)).toBe(moneyToTiyin(day.netSales));
+    expect(dash.grossProfit && moneyToTiyin(dash.grossProfit)).toBe(
+      day.grossProfit && moneyToTiyin(day.grossProfit),
+    );
   });
 });

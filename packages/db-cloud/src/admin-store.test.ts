@@ -144,6 +144,35 @@ describePg('@mezon/db-cloud - AdminReadStore queries and RLS isolation', () => {
         [sale1Id, orgA, storeA, deviceA, dummyHlc, nowMs.toString(), ownerA, idGen.nextId()],
       );
 
+      await client.query(
+        `INSERT INTO sale_lines (
+          id, organization_id, store_id, device_id, hlc, created_at_ms,
+          sale_id, sort_order, line_kind, item_name, unit, qty,
+          unit_price_snapshot, gross_total, promo_discount, subtotal_after_promo,
+          allocated_order_discount, final_total, vat_rate_bp_snapshot,
+          net_ex_vat, vat_total, cost_value
+        ) VALUES (
+          $1, $2, $3, $4, $5, $6,
+          $7, 1, 'quick_sale', 'Non', 'dona', 1000,
+          $8, $8, 0, $8,
+          0, $8, 1200,
+          $9, $10, $11
+        )`,
+        [
+          idGen.nextId(),
+          orgA,
+          storeA,
+          deviceA,
+          dummyHlc,
+          nowMs.toString(),
+          sale1Id,
+          '1000000',
+          '892857',
+          '107143',
+          '600000',
+        ],
+      );
+
       // Voided sale
       await client.query(
         `INSERT INTO sales (
@@ -176,6 +205,35 @@ describePg('@mezon/db-cloud - AdminReadStore queries and RLS isolation', () => {
         ],
       );
 
+      await client.query(
+        `INSERT INTO sale_lines (
+          id, organization_id, store_id, device_id, hlc, created_at_ms,
+          sale_id, sort_order, line_kind, item_name, unit, qty,
+          unit_price_snapshot, gross_total, promo_discount, subtotal_after_promo,
+          allocated_order_discount, final_total, vat_rate_bp_snapshot,
+          net_ex_vat, vat_total, cost_value
+        ) VALUES (
+          $1, $2, $3, $4, $5, $6,
+          $7, 1, 'quick_sale', 'Non', 'dona', 1000,
+          $8, $8, 0, $8,
+          0, $8, 1200,
+          $9, $10, $11
+        )`,
+        [
+          idGen.nextId(),
+          orgA,
+          storeA,
+          deviceA,
+          dummyHlc,
+          nowMs.toString(),
+          sale2VoidedId,
+          '500000',
+          '446429',
+          '53571',
+          '300000',
+        ],
+      );
+
       // Return
       await client.query(
         `INSERT INTO returns (
@@ -200,6 +258,19 @@ describePg('@mezon/db-cloud - AdminReadStore queries and RLS isolation', () => {
           ownerA,
           idGen.nextId(),
         ],
+      );
+
+      await client.query(
+        `INSERT INTO return_lines (
+          id, organization_id, store_id, device_id, hlc, created_at_ms,
+          return_id, sale_id, sale_line_id, sort_order, line_kind, item_name, unit, qty,
+          unit_price_snapshot, vat_rate_bp_snapshot, refund_amount, net_ex_vat, vat_total, cost_value
+        ) VALUES (
+          $1, $2, $3, $4, $5, $6,
+          $7, $8, (SELECT id FROM sale_lines WHERE sale_id = $8 LIMIT 1), 1, 'quick_sale', 'Non', 'dona', 1000,
+          1000000, 1200, 100000, 89286, 10714, 60000
+        )`,
+        [idGen.nextId(), orgA, storeA, deviceA, dummyHlc, nowMs.toString(), ret1Id, sale1Id],
       );
     });
 

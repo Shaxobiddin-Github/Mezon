@@ -435,7 +435,8 @@ describePg('@mezon/cloud - Admin Cabinet API & Security Integration (T2.7a)', ()
       expect(json.grossSales).toBe('2000000');
       expect(json.netSales).toBe('2000000');
       expect(json.receiptsCount).toBe(1);
-      expect(json.grossProfit).toBe('800000'); // 2000000 - 1200000
+      // Hub formula (T1.13): VAT-exclusive net minus cost = 1785714 - 1200000.
+      expect(json.grossProfit).toBe('585714');
       expect(json.stores.length).toBe(1);
       expect(json.stores[0]?.storeName).toBe('Markaziy Do‘kon A');
       expect(json.stores[0]?.isStale).toBe(true);
@@ -520,7 +521,7 @@ describePg('@mezon/cloud - Admin Cabinet API & Security Integration (T2.7a)', ()
       expect(json.totalNetSales).toBe('2000000');
       expect(json.totalCashSales).toBe('2000000');
       expect(json.totalCostValue).toBe('1200000');
-      expect(json.totalGrossProfit).toBe('800000');
+      expect(json.totalGrossProfit).toBe('585714');
     });
   });
 });
