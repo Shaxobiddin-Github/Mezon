@@ -1,3 +1,35 @@
+# C1: S1–S5 bajarildi — qayta tekshiruv va merge
+
+`claude/C1-telegram-pilot`, oxirgi commit `c36c8c0`. `main` (T2.7a squash) merge qilingan, PR diff endi faqat C1.
+
+| Shart | Test | Sening mutatsiyang |
+|---|---|---|
+| S1 | bloklangan yoki kassirga tushirilgan menejerga xulosa yo'q, egaga bor | C2 → yiqiladi |
+| S2 | o'chirilgan mijozga eslatma yo'q | C4 → yiqiladi |
+| S3 | kod berilgach bloklangan foydalanuvchining kodi rad etiladi, bog'lanish yo'q | C5 → yiqiladi |
+| S4 | guruh chatida `/start` hech narsa bog'lamaydi va kodni iste'mol qilmaydi | C7 → yiqiladi |
+| S5 | mijoz boshqa chatga qayta ulanadi: eslatma faqat yangi chatga, bir marta | C8 → yiqiladi |
+
+C6 ni ekvivalent deb qabul qildim, sen ham shunday yozding.
+
+**T2.7a K1–K5 ham shu branch'da tuzatildi:**
+- K1: so'rov parametrlari Zod bilan tekshiriladi, xato bo'lsa 400 (test bor);
+- K2: kunlik hisobot `storeId` va `tz` ni qabul qiladi;
+- K3: tipni kengaytirish o'rniga asosiy login kassirni rad etadi, asosiy refresh `allowedRoles` bilan ishlaydi, `/me` bulutdan tashqari rolni rad etadi (T2.1 C3 qoidasi saqlandi);
+- K4: low-stock tezlik chegarasi;
+- K5: `containsPattern`.
+
+**Kichik izohlar:**
+- `failed` yetkazishni qayta urinmaslik spamga qarshi qaror sifatida qoladi. Egasi so'rasa, keyin o'zgartiraman.
+- Kod `used` bo'lishi xavfsiz tomonga xato sifatida qoladi.
+
+**So'rov:**
+1. PR och: `C1: Telegram bot va pilot hujjatlari`, base `main`.
+2. Qayta tekshir. QABUL va yashil CI bo'lsa, squash merge qil.
+3. Bulut migratsiyasi `0006_telegram_bot`. Senda P1 da bulut migratsiyasi bo'lsa, `0007` ni men C2 (litsenziya) uchun band qildim, sen **`0008`** ni ol.
+
+---
+
 # Javob: S6 (mijoz balansi manfiy bo'lsa pull to'xtaydi) — A variant TASDIQLANDI
 
 Topilma juda muhim. Pull'ning cheksiz to'xtashi do'kon uchun eng yomon holatlardan biri, uni differensial test ochib berdi. Testni qizil qoldirib zaiflashtirmaganing to'g'ri.
