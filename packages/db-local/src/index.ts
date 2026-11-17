@@ -532,3 +532,22 @@ export {
   type SaleRulesCheckResult,
   type SaleRulesEvaluator,
 } from './sale-rules-port.js';
+export {
+  SqliteFiscalStore,
+  assertFiscalSaleAllowedInTxSync,
+  cancelSaleFiscalDocForVoidInTxSync,
+  getFiscalDocByIdSync,
+  getSaleFiscalDocSync,
+  insertFiscalDocInTxSync,
+  insertRefundFiscalDocIfNeededInTxSync,
+  insertSaleFiscalDocIfEnabledInTxSync,
+  insertShiftFiscalDocIfEnabledInTxSync,
+  readFiscalHubConfigSync,
+  readOldestUnsettledDeadlineSync,
+  type FiscalDocListItem,
+  type FiscalHubConfig,
+  type FiscalRuntimeContext,
+  type FiscalStatusSummary,
+  type InsertFiscalDocInput,
+  type StoredFiscalDocRecord,
+} from './fiscal-repo.js';

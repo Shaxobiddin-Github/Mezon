@@ -14,7 +14,7 @@ describe('@mezon/db-cloud - Schema Registry, Foreign Keys & MONOTONE Parity (R2,
       .all()
       .filter((m) => m.tableClass !== 'LOCAL' && !m.tableName.startsWith('cloud_'));
 
-    expect(syncedTables.length).toBe(37);
+    expect(syncedTables.length).toBe(38);
 
     for (const tableMeta of syncedTables) {
       const schema = SYNC_ENTITY_PAYLOAD_SCHEMAS[tableMeta.tableName];
@@ -50,7 +50,7 @@ describe('@mezon/db-cloud - Schema Registry, Foreign Keys & MONOTONE Parity (R2,
   it('R2: every MONOTONE table in cloudSchemaRegistry has a defined transition rule in MONOTONE_TRANSITION_RULES', () => {
     const monotoneTables = cloudSchemaRegistry.all().filter((m) => m.tableClass === 'MONOTONE');
 
-    expect(monotoneTables.length).toBe(6);
+    expect(monotoneTables.length).toBe(7);
 
     for (const tableMeta of monotoneTables) {
       const rule = MONOTONE_TRANSITION_RULES[tableMeta.tableName];

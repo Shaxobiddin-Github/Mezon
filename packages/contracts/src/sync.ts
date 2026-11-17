@@ -1,3 +1,10 @@
+import {
+  FISCAL_DOC_BOOKKEEPING_STATES,
+  FISCAL_DOC_KINDS,
+  FISCAL_DOC_STATUSES,
+  isFiscalDocStatus,
+  isFiscalDocTransitionAllowed,
+} from '@mezon/domain';
 import { BigIntStringSchema, UuidV7Schema } from './auth.js';
 import { z } from 'zod';
 
@@ -992,6 +999,38 @@ export const OrganizationTaxProfilesPayloadSchema = z
   })
   .strict();
 
+/** T3.3 fiscal documents (MONOTONE). Driver fields are opaque strings, set only on `confirmed`. */
+export const FiscalDocsPayloadSchema = z
+  .object({
+    id: UuidV7Schema,
+    organizationId: UuidV7Schema,
+    storeId: UuidV7Schema,
+    deviceId: UuidV7Schema,
+    hlc: z.string().length(58),
+    createdAtMs: UnixMsPayloadSchema,
+    updatedAtMs: UnixMsPayloadSchema,
+    docKind: z.enum(FISCAL_DOC_KINDS),
+    saleId: UuidV7Schema.nullable(),
+    returnId: UuidV7Schema.nullable(),
+    shiftId: UuidV7Schema.nullable(),
+    dependsOnDocId: UuidV7Schema.nullable(),
+    idempotencyKey: z.string().min(1).max(200),
+    status: z.enum(FISCAL_DOC_STATUSES),
+    attempts: z.number().int().nonnegative(),
+    nextCheckAtMs: UnixMsPayloadSchema,
+    lastErrorCode: z.string().nullable(),
+    lastErrorMessage: z.string().nullable(),
+    sentAtMs: UnixMsPayloadSchema.nullable(),
+    confirmedAtMs: UnixMsPayloadSchema.nullable(),
+    cancelledAtMs: UnixMsPayloadSchema.nullable(),
+    fiscalSign: z.string().nullable(),
+    fiscalNumber: z.string().nullable(),
+    qrPayload: z.string().nullable(),
+    driverId: z.string().min(1),
+    offlineDeadlineMs: UnixMsPayloadSchema,
+  })
+  .strict();
+
 export const SYNC_PAYLOAD_SCHEMAS: Readonly<Record<string, z.ZodType<Record<string, unknown>>>> = {
   users: UsersPayloadSchema,
   categories: CategoriesPayloadSchema,
@@ -1030,6 +1069,7 @@ export const SYNC_PAYLOAD_SCHEMAS: Readonly<Record<string, z.ZodType<Record<stri
   order_lines: OrderLinesPayloadSchema,
   order_payments: OrderPaymentsPayloadSchema,
   organization_tax_profiles: OrganizationTaxProfilesPayloadSchema,
+  fiscal_docs: FiscalDocsPayloadSchema,
 };
 
 export const UserPayloadSchema = UsersPayloadSchema;
@@ -1067,6 +1107,7 @@ export const OrderPayloadSchema = OrdersPayloadSchema;
 export const OrderLinePayloadSchema = OrderLinesPayloadSchema;
 export const OrderPaymentPayloadSchema = OrderPaymentsPayloadSchema;
 export const OrganizationTaxProfilePayloadSchema = OrganizationTaxProfilesPayloadSchema;
+export const FiscalDocPayloadSchema = FiscalDocsPayloadSchema;
 
 export const SYNC_ENTITY_PAYLOAD_SCHEMAS = SYNC_PAYLOAD_SCHEMAS;
 
@@ -1297,6 +1338,66 @@ export const MONOTONE_TRANSITION_RULES: Readonly<Record<string, MonotoneTransiti
       return 'accepted';
     },
   },
+  fiscal_docs: {
+    stateColumn: 'status',
+    isMonotone: true,
+    // Controller fix #5: explicit list. Opaque driver fields are accepted only on the transition to
+    // `confirmed` (checkTransition) and are frozen afterwards (terminal state).
+    allowableUpdateColumns: [
+      'status',
+      'attempts',
+      'nextCheckAtMs',
+      'lastErrorCode',
+      'lastErrorMessage',
+      'sentAtMs',
+      'confirmedAtMs',
+      'cancelledAtMs',
+      'fiscalSign',
+      'fiscalNumber',
+      'qrPayload',
+      'deviceId',
+      'hlc',
+      'updatedAtMs',
+    ],
+    checkTransition(existing, incoming) {
+      const from = existing.status;
+      const to = incoming.status;
+      if (!isFiscalDocStatus(from) || !isFiscalDocStatus(to)) return 'rejected';
+      const opaque = ['fiscal_sign', 'fiscal_number', 'qr_payload'] as const;
+      const camel = {
+        fiscal_sign: 'fiscalSign',
+        fiscal_number: 'fiscalNumber',
+        qr_payload: 'qrPayload',
+      };
+      const val = (row: Record<string, unknown>, k: (typeof opaque)[number]) =>
+        row[k] ?? row[camel[k]] ?? null;
+      if (from === to) {
+        if (from === 'confirmed' || from === 'cancelled' || from === 'rejected') {
+          // Replay of the terminal state with identical opaque fields is a duplicate.
+          return opaque.every((k) => val(existing, k) === val(incoming, k))
+            ? 'duplicate'
+            : 'rejected';
+        }
+        // In-place bookkeeping (attempts / next check / last error) on a live state.
+        if (!FISCAL_DOC_BOOKKEEPING_STATES.includes(from)) return 'rejected';
+        if (opaque.some((k) => val(incoming, k) !== null)) return 'rejected';
+        // attempts may arrive as number, bigint (SQLite safeIntegers) or string (wire).
+        const a0 = toSafeString(existing.attempts);
+        const a1 = toSafeString(incoming.attempts);
+        if (!/^[0-9]+$/.test(a0) || !/^[0-9]+$/.test(a1) || BigInt(a1) < BigInt(a0))
+          return 'rejected';
+        return 'accepted';
+      }
+      if (!isFiscalDocTransitionAllowed(from, to)) return 'rejected';
+      const hasAll = opaque.every((k) => {
+        const v = val(incoming, k);
+        return typeof v === 'string' && v.length > 0;
+      });
+      const hasAny = opaque.some((k) => val(incoming, k) !== null);
+      if (to === 'confirmed') return hasAll ? 'accepted' : 'rejected';
+      return hasAny ? 'rejected' : 'accepted';
+    },
+  },
 };
 
 // ============================================================================
@@ -1309,6 +1410,12 @@ export interface ForeignKeyRef {
 }
 
 export const SYNC_FOREIGN_REFERENCES: Readonly<Record<string, readonly ForeignKeyRef[]>> = {
+  fiscal_docs: [
+    { payloadKey: 'saleId', targetEntity: 'sales' },
+    { payloadKey: 'returnId', targetEntity: 'returns' },
+    { payloadKey: 'shiftId', targetEntity: 'shifts' },
+    { payloadKey: 'dependsOnDocId', targetEntity: 'fiscal_docs' },
+  ],
   categories: [{ payloadKey: 'parentId', targetEntity: 'categories' }],
   products: [{ payloadKey: 'categoryId', targetEntity: 'categories' }],
   product_variants: [{ payloadKey: 'productId', targetEntity: 'products' }],
