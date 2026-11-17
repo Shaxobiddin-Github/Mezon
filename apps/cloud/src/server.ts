@@ -437,7 +437,7 @@ export async function buildCloudServer(options: BuildServerOptions): Promise<Fas
       id: auth.sub,
       organizationId: auth.org,
       username: auth.name,
-      role: auth.role as 'owner' | 'manager',
+      role: auth.role,
     };
 
     return reply.code(200).send({ user });
