@@ -67,3 +67,23 @@ export {
   type FakePrintJob,
   type FakePrinterFailureConfig,
 } from './printer/fake-driver.js';
+export {
+  FiscalDriverError,
+  isFiscalDriverError,
+  type FiscalConfirmation,
+  type FiscalDriver,
+  type FiscalDriverErrorKind,
+  type FiscalStatusResult,
+  type FiscalSubmitRequest,
+  type FiscalSubmitResult,
+} from './fiscal/fiscal-driver.js';
+export {
+  FakeFiscalDriver,
+  InMemoryFakeFiscalLedgerStore,
+  type FakeFiscalDriverOptions,
+  type FakeFiscalLedger,
+  type FakeFiscalLedgerEntry,
+  type FakeFiscalLedgerStore,
+  type FakeFiscalStatusMode,
+  type FakeFiscalSubmitMode,
+} from './fiscal/fake-driver.js';

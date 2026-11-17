@@ -198,6 +198,7 @@ export {
 export { buildShiftTriggersSql, assertShiftMigrationsComplete } from './shift-migrations.js';
 
 export { buildOrderTriggersSql, assertOrderMigrationsComplete } from './order-migrations.js';
+export { buildFiscalDocsTriggersSql, assertFiscalMigrationsComplete } from './fiscal-migrations.js';
 
 export {
   type HubConfigSnapshot,
