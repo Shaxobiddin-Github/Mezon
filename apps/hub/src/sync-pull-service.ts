@@ -14,10 +14,11 @@ import {
   buildSqliteForeignReferencesMap,
   type SqliteForeignKeyRef,
   type LocalSqliteConnection,
-  executeCustomerBalancesRebuildSync,
-  executeSupplierBalancesRebuildSync,
   executeStockProjectionsRebuildSync,
+  recomputeCustomerBalancesForIdsSync,
+  recomputeSupplierBalancesForIdsSync,
 } from '@mezon/db-local';
+import { ProjectionTouchSet, collectTouchedProjectionKeys } from './sync-projection-keys.js';
 
 export class PermanentSyncError extends Error {
   constructor(
@@ -137,9 +138,7 @@ export class HubSyncPullService {
     let skippedEchoCount = 0;
     let parkedCount = 0;
     let conflictCount = 0;
-    let hasCustomerLedger = false;
-    let hasSupplierLedger = false;
-    let hasStockEvents = false;
+    const touch = new ProjectionTouchSet();
 
     const executeTx = this.sqlite.transaction(() => {
       // T1: Set in_sync = 1 in main schema table
@@ -238,6 +237,7 @@ export class HubSyncPullService {
               }
             }
 
+            const appliedBefore = appliedCount;
             // 7. Apply to table by class:
             if (tableMeta.tableClass === 'FACT') {
               const existingFact = this.sqlite
@@ -313,12 +313,8 @@ export class HubSyncPullService {
               }
             }
 
-            if (event.entity === 'customer_ledger') {
-              hasCustomerLedger = true;
-            } else if (event.entity === 'supplier_ledger') {
-              hasSupplierLedger = true;
-            } else if (event.entity === 'stock_moves' || event.entity === 'batches') {
-              hasStockEvents = true;
+            if (appliedCount > appliedBefore) {
+              collectTouchedProjectionKeys(touch, event.entity, event.entityId, payloadData);
             }
 
             this.sqlite.exec(`RELEASE SAVEPOINT ${spName}`);
@@ -337,34 +333,37 @@ export class HubSyncPullService {
           }
         }
 
-        // 8. Update projections for applied ledger or stock events using authoritative rebuild logic (X3)
-        if (hasCustomerLedger) {
-          executeCustomerBalancesRebuildSync(
-            this.sqlite,
-            this.connection.db,
-            params.context.organizationId,
-            params.nowMs,
-          );
-        }
-        if (hasSupplierLedger) {
-          executeSupplierBalancesRebuildSync(
-            this.sqlite,
-            this.connection.db,
-            params.context.organizationId,
-            params.nowMs,
-          );
-        }
-        if (hasStockEvents) {
+        // 8. Retry parked events FIRST: a dependency that arrived in this batch lets them apply now,
+        // and their projection keys must be part of this batch's recompute (T2.6).
+        this.retryParkedEvents(params.nowMs, touch);
+
+        // 9. T2.6: recompute only the projection rows the applied events touched — the same code
+        // path as the full rebuild, so the partial result equals a full rebuild.
+        if (touch.productIds.size > 0) {
           executeStockProjectionsRebuildSync(this.sqlite, this.connection.db, {
             organizationId: params.context.organizationId,
             storeId: params.context.storeId,
             nextId: () => this.idGen.nextId(),
             nowUnixMs: () => params.nowMs,
+            productIds: [...touch.productIds],
           });
         }
-
-        // 9. Retry parked events
-        this.retryParkedEvents(params.nowMs);
+        if (touch.customerIds.size > 0) {
+          recomputeCustomerBalancesForIdsSync(this.sqlite, this.connection.db, {
+            organizationId: params.context.organizationId,
+            customerIds: touch.customerIds,
+            nowMs: params.nowMs,
+            nextId: () => this.idGen.nextId(),
+          });
+        }
+        if (touch.supplierIds.size > 0) {
+          recomputeSupplierBalancesForIdsSync(this.sqlite, this.connection.db, {
+            organizationId: params.context.organizationId,
+            supplierIds: touch.supplierIds,
+            nowMs: params.nowMs,
+            nextId: () => this.idGen.nextId(),
+          });
+        }
 
         // 10. Atomically update cursors inside the same transaction
         for (const [storeId, lastPos] of Object.entries(params.nextCursors)) {
@@ -664,7 +663,7 @@ export class HubSyncPullService {
     this.sqlite.prepare(sqlStr).run(...values);
   }
 
-  private retryParkedEvents(nowMs: UnixMs): void {
+  private retryParkedEvents(nowMs: UnixMs, touch: ProjectionTouchSet): void {
     const parked = this.sqlite
       .prepare('SELECT * FROM local_sync_parked ORDER BY attempts ASC, created_at_ms ASC LIMIT 50')
       .all() as Array<{
@@ -720,6 +719,7 @@ export class HubSyncPullService {
           };
 
           this.insertLocalRow(tableMeta, payloadObj, pseudoEvent, nowMs);
+          collectTouchedProjectionKeys(touch, row.entity, row.entity_id, payloadObj);
         }
 
         this.sqlite.prepare('DELETE FROM local_sync_parked WHERE id = ?').run(row.id);

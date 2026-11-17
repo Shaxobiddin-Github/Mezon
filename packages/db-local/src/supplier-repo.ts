@@ -1328,6 +1328,67 @@ export function executeSupplierBalancesRebuildSync(
   };
 }
 
+/**
+ * T2.6: recomputes the balance projection of the given suppliers only, with the very same FIFO read as
+ * the full rebuild (`execute*BalancesRebuildSync`). Unknown / foreign-organization ids are ignored
+ * (the full rebuild has no row for them either). Upsert keeps an existing row id.
+ */
+export function recomputeSupplierBalancesForIdsSync(
+  sqlite: LocalSqliteConnection['sqlite'],
+  db: LocalSqliteConnection['db'],
+  params: {
+    readonly organizationId: UuidV7;
+    readonly supplierIds: Iterable<UuidV7>;
+    readonly nowMs: UnixMs;
+    readonly nextId: () => UuidV7;
+  },
+): number {
+  const organizationId = parseUuidV7(params.organizationId);
+  const exists = sqlite.prepare(
+    'SELECT 1 FROM "suppliers" WHERE "id" = ? AND "organization_id" = ?',
+  );
+  const upsert = sqlite.prepare(
+    `INSERT INTO "local_supplier_balances" (
+       "id", "organization_id", "created_at_ms", "updated_at_ms",
+       "supplier_id", "balance", "total_debt_accrued", "total_credited",
+       "earliest_open_due_at_ms", "last_activity_at_ms"
+     ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+     ON CONFLICT("supplier_id") DO UPDATE SET
+       "updated_at_ms" = excluded."updated_at_ms",
+       "balance" = excluded."balance",
+       "total_debt_accrued" = excluded."total_debt_accrued",
+       "total_credited" = excluded."total_credited",
+       "earliest_open_due_at_ms" = excluded."earliest_open_due_at_ms",
+       "last_activity_at_ms" = excluded."last_activity_at_ms"`,
+  );
+  const storeTimezone = readHubSupplierConfigSync(db, organizationId).storeTimezone;
+  let updated = 0;
+  for (const rawId of new Set(params.supplierIds)) {
+    const id = parseUuidV7(rawId);
+    if (exists.get(id, organizationId) === undefined) continue;
+    const { fifo, lastActivityAtMs } = readSupplierLedgerFifoSync(sqlite, {
+      organizationId,
+      supplierId: id,
+      asOfMs: params.nowMs,
+      storeTimezone,
+    });
+    upsert.run(
+      params.nextId(),
+      organizationId,
+      BigInt(params.nowMs),
+      BigInt(params.nowMs),
+      id,
+      fifo.balanceTiyin,
+      moneyToTiyin(fifo.totalDebtAccrued),
+      moneyToTiyin(fifo.totalCredited),
+      fifo.earliestOpenDueAtMs !== null ? BigInt(fifo.earliestOpenDueAtMs) : null,
+      lastActivityAtMs !== null ? BigInt(lastActivityAtMs) : null,
+    );
+    updated += 1;
+  }
+  return updated;
+}
+
 export class SqliteSupplierStore {
   private readonly connection: LocalSqliteConnection;
   private readonly getRuntimeContext: () => SupplierRuntimeContext | null;
