@@ -50,6 +50,13 @@
       "when": 1794908111210,
       "tag": "0006_telegram_bot",
       "breakpoints": true
+    },
+    {
+      "idx": 7,
+      "version": "7",
+      "when": 1794909807996,
+      "tag": "0007_licences",
+      "breakpoints": true
     }
   ]
 }

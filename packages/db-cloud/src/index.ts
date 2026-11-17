@@ -134,5 +134,11 @@ export {
   type TelegramStaffTarget,
 } from './telegram-store.js';
 export { loadCustomerDebts, type CloudCustomerDebt } from './customer-debt.js';
+export {
+  CloudLicenceStore,
+  type GrowthUsage,
+  type StoredLicence,
+  type StoredPlatformInvoice,
+} from './licence-store.js';
 
 export { isDockerAvailable, shouldRunPgTests } from './pg-test-helper.js';

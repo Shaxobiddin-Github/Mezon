@@ -466,4 +466,23 @@ export const RU_MESSAGES: Readonly<Record<I18nKey, string>> = {
   'error.FISCAL_BLOCKED': 'Продажа заблокирована из-за фискального статуса.',
   'error.FISCALIZED_SALE_CANNOT_VOID':
     'Фискализированный (или отправленный) чек нельзя аннулировать — оформите возврат.',
+
+  // T4.7 Licence
+  'admin.licence.title': 'Тариф',
+  'admin.licence.plan.start': 'Start',
+  'admin.licence.plan.business': 'Business',
+  'admin.licence.plan.pro': 'Pro',
+  'admin.licence.trial': 'Бесплатный период: осталось {days} дн.',
+  'admin.licence.active': 'Тариф {plan}: осталось {days} дн.',
+  'admin.licence.grace':
+    'Тариф {plan} закончился. Оплатите в течение {days} дн., иначе нельзя будет добавлять магазины и кассы.',
+  'admin.licence.expired':
+    'Срок тарифа истёк. Продажи продолжаются, но добавлять магазины и кассы нельзя.',
+  'admin.licence.invalid': 'Файл лицензии не прошёл проверку. Свяжитесь с платформой.',
+  'admin.licence.usage': 'Магазины: {stores} / {maxStores}, кассы: {devices} / {maxDevices}',
+  'admin.licence.unlimited': 'без ограничений',
+  'admin.licence.invoice': '{period}: {amount} — {status}',
+  'admin.licence.invoice.issued': 'не оплачен',
+  'admin.licence.invoice.paid': 'оплачен',
+  'admin.licence.invoice.void': 'аннулирован',
 };

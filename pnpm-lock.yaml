@@ -258,6 +258,9 @@ importers:
       '@mezon/i18n':
         specifier: workspace:*
         version: link:../../packages/i18n
+      '@mezon/licensing':
+        specifier: workspace:*
+        version: link:../../packages/licensing
       '@mezon/sync':
         specifier: workspace:*
         version: link:../../packages/sync
@@ -530,6 +533,15 @@ importers:
         version: 3.3.7
 
   packages/i18n: {}
+
+  packages/licensing:
+    dependencies:
+      '@mezon/domain':
+        specifier: workspace:*
+        version: link:../domain
+      '@mezon/rules':
+        specifier: workspace:*
+        version: link:../rules
 
   packages/rules:
     dependencies:
