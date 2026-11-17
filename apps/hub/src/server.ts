@@ -311,7 +311,12 @@ export async function createHubServer(options: CreateHubServerOptions): Promise<
       getRuntimeContext: () => {
         const ctx = store.getActiveRuntimeContext();
         return ctx
-          ? { uow: ctx.uow, organizationId: ctx.config.organizationId, storeId: ctx.config.storeId }
+          ? {
+              uow: ctx.uow,
+              organizationId: ctx.config.organizationId,
+              storeId: ctx.config.storeId,
+              deviceId: ctx.config.deviceId,
+            }
           : null;
       },
     });

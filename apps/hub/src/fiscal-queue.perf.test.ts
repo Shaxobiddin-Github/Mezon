@@ -249,6 +249,7 @@ describe('T3.3 S1 backlog drain never freezes the till (perf)', () => {
       expect(count("SELECT count(*) AS n FROM fiscal_docs WHERE status = 'confirmed'")).toBe(total);
       expect(BigInt(fake.ledgerKeys().length)).toBe(total);
       expect(fake.ledgerKeys().every((k) => fake.submitCount(k) === 1)).toBe(true);
+      expect(fake.shiftOrderViolations()).toEqual([]);
     } finally {
       await hub.close();
     }

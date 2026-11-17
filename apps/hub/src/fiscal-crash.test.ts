@@ -237,6 +237,7 @@ describe('T3.3 crash tests (F1)', () => {
       await hub.fiscalWorker.runOnce(); // safe resubmit
       expect(docOf(hub, p.saleId).status).toBe('confirmed');
       expect(probe.submitCount(p.saleId)).toBe(1);
+      expect(probe.shiftOrderViolations()).toEqual([]);
     } finally {
       await hub.close();
     }
@@ -259,6 +260,7 @@ describe('T3.3 crash tests (F1)', () => {
       expect(docOf(hub, p.saleId).status).toBe('confirmed');
       await hub.fiscalWorker.runOnce();
       expect(probe.submitCount(p.saleId)).toBe(1);
+      expect(probe.shiftOrderViolations()).toEqual([]);
     } finally {
       await hub.close();
     }

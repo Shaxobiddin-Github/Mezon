@@ -90,4 +90,66 @@ describe('T3.3 FakeFiscalDriver', () => {
       fs.rmSync(dir, { recursive: true, force: true });
     }
   });
+
+  describe('P1 operator shift invariants (the operator, not the hub, is the authority)', () => {
+    const doc = (
+      kind: FiscalSubmitRequest['kind'],
+      key: string,
+      shiftId: string | null,
+    ): FiscalSubmitRequest => ({
+      kind,
+      idempotencyKey: key,
+      docId: `doc-${key}`,
+      saleId: kind === 'sale' || kind === 'refund' ? key : null,
+      returnId: kind === 'refund' ? key : null,
+      shiftId,
+    });
+
+    it('a receipt for a shift the operator never opened is rejected (SHIFT_NOT_OPEN)', async () => {
+      const d = new FakeFiscalDriver();
+      const r = await d.submit(doc('sale', 's1', 'shift-1'));
+      expect(r.outcome === 'rejected' && r.code).toBe('SHIFT_NOT_OPEN');
+      const ref = await d.submit(doc('refund', 'r1', 'shift-1'));
+      expect(ref.outcome === 'rejected' && ref.code).toBe('SHIFT_NOT_OPEN');
+      // Recorded like any operator answer: status() reports the refusal, a resubmit repeats it.
+      expect((await d.status('s1')).state).toBe('rejected');
+    });
+
+    it('open → receipts accepted → close → a later receipt is rejected (SHIFT_CLOSED)', async () => {
+      const d = new FakeFiscalDriver();
+      expect((await d.submit(doc('shift_open', 'o', 'shift-1'))).outcome).toBe('confirmed');
+      expect((await d.submit(doc('sale', 's1', 'shift-1'))).outcome).toBe('confirmed');
+      expect((await d.submit(doc('refund', 'r1', 'shift-1'))).outcome).toBe('confirmed');
+      expect((await d.submit(doc('shift_close', 'z', 'shift-1'))).outcome).toBe('confirmed');
+      const late = await d.submit(doc('sale', 's2', 'shift-1'));
+      expect(late.outcome === 'rejected' && late.code).toBe('SHIFT_CLOSED');
+      // The idempotent replay of an earlier, accepted receipt still returns its original sign.
+      expect((await d.submit(doc('sale', 's1', 'shift-1'))).outcome).toBe('confirmed');
+    });
+
+    it('closing a shift that is not open is rejected; shifts are independent', async () => {
+      const d = new FakeFiscalDriver();
+      const z = await d.submit(doc('shift_close', 'z1', 'shift-1'));
+      expect(z.outcome === 'rejected' && z.code).toBe('SHIFT_NOT_OPEN');
+      await d.submit(doc('shift_open', 'o2', 'shift-2'));
+      expect((await d.submit(doc('sale', 's', 'shift-2'))).outcome).toBe('confirmed');
+      const other = await d.submit(doc('sale', 't', 'shift-1'));
+      expect(other.outcome === 'rejected' && other.code).toBe('SHIFT_NOT_OPEN');
+    });
+
+    it('the shift state survives a new driver instance (file ledger)', async () => {
+      const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'mezon-fake-fiscal-shift-'));
+      try {
+        const file = path.join(dir, 'ledger.json');
+        const a = new FakeFiscalDriver({ ledgerStore: new FileFakeFiscalLedgerStore(file) });
+        await a.submit(doc('shift_open', 'o', 'shift-1'));
+        await a.submit(doc('shift_close', 'z', 'shift-1'));
+        const b = new FakeFiscalDriver({ ledgerStore: new FileFakeFiscalLedgerStore(file) });
+        const late = await b.submit(doc('sale', 's', 'shift-1'));
+        expect(late.outcome === 'rejected' && late.code).toBe('SHIFT_CLOSED');
+      } finally {
+        fs.rmSync(dir, { recursive: true, force: true });
+      }
+    });
+  });
 });
