@@ -11,7 +11,7 @@ import {
   parseUuidV7,
   quantityFromMilli,
 } from '@mezon/domain';
-import { FixedClock, SeededRandomSource } from '@mezon/test-utils';
+import { FixedClock, SeededRandomSource, allowAllSaleRulesEvaluator } from '@mezon/test-utils';
 import { afterEach, describe, expect, it } from 'vitest';
 import {
   type LocalSqliteConnection,
@@ -93,7 +93,11 @@ describe('@mezon/db-local - T1.10 Order Delivery Performance Benchmark', () => {
     const stockStore = createSqliteStockStore({ connection, getRuntimeContext: getStoreCtx });
     const customerStore = createSqliteCustomerStore({ connection, getRuntimeContext: getStoreCtx });
     const shiftStore = createSqliteShiftStore({ connection, getRuntimeContext: getStoreCtx });
-    const orderStore = createSqliteOrderStore({ connection, getRuntimeContext: getStoreCtx });
+    const orderStore = createSqliteOrderStore({
+      connection,
+      rulesEvaluator: allowAllSaleRulesEvaluator,
+      getRuntimeContext: getStoreCtx,
+    });
 
     let seq = 1;
     const nextUuid = () => makeUuid(seq++);

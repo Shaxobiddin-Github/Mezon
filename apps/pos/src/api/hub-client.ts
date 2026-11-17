@@ -1,4 +1,7 @@
 import {
+  type RulesCheckRequestDto,
+  RulesCheckResponseSchema,
+  type RulesCheckResponseDto,
   type CreateProductRequestDto,
   MissingMxikCountResponseSchema,
   type MissingMxikCountResponseDto,
@@ -404,6 +407,15 @@ export class HubApiClient {
       path: `/products/${encodeURIComponent(productId)}`,
       body: input,
       responseSchema: ProductResponseSchema,
+    });
+  }
+
+  async rulesCheck(cartId: string, input: RulesCheckRequestDto): Promise<RulesCheckResponseDto> {
+    return this.request({
+      method: 'POST',
+      path: `/carts/${encodeURIComponent(cartId)}/rules-check`,
+      body: input,
+      responseSchema: RulesCheckResponseSchema,
     });
   }
 

@@ -132,7 +132,13 @@ export type DomainErrorCode =
   | 'DEVICE_NOT_INITIALIZED'
   | 'NETWORK_ERROR'
   | 'RATE_LIMITED'
-  | 'PAIRING_FAILED';
+  | 'PAIRING_FAILED'
+  | 'RULES_BLOCKED'
+  | 'RULES_PACKAGE_INVALID'
+  | 'RULES_SIGNATURE_INVALID'
+  | 'RULES_KEY_UNTRUSTED'
+  | 'RULES_PACKAGE_ROLLBACK'
+  | 'RULES_PACKAGE_CONFLICT';
 
 export type DomainErrorDetails = Readonly<Record<string, unknown>>;
 

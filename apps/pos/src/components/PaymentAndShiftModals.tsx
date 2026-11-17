@@ -8,6 +8,7 @@ import {
   tiyinToSomInputString,
 } from '@mezon/ui';
 import { type FormEvent, useEffect, useRef, useState } from 'react';
+import { RulesPanel } from './RulesPanel.js';
 import { type HubApiClient, HubApiError } from '../api/hub-client.js';
 import { type InsufficientStockLineDetail, usePosStore } from '../store/pos-store.js';
 import { generateBrowserUuidV7 } from '../utils/browser-uuid.js';
@@ -74,6 +75,7 @@ export function PaymentModal({
   const [supervisorUsername, setSupervisorUsername] = useState('');
   const [supervisorPin, setSupervisorPin] = useState('');
   const [networkRetryPending, setNetworkRetryPending] = useState(false);
+  const [rulesBlocked, setRulesBlocked] = useState(false);
 
   if (!activeCart) {
     return null;
@@ -128,6 +130,33 @@ export function PaymentModal({
     }
   };
 
+  const buildPayments = (): SalePaymentInputDto[] => {
+    const out: SalePaymentInputDto[] = [];
+    if (cashAppliedTiyin > 0n && tenderedCashTiyin > 0n) {
+      out.push({
+        method: 'cash',
+        tenderedAmount: tenderedCashTiyin.toString(),
+        amount: cashAppliedTiyin.toString(),
+      });
+    }
+    for (const row of nonCashRows) {
+      let amt: string;
+      try {
+        amt = row.amountSom.trim().length > 0 ? parseSomInputToTiyinString(row.amountSom) : '0';
+      } catch {
+        continue;
+      }
+      if (BigInt(amt) > 0n) {
+        out.push({
+          method: row.method,
+          amount: amt,
+          providerRef: row.providerRef.trim() || null,
+        });
+      }
+    }
+    return out;
+  };
+
   const submitSale = async (overrideTotalTiyin?: string) => {
     if (isSubmittingPayment) {
       return;
@@ -137,26 +166,7 @@ export function PaymentModal({
     setErrorBanner(null);
 
     try {
-      const payments: SalePaymentInputDto[] = [];
-      if (cashAppliedTiyin > 0n && tenderedCashTiyin > 0n) {
-        payments.push({
-          method: 'cash',
-          tenderedAmount: tenderedCashTiyin.toString(),
-          amount: cashAppliedTiyin.toString(),
-        });
-      }
-      for (const row of nonCashRows) {
-        if (row.amountSom.trim().length > 0) {
-          const amt = parseSomInputToTiyinString(row.amountSom);
-          if (BigInt(amt) > 0n) {
-            payments.push({
-              method: row.method,
-              amount: amt,
-              providerRef: row.providerRef.trim() || null,
-            });
-          }
-        }
-      }
+      const payments = buildPayments();
 
       const creditOverride =
         needsCreditOverride && supervisorUsername.trim().length > 0
@@ -202,6 +212,11 @@ export function PaymentModal({
         if (err.code === 'CREDIT_LIMIT_EXCEEDED') {
           setNeedsCreditOverride(true);
           setErrorBanner(t('error.CREDIT_LIMIT_EXCEEDED'));
+          return;
+        }
+        if (err.code === 'RULES_BLOCKED') {
+          setRulesBlocked(true);
+          setErrorBanner(t('error.RULES_BLOCKED'));
           return;
         }
         if (err.code === 'INSUFFICIENT_STOCK') {
@@ -466,6 +481,14 @@ export function PaymentModal({
           </div>
         )}
 
+        <RulesPanel
+          api={api}
+          cartId={activeCart.id}
+          cartVersionKey={`${activeCart.id}:${activeCart.totalFinal}:${String(activeCart.lines.length)}`}
+          payments={buildPayments()}
+          onBlockedChange={setRulesBlocked}
+        />
+
         <div className="pos-totals-row">
           <span>{t('payment.remainingUnallocated')}:</span>
           <strong data-testid="payment-unallocated">
@@ -478,7 +501,7 @@ export function PaymentModal({
             type="submit"
             className="pos-btn pos-btn-success"
             data-testid="payment-complete-btn"
-            disabled={isSubmittingPayment || unallocatedTiyin !== 0n}
+            disabled={isSubmittingPayment || unallocatedTiyin !== 0n || rulesBlocked}
           >
             {isSubmittingPayment ? t('payment.submitting') : t('payment.completeBtn')}
           </button>
