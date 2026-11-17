@@ -1006,3 +1006,51 @@ describe('T3.3 K1 no deadlock after a clock correction', () => {
     }
   });
 });
+
+describe('T3.3 queue order details', () => {
+  it('F15 / S3: a refund waits while its sale document is still in backoff', async () => {
+    const env = await boot(5001);
+    try {
+      const pid = await product(env);
+      await openShift(env);
+      const sale = await sellOk(env, pid);
+      env.driver.queueSubmitModes('offline');
+      await env.hub.fiscalWorker.runOnce(); // sale doc → failed, next check in the future
+      const returnId = await returnSale(env, sale);
+      await env.hub.fiscalWorker.runOnce(); // same instant: only the refund is due
+      expect(env.driver.submitCount(returnId)).toBe(0);
+      expect(
+        one<{ status: string; last_error_code: string | null }>(
+          env,
+          'SELECT status, last_error_code FROM fiscal_docs WHERE return_id = ?',
+          returnId,
+        ),
+      ).toEqual({ status: 'pending', last_error_code: 'FISCAL_WAITING_DEPENDENCY' });
+      for (let i = 0; i < 3; i += 1) await tick(env);
+      expect(env.driver.ledgerKeys().filter((k) => !k.includes(':'))).toEqual([sale.id, returnId]);
+    } finally {
+      await env.hub.close();
+    }
+  });
+
+  it('S1: independent receipts drain OLDEST first even when an older one was retried', async () => {
+    const env = await boot(5002);
+    try {
+      const pid = await product(env);
+      await openShift(env);
+      const s1 = await sellOk(env, pid);
+      env.driver.queueSubmitModes('offline');
+      await env.hub.fiscalWorker.runOnce(); // s1 → failed (backoff)
+      const s2 = await sellOk(env, pid);
+      const s3 = await sellOk(env, pid);
+      await tick(env);
+      expect(env.driver.ledgerKeys().filter((k) => !k.includes(':'))).toEqual([
+        s1.id,
+        s2.id,
+        s3.id,
+      ]);
+    } finally {
+      await env.hub.close();
+    }
+  });
+});
