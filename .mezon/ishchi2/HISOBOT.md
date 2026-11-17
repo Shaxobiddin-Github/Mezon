@@ -1,201 +1,282 @@
-# Hisobot: T3.2 — Qoidalar dvigateli (T3.2a + T3.2b, bitta PR)
+# Reja: T3.3 + T3.4 — Fiskal yadro va fiskal chek (bitta PR)
 
-Branch / PR: `ishchi2/T3.2-rules` / https://github.com/Shaxobiddin-Github/Mezon/pull/25
-Oxirgi kod commit'i: `bb5694c`.
-Asos: `main` = `89011bf` (T2.3) merge qilingan. Nazoratchi commit'lari: `7f83451` (T3.2a tasdig'i) va `79df8b8` (egasi javoblari).
+Branch: `ishchi2/T3.3-fiscal`. `main` dan ochilgan, T3.2 merge'idan keyin (`18d4a41`).
 Bajaruvchi: ishchi2.
+Holat: **REJA**. Kod yozilmagan, tasdiq kutilyapti.
 
-`79df8b8` dagi ruxsat bo'yicha T3.2b shu PR'ga qo'shildi. Hisobot bitta: `[ishchi2-hisobot] T3.2`.
+## T3.2 merge holati
+
+- PR #25 squash merge qilindi: `18d4a41 T3.2: Qoidalar dvigateli`. Tekshirilgan head: `944b81c`. Undagi to'rtala job yashil: Verify ubuntu, Verify windows, PG RLS va Detect. Desktop job `skipped`.
+- `git diff 944b81c origin/main --stat` bo'sh. `ishchi2/T3.2-rules` remote va lokalda o'chirildi.
+- Windows Verify ikki marta yiqildi, ikkalasi ham T1.7 dagi `customer.perf.test.ts` da: avval D4 testi 224 ms (chegara 100 ms), keyin 10k testi 30 s timeout. 10k testi bazani xom SQL bilan to'ldiradi va T3.2 kodini chaqirmaydi. Aynan shu kod bilan `f4c1675` yashil o'tgan edi. Shuning uchun buni runner sekinligi deb hisobladim va faqat Windows job'ini qayta ishga tushirdim. Test o'zgartirilmadi. Windows perf chegaralari flaky bo'lib qolsa, bu nazoratchining qarori.
+- Iltimos bajarildi: `claude/T4.6-i18n` → `main` PR #26 ochildi, merge qilinmadi.
+
+**Qat'iy qoida (§3.3):** operator, virtual kassa, OFD protokoli, endpoint, maydon nomlari va imzo jarayoni **o'ylab topilmaydi**. Hamma narsa `FiscalDriver` porti va `FakeFiscalDriver` orqali ishlaydi. Haqiqiy drayver T3.5 da, hujjat kelgach yoziladi. Driver javobidagi maydonlar (belgi, QR matni, raqam) **shaffof satrlar** sifatida saqlanadi va chop etiladi, ular kodda tahlil qilinmaydi.
+
+Ko'rib chiqilgan kod:
+- `return-repo.ts` (`assertSaleNotFiscalizedForVoidSync` ilgagi hozir bo'sh);
+- `day_closes.fiscal_status` (T1.9 dagi `not_fiscalized` / `pending` / `fiscalized`);
+- `escpos-encoder.ts` ("SINOV — FISKAL EMAS" banneri, QR yo'q);
+- `sync-push-worker.ts` (T2.3 dagi worker naqshi: `setTimeout`, backoff, `stop()`);
+- `contracts/src/sync.ts` dagi `MONOTONE_TRANSITION_RULES` va `apps/hub/src/monotone-parity.test.ts` (6 ta MONOTONE jadval);
+- `shift-repo.ts` (`openShift`, `closeShift`).
 
 ---
 
-## Git bo'yicha ochiq izoh (avval o'qing)
+## 0. Test qarzi (PR'ning birinchi commit'i, nazoratchining C3 va C4 mutatsiyalari)
 
-1. T2.3 `main` ga tushgach, men branch'ni `origin/main` ga **rebase** qildim. Rebase branch'dagi `[claude] 7f83451` va `[ishchi2-reja] bf6b080` commit'larini **lokal ravishda qayta yozdi**. Bu `[claude]` commit'larini rebase qilmaslik qoidasiga zid edi.
-2. Push paytida remote'da yangi `79df8b8` borligi sababli push rad etildi, shuning uchun qayta yozilgan tarix **hech qachon push qilinmadi**. Force push ham qilinmagan.
-3. Keyin branch'ni remote holatidan qayta tikladim: asos `origin/ishchi2/T3.2-rules` (`79df8b8`), unga `origin/main` **merge** qilindi (`3540c66`, tarix qayta yozilmaydi). Ishim cherry-pick bilan ustiga qo'yildi. Natijadagi kod daraxti rebase qilingan versiya bilan **aynan bir xil** (`git diff` bo'sh). Barcha `[claude]` commit'lari asl SHA'lari bilan turibdi.
-4. Shu sababli PR'da `origin/main` rebase emas, merge commit orqali kiritilgan. Squash merge'da bu ahamiyatsiz. Kelgusida `[claude]` commit'lari bor branch'da `main` ni yangilash uchun faqat merge ishlataman.
+- **C3:** bazadagi `local_rule_packages.package_version` qo'lda boshqa songa o'zgartiriladi, envelope'ga tegilmaydi. Kutilgan natija: `GET /rules/package/active` → `invalid`. Test kesh **to'lmagan** va **to'lgan** holatlarda ham yoziladi.
+- **C4:** paket bir marta yuklanadi (kesh to'ladi), keyin bazadagi `envelope_json` qo'lda buziladi. Kutilgan natija: keyingi yuklashda `invalid`. Kesh kalit sifatida envelope baytlarini **va** versiya ustunini ishlatishi kerak. Hozirgi kesh faqat envelope'ni solishtiradi, shuning uchun C3 kesh to'lgan holatda omon qoladi. Kalitga versiya ham qo'shiladi.
+- Ikkala mutatsiya qayta ishga tushirilib, natijasi hisobotga yoziladi.
 
 ---
 
-## Egasining javoblari bo'yicha o'zgarishlar (79df8b8, 1–6-bandlar)
+## 1. `fiscal_docs` modeli
 
-1. **Ijtimoiy karta olib tashlandi.** `SOCIAL_CARD_DATA_REQUIRED`, `socialCard` kirish maydonlari (domain, contracts, hub servislari), POS formasi, maskalash (`provider_meta_json`), log redaksiyasi va i18n matnlari olib tashlandi. Yangi sinxron ustun yoki jadval qo'shilmadi: `payments.provider_meta_json` yana `null` bo'lib yoziladi. **T3.2 uchun bulut jufti kerak emas.** Yagona yangi jadval `local_rule_packages` (LOCAL, sinxronlanmaydi), qolganlari `local_hub_config` ning ikkita LOCAL ustuni.
-2. **`EXPIRED_GOODS` faqat warn.**
-   - Aynan bugun tugaydigan partiya: topilma yo'q.
-   - Kecha va undan oldin tugagan partiya: warn, savdo davom etadi. Fiskal rejimda ham warn.
-   - Chegara mahalliy sana bo'yicha (`Asia/Tashkent`): 23:59:59.999 hali "bugun", 00:00 dan keyin warn.
-   - Mutatsiyalar: R17 (warn → block), R7 (`<` → `<=`), R8 (sana o'rniga lahza).
-3. **Retsept umuman yo'q.** `PRESCRIPTION_REQUIRED` kodi va `prescriptionRequired` paket maydoni olib tashlandi. Paketda bu maydon kelsa, `unknown field` deb rad etiladi (test bor).
-4. **Naqd limit formati:** `perMxikCashLimit: { limitTiyin, appliesTo: 'cash' | 'mxikTotal', inclusive, exempt } | null`. Kodda hech qanday limit raqami yo'q: testlarda sintetik 1 000 000 tiyin, hub testida 99 999 tiyin. Semantika (T3.2b) quyida.
-5. **`cashForbidden` qoldi** (aniq moslik va prefiks). Ro'yxat bo'sh bo'lsa, hech narsa bloklanmaydi (test bor).
-6. **Kalit egasida, paket barcha tashkilotlar uchun.**
-   - `PRODUCTION_TRUSTED_RULE_KEYS = []`, egasi kalit berguncha shunday qoladi (test bor).
-   - Payload'da `organizationId` yo'q, bunday maydon kelsa rad etiladi (test bor).
-   - Egasi uchun yo'riqnoma: `docs/rules-signing.md`. Unda `keygen`, `sign`, `verify` va import tartibi bor.
+**Jadval `fiscal_docs`:** sinf **MONOTONE**, tenant doirasi `store`. Har bir savdo yoki qaytarish uchun bitta hujjat bo'ladi.
 
-## T3.2b semantikasi (shu PR'da)
-
-- **`CASH_FORBIDDEN_MXIK` / `MIXED_RECEIPT_CASHLESS`:** chekda `cashForbidden` ga mos qator bo'lsa va `cash` to'lovi > 0 bo'lsa (hatto 1 tiyin), block. Hamma qator taqiqlangan bo'lsa, `CASH_FORBIDDEN_MXIK`; aralash chek bo'lsa, `MIXED_RECEIPT_CASHLESS`. Faqat naqdsiz to'lov bo'lsa, block yo'q.
-- **`MXIK_CASH_LIMIT`:** faqat `cash` > 0 bo'lganda tekshiriladi. Qatorlar MXIK bo'yicha guruhlanadi (bir MXIK'li bo'lingan qatorlar yig'iladi), `exempt` dagilar o'tkazib yuboriladi.
-  - `appliesTo: 'mxikTotal'`: MXIK'ning chekdagi umumiy summasi limit bilan taqqoslanadi.
-  - `appliesTo: 'cash'`: naqd summa (chek summasidan oshmaydigan qismi) qatorlarga `allocate` (eng katta qoldiq usuli) bilan proporsional taqsimlanadi va MXIK bo'yicha yig'iladi.
-  - `inclusive: true`: limitga teng summa ruxsat; `false`: teng summa ham block.
-
-## Qabul mezonlari
-
-- [x] **Chegara qiymatli jadval testlari.** `packages/rules/src/rules.test.ts`:
-  - "MXIK_CASH_LIMIT boundary table": `limit − 1` / `limit` / `limit + 1` × `inclusive` true/false × `appliesTo` cash/mxikTotal, jami 12 holat;
-  - proporsional naqd taqsimoti, bo'lingan qatorlar, ikki MXIK, `exempt`, naqdsiz to'lov;
-  - property testi: naqd ≤ limit bo'lsa, hech qachon block yo'q;
-  - naqd taqiqi: aniq va prefiks moslik, MXIK o'rtasidagi kod mos kelmasligi, 1 tiyin naqd, avans va karta naqd hisoblanmasligi, bo'sh ro'yxat;
-  - muddat chegarasi (yuqoridagi 2-band).
-- [x] **Imzosiz paket rad etiladi.** `apps/hub/src/rules.test.ts`, "signature attacks are rejected and nothing is stored", haqiqiy Ed25519 bilan:
-  - imzosiz paket → 400;
-  - payload'da bitta bayt o'zgartirilgan → `RULES_SIGNATURE_INVALID`;
-  - imzoda bitta bit o'zgartirilgan → `RULES_SIGNATURE_INVALID`;
-  - boshqa kalit bilan imzolangan → `RULES_SIGNATURE_INVALID`;
-  - konvertdagi `keyId` almashtirilgan → `RULES_SIGNATURE_INVALID`;
-  - ishonchsiz kalit → `RULES_KEY_UNTRUSTED`;
-  - hech qaysi holatda bazaga hech narsa yozilmaydi.
-  - Bunga qo'shimcha: kalitning amal qilish oynasi (rotatsiya) va bazada qo'lda o'zgartirilgan paket → `invalid`.
-- [x] **API, buyurtma va bot yo'llari ham bloklanadi.** Yagona nuqta `completeSaleCoreInTxSync` va majburiy `rulesEvaluator` porti:
-  - "cash ban: preview and final return the same code, a direct API call gets 422 with FULL rollback": to'g'ridan-to'g'ri API so'rovi 422 oladi; sales, stock_moves, cash_moves, receipt_seq va outbox o'zgarmaydi; karta bilan esa savdo o'tadi;
-  - "per-MXIK cash limit … blocks cart complete AND order deliver";
-  - "fiscal mode + missing package blocks cart complete AND order deliver".
-  - Bot alohida savdo yo'liga ega emas, `completeSale` orqali ishlaydi (§3.1.9).
-
-### Nazoratchi tuzatishlari (7f83451)
-
-- [x] **S11, majburiy port.** `CreateSqliteSaleStoreOptions.rulesEvaluator` va `CreateSqliteOrderStoreOptions.rulesEvaluator` majburiy, `CompleteSaleCoreInTxInput.rulesEvaluator` ham majburiy. Mutatsiyalar: R5 (noop evaluator) va R6 (deliver evaluator'ni chetlab o'tadi) aniqlandi.
-- [x] **S10.** Fiskal rejimda `missing` yoki `invalid` → block (R11).
-- [x] **Rollback himoyasi va zaxira.** "backup at v3, import v5, restore the backup → v4 is still rejected" testi: tiklashdan oldin joriy yuqori chegara `backups/rules-hwm-after-restore.json` ga yoziladi. Hub ishga tushganda migratsiyalardan keyin `recomputeMaxVersion(floor)` uni hisobga oladi, keyin fayl o'chiriladi. Bu T3.2 sxemasidan **oldingi** zaxira tiklansa ham ishlaydi (R13).
-- [x] **Migratsiya raqami.** `0017_rules_packages`, chunki `main` da `0016_sync_conflicts` bor. Drizzle generatsiya qilgan `INSERT … SELECT` dagi yangi ustunlar (`max_rule_package_version`, `fiscal_mode_enabled`) qo'lda `0, 0` literal qiymatlariga almashtirildi. `0013` da ham shu naqsh bor. `db:check`: 0 diff.
-- [x] **`trustedRuleKeys` faqat test va DI uchun.** `NODE_ENV=production` da `createHubServer` xato tashlaydi (R14). Test Electron worker manbalarida `trustedRuleKeys` yo'qligini tekshiradi.
-- [x] **Faol paket o'zgarishi bitta tranzaksiyada.** Parallel ikki import testi: oxirida faol paket v4 va faol qatorlar soni aynan 1 (R15).
-- [x] **CLI.** `keygen` repo ichidagi yo'lni rad etadi. Test **soxta repo ildizida** ishlaydi, shunda buzilgan himoya ham haqiqiy repoga kalit yoza olmaydi; bu 6-bo'limdagi voqeadan keyin qilingan o'zgarish. Kalit fayli `0600` rejimida va `wx` bilan yoziladi (mavjud faylni ustiga yozmaydi). Imzolash, tekshirish va hub'ga import zanjiri testda bor (R16).
-- [x] **UI.** Block bo'lsa "Yakunlash" o'chadi, sabab i18n orqali ko'rsatiladi (`RulesPanel`). Final tekshiruv hub'da: to'g'ridan-to'g'ri API so'rovi 422 oladi (yuqoridagi test).
-
-## O'zgargan fayllar (fayl — sabab)
-
-**Rules va contracts**
-
-| Fayl | Sabab |
+| Ustun | Ma'no |
 |---|---|
-| `packages/rules/src/{types,canonical,package,verify,evaluate,trusted-keys,index}.ts` | Dvigatel |
-| `rules.test.ts` | 39 ta test |
-| `packages/rules/package.json` | `fast-check` devDependency |
-| `packages/contracts/src/rules.ts` (yangi), `index.ts` | Wire Zod sxemalari va API DTO'lari |
-| `packages/domain/src/errors.ts` | `RULES_*` kodlari |
-| `packages/domain/src/auth.ts` | `rules:import` (owner, manager) |
+| `id` | UUIDv7 |
+| `organization_id`, `store_id` | tenant |
+| `doc_kind` | `'sale' \| 'refund'` |
+| `sale_id` | FK `sales` (`kind = 'sale'` bo'lsa) |
+| `return_id` | FK `returns` (`kind = 'refund'` bo'lsa) |
+| `idempotency_key` | `sale.id` yoki `return.id`; UNIQUE `(organization_id, idempotency_key)` |
+| `status` | `pending \| sent \| confirmed \| failed \| rejected` |
+| `attempts` | int ≥ 0 |
+| `last_error_code`, `last_error_message` | driver xatosi (matn) |
+| `sent_at_ms` | oxirgi yuborish oldidan yoziladi |
+| `confirmed_at_ms` | driver tasdig'i vaqti |
+| `fiscal_sign` | **shaffof** satr, driver javobidan |
+| `fiscal_number` | **shaffof** satr |
+| `qr_payload` | **shaffof** satr, QR'ga aynan shu chop etiladi |
+| `driver_id` | `'fake'` yoki keyin `'<hamkor>'` |
+| `offline_deadline_ms` | `created_at_ms + offline_window_ms` (konfiguratsiyadan) |
 
-**db-local**
+- **CHECK'lar:** `confirmed` bo'lsa, `fiscal_sign`, `fiscal_number` va `qr_payload` NOT NULL. Shu sababli driver javobisiz belgi bo'lmaydi, buni DB darajasida ham ta'minlayman. `doc_kind` va FK mosligi ham CHECK bilan tekshiriladi.
+- **Nega MONOTONE:** hujjat yaratiladi va faqat oldinga qarab o'zgaradi. Fiskal holat `sales` jadvalidan alohida turadi (`schema/index.ts` dagi izoh shuni talab qiladi), shuning uchun `sales` ning MONOTONE kafolati buzilmaydi.
+- **Sinxron:** jadval sinxronlanadi, chunki biznes kabineti fiskal holatni ko'rishi kerak. Bulut jufti **mening ishim** (ruxsat faqat o'z jadvalim uchun):
+  - `packages/db-cloud/src/schema/domain-tables.ts` ga jadval;
+  - bulut migratsiyasi;
+  - `packages/contracts/src/sync.ts` ga payload sxemasi va `MONOTONE_TRANSITION_RULES.fiscal_docs`.
+  - `sync-push-store.ts` va worker'ga tegmayman.
+- **Faqat bitta yozuvchi:** fiskal hujjatni faqat savdo qilingan hub o'zgartiradi. Bulut tasdiqni qabul qiladi, lekin o'zi holatni o'zgartirmaydi.
 
-| Fayl | Sabab |
-|---|---|
-| `schema/index.ts`, `drizzle/0017_rules_packages.sql`, `meta/*` | `local_rule_packages` va 2 ta config ustuni |
-| `rules-repo.ts` (yangi) | Import, rollback, conflict, high-water mark |
-| `sale-rules-port.ts` (yangi), `sale-repo.ts`, `order-repo.ts` | Majburiy evaluator porti; FIFO partiyalari muddati evaluator'ga uzatiladi |
-| `backup-service.ts` | Tiklashda high-water mark |
-| testlar va `test-utils/allow-all-rules.ts` | Qoidaga aloqasi yo'q db-local testlari uchun "hammasiga ruxsat" evaluator |
+---
 
-**Hub**
+## 2. Holat mashinasi
 
-| Fayl | Sabab |
-|---|---|
-| `rules-service.ts` (yangi) | Ed25519 verifier, qayta tekshiruv keshi, yagona `saleEvaluator` |
-| `rules-routes.ts` (yangi) | Uchta endpoint |
-| `server.ts` | Ulanish, prod guard, `recomputeMaxVersion` |
-| `error-handler.ts` | `RULES_BLOCKED` → 422 va boshqalar |
-| `package.json`, `tsconfig.json`, `.dependency-cruiser.cjs` | hub → rules ruxsati |
-| `rules.test.ts`, `rules-cli.test.ts` | Testlar |
+```
+pending ──(worker: sent yozildi)──► sent ──(driver OK)──────────► confirmed   [terminal]
+   ▲                                  │──(driver rad etdi)──────► rejected    [terminal → konflikt]
+   │                                  └──(uzilish / timeout / 5xx)► failed
+   └──────────(qayta urinish)──────────────────────────────────────┘
+failed ──(worker yoki manager "qayta yuborish")──► sent
+```
 
-**POS, CLI va hujjatlar**
+- Ruxsat etilgan o'tishlar: `pending→sent`, `sent→confirmed`, `sent→rejected`, `sent→failed`, `failed→sent`. Bulut jufti uchun `sent→sent` (attempts++) ham ruxsat.
+- **Taqiqlangan:** `confirmed` dan har qanday o'tish, `rejected` dan har qanday o'tish, `pending→confirmed` (`sent` siz tasdiq), orqaga qaytish.
+- **Bitta manba:** lokal SQLite `BEFORE UPDATE` triggerlari va bulutdagi `MONOTONE_TRANSITION_RULES.fiscal_docs` bitta jadvaldan (`FISCAL_DOC_TRANSITIONS` konstantasi `packages/domain`) olinadi. `monotone-parity.test.ts` ga **7-jadval** sifatida qo'shiladi: har bir ruxsatli o'tish ikkala tomonda o'tadi, har bir taqiqlangan o'tish ikkala tomonda rad etiladi.
+- **`rejected` → konflikt:** hujjat `rejected` bo'lsa, `local_sync_conflicts` ga emas, alohida fiskal konflikt ro'yxatiga tushadi (8-bo'limdagi UI). Qo'lda hal qilish **qaytarish orqali** bo'ladi. Bekor qilishga (void) yo'l yo'q, 5-bo'limga qarang.
 
-| Fayl | Sabab |
-|---|---|
-| `apps/pos/src/components/RulesPanel.tsx` (yangi), `PaymentAndShiftModals.tsx`, `api/hub-client.ts` | Panel, "Yakunlash" bloki, `rulesCheck` |
-| `packages/i18n/src/locales/uz-Latn.ts` | `rules.*`, `error.RULES_BLOCKED` |
-| `scripts/rules-sign.mjs`, `scripts/rules-sign-lib.mjs`, `docs/rules-signing.md`, `.gitignore` (`*.key`, `*.pem`, `*.pub.b64`) | CLI va yo'riqnoma |
+---
 
-Tegilmagan: `apps/cloud/**`, `packages/db-cloud/**`, `apps/hub/src/sync*`, `packages/contracts/src/sync.ts`. Yangi kutubxona qo'shilmadi: Ed25519 uchun `node:crypto` ishlatildi.
+## 3. Navbat va idempotentlik
 
-## Rejadan chetlanishlar
+**Fon worker'i:** `apps/hub/src/fiscal-worker.ts`, T2.3 dagi `HubSyncPushWorker` naqshida (`setTimeout`, eksponensial backoff, `stop()`). Ketma-ketlik:
 
-- **POS paketni o'zi baholamaydi.** U `POST /carts/:id/rules-check` ni chaqiradi, bu endpoint ham aynan o'sha `evaluate` ni ishlatadi. Sabab: UI'da imzo tekshiruvi yo'q, ishonch chegarasi hub. Shuning uchun POS'ga `@mezon/rules` bog'liqligi kerak emas.
-- **Final tekshiruv nuqtasi.** U FIFO partiyalari ajratilgandan **keyin**, to'lovlar yozilishidan **oldin** turadi, chunki muddat uchun partiyalar kerak. `sale-repo.ts` dagi eski izohda "receipt_no dan oldin" deyilgan edi. Block bo'lsa hammasi bitta tranzaksiyada qaytariladi: `receipt_seq` o'zgarmasligi test bilan isbotlangan.
+1. **Tanlash:** `pending` yoki `failed` hujjatlar, eng eskisidan.
+2. **Ochiq qolgan `sent` hujjat bo'lsa:** worker uni **qayta yubormaydi**. Avval `driver.status(idempotencyKey)` ni so'raydi. Bunday hujjat avvalgi urinishda javob kelmasdan qolgan bo'ladi (qulash yoki uzilish). Javobga qarab:
 
-## Mutatsiya dalillari
+   | `status` javobi | Natija |
+   |---|---|
+   | `confirmed` va maydonlar | `confirmed` |
+   | `unknown` | `failed`, keyin oddiy qayta urinish |
+   | `rejected` | `rejected` |
+   | uzilish | `sent` qoladi, backoff |
 
-Har mutatsiya bitta matnli o'zgarish. Kerakli paket qayta build qilinadi, testlar ishga tushiriladi, keyin fayl qaytariladi. **22 tadan 22 tasi aniqlandi.**
+3. **Yuborish:** `UPDATE … SET status = 'sent', attempts = attempts + 1, sent_at_ms = now` **alohida tranzaksiyada commit qilinadi** (WAL, `synchronous = FULL`). Shundan **keyingina** `driver.submitReceipt(doc)` chaqiriladi.
+4. **Javob:** natija alohida tranzaksiyada yoziladi. `confirmed` bo'lsa, shaffof maydonlar va outbox hodisasi bilan.
 
-| # | Mutatsiya | Yiqilgan test(lar) |
+**Ikki marta fiskallashtirmaslik isboti:**
+- Driver'ga har doim `idempotencyKey = sale.id` yuboriladi. Haqiqiy operator ham shu kalit bo'yicha takrorni aniqlashi kerak, bu T3.5 hujjatida tekshiriladi.
+- Hub tomonda driver faqat `sent` commit qilingandan keyin chaqiriladi. `sent` holatdagi hujjat esa **faqat `status()` orqali** davom ettiriladi. Shuning uchun driver hech qachon bir kalit bilan ikki marta `submit` olmaydi, agar `status` "yo'q" demagan bo'lsa.
+- Bitta worker bir vaqtda bitta hujjatni oladi: hub ichida mutex. Ikkinchi worker instansiyasi bo'lmaydi.
+
+**`FakeFiscalDriver`** (`packages/drivers/src/fiscal/fake-driver.ts`):
+- Xotiradagi daftar `idempotencyKey → natija`.
+- Takroriy `submit` kelsa, yangi fiskal belgi **berilmaydi**, birinchi natija qaytariladi, `submitCount` hisoblagichi oshadi (testlar shuni tekshiradi).
+- Rejimlar: `ok`, `reject`, `timeout`, `throw-after-accept` (driver qabul qilgan, lekin javob yo'qolgan holat), `offline`.
+- Belgilar: `SINOV-…` prefiksli, QR matni `SINOV|…`. Haqiqiy formatga o'xshatilmaydi.
+
+**Qulash testi:** child process (T1.4 dagi C1 testi naqshida):
+- (a) `sent` commit qilingandan keyin va driver chaqirilishidan **oldin** o'ldiriladi;
+- (b) driver `accept` qilgandan keyin, lekin javob yozilishidan oldin o'ldiriladi. Fake driver daftari faylda saqlanadi, shunda u qulashdan keyin ham "ko'rinadi".
+
+Qayta ishga tushgach worker `status()` ni so'raydi: (a) da `unknown`, keyin yuboradi; (b) da `confirmed` qaytadi va **qayta yubormaydi**. Ikkala holatda ham `submitCount` kalit uchun ≤ 1.
+
+---
+
+## 4. Savdo oqimi (§3.2 uzluksizlik)
+
+- **Savdo driver'ni hech qachon kutmaydi.** `completeSaleCoreInTxSync` ichida, fiskal rejim yoqiq bo'lsa, o'sha tranzaksiyada `fiscal_docs(status = 'pending')` yoziladi (§3.1.10 dagi atomiklik). Driver chaqiruvi tranzaksiyadan tashqarida, worker'da bo'ladi.
+- **Variantlar:**
+
+  | | Variant A (taklif) | Variant B |
+  |---|---|---|
+  | Chek | darhol chiqadi, `pending` bo'lsa "FISKAL KUTILMOQDA" bilan; tasdiqdan keyin fiskal nusxa qayta chop etilishi mumkin | tasdiqni N soniya kutadi |
+  | §3.2 | buzilmaydi | internet yo'qligi savdoni sekinlashtiradi, buzadi |
+
+  **Variant A ni taklif qilaman.**
+- **Oflayn muddat** `local_hub_config.fiscal_offline_window_ms` da saqlanadi. Standart qiymat 24 soat, `[TASDIQLANSIN]` belgisi bilan (2019-yil loyihasi). U API orqali o'zgartirilmaydi, faqat konfiguratsiyadan.
+  - Muddatning 75% o'tganda: `GET /fiscal/status` va POS'da ogohlantirish.
+  - **Muddat o'tib ketganda:** taklifim — yangi savdo bloklanadi (`FISCAL_OFFLINE_EXPIRED`, `rules` dagi kabi `block`), faqat fiskal rejimda. Sabab: qonuniy talab, §3.2 ham "qonuniy qoida to'xtata oladi" deydi. Bu qonuniy masala, shuning uchun **S1** savoli bilan egasidan tasdiq so'rayman. Javob kelguncha muddat faqat ogohlantiradi.
+- **`completeSale` integratsiyasi:** fiskal rejim **o'chiq** bo'lsa, `fiscal_docs` yozilmaydi (hozirgi xatti-harakat). Fiskal rejim T3.3 da faqat testlarda va owner'ning maxsus endpoint'i orqali yoqiladi (6-bo'lim).
+
+---
+
+## 5. Bekor qilish va qaytarish
+
+- **`void`** (`assertSaleNotFiscalizedForVoidSync`):
+
+  | `fiscal_docs` holati | Natija |
+  |---|---|
+  | `confirmed`, yoki `sent` (natija noma'lum) | `FISCALIZED_SALE_CANNOT_VOID`, faqat qaytarish mumkin |
+  | `pending` (hali yuborilmagan) | void mumkin; hujjat **o'sha tranzaksiyada** yakuniy holatga o'tadi (taklif: yangi terminal holat `cancelled`, `pending→cancelled`) va worker uni olmaydi |
+  | `failed` | `status()` javobi noma'lum, shuning uchun xavfsiz tomon: void taqiqlanadi, qaytarish orqali (taklif) |
+  | `rejected` | void mumkin, chunki operator qabul qilmagan (taklif, **S2**) |
+
+- **Qaytarish:** fiskallashgan (`confirmed`) savdo qaytarilsa, o'sha tranzaksiyada `fiscal_docs(kind = 'refund', idempotency_key = return.id, status = 'pending')` yoziladi. Worker uni `driver.submitRefund` ga yuboradi, oqim xuddi savdodagidek.
+- **Fiskallashmagan savdoni qaytarish:** refund hujjati yaratilmaydi. Asl savdo `pending` yoki `failed` bo'lsa, qaytarish **ruxsat etilmaydi**, toki savdo hujjati yakuniy holatga kelmaguncha (`FISCAL_SALE_NOT_SETTLED`). Bu ikki xil holat aralashib ketmasligi uchun. **S3** savoli.
+
+---
+
+## 6. Fiskal rejim
+
+- **MXIK'siz qator** fiskal rejimda **block** bo'ladi. T3.2 dan qolgan bo'shliq: `rules/evaluate` da `MXIK_MISSING` fiskal rejimda `block`ga ko'chadi, oddiy rejimda warn qoladi. Shu bilan limit guruhidan chetda qolgan MXIK'siz qator muammosi ham yopiladi.
+- **Smena:**
+  - `openShift` fiskal rejimda `driver.openShift()` ni chaqiradi;
+  - `closeShift` → `driver.closeShift()` (Z-hisobot);
+  - natija `day_closes.fiscal_status` / `fiscal_report_no` ga yoziladi (bu ustunlar T1.9 da mavjud).
+  - **§3.2:** driver javob bermasa, smena ochilish yoki yopilishi **bloklanmaydi**: smena operatsiyasi navbatga (`pending`) tushadi va worker davom ettiradi. Ochilmagan fiskal smena paytida savdo qilinishi mumkinmi — **S4** savoli. Hujjat kelguncha taxmin qilmayman, hozircha bloklamayman.
+- **Rejimni yoqish:** `PUT /fiscal/mode` faqat **owner** uchun (yangi ruxsat `fiscal:mode`). Oldinga shartlar:
+  - imzolangan rules paketi `ok` holatda;
+  - driver `status()` ga javob beradi;
+  - MXIK'siz faol mahsulotlar soni = 0 (ogohlantirish emas, rad etish).
+  - Har bir yoqish yoki o'chirish **audit** sifatida outbox hodisasi bo'ladi (`fiscal_mode.changed`, `userId` bilan). T3.8 dagi to'liq audit jurnaliga keyin ulanadi.
+  - **GEMINI.md F3 yakuni:** haqiqiy fiskal ishga tushirish faqat egasining yozma tasdig'i bilan. Shuning uchun `FakeFiscalDriver` bilan rejim yoqiq bo'lsa ham chekda "SINOV — FISKAL EMAS" saqlanadi (7-bo'lim).
+
+---
+
+## 7. T3.4 — Fiskal chek
+
+- **Maydonlar konfiguratsiyadan:** `local_hub_config.fiscal_receipt_fields_json`, `[TASDIQLANSIN]` (2019-yil loyihasi). Format:
+  ```json
+  [{ "key": "fiscalSign", "label": "FB" }, { "key": "fiscalNumber", "label": "FD" }]
+  ```
+  Ro'yxat **kodda yo'q**; testlar sintetik ro'yxat ishlatadi. Ruxsat etilgan `key` qiymatlari faqat `fiscal_docs` dagi shaffof maydonlar: `fiscalSign`, `fiscalNumber`, `confirmedAt`, `driverId`, shuningdek tashkilot STIR'i (T3.1).
+- **QR:** ESC/POS `GS ( k` buyrug'i (model 2, xato tuzatish M). Bu printer standarti, fiskal API emas. QR'ga `qr_payload` **aynan** joylanadi. Printer drayveri (`escpos-encoder.ts`) kengaytiriladi, `qrPayload` bo'sh bo'lsa QR chiqmaydi.
+- **Belgi qoidasi:**
+
+  | Holat | Chekdagi belgi |
+  |---|---|
+  | `confirmed` va konfiguratsiyadagi **barcha** maydonlar mavjud | "FISKAL CHEK" va fiskal maydonlar, QR |
+  | `confirmed`, lekin biror maydon yetishmaydi | "FISKAL CHEK" **chiqmaydi**, "FISKAL MA'LUMOT TO'LIQ EMAS" chiqadi |
+  | `pending`, `sent` yoki `failed` | "FISKAL KUTILMOQDA" |
+  | fiskal rejim o'chiq yoki `rejected` | "FISKAL EMAS" |
+  | Fake drayver (har qanday holat) | qo'shimcha ravishda "SINOV — FISKAL EMAS" (§3.3) |
+
+- **Bayt snapshot testlari:** 58 va 80 mm qog'ozda `confirmed`, `pending`, `failed`, maydon yetishmagan holat, `rejected` va QR. Mavjud `escpos-encoder.test.ts` naqshida.
+- **Qayta chop etish:** tasdiqdan keyin hujjat `confirmed` bo'lsa, `POST /sales/:id/print` fiskal nusxani chiqaradi. NUSXA belgisi T1.12 dagidek ishlaydi.
+
+---
+
+## 8. UI
+
+- **Chek ekrani:** fiskal holat belgisi (kutilmoqda, tasdiqlandi, xato, rad etildi), qisqa so'rov bilan yangilanadi.
+- **"Fiskallashmagan cheklar" ekrani** (manager va owner): `pending`, `failed`, `rejected` ro'yxati, oflayn muddatgacha qolgan vaqt. "Qayta yuborish" tugmasi `failed→sent` ni worker navbatining boshiga qo'yadi (manager). `rejected` uchun "qaytarish orqali hal qilish" ko'rsatmasi.
+- Smena va POS sarlavhasida oflayn muddat ogohlantirishi.
+- Barcha matnlar i18n orqali. **T4.6** `main` ga birinchi tushsa, har yangi `uz-Latn` kaliti uchun `RU_MESSAGES` ga ruscha tarjima ham qo'shaman.
+
+---
+
+## 9. Testlar va mutatsiya rejasi
+
+**Domain va drivers (unit):**
+- `FISCAL_DOC_TRANSITIONS` jadvali: har ruxsatli va taqiqlangan o'tish;
+- `FakeFiscalDriver` idempotentligi: 100 ta takroriy `submit` → 1 ta belgi;
+- QR bayt kodlovchisi: uzunlik baytlari, 0 va 7089 chegara qiymatlari.
+
+**db-local:**
+- `fiscal_docs` CHECK'lari: `confirmed` maydonlarsiz bo'lmaydi;
+- triggerlar;
+- `completeSale` fiskal rejimda `pending` yozadi, rollback'da yozmaydi;
+- void va qaytarish gate'lari (5-bo'limdagi jadval).
+
+**Hub integratsiya:**
+- worker: OK, reject, timeout → `failed` → qayta urinish → `confirmed`;
+- `throw-after-accept` → `status()` → `confirmed`, `submitCount = 1`;
+- uzilish paytida savdo davom etadi;
+- oflayn muddat ogohlantirishi;
+- `PUT /fiscal/mode` RBAC (manager 403) va oldinga shartlar;
+- MXIK'siz qator fiskal rejimda 422;
+- smena ochish va yopish driver bilan, driver ishlamaganda ham smena bloklanmaydi.
+
+**Qulash:** 3-bo'limdagi child process testlari (a) va (b).
+
+**Monotone pariteti:** `fiscal_docs` 7-jadval sifatida.
+
+**Bulut:** `sync-schema-parity.test.ts` va bulut migratsiyasi (`fiscal_docs` uchun PG testlari CI'da).
+
+**Bayt snapshot:** 7-bo'lim.
+
+**Mutatsiyalar** (nazoratchi talab qilganlar va qo'shimchalar):
+
+| # | Mutatsiya | Kutilgan |
 |---|---|---|
-| R1 | Kanonik JSON kalitlarni saralamaydi | canonical golden va property |
-| R2 | `keyId` imzolanadigan matnda yo'q | "signed message … includes keyId" |
-| R3 | Imzo natijasi e'tiborsiz qoldiriladi | hub: imzo hujumlari va bazada o'zgartirilgan paket; rules: verify |
-| R4 | Rollback tekshiruvi olib tashlanadi | rollback/idempotent/conflict testi va zaxira testi |
-| R5 | Hub evaluator'i noop | fiskal + paket yo'q, naqd taqiqi, limit, buzilgan paket |
-| R6 | Deliver evaluator'ni chetlab o'tadi | fiskal + deliver, limit + deliver |
-| R7 | Muddat `<` → `<=` | muddat chegarasi |
-| R8 | Muddat sana o'rniga lahza bilan taqqoslanadi | muddat chegarasi |
-| R11 | Fiskal rejim e'tiborsiz qoldiriladi | §8 holatlari, hub fiskal testlari |
-| R12 | Bazadagi paket qayta tekshirilmaydi | "tampered in the DB … invalid" |
-| R13 | High-water mark tiklashdan o'tmaydi | zaxira testi |
-| R14 | Prod guard olib tashlanadi | `NODE_ENV=production` testi |
-| R15 | Eski paket nofaol qilinmaydi | rollback/active testi, zaxira testi |
-| R16 | CLI repo ichiga kalit yozishga ruxsat beradi | keygen rad etish testi |
-| R17 | `EXPIRED_GOODS` warn o'rniga block | rules: muddat (3), property; hub: muddat warn testi |
-| R18 | `inclusive` ma'nosi teskari | chegara jadvali (7) |
-| R19 | `appliesTo: 'cash'` e'tiborsiz qoldiriladi | proporsional taqsimot va property |
-| R20 | `exempt` e'tiborsiz qoldiriladi | split/two/exempt testi |
-| R21 | Prefiks moslik o'rniga substring | prefiks chegarasi (MXIK o'rtasidagi kod) |
-| R22 | `advance` naqd hisoblanadi | naqdsiz to'lov usullari testi |
-| R23 | Aralash chek bloklanmaydi | only/mixed testi |
-| R24 | Bo'lingan qatorlar yig'ilmaydi | split testi va boundary |
+| F1 | `sent` yozilmasdan driver'ga yuborish | qulash testi (a) va `submitCount` |
+| F2 | Uzilishdan keyin `status` so'ramasdan qayta yuborish | `throw-after-accept` testi, `submitCount = 2` |
+| F3 | `confirmed → pending` ruxsat etiladi | trigger va parity testi |
+| F4 | Fiskal chekni `void` qilishga ruxsat | void gate testi |
+| F5 | Maydon yetishmasa ham "FISKAL CHEK" chiqadi | bayt snapshot |
+| F6 | MXIK'siz qator fiskal rejimda o'tadi | hub 422 testi |
+| F7 | `confirmed` CHECK olib tashlanadi (belgisiz tasdiq) | DB testi |
+| F8 | Fake driver takroriy `submit` da yangi belgi beradi | idempotentlik testi |
+| F9 | `pending` hujjat savdo tranzaksiyasidan tashqarida yoziladi | rollback testi |
+| F10 | Manager fiskal rejimni yoqa oladi | RBAC testi |
+| F11 | Oflayn muddat ogohlantirishi o'chiriladi | muddat testi |
+| C3, C4 | T3.2 qarzlari | 0-bo'lim |
 
-R21 birinchi ishga tushirishda **omon qoldi**: testda MXIK o'rtasida kod uchraydigan holat yo'q edi. `10099910000000000` holatini qo'shdim, endi aniqlanadi. R15 birinchi urinishda sessiya uzilishi sabab yakunlanmadi (6-bo'limga qarang), qayta ishga tushirilganda aniqlandi.
+---
 
-## Test natijasi
+## 10. Bog'liqliklar va fayllar
 
-`pnpm verify` (lokal):
+| Joy | Fayl |
+|---|---|
+| `packages/domain` | `fiscal.ts`: holatlar, `FISCAL_DOC_TRANSITIONS`, belgi qoidasi (toza funksiya `resolveReceiptFiscalMark`) |
+| `packages/drivers` | `fiscal/fiscal-driver.ts` (port interfeysi), `fiscal/fake-driver.ts`; `printer/escpos-encoder.ts` ga QR va belgi qatorlari |
+| `packages/contracts` | `fiscal.ts` (API DTO), `sync.ts` (faqat `fiscal_docs` payload sxemasi va transition qoidasi) |
+| `packages/db-local` | sxema, migratsiya (`main` dagi oxirgi raqamdan keyingi bo'sh raqam, hozir `0018`, chunki `main` dagi oxirgisi `0017`. PR dan oldin `main` merge qilinadi va raqam qayta tekshiriladi), `fiscal-repo.ts`, `sale-repo.ts` / `return-repo.ts` / `shift-repo.ts` gate'lari |
+| `packages/db-cloud` | faqat `fiscal_docs` jadvali va migratsiyasi |
+| `apps/hub` | `fiscal-worker.ts`, `fiscal-service.ts`, `fiscal-routes.ts`, `printer-service.ts` (fiskal belgi va QR) |
+| `apps/pos` | chek holati va fiskallashmagan cheklar ekrani |
+| `packages/rules` | `MXIK_MISSING` fiskal rejimda block |
 
-```
-format:check  All matched files use Prettier code style!
-build         Tasks: 17 successful, 17 total
-typecheck     Tasks: 28 successful, 28 total
-db:check      Tasks: 19 successful, 19 total
-test:unit     Test Files 92 passed (92)   Tests 522 passed (522)      ← f54ad2c, Docker bilan
-test:unit     Test Files 85 passed | 7 skipped   Tests 464 passed | 58 skipped  ← bb5694c, Docker ishlamayotgan edi
-test:perf     Test Files 9 passed (9)    Tests 12 passed (12)
-test:e2e      1 passed
-depcruise     ✔ no dependency violations found (461 modules, 1989 dependencies cruised)
-EXIT=0
-```
+- depcruise o'zgarmaydi: `drivers` faqat `domain` ni import qiladi, hub `drivers` dan foydalanadi.
+- Yangi kutubxona kerak emas: QR uchun printerning o'zi `GS ( k` ni bajaradi, rasm generatsiyasi kerak emas.
+- **Hajm:** katta, lekin nazoratchi bitta PR so'radi. Ichida bosqichma-bosqich commit'lar bo'ladi: qarz → model va holat mashinasi → worker → savdo, void va qaytarish → smena va rejim → chek va QR → UI.
 
-- `bb5694c` (faqat bitta test qo'shilgan) uchun ishga tushirishda Docker Desktop kompyuter qayta ishga tushganidan keyin ishlamayotgan edi. Shuning uchun PG testlari skip bo'ldi, ular CI'da ishlaydi.
-- Bir marta `EBUSY` xatosi chiqdi: repo OneDrive papkasida, OneDrive `node_modules` fayllarini qulflaydi. Qayta ishga tushirilganda yashil bo'ldi.
+---
 
-**CI (PR #25):** hisobot yozilgan paytda to'rtala job ishlayotgan edi. Natijani PR'da ko'rasiz. Qizil chiqsa, tuzataman.
+## Savol
 
-## Tekshirilmagan narsalar va xavflar
+Egasi yoki nazoratchi qarori kerak bo'lgan savollar.
 
-- **Supplier E4 model testi** (`supplier.test.ts`, ichki timeout 20 s) og'ir parallel yuklama ostida ikki marta 20,8 s bilan yiqildi. Uchinchi to'liq ishga tushirishda va undan keyingi barcha ishga tushirishlarda o'tdi. Alohida ishlaganda 4,3 s, yuklama ostida 12–14 s. Bu chegaraga yaqin "flaky" holat. Testning timeout'iga tegmadim. Sabab yuklama ekani kuzatildi, lekin baseline bilan aniq solishtirilmadi.
-- POS paneli uchun Playwright E2E yozilmadi. Paneldagi mantiq hub endpoint'iga tayanadi va u integratsion testlar bilan qoplangan.
-- Ed25519 brauzerda tekshirilmaydi (rejadagi qaror).
+Barcha savollar nazoratchi orqali yuboriladi. "(egasi)" belgisi javob egasidan kelishi kerakligini bildiradi.
 
-## Qilingan taxminlar (nazoratchi ko'rib chiqsin)
-
-1. **Faqat `cash` usuli naqd hisoblanadi.** `advance` (avvalgi avans), qarz (nasiya), `card`, `uzqr` va boshqalar naqd emas. S3 javobida avans va nasiya haqida aniq gap yo'q edi (R22 bu tanlovni qotiradi).
-2. **`appliesTo: 'mxikTotal'` faqat chekda naqd bo'lganda qo'llanadi.** Butunlay naqdsiz chek limitga tushmaydi, chunki bu "naqd" limiti.
-3. **`appliesTo: 'cash'` taqsimoti** chekdagi barcha qatorlar bo'yicha `finalTotal` ga proporsional (eng katta qoldiq usuli). Naqd chek summasidan oshsa (qaytim), chek summasi bilan cheklanadi.
-4. **Muddati o'tgan tovar paketsiz ham warn beradi.** Paketda `expiredGoods.enabled = false` bo'lsa, o'chiriladi.
-
-## Savollar
-
-- 1–3-taxminlar to'g'rimi? Ayniqsa `appliesTo` rejimlarining aniq ma'nosi egasida hali ochiq (S4).
-
-## 6. Sessiya uzilishi va kalit fayllari haqida (shaffoflik uchun)
-
-- Mutatsiya R16 birinchi ishga tushirilganda buzilgan `keygen` repo ildiziga ikkita **test** kalit faylini (`rules-signing.key`, `.pub.b64`) yozdi. `.gitignore` sabab ular git'ga kirmadi. Topildi va o'chirildi. Shundan keyin test soxta repo ildiziga o'tkazildi, endi bu takrorlanmaydi. Hech qanday kalit commit qilinmagan.
-- Sessiya R15 mutatsiyasi paytida uzildi va `rules-repo.ts` buzilgan holda qolib ketdi. Qayta ulangach `git diff` bilan aniqlandi, `git checkout` bilan tiklandi va paket qayta build qilindi. Commit'larda buzilgan kod yo'q.
+- **S1 (egasi):** oflayn muddat (24 soat `[TASDIQLANSIN]`) o'tib ketsa, fiskal rejimda yangi savdo bloklanadimi (taklif) yoki faqat ogohlantirish chiqadimi?
+- **S2 (nazoratchi):** `rejected` chekni void qilishga ruxsat beriladimi (taklif: ha, operator qabul qilmagan) yoki faqat qaytarish orqalimi?
+- **S3 (nazoratchi):** fiskal holati yakunlanmagan (`pending` / `failed`) savdoni qaytarish bloklanadimi (taklif), yoki refund hujjati asl hujjat yakunlanishini kutib navbatda turadimi?
+- **S4 (egasi):** fiskal smena driver'da ochilmagan bo'lsa (oflayn), savdo qilish mumkinmi? Hujjat kelguncha bloklamayman.
+- **S5 (nazoratchi):** `void` qilingan `pending` hujjat uchun yangi terminal holat `cancelled` qo'shishga ruxsat beriladimi (spetsifikatsiyada 5 ta holat bor)? Muqobil yo'l: hujjatni o'chirmasdan `rejected` deb belgilash, lekin bu holat ma'nosini buzadi.
