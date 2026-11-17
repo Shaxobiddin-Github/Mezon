@@ -1,3 +1,38 @@
+# Qo'shimcha (17-noyabr, 2): egasining S1, S4 javoblari va bitta PR
+
+## S1 — oflayn muddat o'tsa (egasi javobi)
+
+"Ogohlantirish chiqsin. Internet qaytsa sinxronlansin, ma'lumotlar saqlanishi kerak, ish jarayoni to'xtamasligi kerak. Internet yo'q vaqtdagini birdaniga yozaman deb qotib ham qolmasligi kerak."
+
+**Qaror:**
+
+1. Muddat o'tganda savdo **bloklanmaydi**. Faqat ogohlantirish chiqadi (POS sarlavhasi va `GET /fiscal/status`).
+2. Hujjatlar `fiscal_docs` da saqlanadi, hech narsa yo'qolmaydi.
+3. **Navbatni bo'shatish kassani qotirmasligi kerak.** Internet qaytganda yuzlab `pending` hujjat bo'lishi mumkin. Worker:
+   - ularni **bittadan**, eng eskisidan boshlab yuboradi;
+   - har hujjatni qisqa, alohida tranzaksiyada yozadi;
+   - driver chaqiruvi hech qachon SQLite yozish tranzaksiyasi ichida bo'lmaydi;
+   - hujjatlar orasida event loop'ga navbat beradi (`setImmediate`). Navbat kattaligidan qat'i nazar, savdo so'rovi kutib qolmaydi.
+4. **Test:** 500 ta `pending` hujjat va sekin Fake drayver (har chaqiruv 50 ms). Worker navbatni bo'shatayotgan paytda 20 ta savdo bajariladi. Har savdoning javob vaqti navbat bo'sh bo'lgandagi bilan bir xil chegarada (masalan p95 < 300 ms, perf loyihasida), barcha 500 hujjat oxirida `confirmed`. Bu testni mutatsiya bilan tekshir: driver chaqiruvini tranzaksiya ichiga ko'chirish testni yiqitishi kerak.
+
+Konfiguratsiya bayrog'i (`fiscal_offline_expired_action = 'warn'`) qolsin, standart qiymati `warn`. `block` qiymati kelajakda qonun talab qilsa ishlatiladi, hozir hech qayerda yoqilmaydi.
+
+## S4 — fiskal smena ochilmagan bo'lsa (egasi javobi)
+
+"Ha, vaziyatga qarab."
+
+**Qaror:** savdo **ruxsat**, ogohlantirish bilan. Smena ochish driver'da navbatda turadi, internet qaytganda ochiladi. Smenadagi cheklar undan keyin yuboriladi: worker tartibni saqlaydi (avval `openShift`, keyin cheklar, oxirida `closeShift`). Konfiguratsiya bayrog'i: `fiscal_shift_not_open_action = 'warn'`, standart `warn`.
+
+## Windows perf testlari
+
+Oldingi xabarimda "o'zim qilaman" degan edim. Bu CI tekshiruvini kamaytiradi va egasining roziligi kerak, hozircha hech narsa o'zgarmaydi. Perf testi yana tebransa, faqat Windows job'ini qayta ishga tushir.
+
+## PR iltimosi
+
+`gemini/T2.4-sync-pull` dan `main` ga PR och: `T2.4: Sinxron pull va pozitsiya dvigateli`. Migratsiya `0018` ga ko'chirilgan, `main` merge qilingan, uni men olib boryapman. Merge qilma. PR raqamini keyingi hisobotingga yoz.
+
+---
+
 # Nazoratchi xulosasi (ishchi2): T3.3+T3.4 rejasi — TASDIQLANDI (tuzatishlar bilan)
 
 T3.2 merge'i to'g'ri bajarildi: `main` daraxti `944b81c` ga teng. PR #26 ochilgani uchun rahmat.
