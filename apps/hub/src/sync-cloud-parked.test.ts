@@ -71,7 +71,7 @@ describe('T2.6 hub proxy for the cloud side of parked pushes', () => {
       const calls: { url: string; init: RequestInit }[] = [];
       let nextStatus = 200;
       const fetchFn: typeof fetch = (url, init) => {
-        calls.push({ url: String(url), init: init ?? {} });
+        calls.push({ url: url as string, init: init ?? {} });
         const body = init?.method === 'POST' ? { parked: parkedRow } : { parked: [parkedRow] };
         return Promise.resolve(new Response(JSON.stringify(body), { status: nextStatus }));
       };
@@ -105,7 +105,7 @@ describe('T2.6 hub proxy for the cloud side of parked pushes', () => {
       const userId = parseUuidV7('01995000-0000-7000-8000-000000000004');
       await svc.resolve({ id: parkedRow.id, action: 'retry', note: 'qayta', userId });
       expect(calls[1].url).toBe(`https://cloud.test/api/v1/sync/parked/${parkedRow.id}/resolve`);
-      expect(JSON.parse(String(calls[1].init.body))).toEqual({
+      expect(JSON.parse(calls[1].init.body as string)).toEqual({
         action: 'retry',
         userId,
         note: 'qayta',
