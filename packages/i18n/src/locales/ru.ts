@@ -383,6 +383,7 @@ export const RU_MESSAGES: Readonly<Record<I18nKey, string>> = {
   'admin.customers.balance': 'Баланс долга:',
   'admin.customers.overdue': 'Просрочено:',
   'admin.customers.notes': 'Заметка:',
+  'admin.customers.overpaid': 'Переплата: {amount} (деньги клиента)',
   'admin.report.title': 'Ежедневный отчёт о продажах',
   'admin.report.subtitle': 'Выручка, НДС, наличные и безналичные оплаты, валовая прибыль по дням',
   'admin.report.from': 'С:',

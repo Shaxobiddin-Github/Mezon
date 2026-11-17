@@ -10,6 +10,15 @@ import { describeApiError, formatDateTime, formatSom } from '../utils/format.js'
 
 /** A customer balance is the amount the customer owes; shown as debt (red) when non-zero. */
 function debt(tiyin: string): React.ReactNode {
+  // A negative balance is an overpayment (two stores took the same debt offline): the customer's
+  // money, not a debt (P1/S6).
+  if (tiyin.startsWith('-')) {
+    return (
+      <span className="text-emerald-700">
+        {t('admin.customers.overpaid', { amount: formatSom(tiyin.slice(1)) })}
+      </span>
+    );
+  }
   return tiyin !== '0' ? (
     <span className="text-red-600">{formatSom(tiyin)}</span>
   ) : (

@@ -378,6 +378,7 @@ export const UZ_LATN_MESSAGES = {
   'admin.customers.balance': 'Qarz balansi:',
   'admin.customers.overdue': "Muddati o'tgan:",
   'admin.customers.notes': 'Eslatma:',
+  'admin.customers.overpaid': "Ortiqcha to'lov: {amount} (mijoz haqqi)",
   'admin.report.title': 'Kunlik savdo hisoboti',
   'admin.report.subtitle': "Har kun bo'yicha tushum, QQS, naqd va naqdsiz to'lov, yalpi foyda",
   'admin.report.from': 'Dan:',
