@@ -14,6 +14,8 @@ export interface HubSyncPullWorkerOptions {
   readonly fetchFn?: typeof fetch;
   readonly minBackoffMs?: number;
   readonly maxBackoffMs?: number;
+  /** Events per pull page (cloud caps it). Default 100. */
+  readonly pageSize?: number;
 }
 
 export interface PullBatchResult {
@@ -43,6 +45,8 @@ export class HubSyncPullWorker {
   private inFlight = false;
   private currentBackoffMs = 0;
 
+  private readonly pageSize: number;
+
   constructor(options: HubSyncPullWorkerOptions) {
     this.pullService = options.pullService;
     this.cloudStore = options.cloudStore;
@@ -53,6 +57,7 @@ export class HubSyncPullWorker {
     this.fetchFn = options.fetchFn ?? globalThis.fetch;
     this.minBackoffMs = options.minBackoffMs ?? 1000;
     this.maxBackoffMs = options.maxBackoffMs ?? 60000;
+    this.pageSize = options.pageSize ?? 100;
   }
 
   isRunning(): boolean {
@@ -151,7 +156,7 @@ export class HubSyncPullWorker {
     if (cursorPairs.length > 0) {
       queryParams.set('cursors', cursorPairs.join(','));
     }
-    queryParams.set('limit', '100');
+    queryParams.set('limit', String(this.pageSize));
     const pullUrl = `${cloudState.cloudUrl}/api/v1/sync/pull?${queryParams.toString()}`;
 
     let response: Response;

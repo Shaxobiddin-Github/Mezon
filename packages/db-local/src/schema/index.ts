@@ -3075,7 +3075,12 @@ export const localSyncApplyState = localSchemaRegistry.defineTable(
   (common) => ({
     ...common,
     inSync: sqliteInt('in_sync').notNull().default(0),
+    /** T2.5: initial load from the cloud: none, in_progress (resumable), done. */
+    bootstrapState: text('bootstrap_state').notNull().default('none'),
+    bootstrapPages: sqliteInt('bootstrap_pages').notNull().default(0),
   }),
+  // No CHECK on the T2.5 columns: adding one would make SQLite rebuild this table, which the
+  // sales closed-shift trigger references. The values are written only by HubSyncBootstrap.
   (self) => [check('chk_local_sync_apply_state_in_sync', sql`${self.inSync} IN (0, 1)`)],
 );
 

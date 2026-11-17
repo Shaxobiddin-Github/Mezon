@@ -28,6 +28,8 @@ ALTER TABLE `__new_local_customer_balances` RENAME TO `local_customer_balances`;
 PRAGMA foreign_keys=ON;--> statement-breakpoint
 CREATE UNIQUE INDEX `uidx_local_customer_balances_cust` ON `local_customer_balances` (`customer_id`);--> statement-breakpoint
 CREATE INDEX `idx_local_customer_balances_org_due` ON `local_customer_balances` (`organization_id`,`balance`,`earliest_open_due_at_ms`,`customer_id`);--> statement-breakpoint
+ALTER TABLE `local_sync_apply_state` ADD `bootstrap_state` text DEFAULT 'none' NOT NULL;--> statement-breakpoint
+ALTER TABLE `local_sync_apply_state` ADD `bootstrap_pages` integer DEFAULT 0 NOT NULL;--> statement-breakpoint
 CREATE TABLE `__new_local_sync_conflicts` (
 	`id` text PRIMARY KEY NOT NULL,
 	`organization_id` text NOT NULL,

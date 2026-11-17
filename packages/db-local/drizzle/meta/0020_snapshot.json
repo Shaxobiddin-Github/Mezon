@@ -1,7 +1,7 @@
 {
   "version": "6",
   "dialect": "sqlite",
-  "id": "d4670623-4204-476e-a466-968454b78456",
+  "id": "d53f20f2-a887-4318-a86d-1cefd6772310",
   "prevId": "120d22b8-155b-42b3-8061-7be6e4a8bbd5",
   "tables": {
     "batches": {
@@ -5737,6 +5737,22 @@
         },
         "in_sync": {
           "name": "in_sync",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false,
+          "default": 0
+        },
+        "bootstrap_state": {
+          "name": "bootstrap_state",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false,
+          "default": "'none'"
+        },
+        "bootstrap_pages": {
+          "name": "bootstrap_pages",
           "type": "integer",
           "primaryKey": false,
           "notNull": true,
