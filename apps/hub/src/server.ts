@@ -19,6 +19,7 @@ import {
   createSqliteCartStore,
   createSqliteCatalogStore,
   createSqliteRulesStore,
+  SqliteFiscalStore,
   createSqliteTaxSettingsStore,
   createSqliteCustomerStore,
   createSqliteHubAuthStore,
@@ -46,11 +47,14 @@ import {
 } from '@mezon/domain';
 import {
   CryptoRandomSource,
+  FakeFiscalDriver,
+  type FiscalDriver,
   SystemClock,
   type DiscoveredWindowsPrinter,
   type PrinterConfig,
   type PrinterDriver,
 } from '@mezon/drivers';
+import { FileFakeFiscalLedgerStore } from '@mezon/drivers/node';
 import Fastify, { type FastifyBaseLogger, type FastifyInstance } from 'fastify';
 import type { DestinationStream, LevelWithSilent } from 'pino';
 import { Argon2PinHasher } from './argon2-pin-hasher.js';
@@ -78,6 +82,9 @@ import { HubSyncPushWorker } from './sync-push-worker.js';
 import { PRODUCTION_TRUSTED_RULE_KEYS, type TrustedRuleKey } from '@mezon/rules';
 import { registerRulesRoutes } from './rules-routes.js';
 import { HubRulesService, nodeEd25519RulesVerifier } from './rules-service.js';
+import { registerFiscalRoutes } from './fiscal-routes.js';
+import { HubFiscalService } from './fiscal-service.js';
+import { HubFiscalWorker, type HubFiscalWorkerOptions } from './fiscal-worker.js';
 
 export interface CreateHubServerOptions {
   readonly dbPath: string;
@@ -111,6 +118,16 @@ export interface CreateHubServerOptions {
    * `PRODUCTION_TRUSTED_RULE_KEYS`; passing this under NODE_ENV=production throws.
    */
   readonly trustedRuleKeys?: readonly TrustedRuleKey[];
+  /**
+   * T3.3 fiscal driver (DI). Only `FakeFiscalDriver` exists until T3.5 (§3.3); the default is a fake
+   * driver whose ledger lives next to the database so it survives restarts.
+   */
+  readonly fiscalDriver?: FiscalDriver;
+  /** TEST ONLY: fiscal worker timing / seams. */
+  readonly fiscalWorkerOptions?: Pick<
+    HubFiscalWorkerOptions,
+    'statusRecheckMs' | 'minBackoffMs' | 'maxBackoffMs' | '__afterSentCommitted'
+  >;
 }
 
 export interface HubServer {
@@ -121,6 +138,9 @@ export interface HubServer {
   readonly taxSettingsStore: SqliteTaxSettingsStore;
   readonly rulesStore: SqliteRulesStore;
   readonly rulesService: HubRulesService;
+  readonly fiscalStore: SqliteFiscalStore;
+  readonly fiscalService: HubFiscalService;
+  readonly fiscalWorker: HubFiscalWorker;
   readonly stockStore: SqliteStockStore;
   readonly cartStore: SqliteCartStore;
   readonly saleStore: SqliteSaleStore;
@@ -184,6 +204,9 @@ export async function createHubServer(options: CreateHubServerOptions): Promise<
   let taxSettingsStore: SqliteTaxSettingsStore;
   let rulesStore: SqliteRulesStore;
   let rulesService: HubRulesService;
+  let fiscalStore: SqliteFiscalStore;
+  let fiscalService: HubFiscalService;
+  let fiscalWorker: HubFiscalWorker;
   let stockStore: SqliteStockStore;
   let cartStore: SqliteCartStore;
   let saleStore: SqliteSaleStore;
@@ -279,6 +302,39 @@ export async function createHubServer(options: CreateHubServerOptions): Promise<
       // Rollback high-water mark is never below any stored package (also after backup restore).
       await rulesStore.recomputeMaxVersion(consumeRulesHwmAfterRestore(backupDir));
     }
+    fiscalStore = new SqliteFiscalStore({
+      connection,
+      getRuntimeContext: () => {
+        const ctx = store.getActiveRuntimeContext();
+        return ctx
+          ? { uow: ctx.uow, organizationId: ctx.config.organizationId, storeId: ctx.config.storeId }
+          : null;
+      },
+    });
+    const fiscalDriver =
+      options.fiscalDriver ??
+      new FakeFiscalDriver({
+        ledgerStore: new FileFakeFiscalLedgerStore(
+          path.join(path.dirname(options.dbPath), 'fake-fiscal-ledger.json'),
+        ),
+      });
+    fiscalWorker = new HubFiscalWorker({
+      store: fiscalStore,
+      driver: fiscalDriver,
+      nowMs: () => BigInt(clock.now()),
+      logger,
+      ...(options.fiscalWorkerOptions ?? {}),
+    });
+    fiscalService = new HubFiscalService({
+      store: fiscalStore,
+      connection,
+      driver: fiscalDriver,
+      worker: fiscalWorker,
+      rulesService,
+      nowMs: () => BigInt(clock.now()),
+      getOrganizationId: () => store.getActiveRuntimeContext()?.config.organizationId ?? null,
+      logger,
+    });
     // C1: Hub never injects `__testHooks` into SqliteSaleStore in production/server runtime
     saleStore = createSqliteSaleStore({
       connection,
@@ -499,6 +555,7 @@ export async function createHubServer(options: CreateHubServerOptions): Promise<
       taxSettingsStore,
     );
     registerRulesRoutes(app, authService, rulesService, cartService, () => BigInt(clock.now()));
+    registerFiscalRoutes(app, authService, fiscalService);
     options.registerExtraTestRoutes?.(app);
 
     let boundPort: number | null = securityConfig.port > 0 ? securityConfig.port : null;
@@ -511,6 +568,9 @@ export async function createHubServer(options: CreateHubServerOptions): Promise<
       taxSettingsStore,
       rulesStore,
       rulesService,
+      fiscalStore,
+      fiscalService,
+      fiscalWorker,
       stockStore,
       cartStore,
       saleStore,
@@ -551,6 +611,7 @@ export async function createHubServer(options: CreateHubServerOptions): Promise<
         }
         // R6: Automatically start outbox push worker when hub listens
         pushWorker.start();
+        fiscalWorker.start();
         return {
           host: DEFAULT_HUB_HOST,
           port: boundPort ?? securityConfig.port,
@@ -559,6 +620,7 @@ export async function createHubServer(options: CreateHubServerOptions): Promise<
       async close() {
         try {
           pushWorker.stop();
+          fiscalWorker.stop();
           await app.close();
         } finally {
           connection.close();
