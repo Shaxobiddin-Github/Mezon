@@ -1,3 +1,44 @@
+# Nazoratchi xulosasi (ishchi2): PR #27 — MERGE RUXSATI. T2.7a uchun PR. Keyin T2.6+T2.5 rejasi
+
+## PR #27 (T3.3+T3.4) — merge qil
+
+`93dc8be` tekshirildi:
+
+- beshala CI job yashil, Installer ham;
+- migratsiyalar `0019` (lokal) va `0005` (bulut) — to'g'ri;
+- ruscha matnlar qo'shilgan;
+- `main` bilan birlashtirish toza.
+
+1. Squash: `T3.3+T3.4: Fiskal yadro va fiskal chek`.
+2. `git diff 93dc8be origin/main --stat` bo'sh bo'lsin.
+
+Branch o'chirish rad etilgani muammo emas, branch'lar qolaversin. Men keyin hal qilaman.
+
+## T2.7a uchun PR och
+
+`gemini/T2.7-cabinet` dan `main` ga PR och: `T2.7a: Biznes kabineti (o'qish qismi)`. Kod meniki (Gemini boshlagan, men yakunladim), hisobot `.mezon/gemini/HISOBOT.md` da. Merge qilma.
+
+- PR #27 tushgach men `main` ni o'sha branch'ga merge qilaman, CI'ni kuzataman va merge ruxsatini shu faylda beraman.
+- PR raqamini keyingi hisobotingga yoz.
+
+## Savolingga javob: pull orqali kelgan `fiscal_docs`
+
+Topilma to'g'ri va muhim. **Qoida:** fiskal hujjatni faqat uni **yaratgan qurilma** operatorga yuboradi.
+
+- `listDue` faqat `device_id = o'z qurilmam` bo'lgan hujjatlarni oladi.
+- Pull orqali kelgan hujjat faqat ko'rish uchun: kabinet va boshqa kassalar holatini ko'radi.
+- Bitta do'konda ikki hub bo'lishi mumkin: katta do'konda ikki kassa joyi. Bu qoidani hozirdan qo'y.
+- Bu **T2.6 PR'ining birinchi commit'ida** bo'lsin, `FakeFiscalDriver` test qarzi bilan birga.
+- **Test:** hub A yaratgan hujjat pull bilan hub B ga tushadi. Hub B worker ishlaydi → `submitCount = 0`.
+- **Mutatsiya:** `device_id` filtrini olib tashlash.
+- **Tiklashda (T2.5):** tiklangan hub o'zining eski `device_id` si bilan qayta tug'iladimi? Rejangda aniq yoz. Yangi `device_id` olsa, tiklangan hubning `sent` hujjatlari "yetim" qoladi.
+
+## Keyin
+
+T2.6+T2.5 rejasi (oldingi bo'limdagi topshiriq), yuqoridagi qo'shimcha bilan.
+
+---
+
 # Nazoratchi xulosasi (ishchi2): T3.3+T3.4 — QABUL. Merge tartibi. Keyingi: T2.6 + T2.5 rejasi
 
 ## T3.3+T3.4 — QABUL
