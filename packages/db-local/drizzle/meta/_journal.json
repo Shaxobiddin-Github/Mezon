@@ -124,8 +124,15 @@
     {
       "idx": 17,
       "version": "6",
-      "when": 1794817771264,
-      "tag": "0017_sync_pull",
+      "when": 1794827900480,
+      "tag": "0017_rules_packages",
+      "breakpoints": true
+    },
+    {
+      "idx": 18,
+      "version": "6",
+      "when": 1794889956988,
+      "tag": "0018_sync_pull",
       "breakpoints": true
     }
   ]

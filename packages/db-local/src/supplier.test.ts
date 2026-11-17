@@ -18,7 +18,7 @@ import {
   quantityToMilli,
   unixMsFromBigInt,
 } from '@mezon/domain';
-import { FixedClock, SeededRandomSource } from '@mezon/test-utils';
+import { FixedClock, SeededRandomSource, allowAllSaleRulesEvaluator } from '@mezon/test-utils';
 import { eq } from 'drizzle-orm';
 import { afterEach, describe, expect, it } from 'vitest';
 import {
@@ -129,7 +129,11 @@ async function setupSupplierEnv(options?: {
   const catalogStore = createSqliteCatalogStore({ connection, getRuntimeContext: getOrgCtx });
   const stockStore = createSqliteStockStore({ connection, getRuntimeContext: getStoreCtx });
   const cartStore = createSqliteCartStore({ connection, getRuntimeContext: getStoreCtx });
-  const saleStore = createSqliteSaleStore({ connection, getRuntimeContext: getStoreCtx });
+  const saleStore = createSqliteSaleStore({
+    connection,
+    rulesEvaluator: allowAllSaleRulesEvaluator,
+    getRuntimeContext: getStoreCtx,
+  });
   const supplierStore = createSqliteSupplierStore({ connection, getRuntimeContext: getStoreCtx });
   const shiftStore = createSqliteShiftStore({ connection, getRuntimeContext: getStoreCtx });
   await shiftStore.openShift({

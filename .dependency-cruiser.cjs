@@ -149,7 +149,7 @@ module.exports = {
     {
       name: 'hub-src-imports',
       comment:
-        'apps/hub source files can only import internal files, domain, contracts, db-local, drivers, sync, fastify, pino, @node-rs/argon2, zod, and node builtins (never db-cloud)',
+        'apps/hub source files can only import internal files, domain, contracts, db-local, drivers, sync, rules, fastify, pino, @node-rs/argon2, zod, and node builtins (never db-cloud)',
       severity: 'error',
       from: {
         path: '^apps/hub/src/',
@@ -157,7 +157,7 @@ module.exports = {
       },
       to: {
         pathNot:
-          '^(apps/hub/src/|packages/(domain|contracts|db-local|drivers|sync)/|node_modules/(\\.pnpm/)?(fastify|pino|@node-rs/argon2|@node-rs\\+argon2|zod|exceljs)@|(node:)?(crypto|fs|path|stream)$)',
+          '^(apps/hub/src/|packages/(domain|contracts|db-local|drivers|sync|rules)/|node_modules/(\\.pnpm/)?(fastify|pino|@node-rs/argon2|@node-rs\\+argon2|zod|exceljs)@|(node:)?(crypto|fs|path|stream)$)',
       },
     },
     {

@@ -55,6 +55,61 @@ export interface PostRestoreRebuildResult {
   readonly totalNetSalesTiyin: bigint;
 }
 
+/** T3.2: file (in the backups dir) carrying the rules rollback high-water mark across a restore. */
+export const RULES_HWM_AFTER_RESTORE_FILE = 'rules-hwm-after-restore.json';
+
+/**
+ * Reads max(config high-water mark, stored package versions) from a raw DB handle, tolerating
+ * databases created before the T3.2 schema (returns 0n when the columns/tables do not exist).
+ */
+export function readRuleMaxVersionRaw(db: Database.Database): bigint {
+  let max = 0n;
+  try {
+    const row = db
+      .prepare<[], { readonly v: unknown }>(
+        'SELECT max_rule_package_version AS v FROM local_hub_config LIMIT 1',
+      )
+      .get();
+    if (row && row.v !== null && row.v !== undefined) {
+      const v = BigInt(row.v as string | number | bigint);
+      if (v > max) max = v;
+    }
+  } catch {
+    // pre-T3.2 schema
+  }
+  try {
+    const row = db
+      .prepare<[], { readonly v: unknown }>(
+        'SELECT max(package_version) AS v FROM local_rule_packages',
+      )
+      .get();
+    if (row && row.v !== null && row.v !== undefined) {
+      const v = BigInt(row.v as string | number | bigint);
+      if (v > max) max = v;
+    }
+  } catch {
+    // pre-T3.2 schema
+  }
+  return max;
+}
+
+/**
+ * Consumes the post-restore high-water mark file (if any) and returns its value (0n when absent).
+ * The hub calls this AFTER migrations and passes it to `SqliteRulesStore.recomputeMaxVersion`.
+ */
+export function consumeRulesHwmAfterRestore(backupDir: string): bigint {
+  const file = path.join(backupDir, RULES_HWM_AFTER_RESTORE_FILE);
+  if (!fs.existsSync(file)) {
+    return 0n;
+  }
+  const parsed = JSON.parse(fs.readFileSync(file, 'utf8')) as {
+    readonly maxRulePackageVersion?: unknown;
+  };
+  fs.unlinkSync(file);
+  const raw = parsed.maxRulePackageVersion;
+  return typeof raw === 'string' && /^[0-9]{1,19}$/.test(raw) ? BigInt(raw) : 0n;
+}
+
 export interface BackupServiceOptions {
   readonly connection: LocalSqliteConnection;
   readonly dbPath: string;
@@ -401,6 +456,17 @@ export class SqliteBackupService {
             last_hlc: typeof row.last_hlc === 'string' ? row.last_hlc : '',
             last_uuid_ms: BigInt((row.last_uuid_ms as string | number) ?? 0),
           };
+        }
+
+        // T3.2: carry the rules rollback high-water mark across the restore (the restored file may
+        // predate newer imports or even the rules schema). Applied by the hub after migrations.
+        const ruleMax = readRuleMaxVersionRaw(curDb);
+        if (ruleMax > 0n) {
+          fs.writeFileSync(
+            path.join(options.backupDir, RULES_HWM_AFTER_RESTORE_FILE),
+            JSON.stringify({ maxRulePackageVersion: ruleMax.toString() }),
+            'utf8',
+          );
         }
 
         // B1: Complete backup using better-sqlite3 backup API

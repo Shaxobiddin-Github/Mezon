@@ -7,3 +7,4 @@ export {
   type DeterministicUuidV7GeneratorOptions,
   FixedIdGenerator,
 } from './fake-id-generator.js';
+export { allowAllSaleRulesEvaluator } from './allow-all-rules.js';
