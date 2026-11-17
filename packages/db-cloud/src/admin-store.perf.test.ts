@@ -194,6 +194,7 @@ describePg('@mezon/db-cloud - AdminReadStore at volume (A5)', () => {
         `products page ${products.ms.toFixed(1)} ms`,
     );
     expect(low.value.length).toBeGreaterThan(0);
+    expect(low.ms).toBeLessThan(1500);
     expect(products.ms).toBeLessThan(200);
   });
 });

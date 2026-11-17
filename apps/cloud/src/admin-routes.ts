@@ -5,7 +5,8 @@ import {
   AdminReceiptsQuerySchema,
   type CloudLoginRequestDto,
   CloudLoginRequestSchema,
-  DailySalesReportQuerySchema,
+  AdminDailyReportQuerySchema,
+  AdminStoreScopeQuerySchema,
 } from '@mezon/contracts';
 import { AdminReadStore, type CloudAuthStore, type CloudPgConnection } from '@mezon/db-cloud';
 import {
@@ -361,7 +362,14 @@ export async function registerAdminRoutes(
   // 4. GET /api/v1/admin/dashboard
   app.get('/api/v1/admin/dashboard', { preHandler: [requireAdminAuth] }, async (req, reply) => {
     const user = req.user!;
-    const query = req.query as { storeId?: string; tz?: string };
+    const parsed = AdminStoreScopeQuerySchema.safeParse(req.query);
+    if (!parsed.success) {
+      return reply.code(400).send({
+        error: 'Validation Error',
+        details: parsed.error.flatten(),
+      });
+    }
+    const query = parsed.data;
     const storeId = query.storeId ? parseUuidV7(query.storeId) : undefined;
 
     const metrics = await adminStore.getDashboard({
@@ -393,7 +401,7 @@ export async function registerAdminRoutes(
   // 5. GET /api/v1/admin/reports/daily (A1 Report parity)
   app.get('/api/v1/admin/reports/daily', { preHandler: [requireAdminAuth] }, async (req, reply) => {
     const user = req.user!;
-    const parseResult = DailySalesReportQuerySchema.safeParse(req.query);
+    const parseResult = AdminDailyReportQuerySchema.safeParse(req.query);
     if (!parseResult.success) {
       return reply.code(400).send({
         error: 'Validation Error',
@@ -401,8 +409,7 @@ export async function registerAdminRoutes(
       });
     }
     const q = parseResult.data;
-    const rawQuery = req.query as { storeId?: string; tz?: string };
-    const storeId = rawQuery.storeId ? parseUuidV7(rawQuery.storeId) : undefined;
+    const storeId = q.storeId ? parseUuidV7(q.storeId) : undefined;
 
     const rep = await adminStore.getDailySalesReport({
       organizationId: user.org,
@@ -410,7 +417,7 @@ export async function registerAdminRoutes(
       fromDate: q.fromDate,
       toDate: q.toDate,
       limit: q.limit,
-      tz: rawQuery.tz,
+      tz: q.tz,
       includeCostAndProfit: true,
     });
 
@@ -653,8 +660,14 @@ export async function registerAdminRoutes(
     { preHandler: [requireAdminAuth] },
     async (req, reply) => {
       const user = req.user!;
-      const query = req.query as { storeId?: string };
-      const storeId = query.storeId ? parseUuidV7(query.storeId) : undefined;
+      const parsed = AdminStoreScopeQuerySchema.safeParse(req.query);
+      if (!parsed.success) {
+        return reply.code(400).send({
+          error: 'Validation Error',
+          details: parsed.error.flatten(),
+        });
+      }
+      const storeId = parsed.data.storeId ? parseUuidV7(parsed.data.storeId) : undefined;
 
       const items = await adminStore.getLowStockItems(user.org, storeId);
 
