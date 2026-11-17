@@ -1,3 +1,35 @@
+# Tekshiruv so'rovi (17-noyabr): PR #29 (T2.7a) va C1
+
+P1 ishini to'xtatma. Bu ikkita tekshiruvni P1 orasida qil, ular `main` ga tushish navbatini kutib turibdi.
+
+## Tekshiruv so'rovi: PR #29 — T2.7a biznes kabineti (o'qish)
+
+- **Branch:** `gemini/T2.7-cabinet`, oxirgi commit `110c406` (`main` + T3.3 birlashtirilgan).
+- **Hisobot:** `.mezon/gemini/HISOBOT.md`. Gemini boshlagan, men yakunlaganman. Topilgan 10 xato va 12 mutatsiya o'sha yerda.
+- **Toifa:** chuqur (auth, pul hisobotlari, RLS).
+- **Ayniqsa qara:**
+  1. refresh rol va holatni bazadan o'qiydi (`auth-refresh-claims.test.ts`) — T2.1 dagi teshik;
+  2. `report-parity.test.ts`: bulut hisoboti va dashboard kassa formulasiga tiyinigacha teng. Test haqiqatan ma'lumotni ko'rayotganini tekshir;
+  3. `cloudErrorHandler`: 500 ichki xabarni ochmasligi;
+  4. `admin-store.perf.test.ts` raqamlari.
+- **Xulosa:** `.mezon/ishchi2/TEKSHIRUV.md`, `[ishchi2-tekshiruv] PR #29`, `gemini/T2.7-cabinet` branch'iga. QABUL va yashil CI bo'lsa, o'zing merge qil: squash `T2.7a: Biznes kabineti (o'qish qismi)`.
+
+## Tekshiruv so'rovi: C1 — T2.8 Telegram bot va T3.9 pilot hujjatlari
+
+- **Branch:** `claude/C1-telegram-pilot`, oxirgi commit `b57f0aa`. T2.7a ustiga qurilgan.
+- PR'ni **#29 merge bo'lgach** och (base `main`): `C1: Telegram bot va pilot hujjatlari`. Shunda diff faqat C1 ni ko'rsatadi.
+- **Hisobot:** `.mezon/claude/HISOBOT.md`, oxirida "ishchi2 uchun tekshiruv so'rovi" bo'limi bor.
+- **Toifa:** chuqur (webhook auth, bir martalik kodlar, SECURITY DEFINER funksiyalar, mijozga xabar va rozilik).
+- **Xulosa:** `.mezon/ishchi2/TEKSHIRUV.md`, `[ishchi2-tekshiruv] C1`, `claude/C1-telegram-pilot` branch'iga.
+
+## Bulut migratsiya raqamlari
+
+- `main`: `0005_fiscal_docs`.
+- C1: `0006_telegram_bot`.
+- P1 da bulut migratsiyasi bo'lsa, C1 dan keyingi bo'sh raqamni ol (`0007`). Kim keyin merge bo'lsa, o'sha `main` ni merge qilib raqamni qayta yaratadi.
+
+---
+
 # YANGI ISH TARTIBI (17-noyabr, egasi qarori) — avval shuni o'qi
 
 Gemini loyihadan chiqarildi. Endi ikki ishchi bor: **sen (ishchi2)** va **men (Claude)**. Ikkalamiz ham Opus 5.5. Egasining talabi: **tezroq**, mayda vazifalarni birlashtirib, kutib o'tirmasdan.
