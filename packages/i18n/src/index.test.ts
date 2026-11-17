@@ -68,7 +68,7 @@ describe('T4.6 locales', () => {
       const leftover = cyrl[key]
         .replace(/\{\w+\}/g, '')
         .replace(
-          /\b(F\d{1,2}|Enter|Esc|Delete|SKU|UzQR|Payme|Click|Uzum|Humo|Uzcard|Hub|Renderer|Mezon|Owner|Manager|username|cash_in|cash_out|C)\b/g,
+          /\b(F\d{1,2}|Enter|Esc|Delete|SKU|UzQR|Payme|Click|Uzum|Humo|Uzcard|Hub|Renderer|Mezon|Guzar|Owner|Manager|username|cash_in|cash_out|C)\b/g,
           '',
         )
         .replace(/\/health/g, '');

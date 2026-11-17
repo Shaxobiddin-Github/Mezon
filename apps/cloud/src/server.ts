@@ -25,6 +25,7 @@ import {
   type SyncPullResponseDto,
 } from '@mezon/contracts';
 import {
+  AdminReadStore,
   CloudAuthStore,
   CloudDeviceStore,
   CloudSyncPushStore,
@@ -35,6 +36,7 @@ import {
   type VerifiedDeviceContext,
   assertNonSuperuserNonBypassRls,
 } from '@mezon/db-cloud';
+import { registerAdminRoutes } from './admin-routes.js';
 import {
   MIN_CLIENT_VERSION,
   SyncPushRequestSchema,
@@ -53,7 +55,12 @@ import {
 import cors from '@fastify/cors';
 import rateLimit from '@fastify/rate-limit';
 import * as argon2 from '@node-rs/argon2';
-import Fastify, { type FastifyInstance, type FastifyReply, type FastifyRequest } from 'fastify';
+import Fastify, {
+  type FastifyInstance,
+  type FastifyReply,
+  type FastifyRequest,
+  type FastifyError,
+} from 'fastify';
 import type { CloudConfig } from './config.js';
 import { type CloudJwtPayload, CloudJwtService } from './jwt.js';
 
@@ -72,6 +79,7 @@ export interface BuildServerOptions {
   readonly tenantStore?: CloudTenantStore;
   readonly deviceStore?: CloudDeviceStore;
   readonly syncPushStore?: CloudSyncPushStore;
+  readonly adminStore?: AdminReadStore;
   readonly syncPullStore?: CloudSyncPullStore;
   readonly idGen?: { nextId(): UuidV7 };
   readonly clock?: { nowMs(): UnixMs };
@@ -79,6 +87,19 @@ export interface BuildServerOptions {
 
 const FIVE_MINUTES_MS = 5 * 60 * 1000;
 const THIRTY_DAYS_MS = 30 * 24 * 60 * 60 * 1000;
+
+/**
+ * Server errors are logged in full but never sent to the client: Fastify's default handler put the
+ * raw message (SQL column names, PG error codes) into the 500 body.
+ */
+export function cloudErrorHandler(err: FastifyError, req: FastifyRequest, reply: FastifyReply) {
+  const statusCode = typeof err.statusCode === 'number' ? err.statusCode : 500;
+  if (statusCode >= 500) {
+    req.log.error({ err }, 'Unhandled server error');
+    return reply.code(500).send({ error: 'Internal Server Error' });
+  }
+  return reply.code(statusCode).send({ error: err.name, code: err.code, message: err.message });
+}
 
 export async function buildCloudServer(options: BuildServerOptions): Promise<FastifyInstance> {
   const { config, conn } = options;
@@ -91,6 +112,7 @@ export async function buildCloudServer(options: BuildServerOptions): Promise<Fas
   const tenantStore = options.tenantStore ?? new CloudTenantStore(conn.pool);
   const deviceStore = options.deviceStore ?? new CloudDeviceStore(conn.pool);
   const syncPushStore = options.syncPushStore ?? new CloudSyncPushStore(conn.pool);
+  const adminStore = options.adminStore ?? new AdminReadStore({ pool: conn.pool });
   const syncPullStore = options.syncPullStore ?? new CloudSyncPullStore(conn.pool);
   const defaultIdGen: IdGenerator = new MonotonicUuidV7Generator({
     clock: { now: () => unixMsFromBigInt(BigInt(Date.now())) },
@@ -111,11 +133,15 @@ export async function buildCloudServer(options: BuildServerOptions): Promise<Fas
           'refreshToken',
           'token',
           'secret',
+          'phone',
+          'body.phone',
         ],
         censor: '[REDACTED]',
       },
     },
   });
+
+  app.setErrorHandler(cloudErrorHandler);
 
   // CORS
   await app.register(cors, {
@@ -200,7 +226,7 @@ export async function buildCloudServer(options: BuildServerOptions): Promise<Fas
         return reply.code(401).send({ error: 'Unauthorized', message: 'Invalid credentials' });
       }
 
-      if (lookup.userStatus === 'blocked') {
+      if (lookup.userStatus !== 'active') {
         return reply.code(403).send({ error: 'Forbidden', message: 'User account is suspended' });
       }
 
@@ -322,7 +348,7 @@ export async function buildCloudServer(options: BuildServerOptions): Promise<Fas
     const newExpiresAtMs = unixMsFromBigInt(BigInt(nowMs) + BigInt(THIRTY_DAYS_MS));
 
     try {
-      const { userId } = await authStore.rotateRefreshToken({
+      const rotated = await authStore.rotateRefreshToken({
         organizationId: orgId,
         oldTokenHash: oldHash,
         newTokenId: nextTokenId,
@@ -331,12 +357,12 @@ export async function buildCloudServer(options: BuildServerOptions): Promise<Fas
         nowMs,
       });
 
-      // Issue new access token
+      // S1: claims are re-read from the user row on every refresh.
       const newAccessToken = await jwtService.signAccessToken({
-        sub: userId,
+        sub: rotated.userId,
         org: orgId,
-        role: 'owner', // Default claim; tenant context restricts database access anyway
-        name: 'Authorized User',
+        role: rotated.role,
+        name: rotated.userName,
       });
 
       const newRefreshToken = `${orgId}.${nextSecret}`;
@@ -396,7 +422,7 @@ export async function buildCloudServer(options: BuildServerOptions): Promise<Fas
       id: auth.sub,
       organizationId: auth.org,
       username: auth.name,
-      role: auth.role,
+      role: auth.role as 'owner' | 'manager',
     };
 
     return reply.code(200).send({ user });
@@ -838,6 +864,15 @@ export async function buildCloudServer(options: BuildServerOptions): Promise<Fas
     return reply.code(200).send(result);
   });
 
+  // Admin Cabinet API routes (T2.7a)
+  await registerAdminRoutes(app, {
+    config,
+    conn,
+    jwtService,
+    authStore,
+    adminStore,
+    clock,
+  });
   // GET /api/v1/sync/pull (Hub sync pull engine - T2.4)
   app.get<{ Querystring: { cursors?: string; limit?: string } }>(
     '/api/v1/sync/pull',

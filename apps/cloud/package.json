@@ -26,6 +26,7 @@
     "zod": "4.6.7"
   },
   "devDependencies": {
+    "@mezon/db-local": "workspace:*",
     "@mezon/test-utils": "workspace:*",
     "@testcontainers/postgresql": "^12.2.1",
     "@types/node": "^26.6.6",

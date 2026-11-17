@@ -21,6 +21,17 @@ export interface CloudLoginLookupResult {
   readonly lockedUntilMs: bigint | null;
 }
 
+export type CloudUserRole = 'owner' | 'manager' | 'cashier';
+
+const CLOUD_USER_ROLES: readonly CloudUserRole[] = ['owner', 'manager', 'cashier'];
+
+/** Result of a successful refresh rotation: identity is re-read from the DB, never trusted from the token. */
+export interface CloudRefreshRotationResult {
+  readonly userId: UuidV7;
+  readonly role: CloudUserRole;
+  readonly userName: string;
+}
+
 export class CloudAuthStore {
   constructor(private readonly pool: pg.Pool) {}
 
@@ -134,7 +145,9 @@ export class CloudAuthStore {
     readonly newTokenHash: string;
     readonly newExpiresAtMs: UnixMs;
     readonly nowMs: UnixMs;
-  }): Promise<{ readonly userId: UuidV7 }> {
+    /** Roles allowed to refresh on this channel; others are rejected and their token family revoked. */
+    readonly allowedRoles?: readonly CloudUserRole[];
+  }): Promise<CloudRefreshRotationResult> {
     const outcome = await withPgTenantContext(this.pool, params.organizationId, async (tx) => {
       const rows = await tx
         .select()
@@ -164,11 +177,39 @@ export class CloudAuthStore {
             ),
           );
 
-        return { reuseDetected: true as const };
+        return { outcome: 'reuse' as const };
       }
 
       if (BigInt(existing.expiresAtMs) < BigInt(params.nowMs)) {
         throw new DomainError('AUTH_UNAUTHORIZED', 'Refresh token expired');
+      }
+
+      // S1: role, status and name come from the user row, never from the token or a default.
+      const users = await tx
+        .select({ role: cloudUsers.role, status: cloudUsers.status, username: cloudUsers.username })
+        .from(cloudUsers)
+        .where(eq(cloudUsers.id, parseUuidV7(existing.userId)))
+        .limit(1);
+      const user = users[0];
+      const role = CLOUD_USER_ROLES.find((r) => r === user?.role);
+      const revokeAllForUser = async () => {
+        await tx
+          .update(cloudRefreshTokens)
+          .set({ revokedAtMs: BigInt(params.nowMs), updatedAtMs: params.nowMs })
+          .where(
+            and(
+              eq(cloudRefreshTokens.userId, existing.userId),
+              isNull(cloudRefreshTokens.revokedAtMs),
+            ),
+          );
+      };
+      if (user === undefined || role === undefined || user.status !== 'active') {
+        await revokeAllForUser();
+        return { outcome: 'inactive' as const };
+      }
+      if (params.allowedRoles !== undefined && !params.allowedRoles.includes(role)) {
+        await revokeAllForUser();
+        return { outcome: 'forbidden' as const };
       }
 
       // Mark old token revoked
@@ -193,19 +234,25 @@ export class CloudAuthStore {
       });
 
       return {
-        reuseDetected: false as const,
-        userId: parseUuidV7(existing.userId),
+        outcome: 'ok' as const,
+        result: { userId: parseUuidV7(existing.userId), role, userName: user.username },
       };
     });
 
-    if (outcome.reuseDetected) {
-      throw new DomainError(
-        'AUTH_UNAUTHORIZED',
-        'Refresh token reuse detected — all user sessions revoked',
-      );
+    // Revocations above are committed before these throws, so the security wipe persists.
+    switch (outcome.outcome) {
+      case 'reuse':
+        throw new DomainError(
+          'AUTH_UNAUTHORIZED',
+          'Refresh token reuse detected — all user sessions revoked',
+        );
+      case 'inactive':
+        throw new DomainError('AUTH_UNAUTHORIZED', 'User account is not active');
+      case 'forbidden':
+        throw new DomainError('AUTH_FORBIDDEN', 'Role is not allowed on this channel');
+      case 'ok':
+        return outcome.result;
     }
-
-    return { userId: outcome.userId };
   }
 
   async revokeRefreshToken(params: {
