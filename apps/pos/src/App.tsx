@@ -15,6 +15,7 @@ import {
 import { SetupScreen, LoginScreen, OpenShiftScreen } from './components/AuthAndShiftScreens.js';
 import { PosWorkspaceScreen } from './components/PosWorkspaceScreen.js';
 import { CatalogScreen } from './components/CatalogScreen.js';
+import { FiscalOfflineBanner, FiscalUnsettledModal } from './components/FiscalPanels.js';
 import {
   ShortcutsModal,
   QuickSaleModal,
@@ -656,6 +657,16 @@ export function App() {
                   {t('catalog.openButton')}
                 </button>
               )}
+              {(user?.role === 'owner' || user?.role === 'manager') && (
+                <button
+                  type="button"
+                  className="pos-btn"
+                  data-testid="topbar-fiscal-btn"
+                  onClick={() => setActiveModal('fiscal_unsettled')}
+                >
+                  {t('fiscal.unsettled.openButton')}
+                </button>
+              )}
               <button
                 type="button"
                 className="pos-btn"
@@ -676,6 +687,8 @@ export function App() {
           )}
         </div>
       </header>
+
+      {screen === 'pos' && <FiscalOfflineBanner api={api} />}
 
       {errorBanner && (
         <div className="pos-error-banner" role="alert" data-testid="pos-error-banner">
@@ -758,6 +771,14 @@ export function App() {
       {activeModal === 'catalog' && (user?.role === 'owner' || user?.role === 'manager') && (
         <CatalogScreen api={api} onClose={() => setActiveModal('none')} onError={handleError} />
       )}
+      {activeModal === 'fiscal_unsettled' &&
+        (user?.role === 'owner' || user?.role === 'manager') && (
+          <FiscalUnsettledModal
+            api={api}
+            onClose={() => setActiveModal('none')}
+            onError={handleError}
+          />
+        )}
       {activeModal === 'diagnostics' && (user?.role === 'owner' || user?.role === 'manager') && (
         <div className="pos-modal-backdrop" data-testid="diagnostics-modal">
           <div className="pos-modal" style={{ maxWidth: '520px' }}>
