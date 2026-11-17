@@ -279,4 +279,16 @@ export const RU_MESSAGES: Readonly<Record<I18nKey, string>> = {
   'excelImport.error.invalidPackageCode': 'Неверный код упаковки',
   'excelImport.error.invalidVat': 'Неверная ставка НДС',
   'excelImport.error.invalidRow': 'Неверная строка',
+  // T3.2 Legal rules engine
+  'rules.EXPIRED_GOODS':
+    'В корзине есть товар с истёкшим сроком годности. Продажа продолжится; его можно списать как расход.',
+  'rules.MXIK_MISSING': 'У некоторых товаров нет кода ИКПУ.',
+  'rules.PACKAGE_MISSING': 'Пакет правовых правил не установлен.',
+  'rules.PACKAGE_EXPIRED': 'Срок действия пакета правовых правил истёк. Обновите его.',
+  'rules.PACKAGE_INVALID': 'Пакет правовых правил повреждён (не прошёл проверку подписи).',
+  'rules.CASH_FORBIDDEN_MXIK': 'Для этого товара оплата наличными запрещена.',
+  'rules.MIXED_RECEIPT_CASHLESS':
+    'В чеке есть товар, запрещённый к оплате наличными: весь чек должен быть безналичным.',
+  'rules.MXIK_CASH_LIMIT': 'Превышен лимит оплаты наличными по одному коду ИКПУ.',
+  'error.RULES_BLOCKED': 'Продажа заблокирована правовыми правилами. Посмотрите причину.',
 };
