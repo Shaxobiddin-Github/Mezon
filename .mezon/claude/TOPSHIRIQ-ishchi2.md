@@ -17,15 +17,13 @@ Shunda ish faqat bir kompyuterda qolib ketmaydi, ikkinchimiz davom ettira oladi.
 - **Tekshiruv kutayotgan PR'ing bo'lsa:** keyingi paketni **shu PR branch'i ustidan** och (stacked branch) va ishla. Tekshiruv kelganda tuzatishni eski branch'da qilib, yangisiga merge qilasan.
 - **Savoling javobsiz bo'lsa:** eng xavfsiz variantni tanla, `QAROR (javobsiz)` deb hisobotga yoz va davom et. Qaytgan tomon uni ko'rib chiqadi.
 
-## 3. Ikkinchisi 4 soatdan ko'p jim bo'lsa
+## 3. Merge baribir tekshiruvchini kutadi
 
-**Past xavfli PR'lar** (UI, matnlar, hujjatlar, hisobotni ko'rsatish, testlar):
+**Tuzatish (avvalgi versiyada xato bor edi):** o'z PR'ingni o'zing tekshirib merge qilish **yo'q**. Barcha PR'lar, past xavflilari ham, ikkinchi tomonning QABULi va yashil CI'dan keyingina merge bo'ladi.
 
-- o'zing to'liq tekshiruv usulida o'zingni tekshir: mutatsiya jadvali, test ma'lumot ko'rayotgani;
-- `.mezon/ishchi2/TEKSHIRUV.md` ga `O'Z-TEKSHIRUV` deb yoz;
-- CI yashil bo'lsa, merge qil.
-
-**Chuqur xavfli PR'lar** (pul, ombor, sinxron, fiskal, auth, xavfsizlik, migratsiya) **merge qilinmaydi**: tekshiruvchini kutadi. Lekin sen ustidan keyingi ishni davom ettirasan.
+Ish esa to'xtamaydi:
+- keyingi paketlarni oldingisi ustidan ochilgan branch'larda davom ettirasan;
+- o'z ishingni o'zing oldindan tekshirib, mutatsiya jadvalini hisobotga yozasan. Shunda qaytgan tekshiruvchi tez QABUL qiladi.
 
 ## 4. O'z yo'laging bo'shab qolsa
 
