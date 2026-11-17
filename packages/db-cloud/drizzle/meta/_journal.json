@@ -36,6 +36,13 @@
       "when": 1794814342545,
       "tag": "0004_organization_tax_profiles",
       "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "7",
+      "when": 1794906423262,
+      "tag": "0005_telegram_bot",
+      "breakpoints": true
     }
   ]
 }

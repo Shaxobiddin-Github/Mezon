@@ -22,6 +22,7 @@ export async function startCloudServer(): Promise<void> {
   });
 
   console.log(`@mezon/cloud API listening on ${address}`);
+  server.telegramScheduler?.start();
 
   const shutdown = async () => {
     console.log('Shutting down @mezon/cloud...');

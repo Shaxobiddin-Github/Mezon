@@ -26,6 +26,7 @@ import {
 } from '@mezon/contracts';
 import {
   AdminReadStore,
+  CloudTelegramStore,
   CloudAuthStore,
   CloudDeviceStore,
   CloudSyncPushStore,
@@ -37,6 +38,10 @@ import {
   assertNonSuperuserNonBypassRls,
 } from '@mezon/db-cloud';
 import { registerAdminRoutes } from './admin-routes.js';
+import { isTelegramEnabled } from './config.js';
+import { TelegramBotService } from './telegram/bot-service.js';
+import { TelegramScheduler } from './telegram/scheduler.js';
+import { registerTelegramRoutes } from './telegram-routes.js';
 import {
   MIN_CLIENT_VERSION,
   SyncPushRequestSchema,
@@ -61,6 +66,7 @@ import Fastify, {
   type FastifyRequest,
   type FastifyError,
 } from 'fastify';
+import { HttpTelegramClient, type TelegramClient } from '@mezon/drivers';
 import type { CloudConfig } from './config.js';
 import { type CloudJwtPayload, CloudJwtService } from './jwt.js';
 
@@ -80,6 +86,8 @@ export interface BuildServerOptions {
   readonly deviceStore?: CloudDeviceStore;
   readonly syncPushStore?: CloudSyncPushStore;
   readonly adminStore?: AdminReadStore;
+  /** T2.8: injected in tests (FakeTelegramClient); production builds HttpTelegramClient. */
+  readonly telegramClient?: TelegramClient;
   readonly syncPullStore?: CloudSyncPullStore;
   readonly idGen?: { nextId(): UuidV7 };
   readonly clock?: { nowMs(): UnixMs };
@@ -99,6 +107,13 @@ export function cloudErrorHandler(err: FastifyError, req: FastifyRequest, reply:
     return reply.code(500).send({ error: 'Internal Server Error' });
   }
   return reply.code(statusCode).send({ error: err.name, code: err.code, message: err.message });
+}
+
+declare module 'fastify' {
+  interface FastifyInstance {
+    /** T2.8: null when the Telegram bot is not configured; started by `startCloudServer`. */
+    telegramScheduler: TelegramScheduler | null;
+  }
 }
 
 export async function buildCloudServer(options: BuildServerOptions): Promise<FastifyInstance> {
@@ -865,6 +880,44 @@ export async function buildCloudServer(options: BuildServerOptions): Promise<Fas
   });
 
   // Admin Cabinet API routes (T2.7a)
+  // T2.8 Telegram bot: enabled only when the token and the webhook secret are configured.
+  const telegramStore = new CloudTelegramStore(conn.pool, idGen);
+  let telegramBot: TelegramBotService | undefined;
+  let telegramScheduler: TelegramScheduler | null = null;
+  if (isTelegramEnabled(config)) {
+    const client =
+      options.telegramClient ?? new HttpTelegramClient({ token: config.telegramBotToken ?? '' });
+    telegramBot = new TelegramBotService({
+      store: telegramStore,
+      client,
+      clock,
+      digestHour: config.telegramDigestHour,
+      logger: app.log,
+    });
+    telegramScheduler = new TelegramScheduler({
+      store: telegramStore,
+      adminStore,
+      client,
+      clock,
+      digestHour: config.telegramDigestHour,
+      reminderHour: config.telegramReminderHour,
+      logger: app.log,
+    });
+    const scheduler = telegramScheduler;
+    app.addHook('onClose', () => {
+      scheduler.stop();
+      return Promise.resolve();
+    });
+  }
+  app.decorate('telegramScheduler', telegramScheduler);
+  await registerTelegramRoutes(app, {
+    config,
+    jwtService,
+    store: telegramStore,
+    bot: telegramBot,
+    clock,
+  });
+
   await registerAdminRoutes(app, {
     config,
     conn,

@@ -252,9 +252,18 @@ importers:
       '@mezon/domain':
         specifier: workspace:*
         version: link:../../packages/domain
+      '@mezon/drivers':
+        specifier: workspace:*
+        version: link:../../packages/drivers
+      '@mezon/i18n':
+        specifier: workspace:*
+        version: link:../../packages/i18n
       '@mezon/sync':
         specifier: workspace:*
         version: link:../../packages/sync
+      '@mezon/ui':
+        specifier: workspace:*
+        version: link:../../packages/ui
       '@node-rs/argon2':
         specifier: 2.2.2
         version: 2.2.2

@@ -53,6 +53,36 @@ function parseCookie(cookieHeader?: string): Record<string, string> {
   return result;
 }
 
+/**
+ * Bearer access token of an owner or manager (A4). Shared by every cabinet route module.
+ */
+export function createRequireAdminAuth(jwtService: CloudJwtService) {
+  return async (req: FastifyRequest, reply: FastifyReply) => {
+    const authHeader = req.headers.authorization;
+    if (!authHeader?.startsWith('Bearer ')) {
+      return reply.code(401).send({ error: 'Unauthorized', message: 'Missing Bearer token' });
+    }
+
+    const token = authHeader.slice(7).trim();
+    let payload: CloudJwtPayload;
+    try {
+      payload = await jwtService.verifyAccessToken(token);
+    } catch {
+      return reply.code(401).send({ error: 'Unauthorized', message: 'Invalid or expired token' });
+    }
+
+    // Role check: cashier is strictly forbidden from admin cabinet (A4)
+    if (payload.role !== 'owner' && payload.role !== 'manager') {
+      return reply.code(403).send({
+        error: 'Forbidden',
+        message: 'Cashier accounts cannot access the admin cabinet',
+      });
+    }
+
+    req.user = payload;
+  };
+}
+
 export async function registerAdminRoutes(
   app: FastifyInstance,
   options: AdminRoutesOptions,
@@ -326,30 +356,7 @@ export async function registerAdminRoutes(
   });
 
   // RBAC & Tenant Context Hook for /api/v1/admin/* (except /auth/*)
-  const requireAdminAuth = async (req: FastifyRequest, reply: FastifyReply) => {
-    const authHeader = req.headers.authorization;
-    if (!authHeader?.startsWith('Bearer ')) {
-      return reply.code(401).send({ error: 'Unauthorized', message: 'Missing Bearer token' });
-    }
-
-    const token = authHeader.slice(7).trim();
-    let payload: CloudJwtPayload;
-    try {
-      payload = await jwtService.verifyAccessToken(token);
-    } catch {
-      return reply.code(401).send({ error: 'Unauthorized', message: 'Invalid or expired token' });
-    }
-
-    // Role check: cashier is strictly forbidden from admin cabinet (A4)
-    if (payload.role !== 'owner' && payload.role !== 'manager') {
-      return reply.code(403).send({
-        error: 'Forbidden',
-        message: 'Cashier accounts cannot access the admin cabinet',
-      });
-    }
-
-    req.user = payload;
-  };
+  const requireAdminAuth = createRequireAdminAuth(jwtService);
 
   // 4. GET /api/v1/admin/dashboard
   app.get('/api/v1/admin/dashboard', { preHandler: [requireAdminAuth] }, async (req, reply) => {

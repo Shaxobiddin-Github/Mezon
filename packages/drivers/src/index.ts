@@ -67,3 +67,16 @@ export {
   type FakePrintJob,
   type FakePrinterFailureConfig,
 } from './printer/fake-driver.js';
+
+export {
+  FakeTelegramClient,
+  HttpTelegramClient,
+  TelegramSendError,
+  isTelegramSendError,
+  type HttpTelegramClientOptions,
+  type SentTelegramMessage,
+  type TelegramButton,
+  type TelegramClient,
+  type TelegramErrorKind,
+  type TelegramSendOptions,
+} from './telegram/telegram-client.js';
