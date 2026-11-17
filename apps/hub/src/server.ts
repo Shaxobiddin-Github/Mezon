@@ -88,6 +88,7 @@ import { registerFiscalRoutes } from './fiscal-routes.js';
 import { registerSyncConflictRoutes } from './sync-conflicts-routes.js';
 import { HubSyncConflictService } from './sync-conflicts-service.js';
 import { HubCloudParkedService } from './sync-cloud-parked.js';
+import { HubSyncBootstrap } from './sync-bootstrap.js';
 import { HubFiscalService } from './fiscal-service.js';
 import { HubFiscalWorker, type HubFiscalWorkerOptions } from './fiscal-worker.js';
 
@@ -605,6 +606,7 @@ export async function createHubServer(options: CreateHubServerOptions): Promise<
         nowMs: () => clock.now(),
         fetchFn: options.cloudFetchFn,
       }),
+      new HubSyncBootstrap({ connection, pullWorker, nowMs: () => clock.now() }),
     );
     options.registerExtraTestRoutes?.(app);
 

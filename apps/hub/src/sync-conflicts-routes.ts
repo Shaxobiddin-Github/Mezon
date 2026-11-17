@@ -9,6 +9,7 @@ import { type HubPermission, parseUuidV7 } from '@mezon/domain';
 import type { FastifyInstance, FastifyRequest } from 'fastify';
 import { z } from 'zod';
 import type { HubAuthService } from './auth-service.js';
+import type { HubSyncBootstrap } from './sync-bootstrap.js';
 import type { HubCloudParkedService } from './sync-cloud-parked.js';
 import type { HubSyncConflictService } from './sync-conflicts-service.js';
 
@@ -36,7 +37,25 @@ export function registerSyncConflictRoutes(
   authService: HubAuthService,
   service: HubSyncConflictService,
   cloudParked?: HubCloudParkedService,
+  bootstrap?: HubSyncBootstrap,
 ): void {
+  if (bootstrap) {
+    // T2.5: initial load from the cloud (resumable; the POS shows the state).
+    app.get('/sync/bootstrap', async (request) => {
+      await authorize(authService, request, 'sync:read');
+      return bootstrap.status();
+    });
+    app.post('/sync/bootstrap', async (request) => {
+      const session = await authorize(authService, request, 'sync:resolve');
+      const result = await bootstrap.run();
+      request.log.info(
+        { event: 'sync.bootstrap_run', userId: session.user.id, ...result },
+        'Bootstrap run',
+      );
+      return result;
+    });
+  }
+
   if (cloudParked) {
     // The cloud side of this hub's parked pushes (device token; own store only).
     app.get('/sync/cloud-parked', async (request) => {

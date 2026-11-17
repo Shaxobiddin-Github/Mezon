@@ -446,3 +446,26 @@ describe('T2.6 sync conflicts API (view, retry, acknowledge — never edit)', ()
     }
   });
 });
+
+describe('T2.5 bootstrap endpoints', () => {
+  it('status for manager/owner (cashier 403); an unpaired hub reports not_paired and stays loadable', async () => {
+    const env = await boot(4106);
+    try {
+      const get = (token: string) =>
+        env.hub.app.inject({ method: 'GET', url: '/sync/bootstrap', headers: hdr(token) });
+      expect((await get(env.cashier)).statusCode).toBe(403);
+      const st = await get(env.manager);
+      expect(st.statusCode).toBe(200);
+      expect(st.json()).toEqual({ state: 'none', pagesApplied: 0 });
+      const run = await env.hub.app.inject({
+        method: 'POST',
+        url: '/sync/bootstrap',
+        headers: hdr(env.owner),
+      });
+      expect(run.statusCode, run.body).toBe(200);
+      expect(run.json()).toMatchObject({ stoppedBecause: 'not_paired', state: 'none' });
+    } finally {
+      await env.hub.close();
+    }
+  });
+});

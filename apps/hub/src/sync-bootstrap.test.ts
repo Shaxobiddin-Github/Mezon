@@ -346,12 +346,14 @@ describe('T2.5 bootstrap: interrupted + resumed = uninterrupted', () => {
       pageSize,
     );
     const cut = await first.bootstrap.run();
-    expect(cut).toMatchObject({ state: 'in_progress', stoppedBecause: 'cloud_unavailable' });
+    // Nothing applied yet (failed on the first page) keeps the state at 'none'.
+    const cutState = failAt === 1 ? 'none' : 'in_progress';
+    expect(cut).toMatchObject({ state: cutState, stoppedBecause: 'cloud_unavailable' });
     expect(cut.pagesApplied).toBe(failAt - 1);
     first.conn.close(); // the process dies here
 
     const again = await openTarget(cutPath, false, fakeCloud({}).fetchFn, pageSize);
-    expect(again.bootstrap.status().state).toBe('in_progress');
+    expect(again.bootstrap.status().state).toBe(cutState);
     const resumed = await again.bootstrap.run();
     expect(resumed).toMatchObject({ state: 'done', stoppedBecause: 'caught_up' });
     expect(fingerprint(again.conn)).toEqual(want);

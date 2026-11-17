@@ -51,7 +51,6 @@ export class HubSyncBootstrap {
 
   /** Pulls page after page until the cloud says there is nothing more (or it fails: resumable). */
   async run(maxPages = 100_000): Promise<BootstrapRunResult> {
-    if (this.status().state !== 'done') this.set('in_progress', 0);
     for (let page = 0; page < maxPages; page += 1) {
       const res = await this.o.pullWorker.pullBatch();
       if (res.status === 'idle') return { ...this.status(), stoppedBecause: 'not_paired' };
