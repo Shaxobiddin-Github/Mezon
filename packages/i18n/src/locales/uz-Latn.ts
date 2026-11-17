@@ -144,6 +144,7 @@ export const UZ_LATN_MESSAGES = {
   'customer.selectBtn': 'Tanlash',
   'customer.clearBtn': 'Mijozni bekor qilish',
   'customer.balance': 'Joriy qarz: {amount}',
+  'customer.overpaid': 'Ortiqcha toʻlov: {amount} (mijoz haqqi)',
 
   // Payment Modal
   'payment.title': "To'lov va savdoni yakunlash",

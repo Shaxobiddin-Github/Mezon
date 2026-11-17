@@ -1661,7 +1661,6 @@ export const localCustomerBalances = localSchemaRegistry.defineTable(
       self.earliestOpenDueAtMs,
       self.customerId,
     ),
-    check('chk_local_customer_balances_nonneg', sql`${self.balance} >= 0`),
     check('chk_local_customer_balances_accrued_nonneg', sql`${self.totalDebtAccrued} >= 0`),
     check('chk_local_customer_balances_settled_nonneg', sql`${self.totalSettled} >= 0`),
   ],

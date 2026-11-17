@@ -141,6 +141,13 @@
       "when": 1794903343747,
       "tag": "0019_fiscal_docs",
       "breakpoints": true
+    },
+    {
+      "idx": 20,
+      "version": "6",
+      "when": 1794910639431,
+      "tag": "0020_customer_balance_overpaid",
+      "breakpoints": true
     }
   ]
 }

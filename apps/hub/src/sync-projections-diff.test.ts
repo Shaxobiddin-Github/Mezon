@@ -230,7 +230,17 @@ interface Generated {
 }
 
 /** Runs random real operations on a copy of the template hub and returns its outbox stream. */
-async function generate(seed: number, rnd: () => number): Promise<Generated> {
+interface ScriptCtx {
+  readonly hub: HubServer;
+  readonly owner: string;
+  readonly reqId: () => string;
+}
+
+async function generate(
+  seed: number,
+  rnd: () => number,
+  script?: (ctx: ScriptCtx) => Promise<void>,
+): Promise<Generated> {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'mezon-diff-src-'));
   tempDirs.push(dir);
   const dbPath = path.join(dir, 'source.db');
@@ -259,7 +269,8 @@ async function generate(seed: number, rnd: () => number): Promise<Generated> {
     const done = (op: string, status: number) => {
       if (status >= 200 && status < 300) ok[op] = (ok[op] ?? 0) + 1;
     };
-    const ops = 20 + Math.floor(rnd() * 40);
+    const ops = script ? 0 : 20 + Math.floor(rnd() * 40);
+    if (script) await script({ hub, owner, reqId });
     for (let k = 0; k < ops; k += 1) {
       clock.advance(BigInt(1 + Math.floor(rnd() * 5_000)));
       const r = rnd();
@@ -562,5 +573,239 @@ describe('T2.6 differential: incremental projections equal a full rebuild after 
     expect(nonEmptyFinal).toBe(SEEDS);
     expect(parkedSeen).toBeGreaterThan(0);
     console.info('[T2.6 diff]', { seeds: SEEDS, batchesChecked, parkedSeen, totals });
+  });
+});
+
+/** A fresh target hub DB for a generated stream. */
+function newTarget(gen: Generated, seed: number) {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'mezon-diff-dst-'));
+  tempDirs.push(dir);
+  const conn = openLocalSqliteDatabase(path.join(dir, 'target.db'));
+  migrateLocalDatabase(conn.db);
+  const targetDevice = parseUuidV7('01990000-0000-7000-8000-0000000d0e99');
+  ensureDeviceStateRowSync(conn.sqlite, conn.db, {
+    rowId: parseUuidV7('01990000-0000-7000-8000-0000000d0e98'),
+    organizationId: gen.scope.organizationId,
+    deviceId: targetDevice,
+    initialHlcStr: `${T0.toString().padStart(15, '0')}:00000:${targetDevice}`,
+    initialUuidMs: T0,
+    nowMs: T0,
+  });
+  const pull = new HubSyncPullService(
+    conn,
+    new MonotonicUuidV7Generator({
+      clock: { now: () => unixMsFromBigInt(T0 + 1n) },
+      random: new SeededRandomSource(seed + 5),
+    }),
+  );
+  let nowMs = gen.endMs + 1_000n;
+  const apply = (events: SyncedEventDto[], nextCursors: Record<string, bigint> = {}) => {
+    nowMs += 1_000n;
+    pull.applySyncPullBatch({
+      context: { ...gen.scope, deviceId: targetDevice },
+      events,
+      nextCursors,
+      nowMs: unixMsFromBigInt(nowMs),
+    });
+    return nowMs;
+  };
+  const one = <T>(sql: string, ...args: unknown[]) => conn.sqlite.prepare(sql).get(...args) as T;
+  const count = (sql: string, ...args: unknown[]) => BigInt(one<{ n: bigint }>(sql, ...args).n);
+  return { conn, apply, one, count };
+}
+
+/** A ledger event cloned as if another store of the organization had written it. */
+function otherStoreLedger(
+  e: SyncedEventDto,
+  seed: number,
+  patch: Record<string, unknown>,
+): SyncedEventDto {
+  const idGen = new MonotonicUuidV7Generator({
+    clock: { now: () => unixMsFromBigInt(T0 + 7n) },
+    random: new SeededRandomSource(seed + 99),
+  });
+  const id = idGen.nextId();
+  return {
+    ...e,
+    eventId: idGen.nextId(),
+    entityId: id,
+    storeId: parseUuidV7('01990000-0000-7000-8000-0000000057e2'),
+    deviceId: parseUuidV7('01990000-0000-7000-8000-0000000d0e22'),
+    payload: {
+      ...e.payload,
+      id,
+      sourceId: id,
+      clientRequestId: null,
+      requestHash: null,
+      ...patch,
+    },
+  };
+}
+
+async function debtSale(ctx: ScriptCtx, customerId: string, units: bigint) {
+  const cart = await inject(ctx.hub, 'POST', '/carts', ctx.owner, {});
+  const cartId = cart.json<{ cart: { id: string } }>().cart.id;
+  await inject(ctx.hub, 'POST', `/carts/${cartId}/lines`, ctx.owner, {
+    kind: 'catalog',
+    productId: ids.products.avg,
+    variantId: null,
+    qty: (units * 1000n).toString(),
+  });
+  const total = (units * PRICE).toString();
+  const res = await inject(ctx.hub, 'POST', `/carts/${cartId}/complete`, ctx.owner, {
+    clientRequestId: ctx.reqId(),
+    expectedTotal: total,
+    customerId,
+    debtAmount: total,
+    payments: [],
+  });
+  expect(res.statusCode, res.body).toBe(200);
+  return res.json<{ sale: { id: string } }>().sale.id;
+}
+
+describe('T2.6 / S6 deterministic scenarios', () => {
+  it('D6: a ledger entry parked until its sale arrives is projected when the retry applies it', async () => {
+    let saleId = '';
+    const gen = await generate(9501, prng(9501), async (ctx) => {
+      saleId = await debtSale(ctx, ids.customers[0], 2n);
+    });
+    const saleEvent = gen.events.find((e) => e.entity === 'sales' && e.entityId === saleId)!;
+    const t = newTarget(gen, 9501);
+    try {
+      t.apply(gen.events.filter((e) => e !== saleEvent));
+      expect(
+        t.count("SELECT count(*) AS n FROM local_sync_parked WHERE entity = 'customer_ledger'"),
+      ).toBeGreaterThan(0n);
+      const nowMs = t.apply([saleEvent]); // the sale arrives: the retry applies the parked ledger
+      expect(t.count('SELECT count(*) AS n FROM local_sync_parked'), 'all parked applied').toBe(0n);
+      const bal = t.one<{ balance: bigint }>(
+        'SELECT balance FROM local_customer_balances WHERE customer_id = ?',
+        ids.customers[0],
+      );
+      expect(BigInt(bal.balance)).toBe(2n * PRICE);
+      expect(snapshot(t.conn)).toEqual(fullRebuildSnapshot(t.conn, gen.scope, nowMs));
+    } finally {
+      t.conn.close();
+    }
+  });
+
+  it('S6: two stores take the same debt offline: the pull keeps going, the balance is negative, CUSTOMER_OVERPAID opens and later closes', async () => {
+    const gen = await generate(9502, prng(9502), async (ctx) => {
+      await debtSale(ctx, ids.customers[0], 1n);
+      const pay = await inject(
+        ctx.hub,
+        'POST',
+        `/customers/${ids.customers[0]}/payments`,
+        ctx.owner,
+        { clientRequestId: ctx.reqId(), method: 'card', amount: PRICE.toString() },
+      );
+      expect(pay.statusCode, pay.body).toBe(201);
+    });
+    const payment = gen.events.find(
+      (e) => e.entity === 'customer_ledger' && e.payload.entryType === 'debt_payment',
+    )!;
+    // Store B took the same debt while offline.
+    const doublePay = otherStoreLedger(payment, 9502, {});
+    const t = newTarget(gen, 9502);
+    const bal = () =>
+      BigInt(
+        t.one<{ balance: bigint }>(
+          'SELECT balance FROM local_customer_balances WHERE customer_id = ?',
+          ids.customers[0],
+        ).balance,
+      );
+    try {
+      const nowMs = t.apply([...gen.events, doublePay]);
+      expect(bal()).toBe(-PRICE);
+      const open = t.one<{ payload: string } | undefined>(
+        "SELECT payload FROM local_sync_conflicts WHERE reason = 'CUSTOMER_OVERPAID' AND entity_id = ? AND resolved_at_ms IS NULL",
+        ids.customers[0],
+      );
+      expect(JSON.parse(open!.payload)).toEqual({ overpaidTiyin: PRICE.toString() });
+      expect(snapshot(t.conn)).toEqual(fullRebuildSnapshot(t.conn, gen.scope, nowMs));
+
+      // The owner settles it in store B (a positive adjustment): the conflict closes by itself.
+      const settle = otherStoreLedger(payment, 9503, {
+        entryType: 'adjustment',
+        sourceType: 'adjustment',
+        amountDelta:
+          typeof payment.payload.amountDelta === 'string' ? PRICE.toString() : Number(PRICE),
+        paymentMethod: null,
+        providerRef: null,
+        cashMoveId: null,
+        reason: 'Ortiqcha tolov qaytarildi',
+      });
+      t.apply([settle]);
+      expect(bal()).toBe(0n);
+      expect(
+        t.count(
+          "SELECT count(*) AS n FROM local_sync_conflicts WHERE reason = 'CUSTOMER_OVERPAID' AND resolved_at_ms IS NULL",
+        ),
+      ).toBe(0n);
+    } finally {
+      t.conn.close();
+    }
+  });
+
+  it('a projection that throws (artificial CHECK) never stops the pull: events and cursors commit, PROJECTION_FAILED is retried and closed', async () => {
+    const gen = await generate(9504, prng(9504), async (ctx) => {
+      for (const [productId, batch] of [
+        [ids.products.avg, false],
+        [ids.products.batch, true],
+      ] as const) {
+        const r = await inject(ctx.hub, 'POST', '/stock/moves/in', ctx.owner, {
+          productId,
+          reason: 'purchase',
+          qty: '5000',
+          totalCostValue: '25000',
+          ...(batch ? { batchNumber: 'L-9504' } : {}),
+        });
+        expect(r.statusCode, r.body).toBe(201);
+      }
+    });
+    const t = newTarget(gen, 9504);
+    try {
+      t.conn.sqlite.exec(
+        `CREATE TRIGGER test_projection_boom BEFORE INSERT ON local_stock_balances
+           WHEN NEW.product_id = '${ids.products.avg}'
+         BEGIN SELECT RAISE(ABORT, 'artificial projection CHECK'); END`,
+      );
+      const cursor = BigInt(gen.events.length);
+      expect(() => t.apply(gen.events, { [gen.scope.storeId]: cursor })).not.toThrow();
+      expect(
+        BigInt(
+          t.one<{ last_position: bigint }>('SELECT last_position FROM local_sync_cursors')
+            .last_position,
+        ),
+      ).toBe(cursor);
+      expect(
+        t.count('SELECT count(*) AS n FROM stock_moves WHERE product_id = ?', ids.products.avg),
+      ).toBeGreaterThan(0n);
+      expect(
+        t.count(
+          'SELECT count(*) AS n FROM local_stock_balances WHERE product_id = ?',
+          ids.products.batch,
+        ),
+        'the other product is still projected',
+      ).toBe(1n);
+      const failed = t.one<{ entity: string; error: string } | undefined>(
+        "SELECT entity, error FROM local_sync_conflicts WHERE reason = 'PROJECTION_FAILED' AND entity_id = ? AND resolved_at_ms IS NULL",
+        ids.products.avg,
+      );
+      expect(failed?.entity).toBe('local_stock_balances');
+      expect(failed?.error).toContain('artificial projection CHECK');
+
+      // The cause goes away: the very next batch (even an empty one) retries the key and closes it.
+      t.conn.sqlite.exec('DROP TRIGGER test_projection_boom');
+      const nowMs = t.apply([]);
+      expect(
+        t.count(
+          "SELECT count(*) AS n FROM local_sync_conflicts WHERE reason = 'PROJECTION_FAILED' AND resolved_at_ms IS NULL",
+        ),
+      ).toBe(0n);
+      expect(snapshot(t.conn)).toEqual(fullRebuildSnapshot(t.conn, gen.scope, nowMs));
+    } finally {
+      t.conn.close();
+    }
   });
 });

@@ -150,6 +150,7 @@ export const RU_MESSAGES: Readonly<Record<I18nKey, string>> = {
   'customer.selectBtn': 'Выбрать',
   'customer.clearBtn': 'Убрать клиента',
   'customer.balance': 'Текущий долг: {amount}',
+  'customer.overpaid': 'Переплата: {amount} (в пользу клиента)',
 
   // Payment Modal
   'payment.title': 'Оплата и завершение продажи',
