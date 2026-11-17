@@ -1,66 +1,72 @@
-# P1 — ish holati va savol (S6)
+# P1 — oraliq hisobot: T2.6 tayyor (kod + testlar), keyingisi bulut yozuvchi porti va T2.5
 
-Branch: `ishchi2/T2.6-projections` (P1 paketi). Yangi ish tartibiga ko'ra kutmasdan ishlayapman, quyidagi savolga javob kelguncha boshqa qismlarda davom etaman.
+Branch: `ishchi2/T2.6-projections`. PR hali ochilmagan, chunki P1 bitta PR bo'ladi. Kod ko'rinib turishi uchun push qilib boryapman.
+`main` (`c40d723`, T2.7a) merge qilingan.
 
-## Bajarildi (commit'lar)
+Oraliqda bajarilgan tekshiruvlar:
+- **PR #29 (T2.7a):** QABUL va merge qilindi (`c40d723`).
+- **C1:** SHARTLI QABUL. PR [#30](https://github.com/Shaxobiddin-Github/Mezon/pull/30) ochildi, S1–S5 testlari kutilmoqda.
+
+## T2.6 — bajarildi
 
 | Commit | Mazmun |
 |---|---|
-| `319f1ba` | **T2.6:** pull faqat tegilgan kalitlarni qayta hisoblaydi. Stock to'liq qayta qurish bilan bir xil funksiyada, `productIds` filtri bilan. Mijoz va yetkazib beruvchi uchun id bo'yicha upsert. |
-| `3009c8b` | **Fiskal:** hujjatni faqat yaratgan hub yuboradi. Fake operator smena invariantlari bilan. |
-| (shu commit) | Differensial test (200 seed) va savol S6 |
+| `319f1ba` | Pull faqat tegilgan kalitlarni qayta hisoblaydi (stock: mahsulot; mijoz; yetkazib beruvchi), to'liq qayta qurish bilan bitta kodda. T2.4 xatosi tuzatildi: park'dan retry endi proyeksiyalardan **oldin** ishlaydi. |
+| `3009c8b` | Fiskal: hujjatni faqat yaratgan hub yuboradi; Fake operator smena invariantlari; nazoratchining Z/OPEN mutatsiyalari 1 o'rniga 5 tadan testda ushlanadi. |
+| `6d6fbfa` | Differensial test (200 seed), S6 savoli. |
+| `5f43ba3` | **S6 (A):** `0020` (balans CHECK olib tashlandi); domen qoidalari; proyeksiya xatosi izolyatsiya qilinadi (`PROJECTION_FAILED`); `CUSTOMER_OVERPAID`; POS "Ortiqcha to'lov: X (mijoz haqqi)"; D1/D2/D6 uchun deterministik testlar. |
+| `d367afd` | Perf: 50k mahsulot, 100k ledger, 100k harakat bazasida pull partiyasi **p95 9,5 ms** (< 50; avval 1,23 s). |
+| `87a8adc` | Hub konflikt API'si: ko'rish, retry, o'rganildi, audit; tahrir yo'q. |
+| `5ac8a60` | POS: menejer uchun "Sinxron konfliktlar" ekrani. |
+| `cd4c8ab` | Bulut `cloud_sync_parked`: ko'rish, retry, o'rganildi (device token, RLS + o'z do'koni); hub proksisi; POS bo'limi. |
 
-**Kod o'qishda topilgan T2.4 xatosi (tuzatildi).** `retryParkedEvents` proyeksiyalar qayta qurilgandan **keyin** ishlar edi. Natijada park'dan qo'llangan hodisa proyeksiyaga tushmas edi. Endi retry proyeksiyadan oldin ishlaydi va kalitlarini yig'adi. Bunga mutatsiya D6 bor.
+### Isbotlar
 
-**Fiskal (topshiriqdagi test qarzi):**
-- `DEV1`/`DEV2`: `device_id` filtri yoki retry tekshiruvi olib tashlansa, test yiqiladi.
-- Nazoratchining ikki mutatsiyasi ("Z cheklarni kutmaydi", "cheklar OPEN ni kutmaydi") endi **5 tadan** testda ushlanadi, avval bittadan edi. Buning uchun:
-  - Fake smena qoidasi buzilishini qayd qiladi va har fiskal test oxirida "buzilish yo'q" tekshiriladi;
-  - yangi tasodifiy drayver jadvali testi (16 seed) qo'shildi.
+| Tekshiruv | Natija |
+|---|---|
+| `pnpm verify` (`5ac8a60` da, T2.7a merge'idan oldin) | 106 fayl, 890 test; perf 14; E2E 1; `db:check` 0 diff; depcruise toza |
+| Differensial test, 200 seed | 201/201 o'tdi, 207 s. Har partiyadan keyin 5 proyeksiya jadvali to'liq qayta qurish bilan teng. Bo'sh solishtirishga qarshi tekshiruv bor. |
+| Perf | p95 9,5 ms. Mutatsiya (to'liq qayta qurish) bilan 7 805 ms → yiqiladi. |
 
-## Differensial test va mutatsiyalar
+### Mutatsiyalar
 
-`apps/hub/src/sync-projections-diff.test.ts`:
-- **Manba hub** haqiqiy HTTP orqali tasodifiy amallar bajaradi: savdo, qarzga savdo, qaytarish, void, kirim (partiyali va o'rtacha), narxi noma'lum kirim va keyin tasdiqlash, mijoz va yetkazib beruvchi to'lovi, tuzatish, yangi mijoz.
-- Uning outbox'i **maqsad hub**ga tasodifiy partiyalarda yuboriladi. Ba'zi ota-yozuvlar kechiktiriladi (park va retry), boshqa do'kon ledger hodisalari aralashtiriladi.
-- Har partiyadan keyin barcha 5 proyeksiya jadvali SAVEPOINT ichidagi to'liq qayta qurish bilan solishtiriladi (`id`, `created_at_ms`, `updated_at_ms` dan tashqari).
-- Bo'sh solishtirishga qarshi tekshiruv: har amal turi kamida bir marta bajarilgan, yakuniy proyeksiyalar bo'sh emas, park holatlari bor.
-
-Mutatsiyalar (40 seed):
-
-| Kod | Mutatsiya | Natija |
+| Guruh | Mutatsiyalar | Natija |
 |---|---|---|
-| D0 | `stock_moves` kaliti yig'ilmaydi | 41/41 yiqildi |
-| D1 | `receiving_cost_confirmations` yig'ilmaydi | 21/41 |
-| D2 | `batches` yig'ilmaydi | 3/41 |
-| D4 | qisman qayta hisoblash boshqa mahsulot konfliktlarini o'chiradi | 37/41 |
-| D5 | yangi mijoz yig'ilmaydi | 41/41 |
-| D6 | park'dan retry kalit yig'maydi | 3/41 |
-| D7 | `customer_ledger` yig'ilmaydi | 40/41 |
-| D8 | `supplier_ledger` yig'ilmaydi | 41/41 |
-| D10 | qisman qayta hisoblashda moves filtri yo'q | 41/41 |
+| Kalit yig'ish | D0–D10 (40 seed) va D1/D2/D6 deterministik | hammasi o'ldi |
+| S6 | S6a CHECK qaytariladi; S6b proyeksiya xatosi qayta tashlanadi; S6c kredit limiti manfiy balansni limit deb oladi; S6d `CUSTOMER_OVERPAID` yo'q; S6e `PROJECTION_FAILED` qayta urinilmaydi | hammasi o'ldi |
+| Fiskal | DEV1, DEV2, nazoratchining CZ va CO | hammasi o'ldi, CZ va CO 5 tadan |
 
-## S6. SAVOL: mijoz balansi proyeksiyasi manfiy bo'lishi (T2.4 dan qolgan xato)
+## S6 bo'yicha qo'shimcha qarorlar (ko'rib chiqish uchun)
 
-`local_customer_balances` da `CHECK (balance >= 0)` bor. Ledger hodisalari pull'da tartibsiz kelishi mumkin:
-- `customer_ledger` tashkilot bo'yicha pull qilinadi, do'konlar oqimi aralash keladi;
-- ikki do'kon bir qarzni oflayn holatda kamaytirsa, bu **haqiqiy** ortiqcha to'lov.
+- **S7, sizga savol.** Manfiy balansli mijozga yangi nasiya savdo **ruxsat**: musbat delta ortiqcha to'lovni kamaytiradi.
+  - Bu "ortiqcha pul qanday ishlatiladi" degan masalaga tegadi. Agar egasi "ortiqcha to'lovli mijozga nasiya yo'q" desa, bitta qator o'zgaradi.
+  - To'lov, qaytarish, void va manfiy tuzatish avvalgidek `OVERPAYMENT_NOT_ALLOWED` bilan rad etiladi, chunki ular ortiqcha to'lovni yarata yoki chuqurlashtira olmaydi.
+- **T2.4 dagi yashirin xato tuzatildi.** Domen avval `cur < 0` bo'lsa **har qanday** ledger amalini `VALIDATION_ERROR` bilan rad etar edi: sinxrondan ortiqcha to'lov olgan mijozga kassada hech narsa qilib bo'lmas edi.
+- **Avtomatik yopish.** `CUSTOMER_OVERPAID` balans ≥ 0 bo'lganda o'zi yopiladi (`resolution = 'auto'`). "O'rganildi" qilingani summa o'zgarmaguncha qayta ochilmaydi.
+- **"Ikki hub va bulutda balans teng".** Hub tomonda S6 testi bilan isbotlangan. Bulutda mijoz balansi proyeksiyasi yo'q (C1 dagi `loadCustomerDebts` FIFO'ni o'qishda hisoblaydi). Ikki hub va bulutni birga tekshiradigan PG testini T2.5 bilan birga qo'shaman.
 
-Shunda FIFO manfiy balans hisoblaydi, CHECK **butun pull partiyasini** yiqitadi va xato `transient` deb tasniflanadi. Natijada shu tashkilotning pull'i **cheksiz to'xtaydi**. Eski kod (to'liq qayta qurish) ham xuddi shu INSERT'da yiqilardi.
+## Konflikt modeli (hub)
 
-Isbot: differensial test 200 seed'dan 11 tasida tabiiy ravishda shu xatoga uchradi: `SqliteError: CHECK constraint failed: chk_local_customer_balances_nonneg`. Bu boshqa do'kondan kelgan manfiy tuzatish bilan bo'ldi. Test hozir **qizil**: uni o'chirmadim va zaiflashtirmadim.
+| Kelib chiqishi | Qanday aniqlanadi | Retry | O'rganildi |
+|---|---|---|---|
+| push (bulut rad etgan) | `event_id` outbox'da bor | o'sha event id bilan outbox'ga qaytadi, bulut dedup qiladi | bor |
+| pull | `event_json` saqlanadi | saqlangan konvert oddiy pull yo'lidan; yana yiqilsa yangi xato bilan qayta ochiladi; park bo'lsa ochiq qoladi | bor |
+| `PROJECTION_FAILED` | kalit bo'yicha | kalit qayta hisoblanadi | bor |
+| `CUSTOMER_OVERPAID` | — | yo'q (pulni qaytarish egasining qarori) | bor |
 
-**Taklif (A).**
-- Proyeksiyada `balance >= 0` CHECK olib tashlanadi. Manfiy balans = mijozning haqi (ortiqcha to'lov). Ledger haqiqat, proyeksiya uni aks ettirishi shart.
-- Bu LOCAL jadval, shuning uchun SQLite'da jadvalni qayta yaratuvchi migratsiya kerak.
-- Manfiy balans konflikt ekranida ko'rinadi (`CUSTOMER_OVERPAID`, faqat ko'rish/"o'rganildi").
-- Kassadagi `OVERPAYMENT_NOT_ALLOWED` qoidasi (lokal to'lov) o'zgarmaydi.
+Har yopishda `resolution`, `resolved_by_user_id`, `resolution_note` (≤ 500) yoziladi va `sync.conflict_resolved` log chiqadi. Body strict: ma'lumotni tahrirlash maydoni yo'q (test bor).
 
-**Muqobil (B).** Manfiy qiladigan ledger hodisasini park/konfliktga yuborish. Bunda lokal ledger bulutdan ajralib qoladi, shuning uchun men rad etaman.
+## Migratsiyalar
 
-Yetkazib beruvchi balansida bu CHECK yo'q (faqat `accrued`/`credited` ≥ 0), u yerda muammo yo'q.
+- **Lokal `0020_sync_overpaid_conflicts`.** Ikkita jadval qayta yaratiladi. Eski yopilgan konfliktlar `resolution = 'auto'` oladi: generator buni noto'g'ri yaratgan edi, `INSERT … SELECT` qo'lda tuzatildi.
+- **Bulut `0006_sync_parked_resolution`.** C1 ham `0006` ni oladi: kim keyin merge bo'lsa, raqamni o'sha qayta yaratadi (sizning qoidangiz).
 
-**Javob kelguncha:** konflikt API, POS ekrani va perf ustida ishlayman. A tasdiqlansa, migratsiya `0020`, test va mutatsiya qo'shaman.
+## Qolgan ishlar (P1)
+
+1. Bulut buyruq yozuvchi porti (T2.7b uchun). Navbatdagi ish.
+2. T2.5: bootstrap, davom ettirish, tenant filtri, tiklash. `device_id` savoliga ham javob shu yerda bo'ladi.
+3. `ALOQA.md` yo'laklar jadvali.
+4. Oxirida `pnpm verify`, PR va to'liq hisobot.
 
 ---
 
