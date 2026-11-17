@@ -513,7 +513,18 @@ export class HubSyncPullService {
       .prepare('SELECT balance FROM local_customer_balances WHERE customer_id = ?')
       .get(customerId) as { balance: number | bigint } | undefined;
     const balance = row === undefined ? 0n : BigInt(row.balance);
-    if (balance < 0n) {
+    const acknowledged = this.sqlite
+      .prepare(
+        `SELECT payload FROM local_sync_conflicts
+          WHERE reason = ? AND entity = 'customers' AND entity_id = ? AND resolution = 'acknowledged'
+          ORDER BY resolved_at_ms DESC LIMIT 1`,
+      )
+      .get(CUSTOMER_OVERPAID, customerId) as { payload: string } | undefined;
+    const sameAsAcknowledged =
+      acknowledged !== undefined &&
+      (JSON.parse(acknowledged.payload) as { overpaidTiyin?: string }).overpaidTiyin ===
+        (-balance).toString();
+    if (balance < 0n && !sameAsAcknowledged) {
       this.upsertOpenConflict(
         CUSTOMER_OVERPAID,
         'customers',
@@ -523,7 +534,7 @@ export class HubSyncPullService {
         `Customer overpaid by ${(-balance).toString()} tiyin (the customer's credit)`,
         { overpaidTiyin: (-balance).toString() },
       );
-    } else {
+    } else if (balance >= 0n) {
       this.resolveOpenConflict(CUSTOMER_OVERPAID, 'customers', customerId, nowMs);
     }
   }
@@ -578,7 +589,7 @@ export class HubSyncPullService {
   private resolveOpenConflict(reason: string, entity: string, entityId: UuidV7, nowMs: UnixMs) {
     this.sqlite
       .prepare(
-        `UPDATE local_sync_conflicts SET resolved_at_ms = ?, updated_at_ms = ?
+        `UPDATE local_sync_conflicts SET resolved_at_ms = ?, resolution = 'auto', updated_at_ms = ?
           WHERE reason = ? AND entity = ? AND entity_id = ? AND resolved_at_ms IS NULL`,
       )
       .run(nowMs, nowMs, reason, entity, entityId);
@@ -644,10 +655,16 @@ export class HubSyncPullService {
       .prepare(
         `INSERT INTO local_sync_conflicts (
            id, organization_id, store_id, event_id, entity, entity_id,
-           reason, error, payload, created_at_ms, updated_at_ms
-         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+           reason, error, payload, event_json, created_at_ms, updated_at_ms
+         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
          ON CONFLICT(id) DO UPDATE SET
+           reason = EXCLUDED.reason,
            error = EXCLUDED.error,
+           event_json = EXCLUDED.event_json,
+           resolved_at_ms = NULL,
+           resolution = NULL,
+           resolved_by_user_id = NULL,
+           resolution_note = NULL,
            updated_at_ms = EXCLUDED.updated_at_ms`,
       )
       .run(
@@ -660,9 +677,78 @@ export class HubSyncPullService {
         reason,
         errorMsg,
         payloadStr,
+        JSON.stringify(event, (_k, v: unknown) => (typeof v === 'bigint' ? v.toString() : v)),
         nowMs,
         nowMs,
       );
+  }
+
+  /**
+   * T2.6 "retry" of a pulled event that ended in a conflict: re-applies the stored envelope through
+   * the normal pull path (same validation, same rules). The conflict is closed as `retried` first;
+   * if the event fails again, `recordConflict` re-opens it with the new error, and if it parks again
+   * it is re-opened here. Returns whether the event is now applied.
+   */
+  retryConflictEvent(params: {
+    readonly conflictId: UuidV7;
+    readonly userId: UuidV7;
+    readonly note: string | null;
+    readonly context: {
+      readonly organizationId: UuidV7;
+      readonly storeId: UuidV7;
+      readonly deviceId: UuidV7;
+    };
+    readonly nowMs: UnixMs;
+  }): boolean {
+    const row = this.sqlite
+      .prepare('SELECT event_json FROM local_sync_conflicts WHERE id = ?')
+      .get(params.conflictId) as { event_json: string | null } | undefined;
+    if (!row?.event_json) return false;
+    const event = JSON.parse(row.event_json) as SyncedEventDto;
+    return this.sqlite.transaction(() => {
+      this.sqlite
+        .prepare(
+          `UPDATE local_sync_conflicts
+              SET resolved_at_ms = ?, resolution = 'retried', resolved_by_user_id = ?,
+                  resolution_note = ?, updated_at_ms = ?
+            WHERE id = ?`,
+        )
+        .run(params.nowMs, params.userId, params.note, params.nowMs, params.conflictId);
+      this.applySyncPullBatch({
+        context: params.context,
+        events: [event],
+        nextCursors: {},
+        nowMs: params.nowMs,
+      });
+      const parked =
+        this.sqlite
+          .prepare('SELECT 1 FROM local_sync_parked WHERE event_id = ?')
+          .get(event.eventId) !== undefined;
+      if (parked) {
+        this.sqlite
+          .prepare(
+            `UPDATE local_sync_conflicts
+                SET resolved_at_ms = NULL, resolution = NULL, resolved_by_user_id = NULL,
+                    resolution_note = NULL, error = 'Still waiting for a referenced row', updated_at_ms = ?
+              WHERE id = ?`,
+          )
+          .run(params.nowMs, params.conflictId);
+      }
+      const after = this.sqlite
+        .prepare('SELECT resolved_at_ms FROM local_sync_conflicts WHERE id = ?')
+        .get(params.conflictId) as { resolved_at_ms: number | bigint | null };
+      return after.resolved_at_ms !== null;
+    })();
+  }
+
+  /** T2.6 "retry" of a projection key: recomputes every open PROJECTION_FAILED key now. */
+  recomputeOpenProjectionConflicts(params: {
+    readonly context: { readonly organizationId: UuidV7; readonly storeId: UuidV7 };
+    readonly nowMs: UnixMs;
+  }): void {
+    this.sqlite.transaction(() => {
+      this.recomputeProjectionsSafely(new ProjectionTouchSet(), params.context, params.nowMs);
+    })();
   }
 
   private compareFactContent(

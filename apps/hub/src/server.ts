@@ -85,6 +85,8 @@ import { HubRulesService, nodeEd25519RulesVerifier } from './rules-service.js';
 import { HubSyncPullService } from './sync-pull-service.js';
 import { HubSyncPullWorker } from './sync-pull-worker.js';
 import { registerFiscalRoutes } from './fiscal-routes.js';
+import { registerSyncConflictRoutes } from './sync-conflicts-routes.js';
+import { HubSyncConflictService } from './sync-conflicts-service.js';
 import { HubFiscalService } from './fiscal-service.js';
 import { HubFiscalWorker, type HubFiscalWorkerOptions } from './fiscal-worker.js';
 
@@ -577,6 +579,25 @@ export async function createHubServer(options: CreateHubServerOptions): Promise<
     );
     registerRulesRoutes(app, authService, rulesService, cartService, () => BigInt(clock.now()));
     registerFiscalRoutes(app, authService, fiscalService);
+    registerSyncConflictRoutes(
+      app,
+      authService,
+      new HubSyncConflictService({
+        connection,
+        pullService,
+        getContext: () => {
+          const ctx = store.getActiveRuntimeContext();
+          return ctx
+            ? {
+                organizationId: ctx.config.organizationId,
+                storeId: ctx.config.storeId,
+                deviceId: ctx.config.deviceId,
+              }
+            : null;
+        },
+        nowMs: () => clock.now(),
+      }),
+    );
     options.registerExtraTestRoutes?.(app);
 
     let boundPort: number | null = securityConfig.port > 0 ? securityConfig.port : null;

@@ -1,7 +1,7 @@
 {
   "version": "6",
   "dialect": "sqlite",
-  "id": "bc3a4998-940e-4ba0-993f-8cf0042c0aab",
+  "id": "d4670623-4204-476e-a466-968454b78456",
   "prevId": "120d22b8-155b-42b3-8061-7be6e4a8bbd5",
   "tables": {
     "batches": {
@@ -5849,6 +5849,34 @@
           "primaryKey": false,
           "notNull": false,
           "autoincrement": false
+        },
+        "event_json": {
+          "name": "event_json",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "resolution": {
+          "name": "resolution",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "resolved_by_user_id": {
+          "name": "resolved_by_user_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "resolution_note": {
+          "name": "resolution_note",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
         }
       },
       "indexes": {
@@ -5860,6 +5888,11 @@
         "idx_local_sync_conflicts_created": {
           "name": "idx_local_sync_conflicts_created",
           "columns": ["organization_id", "created_at_ms"],
+          "isUnique": false
+        },
+        "idx_local_sync_conflicts_open": {
+          "name": "idx_local_sync_conflicts_open",
+          "columns": ["organization_id", "reason", "entity", "entity_id", "resolved_at_ms"],
           "isUnique": false
         }
       },
@@ -5878,6 +5911,18 @@
         "chk_local_sync_conflicts_resolved_at_ms_int": {
           "name": "chk_local_sync_conflicts_resolved_at_ms_int",
           "value": "\"local_sync_conflicts\".\"resolved_at_ms\" IS NULL OR typeof(\"local_sync_conflicts\".\"resolved_at_ms\") = 'integer'"
+        },
+        "chk_local_sync_conflicts_resolution": {
+          "name": "chk_local_sync_conflicts_resolution",
+          "value": "\"local_sync_conflicts\".\"resolution\" IS NULL OR \"local_sync_conflicts\".\"resolution\" IN ('retried', 'acknowledged', 'auto')"
+        },
+        "chk_local_sync_conflicts_resolved_pair": {
+          "name": "chk_local_sync_conflicts_resolved_pair",
+          "value": "(\"local_sync_conflicts\".\"resolved_at_ms\" IS NULL) = (\"local_sync_conflicts\".\"resolution\" IS NULL)"
+        },
+        "chk_local_sync_conflicts_note_len": {
+          "name": "chk_local_sync_conflicts_note_len",
+          "value": "\"local_sync_conflicts\".\"resolution_note\" IS NULL OR length(\"local_sync_conflicts\".\"resolution_note\") <= 500"
         }
       }
     },

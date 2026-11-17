@@ -780,6 +780,20 @@ export {
   type MonotoneTransitionRule,
   SYNC_FOREIGN_REFERENCES,
   type ForeignKeyRef,
+  SYNC_CONFLICT_ACTIONS,
+  SYNC_CONFLICT_ORIGINS,
+  SyncConflictDtoSchema,
+  type SyncConflictDto,
+  SyncConflictListQuerySchema,
+  SyncConflictListResponseSchema,
+  type SyncConflictListResponseDto,
+  ResolveSyncConflictRequestSchema,
+  type ResolveSyncConflictRequestDto,
+  ResolveSyncConflictResponseSchema,
+  type ResolveSyncConflictResponseDto,
+  SyncParkedDtoSchema,
+  SyncParkedListResponseSchema,
+  type SyncParkedListResponseDto,
 } from './sync.js';
 
 export {
