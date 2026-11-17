@@ -1,201 +1,243 @@
-# Hisobot: T3.2 — Qoidalar dvigateli (T3.2a + T3.2b, bitta PR)
+# Reja: T2.6 (proyeksiyalar va konfliktlar) + T2.5 (bootstrap va tiklash)
 
-Branch / PR: `ishchi2/T3.2-rules` / https://github.com/Shaxobiddin-Github/Mezon/pull/25
-Oxirgi kod commit'i: `bb5694c`.
-Asos: `main` = `89011bf` (T2.3) merge qilingan. Nazoratchi commit'lari: `7f83451` (T3.2a tasdig'i) va `79df8b8` (egasi javoblari).
-Bajaruvchi: ishchi2.
+Branch: `ishchi2/T2.6-projections`, `main` (`93c4f12`) dan.
+Topshiriq: `9c3efe2`.
+Holat: **REJA**. Tasdiq kutilyapti, kod yozilmagan.
+Parallel holat: PR #27 hisobot bilan merge ruxsatini kutyapti (`ishchi2/T3.3-fiscal`, `93dc8be`).
 
-`79df8b8` dagi ruxsat bo'yicha T3.2b shu PR'ga qo'shildi. Hisobot bitta: `[ishchi2-hisobot] T3.2`.
+Ikki alohida PR bo'ladi: avval T2.6, keyin T2.5. Bulut hodisa yozuvchisi (T2.7b uchun port) T2.6 dan keyin alohida kichik PR (T2.6b) sifatida taklif qilinadi.
 
----
-
-## Git bo'yicha ochiq izoh (avval o'qing)
-
-1. T2.3 `main` ga tushgach, men branch'ni `origin/main` ga **rebase** qildim. Rebase branch'dagi `[claude] 7f83451` va `[ishchi2-reja] bf6b080` commit'larini **lokal ravishda qayta yozdi**. Bu `[claude]` commit'larini rebase qilmaslik qoidasiga zid edi.
-2. Push paytida remote'da yangi `79df8b8` borligi sababli push rad etildi, shuning uchun qayta yozilgan tarix **hech qachon push qilinmadi**. Force push ham qilinmagan.
-3. Keyin branch'ni remote holatidan qayta tikladim: asos `origin/ishchi2/T3.2-rules` (`79df8b8`), unga `origin/main` **merge** qilindi (`3540c66`, tarix qayta yozilmaydi). Ishim cherry-pick bilan ustiga qo'yildi. Natijadagi kod daraxti rebase qilingan versiya bilan **aynan bir xil** (`git diff` bo'sh). Barcha `[claude]` commit'lari asl SHA'lari bilan turibdi.
-4. Shu sababli PR'da `origin/main` rebase emas, merge commit orqali kiritilgan. Squash merge'da bu ahamiyatsiz. Kelgusida `[claude]` commit'lari bor branch'da `main` ni yangilash uchun faqat merge ishlataman.
+Ruxsat doirasi:
+- **Tegaman:** `apps/cloud/**` (kabinet fayllaridan tashqari), `packages/db-cloud/**` (`admin-store.ts` dan tashqari), `apps/hub/src/sync*`, `packages/sync/**`, `packages/contracts/src/sync.ts`. Proyeksiya funksiyalari uchun `packages/db-local/src/{stock,customer,supplier}-repo.ts`. POS'da konflikt ekrani.
+- **Tegmayman:** `apps/admin`, `apps/cloud/src/admin-*`, `packages/db-cloud/src/admin-store.ts`, `.mezon/claude/*`, `.mezon/gemini/*`.
 
 ---
 
-## Egasining javoblari bo'yicha o'zgarishlar (79df8b8, 1–6-bandlar)
+## 0. Test qarzi (T2.6 PR'ning birinchi commit'i)
 
-1. **Ijtimoiy karta olib tashlandi.** `SOCIAL_CARD_DATA_REQUIRED`, `socialCard` kirish maydonlari (domain, contracts, hub servislari), POS formasi, maskalash (`provider_meta_json`), log redaksiyasi va i18n matnlari olib tashlandi. Yangi sinxron ustun yoki jadval qo'shilmadi: `payments.provider_meta_json` yana `null` bo'lib yoziladi. **T3.2 uchun bulut jufti kerak emas.** Yagona yangi jadval `local_rule_packages` (LOCAL, sinxronlanmaydi), qolganlari `local_hub_config` ning ikkita LOCAL ustuni.
-2. **`EXPIRED_GOODS` faqat warn.**
-   - Aynan bugun tugaydigan partiya: topilma yo'q.
-   - Kecha va undan oldin tugagan partiya: warn, savdo davom etadi. Fiskal rejimda ham warn.
-   - Chegara mahalliy sana bo'yicha (`Asia/Tashkent`): 23:59:59.999 hali "bugun", 00:00 dan keyin warn.
-   - Mutatsiyalar: R17 (warn → block), R7 (`<` → `<=`), R8 (sana o'rniga lahza).
-3. **Retsept umuman yo'q.** `PRESCRIPTION_REQUIRED` kodi va `prescriptionRequired` paket maydoni olib tashlandi. Paketda bu maydon kelsa, `unknown field` deb rad etiladi (test bor).
-4. **Naqd limit formati:** `perMxikCashLimit: { limitTiyin, appliesTo: 'cash' | 'mxikTotal', inclusive, exempt } | null`. Kodda hech qanday limit raqami yo'q: testlarda sintetik 1 000 000 tiyin, hub testida 99 999 tiyin. Semantika (T3.2b) quyida.
-5. **`cashForbidden` qoldi** (aniq moslik va prefiks). Ro'yxat bo'sh bo'lsa, hech narsa bloklanmaydi (test bor).
-6. **Kalit egasida, paket barcha tashkilotlar uchun.**
-   - `PRODUCTION_TRUSTED_RULE_KEYS = []`, egasi kalit berguncha shunday qoladi (test bor).
-   - Payload'da `organizationId` yo'q, bunday maydon kelsa rad etiladi (test bor).
-   - Egasi uchun yo'riqnoma: `docs/rules-signing.md`. Unda `keygen`, `sign`, `verify` va import tartibi bor.
+`FakeFiscalDriver` haqiqiy operatorning o'zgarmas qoidalarini majburlaydi. Har biri `rejected` (kod `SHIFT_NOT_OPEN` / `SHIFT_CLOSED`) qaytaradi:
 
-## T3.2b semantikasi (shu PR'da)
-
-- **`CASH_FORBIDDEN_MXIK` / `MIXED_RECEIPT_CASHLESS`:** chekda `cashForbidden` ga mos qator bo'lsa va `cash` to'lovi > 0 bo'lsa (hatto 1 tiyin), block. Hamma qator taqiqlangan bo'lsa, `CASH_FORBIDDEN_MXIK`; aralash chek bo'lsa, `MIXED_RECEIPT_CASHLESS`. Faqat naqdsiz to'lov bo'lsa, block yo'q.
-- **`MXIK_CASH_LIMIT`:** faqat `cash` > 0 bo'lganda tekshiriladi. Qatorlar MXIK bo'yicha guruhlanadi (bir MXIK'li bo'lingan qatorlar yig'iladi), `exempt` dagilar o'tkazib yuboriladi.
-  - `appliesTo: 'mxikTotal'`: MXIK'ning chekdagi umumiy summasi limit bilan taqqoslanadi.
-  - `appliesTo: 'cash'`: naqd summa (chek summasidan oshmaydigan qismi) qatorlarga `allocate` (eng katta qoldiq usuli) bilan proporsional taqsimlanadi va MXIK bo'yicha yig'iladi.
-  - `inclusive: true`: limitga teng summa ruxsat; `false`: teng summa ham block.
-
-## Qabul mezonlari
-
-- [x] **Chegara qiymatli jadval testlari.** `packages/rules/src/rules.test.ts`:
-  - "MXIK_CASH_LIMIT boundary table": `limit − 1` / `limit` / `limit + 1` × `inclusive` true/false × `appliesTo` cash/mxikTotal, jami 12 holat;
-  - proporsional naqd taqsimoti, bo'lingan qatorlar, ikki MXIK, `exempt`, naqdsiz to'lov;
-  - property testi: naqd ≤ limit bo'lsa, hech qachon block yo'q;
-  - naqd taqiqi: aniq va prefiks moslik, MXIK o'rtasidagi kod mos kelmasligi, 1 tiyin naqd, avans va karta naqd hisoblanmasligi, bo'sh ro'yxat;
-  - muddat chegarasi (yuqoridagi 2-band).
-- [x] **Imzosiz paket rad etiladi.** `apps/hub/src/rules.test.ts`, "signature attacks are rejected and nothing is stored", haqiqiy Ed25519 bilan:
-  - imzosiz paket → 400;
-  - payload'da bitta bayt o'zgartirilgan → `RULES_SIGNATURE_INVALID`;
-  - imzoda bitta bit o'zgartirilgan → `RULES_SIGNATURE_INVALID`;
-  - boshqa kalit bilan imzolangan → `RULES_SIGNATURE_INVALID`;
-  - konvertdagi `keyId` almashtirilgan → `RULES_SIGNATURE_INVALID`;
-  - ishonchsiz kalit → `RULES_KEY_UNTRUSTED`;
-  - hech qaysi holatda bazaga hech narsa yozilmaydi.
-  - Bunga qo'shimcha: kalitning amal qilish oynasi (rotatsiya) va bazada qo'lda o'zgartirilgan paket → `invalid`.
-- [x] **API, buyurtma va bot yo'llari ham bloklanadi.** Yagona nuqta `completeSaleCoreInTxSync` va majburiy `rulesEvaluator` porti:
-  - "cash ban: preview and final return the same code, a direct API call gets 422 with FULL rollback": to'g'ridan-to'g'ri API so'rovi 422 oladi; sales, stock_moves, cash_moves, receipt_seq va outbox o'zgarmaydi; karta bilan esa savdo o'tadi;
-  - "per-MXIK cash limit … blocks cart complete AND order deliver";
-  - "fiscal mode + missing package blocks cart complete AND order deliver".
-  - Bot alohida savdo yo'liga ega emas, `completeSale` orqali ishlaydi (§3.1.9).
-
-### Nazoratchi tuzatishlari (7f83451)
-
-- [x] **S11, majburiy port.** `CreateSqliteSaleStoreOptions.rulesEvaluator` va `CreateSqliteOrderStoreOptions.rulesEvaluator` majburiy, `CompleteSaleCoreInTxInput.rulesEvaluator` ham majburiy. Mutatsiyalar: R5 (noop evaluator) va R6 (deliver evaluator'ni chetlab o'tadi) aniqlandi.
-- [x] **S10.** Fiskal rejimda `missing` yoki `invalid` → block (R11).
-- [x] **Rollback himoyasi va zaxira.** "backup at v3, import v5, restore the backup → v4 is still rejected" testi: tiklashdan oldin joriy yuqori chegara `backups/rules-hwm-after-restore.json` ga yoziladi. Hub ishga tushganda migratsiyalardan keyin `recomputeMaxVersion(floor)` uni hisobga oladi, keyin fayl o'chiriladi. Bu T3.2 sxemasidan **oldingi** zaxira tiklansa ham ishlaydi (R13).
-- [x] **Migratsiya raqami.** `0017_rules_packages`, chunki `main` da `0016_sync_conflicts` bor. Drizzle generatsiya qilgan `INSERT … SELECT` dagi yangi ustunlar (`max_rule_package_version`, `fiscal_mode_enabled`) qo'lda `0, 0` literal qiymatlariga almashtirildi. `0013` da ham shu naqsh bor. `db:check`: 0 diff.
-- [x] **`trustedRuleKeys` faqat test va DI uchun.** `NODE_ENV=production` da `createHubServer` xato tashlaydi (R14). Test Electron worker manbalarida `trustedRuleKeys` yo'qligini tekshiradi.
-- [x] **Faol paket o'zgarishi bitta tranzaksiyada.** Parallel ikki import testi: oxirida faol paket v4 va faol qatorlar soni aynan 1 (R15).
-- [x] **CLI.** `keygen` repo ichidagi yo'lni rad etadi. Test **soxta repo ildizida** ishlaydi, shunda buzilgan himoya ham haqiqiy repoga kalit yoza olmaydi; bu 6-bo'limdagi voqeadan keyin qilingan o'zgarish. Kalit fayli `0600` rejimida va `wx` bilan yoziladi (mavjud faylni ustiga yozmaydi). Imzolash, tekshirish va hub'ga import zanjiri testda bor (R16).
-- [x] **UI.** Block bo'lsa "Yakunlash" o'chadi, sabab i18n orqali ko'rsatiladi (`RulesPanel`). Final tekshiruv hub'da: to'g'ridan-to'g'ri API so'rovi 422 oladi (yuqoridagi test).
-
-## O'zgargan fayllar (fayl — sabab)
-
-**Rules va contracts**
-
-| Fayl | Sabab |
+| Qoida | Natija |
 |---|---|
-| `packages/rules/src/{types,canonical,package,verify,evaluate,trusted-keys,index}.ts` | Dvigatel |
-| `rules.test.ts` | 39 ta test |
-| `packages/rules/package.json` | `fast-check` devDependency |
-| `packages/contracts/src/rules.ts` (yangi), `index.ts` | Wire Zod sxemalari va API DTO'lari |
-| `packages/domain/src/errors.ts` | `RULES_*` kodlari |
-| `packages/domain/src/auth.ts` | `rules:import` (owner, manager) |
+| Ochilmagan smenaga chek (`sale` yoki `refund`) | `rejected` |
+| `shift_close` dan keyin shu smenaga chek | `rejected` |
+| Ochilmagan smenani yopish | `rejected` |
 
-**db-local**
+Smena holati drayver daftarida (`ledger`) saqlanadi. Shuning uchun qayta ishga tushirilgandan keyin ham saqlanib qoladi.
 
-| Fayl | Sabab |
+Fake'ga smena tushunchasini berish uchun `FiscalSubmitRequest.shiftId` savdo va refund uchun ham to'ldiriladi: unga `shiftIdOfDocSync` bilan chekning smenasi yoziladi. Hozir bu maydon faqat smena hujjatlarida bor, cheklarda `null`. Bu fiskal port o'zgarishi: T3.5 haqiqiy drayveriga ham kerak bo'ladi (operatorga smena raqami yuboriladi).
+
+**Isbot:** nazoratchining ikki mutatsiyasini ("Z cheklarni kutmaydi", "cheklar `open` ni kutmaydi") qayta ishlataman. Har biri kamida 3 ta testni yiqitishi kerak (hozir bittadan), hisobotda ro'yxati bilan.
+
+---
+
+## T2.6 — Proyeksiyalar va konfliktlar
+
+### 1. Hozirgi holat (o'lchangan)
+
+`HubSyncPullService.applySyncPullBatch` partiyada `stock_moves`/`batches`, `customer_ledger` yoki `supplier_ledger` bo'lsa, yozish tranzaksiyasi ichida **to'liq** qayta quradi:
+
+| Funksiya | Nima qiladi |
 |---|---|
-| `schema/index.ts`, `drizzle/0017_rules_packages.sql`, `meta/*` | `local_rule_packages` va 2 ta config ustuni |
-| `rules-repo.ts` (yangi) | Import, rollback, conflict, high-water mark |
-| `sale-rules-port.ts` (yangi), `sale-repo.ts`, `order-repo.ts` | Majburiy evaluator porti; FIFO partiyalari muddati evaluator'ga uzatiladi |
-| `backup-service.ts` | Tiklashda high-water mark |
-| testlar va `test-utils/allow-all-rules.ts` | Qoidaga aloqasi yo'q db-local testlari uchun "hammasiga ruxsat" evaluator |
+| `executeStockProjectionsRebuildSync` | Do'konning barcha `stock_moves` va `receiving_cost_confirmations` larini o'qiydi, har pool (`product_id` + `variant_id`) uchun replay qiladi. `local_stock_balances`, `local_batch_balances`, `local_stock_conflicts` larni do'kon bo'yicha butunlay o'chirib, qayta yozadi. |
+| `executeCustomerBalancesRebuildSync` | Har mijoz uchun FIFO hisoblaydi, `local_customer_balances` ni tashkilot bo'yicha o'chirib, qayta yozadi. |
+| `executeSupplierBalancesRebuildSync` | Xuddi shu, yetkazib beruvchilar uchun. |
 
-**Hub**
+Y4: 50k mahsulot va 100k ledger bo'lganda partiya 1,23 s davom etadi.
 
-| Fayl | Sabab |
-|---|---|
-| `rules-service.ts` (yangi) | Ed25519 verifier, qayta tekshiruv keshi, yagona `saleEvaluator` |
-| `rules-routes.ts` (yangi) | Uchta endpoint |
-| `server.ts` | Ulanish, prod guard, `recomputeMaxVersion` |
-| `error-handler.ts` | `RULES_BLOCKED` → 422 va boshqalar |
-| `package.json`, `tsconfig.json`, `.dependency-cruiser.cjs` | hub → rules ruxsati |
-| `rules.test.ts`, `rules-cli.test.ts` | Testlar |
+### 2. Tegilgan kalitlar
 
-**POS, CLI va hujjatlar**
+Pull hodisalarni qo'llagach, quyidagi to'plamlar yig'iladi. Faqat **haqiqatan qo'llangan** hodisalar hisobga olinadi; echo, park yoki konflikt bo'lganlari olinmaydi.
 
-| Fayl | Sabab |
-|---|---|
-| `apps/pos/src/components/RulesPanel.tsx` (yangi), `PaymentAndShiftModals.tsx`, `api/hub-client.ts` | Panel, "Yakunlash" bloki, `rulesCheck` |
-| `packages/i18n/src/locales/uz-Latn.ts` | `rules.*`, `error.RULES_BLOCKED` |
-| `scripts/rules-sign.mjs`, `scripts/rules-sign-lib.mjs`, `docs/rules-signing.md`, `.gitignore` (`*.key`, `*.pem`, `*.pub.b64`) | CLI va yo'riqnoma |
-
-Tegilmagan: `apps/cloud/**`, `packages/db-cloud/**`, `apps/hub/src/sync*`, `packages/contracts/src/sync.ts`. Yangi kutubxona qo'shilmadi: Ed25519 uchun `node:crypto` ishlatildi.
-
-## Rejadan chetlanishlar
-
-- **POS paketni o'zi baholamaydi.** U `POST /carts/:id/rules-check` ni chaqiradi, bu endpoint ham aynan o'sha `evaluate` ni ishlatadi. Sabab: UI'da imzo tekshiruvi yo'q, ishonch chegarasi hub. Shuning uchun POS'ga `@mezon/rules` bog'liqligi kerak emas.
-- **Final tekshiruv nuqtasi.** U FIFO partiyalari ajratilgandan **keyin**, to'lovlar yozilishidan **oldin** turadi, chunki muddat uchun partiyalar kerak. `sale-repo.ts` dagi eski izohda "receipt_no dan oldin" deyilgan edi. Block bo'lsa hammasi bitta tranzaksiyada qaytariladi: `receipt_seq` o'zgarmasligi test bilan isbotlangan.
-
-## Mutatsiya dalillari
-
-Har mutatsiya bitta matnli o'zgarish. Kerakli paket qayta build qilinadi, testlar ishga tushiriladi, keyin fayl qaytariladi. **22 tadan 22 tasi aniqlandi.**
-
-| # | Mutatsiya | Yiqilgan test(lar) |
+| Hodisa | Kalit | Proyeksiya |
 |---|---|---|
-| R1 | Kanonik JSON kalitlarni saralamaydi | canonical golden va property |
-| R2 | `keyId` imzolanadigan matnda yo'q | "signed message … includes keyId" |
-| R3 | Imzo natijasi e'tiborsiz qoldiriladi | hub: imzo hujumlari va bazada o'zgartirilgan paket; rules: verify |
-| R4 | Rollback tekshiruvi olib tashlanadi | rollback/idempotent/conflict testi va zaxira testi |
-| R5 | Hub evaluator'i noop | fiskal + paket yo'q, naqd taqiqi, limit, buzilgan paket |
-| R6 | Deliver evaluator'ni chetlab o'tadi | fiskal + deliver, limit + deliver |
-| R7 | Muddat `<` → `<=` | muddat chegarasi |
-| R8 | Muddat sana o'rniga lahza bilan taqqoslanadi | muddat chegarasi |
-| R11 | Fiskal rejim e'tiborsiz qoldiriladi | §8 holatlari, hub fiskal testlari |
-| R12 | Bazadagi paket qayta tekshirilmaydi | "tampered in the DB … invalid" |
-| R13 | High-water mark tiklashdan o'tmaydi | zaxira testi |
-| R14 | Prod guard olib tashlanadi | `NODE_ENV=production` testi |
-| R15 | Eski paket nofaol qilinmaydi | rollback/active testi, zaxira testi |
-| R16 | CLI repo ichiga kalit yozishga ruxsat beradi | keygen rad etish testi |
-| R17 | `EXPIRED_GOODS` warn o'rniga block | rules: muddat (3), property; hub: muddat warn testi |
-| R18 | `inclusive` ma'nosi teskari | chegara jadvali (7) |
-| R19 | `appliesTo: 'cash'` e'tiborsiz qoldiriladi | proporsional taqsimot va property |
-| R20 | `exempt` e'tiborsiz qoldiriladi | split/two/exempt testi |
-| R21 | Prefiks moslik o'rniga substring | prefiks chegarasi (MXIK o'rtasidagi kod) |
-| R22 | `advance` naqd hisoblanadi | naqdsiz to'lov usullari testi |
-| R23 | Aralash chek bloklanmaydi | only/mixed testi |
-| R24 | Bo'lingan qatorlar yig'ilmaydi | split testi va boundary |
+| `stock_moves` | (`product_id`, `variant_id`) | stock pool |
+| `batches` | partiyaning (`product_id`, `variant_id`) | stock pool |
+| `receiving_cost_confirmations` | (`product_id`, `variant_id`) | stock pool (hozir bu yerda **e'tibordan chetda qolgan**, quyida qarang) |
+| `goods_receiving_lines` (`cost_unknown` replay'ga ta'sir qiladi) | qatorning `product_id`/`variant_id` | stock pool |
+| `products` ATTR yangilanishi | `track_batches` o'zgargan bo'lsa, shu mahsulotning barcha pool'lari | stock pool |
+| `customer_ledger` | `customer_id` | `local_customer_balances` |
+| `supplier_ledger` | `supplier_id` | `local_supplier_balances` |
+| `customers` / `suppliers` yangi yozuv | id | balans qatori paydo bo'lishi uchun |
 
-R21 birinchi ishga tushirishda **omon qoldi**: testda MXIK o'rtasida kod uchraydigan holat yo'q edi. `10099910000000000` holatini qo'shdim, endi aniqlanadi. R15 birinchi urinishda sessiya uzilishi sabab yakunlanmadi (6-bo'limga qarang), qayta ishga tushirilganda aniqlandi.
+Hozirgi kodda faqat `stock_moves`/`batches` va ikki ledger tekshiriladi. `receiving_cost_confirmations` va `track_batches` o'zgarishi ham proyeksiyani o'zgartiradi. Differensial test buni ushlashi kerak, ushlamasa test zaif. Tegilgan kalitni aniqlash generator ichida markazlashtiriladi: bitta `collectTouchedProjectionKeys(event, row)` funksiyasi va uning birlik testi bo'ladi.
 
-## Test natijasi
+### 3. Qisman qayta hisoblash
 
-`pnpm verify` (lokal):
+Har proyeksiya uchun kalit bo'yicha funksiya. To'liq qayta qurish ham **shu funksiyani barcha kalitlar uchun chaqiradi**, shuning uchun mantiq bitta bo'ladi va ikki kod yo'li ajralib ketmaydi.
 
-```
-format:check  All matched files use Prettier code style!
-build         Tasks: 17 successful, 17 total
-typecheck     Tasks: 28 successful, 28 total
-db:check      Tasks: 19 successful, 19 total
-test:unit     Test Files 92 passed (92)   Tests 522 passed (522)      ← f54ad2c, Docker bilan
-test:unit     Test Files 85 passed | 7 skipped   Tests 464 passed | 58 skipped  ← bb5694c, Docker ishlamayotgan edi
-test:perf     Test Files 9 passed (9)    Tests 12 passed (12)
-test:e2e      1 passed
-depcruise     ✔ no dependency violations found (461 modules, 1989 dependencies cruised)
-EXIT=0
-```
+- **Stock:** `recomputeStockPoolsSync(db, scope, keys)`.
+  - Har kalit uchun shu pool'ning moves va confirmations'ini (`idx_stock_moves_store_prod_hlc` indeksi bor) HLC tartibida olib, xuddi hozirgidek `applyReplayStockMove` / `applyStockCostConfirmation` bilan replay qiladi.
+  - Keyin faqat shu pool'ning `local_stock_balances`, `local_batch_balances` va `local_stock_conflicts` qatorlarini almashtiradi.
+  - Pool'lar bir-biriga bog'liq emas: replay holati pool kaliti bo'yicha alohida, bu kodda tasdiqlandi.
+- **Mijoz va yetkazib beruvchi:** `recomputeCustomerBalancesSync(keys)` va `recomputeSupplierBalancesSync(keys)` mavjud `readCustomerLedgerFifoSync` / supplier ekvivalentini faqat berilgan id'lar uchun chaqiradi.
+- **Qator id'si.** Hozirgi to'liq qayta qurish yangi id beradi:
+  - stock uchun `nextId()`;
+  - mijoz uchun indeksdan hosil qilingan sintetik id. Bu id mijozlar tartibiga bog'liq, shuning uchun qisman yangilashda ziddiyat chiqaradi.
 
-- `bb5694c` (faqat bitta test qo'shilgan) uchun ishga tushirishda Docker Desktop kompyuter qayta ishga tushganidan keyin ishlamayotgan edi. Shuning uchun PG testlari skip bo'ldi, ular CI'da ishlaydi.
-- Bir marta `EBUSY` xatosi chiqdi: repo OneDrive papkasida, OneDrive `node_modules` fayllarini qulflaydi. Qayta ishga tushirilganda yashil bo'ldi.
+  **Taklif:** proyeksiya qatori id'si **deterministik** bo'ladi va tabiiy kalitdan olinadi. Mavjud qator bo'lsa, uning id'si saqlanadi; yangi qator uchun `nextId()` ishlatiladi. Differensial taqqoslash tabiiy kalit bo'yicha olib boriladi va `id`, `created_at_ms`, `updated_at_ms` ustunlarini chiqarib tashlaydi (savol S1).
+- **Tranzaksiya:** pull tranzaksiyasi ichida qoladi. Natija "qisman = to'liq" bo'lishi uchun proyeksiya hodisalar bilan atomik yangilanadi.
 
-**CI (PR #25):** hisobot yozilgan paytda to'rtala job ishlayotgan edi. Natijani PR'da ko'rasiz. Qizil chiqsa, tuzataman.
+### 4. Differensial test (Mezon isboti)
 
-## Tekshirilmagan narsalar va xavflar
+`apps/hub/src/sync-projections-diff.test.ts` (`sqlite-hub` loyihasi):
 
-- **Supplier E4 model testi** (`supplier.test.ts`, ichki timeout 20 s) og'ir parallel yuklama ostida ikki marta 20,8 s bilan yiqildi. Uchinchi to'liq ishga tushirishda va undan keyingi barcha ishga tushirishlarda o'tdi. Alohida ishlaganda 4,3 s, yuklama ostida 12–14 s. Bu chegaraga yaqin "flaky" holat. Testning timeout'iga tegmadim. Sabab yuklama ekani kuzatildi, lekin baseline bilan aniq solishtirilmadi.
-- POS paneli uchun Playwright E2E yozilmadi. Paneldagi mantiq hub endpoint'iga tayanadi va u integratsion testlar bilan qoplangan.
-- Ed25519 brauzerda tekshirilmaydi (rejadagi qaror).
+- **Generator** (seed bilan qayta takrorlanadigan, `mulberry32` PRNG): savdo, qaytarish, void, kirim (`cost_unknown` va keyin tasdiqlash bilan), qarz savdosi va to'lovi, yetkazib beruvchiga qarz va to'lov, mahsulotda `track_batches` almashinuvi, boshqa do'kondan `customer_ledger`.
+- **Manba:** hodisalar haqiqiy hub servislari bilan "manba hub" da yaratiladi va outbox'dan olinadi. Shunda payloadlar haqiqiy bo'ladi.
+- **Qo'llash:** maqsad hub'ga tasodifiy o'lchamli partiyalarda, tasodifiy tartibda `applySyncPullBatch` orqali yuboriladi. Partiyalarning bir qismi aralashtiriladi: kech kelgan eski HLC va park, keyin retry.
+- **Har partiyadan keyin:**
+  1. barcha proyeksiya jadvallari o'qiladi (qisman natija);
+  2. `SAVEPOINT` ichida to'liq qayta qurish ishga tushiriladi va qayta o'qiladi;
+  3. `ROLLBACK TO`.
 
-## Qilingan taxminlar (nazoratchi ko'rib chiqsin)
+  Ikkala natija tabiiy kalit bo'yicha saralanib, `id`/`created_at_ms`/`updated_at_ms` dan tashqari barcha ustunlar bo'yicha `toEqual` bilan solishtiriladi. Pul bigint holida taqqoslanadi.
+- **Hajm:** 200 seed, har birida 20–60 amal. Shablon baza bir marta migratsiya qilinadi va har seed uchun nusxalanadi. CI vaqtini o'lchab hisobotga yozaman. 60 s dan oshsa, savol bilan qaytaman.
+- **Mutatsiyalar** (har biri testni yiqitishi kerak):
 
-1. **Faqat `cash` usuli naqd hisoblanadi.** `advance` (avvalgi avans), qarz (nasiya), `card`, `uzqr` va boshqalar naqd emas. S3 javobida avans va nasiya haqida aniq gap yo'q edi (R22 bu tanlovni qotiradi).
-2. **`appliesTo: 'mxikTotal'` faqat chekda naqd bo'lganda qo'llanadi.** Butunlay naqdsiz chek limitga tushmaydi, chunki bu "naqd" limiti.
-3. **`appliesTo: 'cash'` taqsimoti** chekdagi barcha qatorlar bo'yicha `finalTotal` ga proporsional (eng katta qoldiq usuli). Naqd chek summasidan oshsa (qaytim), chek summasi bilan cheklanadi.
-4. **Muddati o'tgan tovar paketsiz ham warn beradi.** Paketda `expiredGoods.enabled = false` bo'lsa, o'chiriladi.
+  | Kod | Mutatsiya |
+  |---|---|
+  | D1 | `receiving_cost_confirmations` tegilgan kalitlardan chiqarildi |
+  | D2 | `track_batches` o'zgarishi e'tiborsiz |
+  | D3 | `variant_id` kalitdan tushirildi |
+  | D4 | stock'da konfliktlar pool bo'yicha o'chirilmaydi |
+  | D5 | mijoz balansi faqat mavjud qatorda yangilanadi (yangi mijoz yo'qoladi) |
+  | D6 | parklangan hodisa retry'da qo'llanganida kalit yig'ilmaydi |
+
+### 5. Perf
+
+`apps/hub/src/sync-pull-projections.perf.test.ts`: Y4 bilan bir xil baza (50k mahsulot, 100k `customer_ledger`, real `stock_moves` taqsimoti bilan). Bitta partiya (1 `stock_moves` va 1 `customer_ledger`) **< 50 ms**, p95, 20 marta takrorlanadi.
+
+Mutatsiya: to'liq qayta qurishni qaytarish testni yiqitadi.
+
+### 6. Konfliktlar API va POS ekrani
+
+**Hub** (`apps/hub/src/sync-conflicts-*.ts`):
+
+| Endpoint | Ruxsat | Vazifa |
+|---|---|---|
+| `GET /sync/conflicts?status=open\|resolved` | `sync:read` (owner, manager) | `local_sync_conflicts` ro'yxati |
+| `GET /sync/parked` | `sync:read` | `local_sync_parked` ro'yxati (urinishlar, qaysi ref yetishmaydi) |
+| `POST /sync/conflicts/:id/resolve` `{ action: 'retry' \| 'acknowledge', note? }` | `sync:resolve` (owner, manager) | hal qilish |
+
+- **Retry:**
+  - pull'dan kelgan konflikt bo'lsa, payload pull bilan bir xil yo'l orqali qayta qo'llanadi;
+  - push'da rad etilgan bo'lsa, hodisa outbox'ga **o'sha `eventId` bilan** qayta navbatga qo'yiladi (bulut dedup idempotent).
+
+  Ikkala holatda ham yangi ma'lumot yozilmaydi.
+- **Acknowledge** faqat "o'rganildi" deb belgilaydi.
+- **Qo'lda tahrir yo'q:** API'da payload qabul qiladigan maydon yo'q, `.strict()` schema bilan.
+- **Audit:** `local_sync_conflicts` ga yangi ustunlar `resolution` (`retried`/`acknowledged`), `resolved_by_user_id`, `resolution_note` va mavjud `resolved_at_ms`. Bitta qayta hal qilish taqiqlanadi (409). Strukturalangan log `sync.conflict_resolved`. Hub'da umumiy audit jadvali yo'q (savol S2).
+
+**Bulut:**
+- `GET /sync/parked` va `POST /sync/parked/:id/resolve` (qurilma tokeni, faqat o'z do'koni, RLS bilan). Hub ularni POS'ga proksi qiladi.
+- Ruxsat etilgan amallar: retry (yetishmagan ref endi bormi, qayta tekshiriladi) va acknowledge.
+- Audit ustunlari `cloud_sync_parked` da (`resolved_by_user_id` hub foydalanuvchisi, `resolution`, `resolved_at_ms`).
+- Kabinet uchun bulut tomonida faqat store funksiyasi bo'ladi, kabinet route'i senga.
+
+**POS:**
+- "Sinxron konfliktlar" ekrani faqat manager/owner'ga ko'rinadi.
+- Ekranda ro'yxat, sabab, sana, ikki tugma va izoh maydoni bo'ladi.
+- Uz-Latn va RU matnlari qo'shiladi.
+
+**Testlar:** RBAC (kassir 403), qayta hal qilish 409, retry muvaffaqiyatli bo'lganda konflikt yopiladi va proyeksiya yangilanadi, acknowledge ma'lumotni o'zgartirmaydi (jadval xeshi oldin va keyin teng).
+
+### 7. Bulut hodisa yozuvchisi (T2.7b porti) — taklif, alohida PR T2.6b
+
+**HLC.** Yangi jadval `cloud_hlc_state(organization_id PK, physical_ms, logical, node_id)`. Har tashkilotning bulut node_id'si UUIDv7, bir marta yaratiladi.
+- Yozuvchi tashkilot advisory lock'i (`hashtext('org_sync:' || org)`) ostida `max(now, last.physical)` ni oladi.
+- Shu millisekundda bo'lsa `logical+1`, overflow bo'lsa keyingi ms'ga o'tadi (domain `hlc.ts` dagi qoida, kod qayta ishlatiladi).
+- Holat o'sha tranzaksiyada yangilanadi. Bir millisekundda ikki o'zgarish `logical` 0 va 1 ni oladi, test bilan.
+
+**Pozitsiya oqimi.**
+- Tashkilot darajasidagi hodisalar uchun alohida "tashkilot oqimi" bo'ladi: `store_id = organization_id`, pozitsiya `cloud_store_sync_positions` da shu kalit bilan.
+- Hub uni oddiy do'kon kursori kabi `{storeId → position}` da saqlaydi. Yangi hub kursorsiz bo'lsa, `position > 0` dan oladi; bu `sync-pull-store.ts` dagi mavjud mantiq.
+- O'zgartirish: `ForeignStoreError` tekshiruvi `organization_id` ni ham ruxsat etilgan oqim sifatida qabul qiladi.
+- Bu oqimga faqat `tenantScope = 'organization'` jadvallar yoziladi. Do'kon jadvali bo'lsa, xato.
+- Muqobil variant: `cloud_stores` da virtual qator. Bu do'konlar ro'yxatini ifloslaydi, shuning uchun rad etdim.
+
+**Virtual qurilma.**
+- `cloud_devices` da har tashkilot uchun bitta qator: `platform = 'cloud'`, `status = 'system'`.
+- U uchun **token yaratilmaydi**, juftlash kodi ham yo'q.
+- Auth middleware `status <> 'active'` bo'lsa rad etadi. Test: shu qurilma id'si bilan qo'lda yaratilgan token login va push'da 401/403 oladi.
+- `device_seq` o'sha lock ostida oshiriladi.
+
+**Validatsiya.**
+- `sync-push-store.ts` dagi har hodisa uchun bajariladigan qadamlar alohida `validateAndApplySyncEvent(tx, ctx, event)` ga ajratiladi: Zod payload, tenant, FK yoki park, sinf qoidalari, MONOTONE qoidalari, pozitsiya.
+- Push ham, bulut yozuvchisi ham shu funksiyani chaqiradi. Test: yaroqsiz payload ikkala yo'lda bir xil xato kodini beradi (jadval testi).
+
+**Port** (T2.7b uchun): `CloudEventWriter.write(ctx: {organizationId, actorUserId}, events: CloudCommand[])`, natija `{accepted, positions}`. Kabinet bu portni chaqiradi, men route yozmayman.
+
+---
+
+## T2.5 — Bootstrap va qayta tiklash
+
+### 1. Yangi hub: snapshot va pull
+
+**Variant A (taklif): pull'ning o'zi, alohida snapshot yo'q.**
+- Bulut har do'kon oqimi uchun barcha hodisalarni pozitsiya bo'yicha saqlaydi (`cloud_sync_events`). Yangi hub kursorsiz pull qiladi va hamma narsa tartib bilan keladi.
+- Afzalligi:
+  - kursor bitta haqiqat manbai;
+  - hodisa yo'qolmaydi yoki ikki marta qo'llanmaydi, chunki pull allaqachon `(organization_id, id)` echo/dedup va pozitsiya kursoriga tayanadi.
+- Kamchiligi: katta tashkilotda uzoq davom etadi. 100k hodisa uchun o'lchab hisobotga yozaman.
+
+**Variant B: snapshot.** Bulut proyeksiya jadvallarining nusxasini pozitsiya `P` da beradi, keyin `P` dan pull qilinadi. Bu bulutda barcha jadvallarning **izchil** nusxasini talab qiladi. Buning uchun `REPEATABLE READ` tranzaksiya kerak va `P` o'sha tranzaksiyada `cloud_store_sync_positions` dan o'qiladi. Bulutdagi jadvallar hub sxemasi bilan bir xil emas, qo'shimcha konvertor kerak. Murakkabroq.
+
+**Taklif:** T2.5 da A. B ni o'lchov natijasiga qarab keyingi bosqichga qoldiraman (savol S3).
+
+### 2. Uzilgan yuklashdan davom etish
+
+- Har pull sahifasi bitta SQLite tranzaksiyasida qo'llanadi va kursorlar shu tranzaksiyada yangilanadi (T2.4 da shunday).
+- Uzilsa, oxirgi commit qilingan sahifadan davom etadi.
+- Bootstrap holati: `local_hub_config.bootstrap_state` (`none` / `in_progress` / `done`). `done` bo'lguncha savdo ochilmaydi, POS "Yuklanmoqda N/M" ko'rsatadi.
+- **Test:** yuklash N-sahifada majburan uziladi (pull fetch ichida `throw` yoki child-process kill). Qayta ishga tushgach, natija to'liq yuklash bilan teng bo'ladi: barcha jadvallar va proyeksiyalar §4 dagi taqqoslash bilan, kursorlar ham teng. N tasodifiy, 20 seed.
+
+### 3. Tenant filtri
+
+- Har jadval uchun jadval testi: boshqa tashkilot (va do'kon jadvallari uchun boshqa do'kon) hodisalari bootstrap natijasida hech bir jadvalga tushmaydi.
+- Qoida T2.4 `pullScope` bilan bir xil, chunki bootstrap = pull.
+- Test registrdan generatsiya qilinadi: yangi jadval qo'shilsa, test o'zi uni qamraydi.
+- Mutatsiya: `scopeFilter` dan do'kon sharti olib tashlanadi, test yiqiladi.
+
+### 4. Mavjud hubni tiklash
+
+**Taklif:**
+1. Lokal zaxira (T1.13) tiklanadi.
+2. Kursorlar zaxiradagi qiymatdan davom etadi va bulutdan **faqat zaxiradan keyingi** hodisalar pull qilinadi.
+
+Ustunlik: hodisa darajasida konflikt bo'lmaydi, chunki bir xil `eventId` echo sifatida o'tkaziladi. Bulut — umumiy haqiqat, zaxira esa tezlik uchun.
+
+**Outbox'dagi yuborilmagan hodisalar:**
+- Zaxira olingandan keyin yaratilgan, lekin yuborilmagan hodisalar zaxirada yo'q, ular yo'qolgan. Egasini ogohlantirish kerak.
+- Zaxirada bor, lekin yuborilmagan hodisalar tiklashdan keyin odatdagidek push qilinadi (dedup idempotent).
+- `device_seq` ziddiyati:
+  - zaxiradan keyin bulutga yuborilgan seq'lar qayta ishlatilsa, bulut ularni boshqa hodisa sifatida rad etadi;
+  - **taklif:** tiklangan hub yangi `device_id` bilan qayta juftlanadi (T2.2), eski qurilma `revoked`;
+  - zaxiradagi yuborilmagan hodisalar eski `device_id` bilan saqlangan. Ularni qayta yuborish yo'lini aniqlash kerak (savol S4).
+
+**Fiskal (`fiscal_docs`):**
+- Tiklangan hubda `sent` hujjatlar worker orqali faqat `status()` bilan davom etadi (F-A). Idempotentlik kaliti saqlangan, shuning uchun ikki marta fiskallashtirish xavfi yo'q.
+- `pending` hujjat operatorda allaqachon bo'lishi mumkin (zaxiradan keyin yuborilgan). Kalit idempotent, operator birinchi natijani qaytaradi (Fake'da bor; T3.5 da tasdiqlanishi kerak).
+- **Taklif:** worker faqat `driver_id` va shu hub yaratgan (`device_id` mos) hujjatlarni yuboradi. Pull orqali kelgan boshqa hub hujjati faqat ko'rsatiladi.
+- Test: tiklash ssenariysida `sent` → `status()` → `confirmed`, `submitCount` oshmaydi.
+
+---
 
 ## Savollar
 
-- 1–3-taxminlar to'g'rimi? Ayniqsa `appliesTo` rejimlarining aniq ma'nosi egasida hali ochiq (S4).
+- **S1.** Differensial taqqoslashda `id`, `created_at_ms`, `updated_at_ms` ni chiqarib tashlash maqbulmi? Ular surrogat va hisobga oid ustunlar, proyeksiya qiymati emas. Muqobil: id'larni tabiiy kalitdan deterministik qilish. Bu mavjud mijoz balansi id formulasini o'zgartiradi va migratsiyasiz ishlaydi, chunki proyeksiya LOCAL.
+- **S2.** Konflikt hal qilish auditi uchun konflikt jadvalidagi ustunlar va strukturalangan log yetarlimi, yoki hub'da umumiy `local_audit_log` jadvali kerakmi? Ikkinchisi kengroq sxema o'zgarishi.
+- **S3.** T2.5 bootstrap uchun Variant A (snapshotsiz, to'liq pull) qabul qilinadimi? 100k hodisa uchun vaqtni o'lchab beraman.
+- **S4.** Tiklangan hub yangi `device_id` olishi va zaxiradagi yuborilmagan hodisalarni yangi qurilma nomidan qayta raqamlab yuborishi to'g'rimi? Bu egasining qarori bo'lishi mumkin: hodisaning "kim yaratgan" ma'lumoti o'zgaradi.
+- **S5.** Bulut yozuvchisi (T2.6b) T2.6 dan oldin kerakmi? T2.7b uchun kerak bo'lsa, tartibni o'zgartiraman.
 
-## 6. Sessiya uzilishi va kalit fayllari haqida (shaffoflik uchun)
+## Bajarish tartibi (tasdiqdan keyin)
 
-- Mutatsiya R16 birinchi ishga tushirilganda buzilgan `keygen` repo ildiziga ikkita **test** kalit faylini (`rules-signing.key`, `.pub.b64`) yozdi. `.gitignore` sabab ular git'ga kirmadi. Topildi va o'chirildi. Shundan keyin test soxta repo ildiziga o'tkazildi, endi bu takrorlanmaydi. Hech qanday kalit commit qilinmagan.
-- Sessiya R15 mutatsiyasi paytida uzildi va `rules-repo.ts` buzilgan holda qolib ketdi. Qayta ulangach `git diff` bilan aniqlandi, `git checkout` bilan tiklandi va paket qayta build qilindi. Commit'larda buzilgan kod yo'q.
+1. **T2.6:**
+   1. test qarzi commit'i;
+   2. kalit yig'ish va qisman funksiyalar;
+   3. differensial test;
+   4. perf;
+   5. konflikt API va POS;
+   6. mutatsiyalar, `pnpm verify`, PR.
+2. **T2.6b:** bulut yozuvchisi, alohida PR.
+3. **T2.5:** alohida PR.
