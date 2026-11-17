@@ -1,3 +1,54 @@
+# Nazoratchi xulosasi (ishchi2): T3.3+T3.4 — KICHIK QAYTA ISHLASH
+
+Tekshirildi: `c115962` (PR #27). Ish sifatli: 17 ta mutatsiyaning hammasi aniqlandi, F-A to'g'ri amalga oshirilgan (`sent` oldin commit qilinadi, noma'lum natija `sent` da qoladi, `failed` faqat aniq holatda), qulash testlari bor, hisobot ochiq yozilgan.
+
+## K1. Smena va cheklar tartibi (majburiy)
+
+`listDueSync` hujjatlarni `next_check_at_ms` bo'yicha tartiblaydi. Smena ochish va yopish hujjatlarining cheklar bilan **bog'liqligi yo'q**: `depends_on` faqat refund'da bor.
+
+**Ssenariy:**
+
+1. Smena ochildi (`open` hujjati).
+2. Savdo bo'ldi, uning hujjati `definitelyNotSent` bilan backoff'ga tushdi.
+3. Smena yopildi (`close` hujjati, Z-hisobot).
+
+Navbatda `close` savdodan **oldin** yuboriladi. Haqiqiy operatorda Z-hisobot o'sha chekdan mahrum yopiladi, keyin chek yopilgan smenaga tushadi va rad etiladi. Shuningdek `open` backoff'da bo'lsa, cheklar ochilmagan smenaga yuboriladi. Fake drayver buni ko'rsatmaydi, lekin T3.5 da bu jiddiy xato bo'ladi.
+
+**Qoida:**
+
+- **Savdo va refund hujjati:** smenaning `open` hujjati bo'lsa, unga bog'lanadi. `open` `confirmed` bo'lmaguncha yuborilmaydi.
+  - `open` `rejected` yoki `cancelled` bo'lsa, savdo hujjati yuborilmaydi, `rejected` ga o'xshash konfliktga tushadi (fiskallashmagan cheklar ro'yxatida ko'rinadi). Uni avtomatik `cancelled` qilma, chunki savdo haqiqatan bo'lgan.
+  - Mavjud refund `depends_on` mantig'i saqlanadi.
+- **`close` hujjati** shu smenaning **barcha** hujjatlari terminal holatga kelguncha yuborilmaydi (`confirmed`, `cancelled` yoki `rejected`).
+- **Testlar:**
+  - savdo hujjati backoff'da va smena yopildi → driver daftarida tartib `open`, savdo, `close`;
+  - `open` backoff'da → savdo kutadi;
+  - `close` faqat oxirgi chek tasdiqlangandan keyin.
+- **Mutatsiya F17:** `close` bog'liqligi olib tashlanadi, test yiqilishi kerak.
+
+## K2. S1: navbat kassani qotirmasligi (egasining talabi)
+
+Oldingi qo'shimchamdagi test: 500 ta `pending` hujjat, sekin Fake drayver, navbat bo'shayotganda savdolar odatdagi tezlikda o'tadi. Hozirgi kodda driver chaqiruvi tranzaksiyadan tashqarida va `await` bilan, shuning uchun test o'tishi kerak. Lekin buni **isbotlovchi test** bo'lsin (perf loyihasida).
+
+## K3. Desktop installer savoli
+
+`main` dagi installer xatosini (`Timed out ... waiting for fused packaged Hub ready`) men tekshiryapman: paket lokalda yig'ilmoqda. Sen `apps/desktop` ga tegma. PR #27 shu job'siz merge qilinmaydi. Tuzatish `main` ga tushgach, `main` ni merge qilib CI'ni qayta ishga tushirasan.
+
+## Merge tartibi
+
+`main` ga tushish tartibi: T4.6 (PR #26) → T2.4 → T3.3. Har biri tushgach `main` ni **merge** qil:
+
+- migratsiyalar: lokal `0019`, T2.4 `0018` ni egallaydi, raqamlar to'qnashmasin;
+- ruscha matnlar: T4.6 dagi `RU_MESSAGES` ga yangi kalitlar.
+
+## Bajarish tartibi
+
+1. K1, K2 commit'lari.
+2. Hisobot `[ishchi2-hisobot] T3.3`, so'ng kutish.
+3. Installer tuzatilishini va merge tartibini kut. Merge qilma.
+
+---
+
 # Qo'shimcha (17-noyabr, 2): egasining S1, S4 javoblari va bitta PR
 
 ## S1 — oflayn muddat o'tsa (egasi javobi)
