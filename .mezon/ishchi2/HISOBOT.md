@@ -1,3 +1,69 @@
+# P1 — ish holati va savol (S6)
+
+Branch: `ishchi2/T2.6-projections` (P1 paketi). Yangi ish tartibiga ko'ra kutmasdan ishlayapman, quyidagi savolga javob kelguncha boshqa qismlarda davom etaman.
+
+## Bajarildi (commit'lar)
+
+| Commit | Mazmun |
+|---|---|
+| `319f1ba` | **T2.6:** pull faqat tegilgan kalitlarni qayta hisoblaydi. Stock to'liq qayta qurish bilan bir xil funksiyada, `productIds` filtri bilan. Mijoz va yetkazib beruvchi uchun id bo'yicha upsert. |
+| `3009c8b` | **Fiskal:** hujjatni faqat yaratgan hub yuboradi. Fake operator smena invariantlari bilan. |
+| (shu commit) | Differensial test (200 seed) va savol S6 |
+
+**Kod o'qishda topilgan T2.4 xatosi (tuzatildi).** `retryParkedEvents` proyeksiyalar qayta qurilgandan **keyin** ishlar edi. Natijada park'dan qo'llangan hodisa proyeksiyaga tushmas edi. Endi retry proyeksiyadan oldin ishlaydi va kalitlarini yig'adi. Bunga mutatsiya D6 bor.
+
+**Fiskal (topshiriqdagi test qarzi):**
+- `DEV1`/`DEV2`: `device_id` filtri yoki retry tekshiruvi olib tashlansa, test yiqiladi.
+- Nazoratchining ikki mutatsiyasi ("Z cheklarni kutmaydi", "cheklar OPEN ni kutmaydi") endi **5 tadan** testda ushlanadi, avval bittadan edi. Buning uchun:
+  - Fake smena qoidasi buzilishini qayd qiladi va har fiskal test oxirida "buzilish yo'q" tekshiriladi;
+  - yangi tasodifiy drayver jadvali testi (16 seed) qo'shildi.
+
+## Differensial test va mutatsiyalar
+
+`apps/hub/src/sync-projections-diff.test.ts`:
+- **Manba hub** haqiqiy HTTP orqali tasodifiy amallar bajaradi: savdo, qarzga savdo, qaytarish, void, kirim (partiyali va o'rtacha), narxi noma'lum kirim va keyin tasdiqlash, mijoz va yetkazib beruvchi to'lovi, tuzatish, yangi mijoz.
+- Uning outbox'i **maqsad hub**ga tasodifiy partiyalarda yuboriladi. Ba'zi ota-yozuvlar kechiktiriladi (park va retry), boshqa do'kon ledger hodisalari aralashtiriladi.
+- Har partiyadan keyin barcha 5 proyeksiya jadvali SAVEPOINT ichidagi to'liq qayta qurish bilan solishtiriladi (`id`, `created_at_ms`, `updated_at_ms` dan tashqari).
+- Bo'sh solishtirishga qarshi tekshiruv: har amal turi kamida bir marta bajarilgan, yakuniy proyeksiyalar bo'sh emas, park holatlari bor.
+
+Mutatsiyalar (40 seed):
+
+| Kod | Mutatsiya | Natija |
+|---|---|---|
+| D0 | `stock_moves` kaliti yig'ilmaydi | 41/41 yiqildi |
+| D1 | `receiving_cost_confirmations` yig'ilmaydi | 21/41 |
+| D2 | `batches` yig'ilmaydi | 3/41 |
+| D4 | qisman qayta hisoblash boshqa mahsulot konfliktlarini o'chiradi | 37/41 |
+| D5 | yangi mijoz yig'ilmaydi | 41/41 |
+| D6 | park'dan retry kalit yig'maydi | 3/41 |
+| D7 | `customer_ledger` yig'ilmaydi | 40/41 |
+| D8 | `supplier_ledger` yig'ilmaydi | 41/41 |
+| D10 | qisman qayta hisoblashda moves filtri yo'q | 41/41 |
+
+## S6. SAVOL: mijoz balansi proyeksiyasi manfiy bo'lishi (T2.4 dan qolgan xato)
+
+`local_customer_balances` da `CHECK (balance >= 0)` bor. Ledger hodisalari pull'da tartibsiz kelishi mumkin:
+- `customer_ledger` tashkilot bo'yicha pull qilinadi, do'konlar oqimi aralash keladi;
+- ikki do'kon bir qarzni oflayn holatda kamaytirsa, bu **haqiqiy** ortiqcha to'lov.
+
+Shunda FIFO manfiy balans hisoblaydi, CHECK **butun pull partiyasini** yiqitadi va xato `transient` deb tasniflanadi. Natijada shu tashkilotning pull'i **cheksiz to'xtaydi**. Eski kod (to'liq qayta qurish) ham xuddi shu INSERT'da yiqilardi.
+
+Isbot: differensial test 200 seed'dan 11 tasida tabiiy ravishda shu xatoga uchradi: `SqliteError: CHECK constraint failed: chk_local_customer_balances_nonneg`. Bu boshqa do'kondan kelgan manfiy tuzatish bilan bo'ldi. Test hozir **qizil**: uni o'chirmadim va zaiflashtirmadim.
+
+**Taklif (A).**
+- Proyeksiyada `balance >= 0` CHECK olib tashlanadi. Manfiy balans = mijozning haqi (ortiqcha to'lov). Ledger haqiqat, proyeksiya uni aks ettirishi shart.
+- Bu LOCAL jadval, shuning uchun SQLite'da jadvalni qayta yaratuvchi migratsiya kerak.
+- Manfiy balans konflikt ekranida ko'rinadi (`CUSTOMER_OVERPAID`, faqat ko'rish/"o'rganildi").
+- Kassadagi `OVERPAYMENT_NOT_ALLOWED` qoidasi (lokal to'lov) o'zgarmaydi.
+
+**Muqobil (B).** Manfiy qiladigan ledger hodisasini park/konfliktga yuborish. Bunda lokal ledger bulutdan ajralib qoladi, shuning uchun men rad etaman.
+
+Yetkazib beruvchi balansida bu CHECK yo'q (faqat `accrued`/`credited` ≥ 0), u yerda muammo yo'q.
+
+**Javob kelguncha:** konflikt API, POS ekrani va perf ustida ishlayman. A tasdiqlansa, migratsiya `0020`, test va mutatsiya qo'shaman.
+
+---
+
 # Reja: T2.6 (proyeksiyalar va konfliktlar) + T2.5 (bootstrap va tiklash)
 
 Branch: `ishchi2/T2.6-projections`, `main` (`93c4f12`) dan.
