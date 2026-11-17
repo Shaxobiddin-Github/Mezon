@@ -18,6 +18,17 @@ export interface AdminUser {
   readonly name: string;
 }
 
+/** API failure with the HTTP status, so the UI can show a localized message (T2.7a R3). */
+export class AdminApiError extends Error {
+  constructor(
+    readonly status: number,
+    message: string,
+  ) {
+    super(message);
+    this.name = 'AdminApiError';
+  }
+}
+
 export class AdminApiClient {
   private accessToken: string | null = null;
   private onUnauthorized: (() => void) | null = null;
@@ -57,7 +68,7 @@ export class AdminApiClient {
       } catch {
         this.accessToken = null;
         this.onUnauthorized?.();
-        throw new Error('Sessiya muddati tugadi. Iltimos, qaytadan kiring.');
+        throw new AdminApiError(401, 'Sessiya muddati tugadi. Iltimos, qaytadan kiring.');
       }
     }
 
@@ -69,7 +80,7 @@ export class AdminApiClient {
       } catch {
         // ignore
       }
-      throw new Error(errMsg);
+      throw new AdminApiError(res.status, errMsg);
     }
 
     return res.json() as Promise<T>;

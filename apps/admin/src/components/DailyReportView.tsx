@@ -1,105 +1,117 @@
 import React, { useEffect, useState } from 'react';
 import type { DailySalesReportResponseDto } from '@mezon/contracts';
+import { t } from '@mezon/i18n';
 import { adminApi } from '../api-client.js';
-import { formatTiyin } from '../utils/format.js';
+import { describeApiError, formatSom, tashkentDateKey } from '../utils/format.js';
+
+const DAY_MS = 24 * 60 * 60 * 1000;
 
 export const DailyReportView: React.FC = () => {
-  const today = new Date().toISOString().slice(0, 10);
-  const thirtyDaysAgo = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString().slice(0, 10);
-
-  const [fromDate, setFromDate] = useState(thirtyDaysAgo);
-  const [toDate, setToDate] = useState(today);
+  // Day boundaries are Tashkent days (same as the till reports), not UTC days.
+  const [fromDate, setFromDate] = useState(() => tashkentDateKey(Date.now() - 30 * DAY_MS));
+  const [toDate, setToDate] = useState(() => tashkentDateKey(Date.now()));
   const [report, setReport] = useState<DailySalesReportResponseDto | null>(null);
   const [loading, setLoading] = useState(true);
-
-  useEffect(() => {
-    void loadReport();
-  }, []);
+  const [error, setError] = useState<string | null>(null);
 
   const loadReport = async () => {
     setLoading(true);
+    setError(null);
     try {
-      const res = await adminApi.getDailySalesReport({
-        fromDate,
-        toDate,
-        limit: 100,
-      });
-      setReport(res);
+      setReport(await adminApi.getDailySalesReport({ fromDate, toDate, limit: 100 }));
     } catch (err) {
-      console.error(err);
+      setError(describeApiError(err));
+      setReport(null);
     } finally {
       setLoading(false);
     }
   };
 
+  useEffect(() => {
+    void loadReport();
+  }, []);
+
+  const minus = (tiyin: string) => (tiyin !== '0' ? `-${formatSom(tiyin)}` : formatSom('0'));
+  const columns = [
+    'admin.report.col.date',
+    'admin.report.col.counts',
+    'admin.report.col.gross',
+    'admin.report.col.returns',
+    'admin.report.col.net',
+    'admin.report.col.vat',
+    'admin.report.col.cash',
+    'admin.report.col.nonCash',
+    'admin.report.col.cost',
+    'admin.report.col.profit',
+  ] as const;
+
   return (
     <div className="space-y-6">
       <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
         <div>
-          <h2 className="text-xl font-bold text-slate-800">Kunlik savdo hisoboti</h2>
-          <p className="text-xs text-slate-500 mt-1">
-            Har bir kun boʻyicha tushum, QQS, naqd/karta va yalpi foyda hisoboti
-          </p>
+          <h2 className="text-xl font-bold text-slate-800">{t('admin.report.title')}</h2>
+          <p className="text-xs text-slate-500 mt-1">{t('admin.report.subtitle')}</p>
         </div>
 
         <div className="flex flex-wrap items-center gap-3">
-          <div className="flex items-center space-x-2">
-            <label className="text-xs font-semibold text-slate-600">Dan:</label>
+          <label className="flex items-center gap-2 text-xs font-semibold text-slate-600">
+            {t('admin.report.from')}
             <input
               type="date"
               value={fromDate}
               onChange={(e) => setFromDate(e.target.value)}
               className="text-xs px-2.5 py-1.5 rounded border border-slate-300 bg-white"
             />
-          </div>
-          <div className="flex items-center space-x-2">
-            <label className="text-xs font-semibold text-slate-600">Gacha:</label>
+          </label>
+          <label className="flex items-center gap-2 text-xs font-semibold text-slate-600">
+            {t('admin.report.to')}
             <input
               type="date"
               value={toDate}
               onChange={(e) => setToDate(e.target.value)}
               className="text-xs px-2.5 py-1.5 rounded border border-slate-300 bg-white"
             />
-          </div>
+          </label>
           <button
             onClick={() => {
               void loadReport();
             }}
             className="text-xs px-3 py-1.5 rounded bg-indigo-600 hover:bg-indigo-700 text-white font-medium transition-colors shadow-sm"
           >
-            Hisobotni shakllantirish
+            {t('admin.report.build')}
           </button>
         </div>
       </div>
+
+      {error && (
+        <div role="alert" className="p-3 rounded-lg bg-red-50 text-red-700 text-xs">
+          {error}
+        </div>
+      )}
 
       <div className="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden">
         <div className="overflow-x-auto">
           <table className="min-w-full divide-y divide-slate-200 text-left text-xs">
             <thead className="bg-slate-50 font-semibold text-slate-500 uppercase tracking-wider">
               <tr>
-                <th className="px-4 py-3">Sana</th>
-                <th className="px-4 py-3 text-right">Cheklar (Savdo/Qayt)</th>
-                <th className="px-4 py-3 text-right">Yalpi savdo</th>
-                <th className="px-4 py-3 text-right">Qaytarishlar</th>
-                <th className="px-4 py-3 text-right">Sof savdo</th>
-                <th className="px-4 py-3 text-right">QQS jami</th>
-                <th className="px-4 py-3 text-right">Naqd toʻlov</th>
-                <th className="px-4 py-3 text-right">Karta/Boshqa</th>
-                <th className="px-4 py-3 text-right">Tannarx</th>
-                <th className="px-4 py-3 text-right">Yalpi foyda</th>
+                {columns.map((key, i) => (
+                  <th key={key} className={`px-4 py-3 ${i === 0 ? '' : 'text-right'}`}>
+                    {t(key)}
+                  </th>
+                ))}
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100 text-slate-700 font-mono">
-              {loading || !report ? (
+              {loading ? (
                 <tr>
                   <td colSpan={10} className="text-center py-10 text-slate-400 font-sans text-sm">
-                    Hisobot yuklanmoqda...
+                    {t('admin.report.loading')}
                   </td>
                 </tr>
-              ) : report.days.length === 0 ? (
+              ) : !report || report.days.length === 0 ? (
                 <tr>
                   <td colSpan={10} className="text-center py-10 text-slate-400 font-sans text-sm">
-                    Koʻrsatilgan oraliqda savdo ma’lumotlari topilmadi
+                    {t('admin.report.empty')}
                   </td>
                 </tr>
               ) : (
@@ -109,52 +121,48 @@ export const DailyReportView: React.FC = () => {
                     <td className="px-4 py-2.5 text-right font-sans">
                       {d.salesCount} / <span className="text-red-600">{d.returnsCount}</span>
                     </td>
-                    <td className="px-4 py-2.5 text-right">{formatTiyin(d.grossSales)}</td>
-                    <td className="px-4 py-2.5 text-right text-red-600">
-                      {d.returnsTotal !== '0' ? `-${formatTiyin(d.returnsTotal)}` : '0'}
-                    </td>
+                    <td className="px-4 py-2.5 text-right">{formatSom(d.grossSales)}</td>
+                    <td className="px-4 py-2.5 text-right text-red-600">{minus(d.returnsTotal)}</td>
                     <td className="px-4 py-2.5 text-right font-bold text-slate-900">
-                      {formatTiyin(d.netSales)}
+                      {formatSom(d.netSales)}
                     </td>
                     <td className="px-4 py-2.5 text-right text-slate-500">
-                      {formatTiyin(d.vatTotal)}
+                      {formatSom(d.vatTotal)}
                     </td>
-                    <td className="px-4 py-2.5 text-right">{formatTiyin(d.cashSales)}</td>
-                    <td className="px-4 py-2.5 text-right">{formatTiyin(d.nonCashSales)}</td>
+                    <td className="px-4 py-2.5 text-right">{formatSom(d.cashSales)}</td>
+                    <td className="px-4 py-2.5 text-right">{formatSom(d.nonCashSales)}</td>
                     <td className="px-4 py-2.5 text-right text-slate-500">
-                      {d.costValue ? formatTiyin(d.costValue) : '—'}
+                      {formatSom(d.costValue)}
                     </td>
                     <td className="px-4 py-2.5 text-right font-bold text-emerald-600">
-                      {d.grossProfit ? formatTiyin(d.grossProfit) : '—'}
+                      {formatSom(d.grossProfit)}
                     </td>
                   </tr>
                 ))
               )}
             </tbody>
 
-            {report && report.days.length > 0 && (
+            {!loading && report && report.days.length > 0 && (
               <tfoot className="bg-slate-100 font-mono font-bold text-slate-900 border-t-2 border-slate-300">
                 <tr>
-                  <td className="px-4 py-3 font-sans">JAMI:</td>
+                  <td className="px-4 py-3 font-sans">{t('admin.report.total')}</td>
                   <td className="px-4 py-3 text-right font-sans">
                     {report.totalSalesCount} /{' '}
                     <span className="text-red-600">{report.totalReturnsCount}</span>
                   </td>
-                  <td className="px-4 py-3 text-right">{formatTiyin(report.totalGrossSales)}</td>
+                  <td className="px-4 py-3 text-right">{formatSom(report.totalGrossSales)}</td>
                   <td className="px-4 py-3 text-right text-red-600">
-                    {report.totalReturns !== '0' ? `-${formatTiyin(report.totalReturns)}` : '0'}
+                    {minus(report.totalReturns)}
                   </td>
                   <td className="px-4 py-3 text-right text-indigo-700">
-                    {formatTiyin(report.totalNetSales)}
+                    {formatSom(report.totalNetSales)}
                   </td>
-                  <td className="px-4 py-3 text-right">{formatTiyin(report.totalVat)}</td>
-                  <td className="px-4 py-3 text-right">{formatTiyin(report.totalCashSales)}</td>
-                  <td className="px-4 py-3 text-right">{formatTiyin(report.totalNonCashSales)}</td>
-                  <td className="px-4 py-3 text-right">
-                    {report.totalCostValue ? formatTiyin(report.totalCostValue) : '—'}
-                  </td>
+                  <td className="px-4 py-3 text-right">{formatSom(report.totalVat)}</td>
+                  <td className="px-4 py-3 text-right">{formatSom(report.totalCashSales)}</td>
+                  <td className="px-4 py-3 text-right">{formatSom(report.totalNonCashSales)}</td>
+                  <td className="px-4 py-3 text-right">{formatSom(report.totalCostValue)}</td>
                   <td className="px-4 py-3 text-right text-emerald-700">
-                    {report.totalGrossProfit ? formatTiyin(report.totalGrossProfit) : '—'}
+                    {formatSom(report.totalGrossProfit)}
                   </td>
                 </tr>
               </tfoot>
