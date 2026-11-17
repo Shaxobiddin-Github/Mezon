@@ -20,7 +20,8 @@ export function isDockerAvailable(): boolean {
 }
 
 export function shouldRunPgTests(): boolean {
-  const requirePg = process.env.MEZON_REQUIRE_PG === '1';
+  const requirePg =
+    process.env.MEZON_REQUIRE_PG === '1' || process.env.MEZON_REQUIRE_PG_TESTS === '1';
   const available = isDockerAvailable();
   if (requirePg && !available) {
     throw new Error(

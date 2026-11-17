@@ -99,6 +99,79 @@ export const SyncPushResponseSchema = z.object({
 export type SyncPushResponseDto = z.infer<typeof SyncPushResponseSchema>;
 
 // ============================================================================
+// Sync Pull Request / Response Schemas (T2.4)
+// ============================================================================
+
+export const SyncPullQuerySchema = z.object({
+  cursors: z.string().optional(),
+  limit: z.coerce.number().int().positive().max(500).default(100),
+});
+export type SyncPullQueryDto = z.infer<typeof SyncPullQuerySchema>;
+
+export function parseAndValidateSyncCursors(
+  cursorsStr?: string,
+): { success: true; cursors: Record<string, bigint> } | { success: false; error: string } {
+  if (!cursorsStr || cursorsStr.trim() === '') {
+    return { success: true, cursors: {} };
+  }
+  const pairs = cursorsStr.split(',');
+  const result: Record<string, bigint> = {};
+  for (const pair of pairs) {
+    const trimmed = pair.trim();
+    if (!trimmed) continue;
+    const parts = trimmed.split(':');
+    if (parts.length !== 2) {
+      return {
+        success: false,
+        error: `Invalid cursor format "${trimmed}". Expected "uuid:position"`,
+      };
+    }
+    const [storeId, posStr] = parts;
+    const parsedStoreId = UuidV7Schema.safeParse(storeId);
+    if (!parsedStoreId.success) {
+      return {
+        success: false,
+        error: `Invalid store UUID "${storeId}" in cursors`,
+      };
+    }
+    if (!/^\d+$/.test(posStr)) {
+      return {
+        success: false,
+        error: `Invalid numeric position "${posStr}" in cursors`,
+      };
+    }
+    result[parsedStoreId.data] = BigInt(posStr);
+  }
+  return { success: true, cursors: result };
+}
+
+export const SyncedEventSchema = z.object({
+  eventId: UuidV7Schema,
+  organizationId: UuidV7Schema,
+  storeId: UuidV7Schema,
+  deviceId: UuidV7Schema,
+  deviceSeq: BigIntStringSchema,
+  hlc: z.string().length(58),
+  type: z.string().min(1),
+  entity: z.string().min(1),
+  entityId: UuidV7Schema,
+  entityClass: SyncEntityClassSchema,
+  schemaVersion: z.number().int().positive(),
+  payload: z.record(z.string(), z.unknown()),
+  position: BigIntStringSchema,
+  hlcAdjusted: z.boolean().default(false),
+  receivedAtMs: UnixMsPayloadSchema,
+});
+export type SyncedEventDto = z.infer<typeof SyncedEventSchema>;
+
+export const SyncPullResponseSchema = z.object({
+  events: z.array(SyncedEventSchema),
+  nextCursors: z.record(z.string(), BigIntStringSchema),
+  hasMore: z.boolean(),
+});
+export type SyncPullResponseDto = z.infer<typeof SyncPullResponseSchema>;
+
+// ============================================================================
 // P4: Strict Entity Payload Schemas (for all 36 Synced Domain Tables)
 // Every schema uses .strict() to reject unapproved fields
 // ============================================================================

@@ -888,6 +888,7 @@ export const customerLedger = cloudSchemaRegistry.defineTable(
     name: 'customer_ledger',
     tableClass: 'FACT',
     tenantScope: 'store',
+    pullScope: 'organization',
   },
   (common) => ({
     ...common,
@@ -1238,6 +1239,7 @@ export const supplierLedger = cloudSchemaRegistry.defineTable(
     name: 'supplier_ledger',
     tableClass: 'FACT',
     tenantScope: 'store',
+    pullScope: 'organization',
   },
   (common) => ({
     ...common,
