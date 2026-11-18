@@ -1,3 +1,86 @@
+# P2 — reja: T3.8 audit xesh zanjiri, T3.7 markirovka (Fake), T3.6 UzQR va to'lov yadrosi (Fake)
+
+Branch: `ishchi2/P2-payments`. U P1 (PR #31) ustidan ochilgan, chunki P1 hali tekshiruvda. P1 merge bo'lgach, `main` shu branch'ga merge qilinadi.
+Holat: **REJA**. Yangi tartib bo'yicha tasdiq kutmasdan kodga o'tyapman. Bajarish tartibi: T3.8 → T3.7 → T3.6.
+Tashqi tizimlar (UzQR, Asl belgisi) uchun endpoint, maydon yoki imzo o'ylab topilmaydi: faqat port va `Fake…Driver` (§3.3).
+
+## T3.8 — audit jurnali (xesh zanjiri)
+
+**Jadval `local_audit_log`** (LOCAL, tashkilot doirasida). Ustunlar:
+- `seq` — qat'iy ketma-ket, UNIQUE;
+- `event_type`, `actor_user_id`, `entity`, `entity_id`;
+- `details_json` — kanonik JSON;
+- `prev_hash`, `hash` — SHA-256 hex, kanonik satrdan;
+- `created_at_ms`.
+
+**Faqat qo'shiladi.** UPDATE va DELETE trigger bilan bloklanadi.
+
+**Yozish.** `appendAuditInTxSync(session, …)` amalning **o'z tranzaksiyasi ichida** chaqiriladi (§3.1.10). Amal rollback bo'lsa, audit yozuvi ham qolmaydi (test bilan). Yoziladigan amallar:
+- kirish: muvaffaqiyatli va muvaffaqiyatsiz;
+- savdo void va qaytarish;
+- narx o'zgarishi va chegirma;
+- smena ochish va yopish, kassa naqd harakati;
+- rol yoki foydalanuvchi o'zgarishi;
+- kun yakuni.
+
+**Tekshiruv buyrug'i.**
+- `verifyAuditChain()` qaytaradi: `{ ok, checked, firstBrokenSeq, reason }`.
+- `GET /audit/verify` (faqat owner) va CLI `pnpm --filter @mezon/hub audit:verify <db>`.
+- Aniqlanadigan holatlar: tahrirlangan maydon, o'chirilgan yozuv (seq bo'shlig'i), almashtirilgan tartib, soxta `prev_hash`.
+
+**Testlar va mutatsiyalar.**
+- Trigger o'chirib `details` tahrirlansa → aniqlanadi.
+- Qator o'chirilsa → aniqlanadi.
+- Har hodisa turi o'z yo'lida yoziladi.
+- Rollback'da yozuv qolmaydi.
+- Mutatsiyalar: hash'dan maydon tushirilsa; `prev_hash` bog'lanmasa; seq tekshirilmasa.
+
+**Cheklov (hisobotda aytiladi).** Qurilma egasi butun zanjirni qayta hisoblab chiqsa, lokal tekshiruv buni sezmaydi. Bunga qarshi oxirgi xeshni bulutga "langar" qilish kerak, buni keyingi bosqichga taklif qilaman.
+
+## T3.7 — markirovka
+
+**Tahlilchi.** GS1 DataMatrix: FNC1 yoki GS (`\x1d`) ajratgich, AI `01` GTIN-14, `21` seriya, `91`/`92` kripto-dum. Ochiq GS1 standarti, o'ylab topilmaydi. Namunalar bilan jadval testlari.
+
+**Savat va savdo.**
+- Mahsulotda `requires_marking` bayrog'i.
+- Har birlik uchun bitta kod; kodlar soni miqdorga teng (milli-birlikda butun dona).
+- Bir chekda yoki oldin sotilgan kod takrorlansa → rad etiladi (UNIQUE `org + kod`).
+- Qaytarishda kod qaytib bo'shatiladi.
+
+**Driver.** `MarkingDriver.check(code, mxik)` → `ok` / `mismatch` / `already_sold` / `unknown`, va `FakeMarkingDriver`. MXIK mosligi GTIN↔MXIK jadvali orqali Fake'da tekshiriladi. Haqiqiy tekshiruv T3.0 hujjatidan keyin.
+
+**Skaner.** Oddiy EAN-13 skaneri buzilmaydi: DataMatrix belgisi bo'lmasa, avvalgidek shtrix-kod sifatida qidiriladi.
+
+## T3.6 — UzQR va to'lov yadrosi
+
+**Driver.** `PaymentDriver`: `createQr`, `status`, `refund`, va `FakePaymentDriver`. Rejimlari: to'landi, kech to'landi, vaqt tugadi, rad etildi, javob yo'q.
+
+**`payment_intents`** (MONOTONE). Holatlar: `pending → paid | expired | cancelled | failed`.
+- Kalit `cart` + urinish.
+- Dinamik QR: driver `status()` tasdiqlaydi.
+- Statik QR: kassir qo'lda tasdiqlaydi, owner/manager ruxsati va izoh bilan, audit (T3.8).
+
+**Asosiy qoida (mezon):** tasdiqlanmagan intent bilan chek yopilmaydi. `completeSale` UzQR to'lovini faqat `paid` intent bilan qabul qiladi.
+
+**Kech tasdiq.** Vaqt tugagach `paid` kelsa, ikki marta yozilmaydi:
+- intent bitta savdoga bog'langan (UNIQUE);
+- savdo yopilmagan bo'lsa, intent `paid_late` sifatida kassirga ko'rsatiladi va keyingi urinishda ishlatiladi yoki `refund` qilinadi.
+
+**Testlar.** Qulash va takror; ikki marta bosish; vaqt tugashi bilan bir vaqtda kelgan tasdiq (poyga).
+
+## Bajarish tartibi
+
+1. T3.8: commit, testlar, mutatsiyalar.
+2. T3.7: commit, testlar, mutatsiyalar.
+3. T3.6: commit, testlar, mutatsiyalar.
+4. `pnpm verify`, PR (P1 merge bo'lgach base `main`), hisobot.
+
+## QOLDI (limit qoidasi)
+
+Hozircha faqat reja. Keyingi aniq qadam: T3.8 jadvali va `appendAuditInTxSync`.
+
+---
+
 # Hisobot: P1 — T2.6 + T2.5 + bulut buyruq yozuvchi porti + fiskal test qarzi
 
 Branch: `ishchi2/T2.6-projections`. PR: [#31](https://github.com/Shaxobiddin-Github/Mezon/pull/31) (base `main`).
