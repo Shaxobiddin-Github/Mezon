@@ -1,4 +1,4 @@
-import type { CloudTelegramStore, TelegramLocale } from '@mezon/db-cloud';
+import type { CloudTelegramStore } from '@mezon/db-cloud';
 import type { UnixMs } from '@mezon/domain';
 import { type TelegramClient, isTelegramSendError } from '@mezon/drivers';
 import { t } from '@mezon/i18n';
@@ -90,7 +90,7 @@ export class TelegramBotService {
     const { linkId } = await this.opts.store.bindChat({
       target,
       chatId,
-      locale: locale as TelegramLocale,
+      locale: locale,
       nowMs: this.opts.clock.nowMs(),
     });
     const org = clip(await this.opts.store.getOrganizationName(target.organizationId));

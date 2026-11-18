@@ -110,7 +110,7 @@ export class HttpTelegramClient implements TelegramClient {
     if (!/^\d+:[A-Za-z0-9_-]{20,}$/.test(options.token)) {
       throw new Error('Telegram bot token has an invalid format');
     }
-    this.fetchImpl = options.fetchImpl ?? (globalThis.fetch as unknown as FetchLike);
+    this.fetchImpl = options.fetchImpl ?? globalThis.fetch;
     this.baseUrl = `${options.apiBaseUrl ?? 'https://api.telegram.org'}/bot${options.token}`;
     this.timeoutMs = options.timeoutMs ?? 10_000;
   }
@@ -146,7 +146,7 @@ export class HttpTelegramClient implements TelegramClient {
         signal: AbortSignal.timeout(this.timeoutMs),
       });
       status = res.status;
-      payload = ((await res.json().catch(() => ({}))) ?? {}) as typeof payload;
+      payload = (await res.json().catch(() => ({}))) ?? {};
     } catch {
       // The token is part of the URL: never include the underlying error text.
       throw new TelegramSendError('transient', `Telegram ${method}: network error`);
