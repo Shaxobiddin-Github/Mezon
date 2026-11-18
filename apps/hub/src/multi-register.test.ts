@@ -56,7 +56,7 @@ async function bootWithRegisters(
   hubs.push(hub);
   const h = (t?: string) => (t ? { host: HOST, authorization: `Bearer ${t}` } : { host: HOST });
   const local = async (
-    method: 'GET' | 'POST' | 'PUT',
+    method: 'GET' | 'POST' | 'PUT' | 'PATCH',
     url: string,
     token?: string,
     payload?: object,

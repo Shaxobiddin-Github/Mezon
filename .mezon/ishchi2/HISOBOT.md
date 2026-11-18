@@ -12,6 +12,8 @@ Holat: **HISOBOT**. Tekshiruv kutilyapti. O'zim merge qilmayman.
 | T4.3 printer | tayyor | har kassa o'z printeri va yashigi; printersiz kassa begona printerga chiqarmaydi; P1–P4, M1 o'ldi |
 | T2.8 yakuniy test | tayyor | hub SQLite + bulut PostgreSQL (RLS app roli), 10 seed, 10/10 (3 marta ketma-ket: 30/30). Oxirida qoldiq, qarz, tushum va qaytarishlar ikki tomonda teng. E1–E3 o'ldi, nazorat mutatsiyasi tirik qoldi |
 
+**Depcruise qoidasi kengaytirildi.** `packages/drivers/src/node` ga `crypto`, `tls`, `https` ruxsat etildi. Faqat T4.1 uchun: sertifikat yasash va pinned TLS mijozi. `pnpm verify` (`MEZON_REQUIRE_PG_TESTS=1`) yashil.
+
 ## Qolgan ishlar (P3)
 
 1. **T4.2 kassa smenasi/yashigi** — [ishchi2-savol] javobiga bog'liq (B varianti taklif).
