@@ -96,6 +96,13 @@ Bo'lmasa `PAYMENT_NOT_CONFIRMED` (409) va chek yopilmaydi. Bitta chekda bir nech
 Branch: `ishchi2/T2.6-projections`. PR: [#31](https://github.com/Shaxobiddin-Github/Mezon/pull/31) (base `main`).
 Holat: **HISOBOT**. Tekshiruv kutilyapti.
 
+**Yangilanish (2026-11-18).**
+- C1 (PR #30) mening QABUL'im va yashil CI bilan squash-merge qilindi.
+- `main` P1 ga merge qilindi. Bulut migratsiyasi endi `0007_sync_parked_and_cloud_hlc`. Avval u `0006` edi; `0006` raqamini C1 `0006_telegram_bot` uchun oldi. Qo'lda yozilgan FORCE RLS / REVOKE / GRANT qatorlari aynan saqlandi.
+- `db:check` (ikkala baza), `pnpm verify` va `pg-cloud` (139 test) yashil.
+- **QAROR (javobsiz):** `0008` emas, `0007`, chunki drizzle raqamni bo'shliqsiz, ketma-ket beradi. C2 keyin merge qilinsa, o'z raqamini qayta yaratadi (qoidaga ko'ra).
+- P2 PR ochildi: #32 (base shu branch).
+
 ## Qisqa xulosa
 
 | Qism | Natija | Asosiy isbot |
