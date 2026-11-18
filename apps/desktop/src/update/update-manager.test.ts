@@ -72,6 +72,7 @@ function setup(
   let env: unknown = opts.env ?? envelope(manifest());
   let body = opts.body ?? INSTALLER;
   const readiness = { fn: opts.readiness ?? (() => FREE) };
+  const launchFails = { v: false };
   const mgr = new UpdateManager({
     dir,
     ...EXPECT,
@@ -100,9 +101,13 @@ function setup(
           backupId: backup && r !== null && r.openReceipts === 0 ? 'backup-1' : null,
         });
       },
-      launchInstaller: (p) => {
-        log.push(`install ${path.basename(p)}`);
+      launchInstaller: (p, expected) => {
+        if (launchFails.v) return Promise.reject(new Error('installer did not start'));
+        log.push(`install ${path.basename(p)} ${expected.sha256 === SHA ? 'sha-ok' : 'sha-bad'}`);
         return Promise.resolve();
+      },
+      cancelPrepared: () => {
+        log.push('cancel');
       },
       nowMs: () => now,
     },
@@ -112,6 +117,7 @@ function setup(
     dir,
     log,
     readiness,
+    launchFails,
     setNow: (n: bigint) => (now = n),
     setEnv: (e: unknown) => (env = e),
     setBody: (b: Buffer) => (body = b),
@@ -230,8 +236,27 @@ describe('@mezon/desktop - update manager (T4.8)', () => {
     expect(t.log.slice(-3)).toEqual([
       'prepare 1.3.0 backup=false',
       'prepare 1.3.0 backup=true',
-      'install mezon-setup-1.3.0.exe',
+      'install mezon-setup-1.3.0.exe sha-ok',
     ]);
+  });
+
+  it('B1/B3: when the prepared install does not start, the hub gate is re-opened', async () => {
+    const t = setup();
+    await t.mgr.check();
+    t.launchFails.v = true;
+    await t.mgr.schedule({ kind: 'now' });
+    expect(t.mgr.getState().phase).toBe('waiting');
+    expect(t.log.slice(-2)).toEqual(['prepare 1.3.0 backup=true', 'cancel']);
+
+    // A shift opened during the backup: "when the shift is closed" waits and re-opens the gate.
+    const u = setup();
+    await u.mgr.check();
+    let calls = 0;
+    u.readiness.fn = () => (++calls === 1 ? FREE : { ...FREE, openShifts: 1 });
+    await u.mgr.schedule({ kind: 'shift_close' });
+    expect(u.mgr.getState().waitReason).toBe('open_shift');
+    expect(u.log.at(-1)).toBe('cancel');
+    expect(u.log.some((l) => l.startsWith('install'))).toBe(false);
   });
 
   it('a receipt opened between the two checks still stops the install', async () => {
@@ -361,6 +386,7 @@ describe('@mezon/desktop - update manager (T4.8)', () => {
         sha256File: () => Promise.reject(new Error('no')),
         prepare: () => Promise.resolve({ readiness: null, backupId: null }),
         launchInstaller: () => Promise.reject(new Error('no')),
+        cancelPrepared: () => undefined,
         nowMs: () => 0n,
       },
     });
@@ -386,6 +412,7 @@ describe('@mezon/desktop - update manager (T4.8)', () => {
         sha256File: () => Promise.resolve({ sha256: '', sizeBytes: 0 }),
         prepare: () => Promise.resolve({ readiness: null, backupId: null }),
         launchInstaller: () => Promise.resolve(),
+        cancelPrepared: () => undefined,
         nowMs: () => 0n,
       },
     });

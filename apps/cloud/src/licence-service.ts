@@ -1,5 +1,5 @@
 import { createPublicKey, verify } from 'node:crypto';
-import type { CloudLicenceStore, GrowthUsage } from '@mezon/db-cloud';
+import type { CloudLicenceStore, GrowthGuard, GrowthUsage } from '@mezon/db-cloud';
 import type { UnixMs, UuidV7 } from '@mezon/domain';
 import {
   type LicencePayload,
@@ -74,6 +74,29 @@ export class CloudLicenceService {
   }
 
   /** Throws `PlanLimitError` when one more store/device would exceed the plan (or growth is frozen). */
+  /**
+   * The authoritative check (ishchi2 review B2): returns a guard that the store runs INSIDE the
+   * transaction that inserts the store / device. It takes the organization's growth lock first, so
+   * two parallel requests are serialized and the second one counts the first one's row.
+   */
+  growthGuard(organizationId: UuidV7, kind: LimitKind, nowMs: UnixMs): GrowthGuard {
+    return async (client) => {
+      await client.query('SELECT pg_advisory_xact_lock(hashtext($1))', [
+        `mezon.growth:${organizationId}`,
+      ]);
+      const status = await this.getStatus(organizationId, nowMs);
+      const res = await client.query<{ n: string }>(
+        kind === 'stores'
+          ? `SELECT count(*) AS n FROM cloud_stores WHERE organization_id = $1 AND is_active = true`
+          : `SELECT count(*) AS n FROM cloud_devices WHERE organization_id = $1 AND status = 'active'`,
+        [organizationId],
+      );
+      const result = checkPlanLimit(status, kind, Number(res.rows[0]?.n ?? 0));
+      if (!result.ok) throw new PlanLimitError(kind, result.limit, result.state);
+    };
+  }
+
+  /** Early, friendly check (e.g. before issuing a pairing code); not a guarantee under races. */
   async assertCanAdd(organizationId: UuidV7, kind: LimitKind, nowMs: UnixMs): Promise<void> {
     const [status, usage] = await Promise.all([
       this.getStatus(organizationId, nowMs),

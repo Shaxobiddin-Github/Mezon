@@ -374,12 +374,24 @@ if (singleInstanceLockAcquired) {
           // mistaken for "no answer" (which would start another backup on the next tick).
           prepare: (version, backup) =>
             hub.prepareUpdate(version, backup, backup ? 10 * 60_000 : 30_000),
-          launchInstaller: async (installerPath) => {
+          launchInstaller: async (installerPath, expected) => {
             desktopLog.logger.info({ installerPath }, 'desktop_update_installing');
             await performCleanShutdown('update-install');
+            // B3: the very last check, after the hub is stopped and right before the start.
+            const actual = await sha256File(installerPath);
+            if (
+              actual.sha256 !== expected.sha256 ||
+              String(actual.sizeBytes) !== expected.sizeBytes
+            ) {
+              await fs.rm(installerPath, { force: true });
+              app.relaunch();
+              app.quit();
+              throw new Error('Installer changed on disk before start; removed, app restarted');
+            }
             startInstallerDetached(installerPath);
             app.quit();
           },
+          cancelPrepared: () => hub.cancelPreparedUpdate(),
           nowMs: () => BigInt(Date.now()),
         },
         onState: (state: UpdateState) => {

@@ -71,8 +71,17 @@ export interface UpdateManagerPorts {
     targetVersion: string,
     backup: boolean,
   ): Promise<{ readonly readiness: UpdateReadiness | null; readonly backupId: string | null }>;
-  /** Starts the installer; the shell then shuts the hub down cleanly and quits. */
-  launchInstaller(installerPath: string): Promise<void>;
+  /**
+   * Shuts the hub down cleanly, checks the installer once more against `expected` (B3: the last
+   * check is right before it is started) and starts it. Throws (and must not start anything) when
+   * the file no longer matches.
+   */
+  launchInstaller(
+    installerPath: string,
+    expected: { readonly sha256: string; readonly sizeBytes: string },
+  ): Promise<void>;
+  /** The prepared update will not start now: re-open the hub's update gate (selling continues). */
+  cancelPrepared(): void;
   nowMs(): bigint;
 }
 
@@ -287,6 +296,7 @@ export class UpdateManager {
     const cur = this.current;
     if (!cur?.schedule || this.busy || this.phase === 'installing') return;
     this.busy = true;
+    let prepared = false;
     try {
       const version = cur.envelope.manifest.version;
       const now = this.o.ports.nowMs();
@@ -303,12 +313,14 @@ export class UpdateManager {
           return;
         }
         const second = await this.o.ports.prepare(version, true);
+        prepared = second.backupId !== null;
         decision = decideInstall(cur.schedule, second.readiness, now);
         if (decision.install && second.backupId === null) {
           decision = { install: false, reason: 'hub_unavailable' };
         }
       }
       if (!decision.install) {
+        if (prepared) this.o.ports.cancelPrepared();
         this.phase = 'waiting';
         this.waitReason = decision.reason;
         return;
@@ -316,8 +328,12 @@ export class UpdateManager {
       this.phase = 'installing';
       this.waitReason = null;
       this.emit();
-      await this.o.ports.launchInstaller(cur.installer);
+      await this.o.ports.launchInstaller(cur.installer, {
+        sha256: cur.envelope.manifest.sha256,
+        sizeBytes: cur.envelope.manifest.sizeBytes,
+      });
     } catch (err) {
+      if (prepared) this.o.ports.cancelPrepared();
       this.error = err instanceof Error ? err.message : String(err);
       if (this.phase === 'installing') this.phase = 'waiting';
     } finally {

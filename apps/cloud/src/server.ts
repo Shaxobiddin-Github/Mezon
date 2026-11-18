@@ -524,21 +524,21 @@ export async function buildCloudServer(options: BuildServerOptions): Promise<Fas
     const storeId = idGen.nextId();
     const nowMs = clock.nowMs();
 
-    // T4.7: the plan limits growth (never sales).
+    // T4.7: the plan limits growth (never sales). Checked inside the insert transaction.
+    let created: Awaited<ReturnType<typeof tenantStore.createStore>>;
     try {
-      await licenceService.assertCanAdd(auth.org, 'stores', nowMs);
+      created = await tenantStore.createStore({
+        storeId,
+        organizationId: auth.org,
+        name,
+        code,
+        nowMs,
+        growthGuard: licenceService.growthGuard(auth.org, 'stores', nowMs),
+      });
     } catch (err) {
       if (err instanceof PlanLimitError) return planLimitReply(reply, err);
       throw err;
     }
-
-    const created = await tenantStore.createStore({
-      storeId,
-      organizationId: auth.org,
-      name,
-      code,
-      nowMs,
-    });
 
     const dto: CloudStoreDto = {
       id: created.id,
@@ -721,14 +721,8 @@ export async function buildCloudServer(options: BuildServerOptions): Promise<Fas
         });
       }
 
-      // T4.7: authoritative device limit at pairing time (a code may predate the limit).
-      try {
-        await licenceService.assertCanAdd(lookup.organizationId, 'devices', nowMs);
-      } catch (err) {
-        if (err instanceof PlanLimitError) return planLimitReply(reply, err);
-        throw err;
-      }
-
+      // T4.7: authoritative device limit at pairing time (a code may predate the limit), checked
+      // inside the pairing transaction under the organization's growth lock.
       try {
         const paired = await deviceStore.pairDevice({
           pairingLookup: lookup,
@@ -737,6 +731,7 @@ export async function buildCloudServer(options: BuildServerOptions): Promise<Fas
           appVersion,
           idGen,
           nowMs,
+          growthGuard: licenceService.growthGuard(lookup.organizationId, 'devices', nowMs),
         });
 
         const response: CloudPairDeviceResponseDto = {
@@ -749,6 +744,7 @@ export async function buildCloudServer(options: BuildServerOptions): Promise<Fas
 
         return reply.code(201).send(response);
       } catch (err) {
+        if (err instanceof PlanLimitError) return planLimitReply(reply, err);
         if (err instanceof DomainError) {
           if (err.code === 'PAIRING_ALREADY_USED') {
             return reply.code(409).send({

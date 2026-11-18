@@ -29,8 +29,16 @@ export interface HubWorkerUpdatePrepareMessage {
   readonly targetVersion: string;
 }
 
+/** T4.8: the prepared update is not going to start (re-opens the update gate). */
+export interface HubWorkerUpdateCancelMessage {
+  readonly type: 'update-cancel';
+}
+
 export type HubWorkerIncomingMessage =
-  HubWorkerStartMessage | HubWorkerShutdownMessage | HubWorkerUpdatePrepareMessage;
+  | HubWorkerStartMessage
+  | HubWorkerShutdownMessage
+  | HubWorkerUpdatePrepareMessage
+  | HubWorkerUpdateCancelMessage;
 
 export type HubWorkerOutgoingMessage =
   | {
@@ -121,6 +129,14 @@ function parseUpdatePrepareMessage(raw: unknown): HubWorkerUpdatePrepareMessage 
     backupIfReady: r['backupIfReady'] === true,
     targetVersion: typeof r['targetVersion'] === 'string' ? r['targetVersion'].slice(0, 32) : '',
   };
+}
+
+function isUpdateCancelMessage(raw: unknown): boolean {
+  return (
+    typeof raw === 'object' &&
+    raw !== null &&
+    (raw as { readonly type?: unknown }).type === 'update-cancel'
+  );
 }
 
 function isShutdownMessage(raw: unknown): boolean {
@@ -253,14 +269,39 @@ export function attachHubWorkerController(deps: HubWorkerControllerDeps) {
       return;
     }
     try {
-      const readiness = readUpdateReadiness(hub.connection);
-      let backupId: string | null = null;
-      if (msg.backupIfReady && readiness.openReceipts === 0) {
-        const meta = await hub.backupService.createBackup({
-          reason: `Yangilanishdan oldin (${msg.targetVersion || '?'})`,
-          actorUserId: null,
+      if (!msg.backupIfReady) {
+        deps.port.postMessage({
+          type: 'update-readiness',
+          requestId: msg.requestId,
+          readiness: readUpdateReadiness(hub.connection),
+          backupId: null,
         });
-        backupId = meta.id;
+        return;
+      }
+      // B1: close the gate FIRST, then look. From here no new receipt can start (POS or LAN), so
+      // what we read stays true until the installer stops the hub — or until the gate re-opens.
+      hub.updateGate.close();
+      let readiness = readUpdateReadiness(hub.connection);
+      let backupId: string | null = null;
+      if (readiness.openReceipts > 0) {
+        hub.updateGate.open();
+      } else {
+        try {
+          const meta = await hub.backupService.createBackup({
+            reason: `Yangilanishdan oldin (${msg.targetVersion || '?'})`,
+            actorUserId: null,
+          });
+          backupId = meta.id;
+        } catch (error) {
+          hub.updateGate.open();
+          throw error;
+        }
+        // The answer is the state AFTER the backup (the gate kept it from changing).
+        readiness = readUpdateReadiness(hub.connection);
+        if (readiness.openReceipts > 0) {
+          hub.updateGate.open();
+          backupId = null;
+        }
       }
       deps.port.postMessage({
         type: 'update-readiness',
@@ -291,6 +332,11 @@ export function attachHubWorkerController(deps: HubWorkerControllerDeps) {
       const start = parseStartMessage(event.data);
       if (start !== null) {
         void enqueue(() => handleStart(start));
+        return;
+      }
+      if (isUpdateCancelMessage(event.data)) {
+        // The update was not started after all: selling goes on.
+        activeHub?.updateGate.open();
         return;
       }
       const prepare = parseUpdatePrepareMessage(event.data);

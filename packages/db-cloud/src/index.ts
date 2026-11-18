@@ -101,7 +101,11 @@ export {
 
 export { CloudAuthStore, type CloudLoginLookupResult } from './auth-store.js';
 
-export { CloudTenantStore, type CreateOrganizationParams } from './tenant-store.js';
+export {
+  CloudTenantStore,
+  type CreateOrganizationParams,
+  type GrowthGuard,
+} from './tenant-store.js';
 
 export {
   CloudDeviceStore,

@@ -258,6 +258,35 @@ describePg('@mezon/cloud - T4.7 licences, plan limits and invoices', () => {
     expect(JSON.parse(third.payload)).toMatchObject({ kind: 'devices', limit: 2 });
   });
 
+  it('B2: five parallel pairings with one free place → exactly one device is added', async () => {
+    // Start plan, 2 of 2 devices: free exactly one place.
+    await withPgTenantContext(adminConn.pool, org, async (_tx, c) => {
+      await c.query(
+        `UPDATE cloud_devices SET status = 'revoked'
+          WHERE id = (SELECT id FROM cloud_devices WHERE organization_id = $1 AND status = 'active' LIMIT 1)`,
+        [org],
+      );
+    });
+    const codes: string[] = [];
+    for (let i = 0; i < 5; i += 1) {
+      const res = await pairingCode();
+      expect(res.statusCode, res.payload).toBe(201);
+      codes.push((JSON.parse(res.payload) as { code: string }).code);
+    }
+    const results = await Promise.all(
+      codes.map((code) =>
+        server.inject({
+          method: 'POST',
+          url: '/api/v1/devices/pair',
+          payload: { code, deviceId: idGen.nextId(), platform: 'windows', appVersion: '1.0.0' },
+        }),
+      ),
+    );
+    const statuses = results.map((r) => r.statusCode).sort();
+    expect(statuses).toEqual([201, 402, 402, 402, 402]);
+    expect((await status()).usage.devices).toBe(2);
+  });
+
   it('the CLI refuses a tampered or untrusted licence; a tampered row in the DB is ignored', async () => {
     const env = signed({
       licenceId: idGen.nextId(),

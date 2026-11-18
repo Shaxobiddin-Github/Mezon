@@ -1,3 +1,4 @@
+import { HubUpdateGate, registerUpdateGate } from './update-gate.js';
 import path from 'node:path';
 import {
   type LocalSqliteConnection,
@@ -170,6 +171,8 @@ export interface HubServer {
   readonly reportStore: SqliteReportStore;
   readonly reportService: HubReportService;
   readonly backupService: SqliteBackupService;
+  /** T4.8: closed while an update is prepared; refuses starting new receipt work. */
+  readonly updateGate: HubUpdateGate;
   readonly importCache: CatalogImportCache;
   readonly cloudStore: SqliteCloudStore;
   readonly cloudService: HubCloudService;
@@ -593,6 +596,8 @@ export async function createHubServer(options: CreateHubServerOptions): Promise<
     registerRulesRoutes(app, authService, rulesService, cartService, () => BigInt(clock.now()));
     registerFiscalRoutes(app, authService, fiscalService);
     registerLicenceRoutes(app, authService, licenceService);
+    const updateGate = new HubUpdateGate();
+    registerUpdateGate(app, updateGate);
     options.registerExtraTestRoutes?.(app);
 
     let boundPort: number | null = securityConfig.port > 0 ? securityConfig.port : null;
@@ -630,6 +635,7 @@ export async function createHubServer(options: CreateHubServerOptions): Promise<
       reportStore,
       reportService,
       backupService,
+      updateGate,
       importCache,
       cloudStore,
       cloudService,

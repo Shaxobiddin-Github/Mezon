@@ -15,6 +15,7 @@ import {
   attachHubWorkerController,
 } from './electron-worker.js';
 import { createHubServer, type HubServer } from './server.js';
+import { HubUpdateGate, startsReceiptWork } from './update-gate.js';
 import { readUpdateReadiness } from './update-readiness.js';
 
 const tempDirs: string[] = [];
@@ -117,7 +118,16 @@ async function seed(hub: HubServer) {
       expectedTotal: '5000',
       payments: [{ method: 'cash', tenderedAmount: '5000' }],
     });
-  return { addLine, post, complete };
+  const newCart = () =>
+    hub.app.inject({ method: 'POST', url: '/carts', headers: cashier, payload: {} });
+  const addLineTo = (id: string) =>
+    hub.app.inject({
+      method: 'POST',
+      url: `/carts/${id}/lines`,
+      headers: cashier,
+      payload: { kind: 'catalog', productId: product.id, variantId: null, qty: '1000' },
+    });
+  return { addLine, post, complete, newCart, addLineTo };
 }
 
 describe('@mezon/hub - update readiness (T4.8)', () => {
@@ -199,5 +209,108 @@ describe('@mezon/hub - update readiness (T4.8)', () => {
     } finally {
       await controller.shutdown();
     }
+  });
+
+  it('B1: during the pre-update backup no receipt can start; cancel re-opens selling', async () => {
+    const hub = await makeHub();
+    const sent: HubWorkerOutgoingMessage[] = [];
+    let listener: ((e: { readonly data: unknown }) => void) | null = null;
+    const controller = attachHubWorkerController({
+      port: { on: (_e, l) => (listener = l), postMessage: (m) => sent.push(m) },
+      createServer: () => Promise.resolve(hub),
+      exitProcess: () => undefined,
+    });
+    const deliver = (data: unknown) => listener?.({ data });
+    const answer = async (requestId: string) => {
+      for (let i = 0; i < 300; i += 1) {
+        const m = sent.find((x) => x.type === 'update-readiness' && x.requestId === requestId);
+        if (m) return m as Extract<HubWorkerOutgoingMessage, { type: 'update-readiness' }>;
+        await new Promise((r) => setTimeout(r, 10));
+      }
+      throw new Error(`no answer for ${requestId}`);
+    };
+    try {
+      deliver({ type: 'start', dbPath: 'unused', logDir: tempDirs[0], allowedOrigins: [] });
+      for (let i = 0; i < 200 && !sent.some((m) => m.type === 'ready'); i += 1) {
+        await new Promise((r) => setTimeout(r, 10));
+      }
+      const s = await seed(hub);
+
+      // A slow backup: the gate must already be closed while it runs.
+      let release!: () => void;
+      const slow = new Promise<void>((r) => (release = r));
+      const realBackup = hub.backupService.createBackup.bind(hub.backupService);
+      hub.backupService.createBackup = async (p) => {
+        await slow;
+        return realBackup(p);
+      };
+      deliver({ type: 'update-prepare', requestId: 'g1', backupIfReady: true, targetVersion: '3' });
+      await new Promise((r) => setTimeout(r, 50));
+      const during = await s.newCart();
+      expect(during.statusCode).toBe(503);
+      expect(during.body).toContain('HUB_UPDATING');
+      // The existing (empty) cart cannot get a line either.
+      expect(
+        (await s.post('lines', { kind: 'catalog', productId: 'x', variantId: null, qty: '1000' }))
+          .statusCode,
+      ).toBe(503);
+      release();
+      const done = await answer('g1');
+      expect(done.backupId).toMatch(/^backup-/);
+      expect(done.readiness?.openReceipts).toBe(0);
+      // Still closed after the answer, until the installer stops the hub or the update is cancelled.
+      expect((await s.newCart()).statusCode).toBe(503);
+      deliver({ type: 'update-cancel' });
+      await new Promise((r) => setTimeout(r, 20));
+      expect((await s.newCart()).statusCode).toBeLessThan(300);
+
+      // A receipt in progress: the gate re-opens at once and no backup is taken.
+      await s.addLine();
+      deliver({ type: 'update-prepare', requestId: 'g2', backupIfReady: true, targetVersion: '3' });
+      const busy = await answer('g2');
+      expect(busy.backupId).toBeNull();
+      expect((await s.newCart()).statusCode).toBeLessThan(300);
+
+      // Defence in depth: a receipt that appears during the backup by a path the gate does not
+      // cover is seen by the re-check after the backup — no install (no backup id).
+      await s.complete();
+      let release2!: () => void;
+      const slow2 = new Promise<void>((r) => (release2 = r));
+      hub.backupService.createBackup = async (p) => {
+        await slow2;
+        return realBackup(p);
+      };
+      deliver({ type: 'update-prepare', requestId: 'g3', backupIfReady: true, targetVersion: '3' });
+      await new Promise((r) => setTimeout(r, 50));
+      hub.updateGate.open(); // simulate an uncovered path
+      const sneaky = (await s.newCart()).json<{ cart: { id: string } }>().cart.id;
+      expect((await s.addLineTo(sneaky)).statusCode).toBeLessThan(300);
+      release2();
+      const late = await answer('g3');
+      expect(late.readiness?.openReceipts).toBe(1);
+      expect(late.backupId).toBeNull();
+    } finally {
+      await controller.shutdown();
+    }
+  });
+
+  it('the gate refuses only starting or growing a receipt, and opens by itself after its limit', () => {
+    expect(startsReceiptWork('POST', '/carts')).toBe(true);
+    expect(startsReceiptWork('POST', '/carts/abc/lines')).toBe(true);
+    expect(startsReceiptWork('PATCH', '/carts/abc/lines/l1')).toBe(true);
+    expect(startsReceiptWork('POST', '/carts/abc/resume')).toBe(true);
+    expect(startsReceiptWork('POST', '/carts/abc/marks?x=1')).toBe(true);
+    expect(startsReceiptWork('POST', '/carts/abc/complete')).toBe(false);
+    expect(startsReceiptWork('POST', '/carts/abc/park')).toBe(false);
+    expect(startsReceiptWork('DELETE', '/carts/abc/lines/l1')).toBe(false);
+    expect(startsReceiptWork('GET', '/carts')).toBe(false);
+    let now = 0;
+    const gate = new HubUpdateGate(() => now, 1000);
+    gate.close();
+    expect(gate.isClosed()).toBe(true);
+    now = 999;
+    expect(gate.isClosed()).toBe(true);
+    now = 1000;
+    expect(gate.isClosed()).toBe(false);
   });
 });

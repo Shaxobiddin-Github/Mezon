@@ -175,6 +175,11 @@ export class HubSupervisor {
     });
   }
 
+  /** T4.8: the prepared update will not start; the hub re-opens its update gate. */
+  cancelPreparedUpdate(): void {
+    this.currentWorker?.postMessage({ type: 'update-cancel' });
+  }
+
   start(): void {
     if (this.shuttingDown || this.currentWorker !== null) {
       return;
