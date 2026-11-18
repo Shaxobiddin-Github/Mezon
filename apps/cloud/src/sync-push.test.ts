@@ -829,6 +829,15 @@ describePg('@mezon/cloud - Sync Push Engine (T2.3 & P1-P5)', () => {
       }
     }
 
+    // Keep the position counters in step with the rows inserted above (later pushes allocate from them).
+    for (const [org, store, pos] of streams) {
+      await adminConn.pool.query(
+        `INSERT INTO cloud_store_sync_positions (id, organization_id, created_at_ms, updated_at_ms, store_id, last_position)
+         VALUES ($1, $2, $3, $3, $4, $5)
+         ON CONFLICT (organization_id, store_id) DO UPDATE SET last_position = EXCLUDED.last_position`,
+        [idGen.nextId(), org, nowMs.toString(), store, pos.toString()],
+      );
+    }
     const seen = new Set<string>();
     let cursors = '';
     for (let page = 0; page < 200; page += 1) {
