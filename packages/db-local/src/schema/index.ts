@@ -3323,3 +3323,57 @@ export const localSaleMarks = localSchemaRegistry.defineTable(
     ),
   ],
 );
+
+/**
+ * T3.6 QR payment intents (`LOCAL`). One intent = one QR the customer pays; a sale may close with
+ * an `uzqr` payment only through a `paid` intent of exactly that amount, consumed ONCE
+ * (`consumed_by_sale_id`, partial UNIQUE). Status moves forward only:
+ * pending → paid | expired | cancelled | failed; expired → paid (late, `paid_late = 1`);
+ * paid (not consumed) → refunded.
+ */
+export const paymentIntents = localSchemaRegistry.defineTable(
+  {
+    name: 'payment_intents',
+    tableClass: 'LOCAL',
+    tenantScope: 'store',
+  },
+  (common) => ({
+    ...common,
+    cartId: sqliteUuidV7('cart_id'),
+    method: text('method').notNull(),
+    kind: text('kind').notNull(),
+    amount: sqliteMoney('amount').notNull(),
+    status: text('status').notNull(),
+    providerRef: text('provider_ref').notNull(),
+    qrPayload: text('qr_payload'),
+    expiresAtMs: sqliteUnixMs('expires_at_ms').notNull(),
+    paidAtMs: sqliteUnixMs('paid_at_ms'),
+    paidLate: sqliteBoolean('paid_late').notNull().default(false),
+    confirmedByUserId: sqliteUuidV7('confirmed_by_user_id'),
+    confirmNote: text('confirm_note'),
+    consumedBySaleId: sqliteUuidV7('consumed_by_sale_id').references(() => sales.id),
+    refundedAtMs: sqliteUnixMs('refunded_at_ms'),
+  }),
+  (self) => [
+    uniqueIndex('uidx_payment_intents_provider_ref').on(self.organizationId, self.providerRef),
+    uniqueIndex('uidx_payment_intents_consumed')
+      .on(self.consumedBySaleId)
+      .where(sql`${self.consumedBySaleId} IS NOT NULL`),
+    index('idx_payment_intents_cart').on(self.cartId),
+    check('chk_payment_intents_method', sql`${self.method} IN ('uzqr')`),
+    check('chk_payment_intents_kind', sql`${self.kind} IN ('dynamic', 'static')`),
+    check(
+      'chk_payment_intents_status',
+      sql`${self.status} IN ('pending', 'paid', 'expired', 'cancelled', 'failed', 'refunded')`,
+    ),
+    check('chk_payment_intents_amount', sql`${self.amount} > 0`),
+    check(
+      'chk_payment_intents_paid_at',
+      sql`(${self.status} IN ('paid', 'refunded')) = (${self.paidAtMs} IS NOT NULL)`,
+    ),
+    check(
+      'chk_payment_intents_consumed_paid',
+      sql`${self.consumedBySaleId} IS NULL OR ${self.status} = 'paid'`,
+    ),
+  ],
+);

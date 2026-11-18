@@ -42,6 +42,7 @@ import {
   isMarkedMxik,
   readMarkingPrefixesSync,
 } from './marking-repo.js';
+import { consumeUzqrPaymentInTxSync } from './payment-intent-repo.js';
 import {
   assertFiscalSaleAllowedInTxSync,
   insertSaleFiscalDocIfEnabledInTxSync,
@@ -859,6 +860,16 @@ export function completeSaleCoreInTxSync(
   // Insert immutable `payments` (`FACT`) & atomic `cash_moves` (`FACT`) — `'advance'` NEVER emits `cash_moves`
   const insertedPayments: (typeof payments.$inferSelect)[] = [];
   for (const item of resolvedPayments.payments) {
+    // T3.6: an UzQR payment closes the receipt only with a confirmed (paid) intent, used once.
+    if (item.method === 'uzqr') {
+      consumeUzqrPaymentInTxSync(session.internalGetSqlite(), {
+        organizationId: input.organizationId,
+        providerRef: item.providerRef,
+        amount: item.amount,
+        saleId,
+        nowMs: input.nowMs,
+      });
+    }
     const paymentWrite = insertFact(session, payments, {
       organizationId: input.organizationId,
       storeId: input.storeId,

@@ -170,6 +170,7 @@ export {
   localAuditLog,
   localCartMarks,
   localSaleMarks,
+  paymentIntents,
   localRulePackages,
   localSyncApplyState,
   localSyncCursors,
@@ -592,3 +593,11 @@ export {
   readMarkingPrefixesSync,
   releaseSaleMarksInTxSync,
 } from './marking-repo.js';
+export {
+  type PaymentIntentRecord,
+  type PaymentIntentStatus,
+  consumeUzqrPaymentInTxSync,
+  getPaymentIntentSync,
+  insertPaymentIntentSync,
+  transitionPaymentIntentSync,
+} from './payment-intent-repo.js';

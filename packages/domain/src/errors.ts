@@ -152,7 +152,10 @@ export type DomainErrorCode =
   | 'MARKING_CODE_ALREADY_SOLD'
   | 'MARKING_CODE_MISMATCH'
   | 'MARKING_NOT_REQUIRED'
-  | 'MARKING_CODES_INCOMPLETE';
+  | 'MARKING_CODES_INCOMPLETE'
+  | 'PAYMENT_NOT_CONFIRMED'
+  | 'PAYMENT_INTENT_NOT_FOUND'
+  | 'PAYMENT_INTENT_INVALID_STATE';
 
 export type DomainErrorDetails = Readonly<Record<string, unknown>>;
 
