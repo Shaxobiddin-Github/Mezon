@@ -1,4 +1,5 @@
 import { createHash } from 'node:crypto';
+import { appendAuditInTxSync } from './audit-log.js';
 import {
   type CartLineKind,
   DEFAULT_STORE_TIMEZONE,
@@ -794,6 +795,18 @@ export class SqliteReturnStore {
 
       this.testHooks?.onBeforeCommit?.();
 
+      // T3.8: audit row in the same transaction as the operation.
+      appendAuditInTxSync(session.internalGetSqlite(), {
+        organizationId: ctx.organizationId,
+        nowMs: session.nowUnixMs(),
+        nextId: () => session.nextId(),
+        eventType: 'sale.voided',
+        actorUserId: validActorId,
+        entity: 'sales',
+        entityId: validSaleId,
+        details: { reason: cleanReason, receiptCode: saleRow.receiptCode },
+      });
+
       return Promise.resolve({
         sale: toStoredVoidedSale(updatedSaleWrite.row, lineRows, paymentRows),
         cashRefundAmount,
@@ -1345,6 +1358,18 @@ export class SqliteReturnStore {
       });
 
       this.testHooks?.onBeforeCommit?.();
+
+      // T3.8: audit row in the same transaction as the operation.
+      appendAuditInTxSync(session.internalGetSqlite(), {
+        organizationId: ctx.organizationId,
+        nowMs: session.nowUnixMs(),
+        nextId: () => session.nextId(),
+        eventType: 'return.created',
+        actorUserId: validActorId,
+        entity: 'returns',
+        entityId: returnWrite.row.id,
+        details: { saleId: validSaleId },
+      });
 
       return Promise.resolve({
         returnDoc: toStoredReturnRecord(returnWrite.row, insertedLines, insertedPayments),

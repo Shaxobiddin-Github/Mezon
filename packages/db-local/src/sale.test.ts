@@ -1387,6 +1387,13 @@ describe('@mezon/db-local - T1.4 completeSale atomic TX, receipts, stock policy,
     try {
       migrateLocalDatabase(conn.db, partial06Dir);
       expect(conn.pragmas.foreignKeys).toBe(true);
+      // The fixture writes the "old" data with TODAY's code, which audits user creation (T3.8). The
+      // journal table did not exist in 0006, so it is created here from its real migration and
+      // dropped again before the upgrade below; the upgrade under test is unchanged.
+      const auditSql = fs.readFileSync(path.join(migDir, '0021_audit_log.sql'), 'utf8');
+      for (const stmt of auditSql.split('--> statement-breakpoint')) {
+        if (stmt.trim()) conn.sqlite.exec(stmt);
+      }
 
       const authStore = await createSqliteHubAuthStore({ connection: conn, clock, random });
       const setup = await authStore.completeSetup({
@@ -1634,6 +1641,7 @@ describe('@mezon/db-local - T1.4 completeSale atomic TX, receipts, stock policy,
       const preOutboxCount = listAllOutboxRecordsSync(conn.db).length;
       const preStockMoveCount = conn.db.select().from(stockMoves).all().length;
 
+      conn.sqlite.exec('DROP TABLE local_audit_log');
       // Apply 0007 migration cleanly under PRAGMA foreign_keys = ON inside Drizzle transaction
       migrateLocalDatabase(conn.db, migDir);
 

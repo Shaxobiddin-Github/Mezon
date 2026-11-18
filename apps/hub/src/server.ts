@@ -85,6 +85,7 @@ import { HubRulesService, nodeEd25519RulesVerifier } from './rules-service.js';
 import { HubSyncPullService } from './sync-pull-service.js';
 import { HubSyncPullWorker } from './sync-pull-worker.js';
 import { registerFiscalRoutes } from './fiscal-routes.js';
+import { registerAuditRoutes } from './audit-routes.js';
 import { registerSyncConflictRoutes } from './sync-conflicts-routes.js';
 import { HubSyncConflictService } from './sync-conflicts-service.js';
 import { HubCloudParkedService } from './sync-cloud-parked.js';
@@ -581,6 +582,12 @@ export async function createHubServer(options: CreateHubServerOptions): Promise<
     );
     registerRulesRoutes(app, authService, rulesService, cartService, () => BigInt(clock.now()));
     registerFiscalRoutes(app, authService, fiscalService);
+    registerAuditRoutes(
+      app,
+      authService,
+      connection,
+      () => store.getActiveRuntimeContext()?.config.organizationId ?? null,
+    );
     registerSyncConflictRoutes(
       app,
       authService,

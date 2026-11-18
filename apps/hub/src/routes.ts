@@ -109,17 +109,17 @@ export function registerHubRoutes(
   });
 
   app.post('/users', async (request, reply) => {
-    await authorize(authService, request, 'users:write');
+    const session = await authorize(authService, request, 'users:write');
     const body = CreateUserRequestSchema.parse(request.body);
-    const res = await authService.createUser(body);
+    const res = await authService.createUser(body, session.user.id);
     return reply.code(201).send(res);
   });
 
   app.patch('/users/:id', async (request) => {
-    await authorize(authService, request, 'users:write');
+    const session = await authorize(authService, request, 'users:write');
     const params = UserIdParamsSchema.parse(request.params);
     const body = UpdateUserRequestSchema.parse(request.body);
-    return authService.updateUser(params.id, body);
+    return authService.updateUser(params.id, body, session.user.id);
   });
 
   app.post('/users/:id/pin', async (request) => {

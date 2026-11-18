@@ -35,6 +35,7 @@ import {
 } from '@mezon/domain';
 import { and, asc, desc, eq, inArray, isNull } from 'drizzle-orm';
 import type { BetterSQLite3Database } from 'drizzle-orm/better-sqlite3';
+import { appendAuditInTxSync } from './audit-log.js';
 import type { LocalSqliteConnection } from './connection.js';
 import { effectiveVatRateBp, readEffectiveVatSettingsSync } from './tax-settings-repo.js';
 import {
@@ -1701,6 +1702,22 @@ export class SqliteCartStore {
         })
         .where(eq(localCarts.id, cartRow.id))
         .run();
+
+      appendAuditInTxSync(session.internalGetSqlite(), {
+        organizationId: ctx.organizationId,
+        eventType: 'discount.applied',
+        actorUserId: cartRow.cashierUserId,
+        entity: 'carts',
+        entityId: cartRow.id,
+        details: {
+          mode: input.mode,
+          value: proposedDbValue.toString(),
+          reason: cleanReason,
+          approvedBy,
+        },
+        nowMs,
+        nextId: () => session.nextId(),
+      });
 
       const updated = this.requireCartRowSync(ctx, cartRow.id);
       return Promise.resolve(this.evaluateCartRowSync(ctx, updated, nowMs));
