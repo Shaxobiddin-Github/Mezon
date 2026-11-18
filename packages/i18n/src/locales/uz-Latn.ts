@@ -378,6 +378,7 @@ export const UZ_LATN_MESSAGES = {
   'admin.customers.balance': 'Qarz balansi:',
   'admin.customers.overdue': "Muddati o'tgan:",
   'admin.customers.notes': 'Eslatma:',
+  'admin.customers.overpaid': "Ortiqcha to'lov: {amount} (mijoz haqqi)",
   'admin.report.title': 'Kunlik savdo hisoboti',
   'admin.report.subtitle': "Har kun bo'yicha tushum, QQS, naqd va naqdsiz to'lov, yalpi foyda",
   'admin.report.from': 'Dan:',
@@ -396,6 +397,38 @@ export const UZ_LATN_MESSAGES = {
   'admin.report.loading': 'Hisobot yuklanmoqda...',
   'admin.report.empty': "Bu oraliqda savdo ma'lumoti yo'q",
   'admin.report.total': 'JAMI:',
+
+  // T2.8 Telegram bot
+  'telegram.start.welcome':
+    "Assalomu alaykum! Bu Guzar boti. Ulanish uchun biznes kabinetidagi yoki do'kondan olingan havolani bosing.",
+  'telegram.link.invalid': "Havola eskirgan yoki noto'g'ri. Yangi havola oling.",
+  'telegram.link.staffOk':
+    'Ulandi. Har kuni soat {hour}:00 da "{org}" bo\'yicha kunlik xulosa keladi. To\'xtatish: /stop',
+  'telegram.link.customerAsk':
+    '"{org}" sizga qarz eslatmalarini yubormoqchi. Qarzingiz bo\'lsa, haftada ko\'pi bilan bir marta xabar keladi. Rozimisiz?',
+  'telegram.consent.yes': 'Ha, roziman',
+  'telegram.consent.no': "Yo'q",
+  'telegram.consent.accepted': "Rahmat. Eslatmalarni to'xtatish uchun /stop yozing.",
+  'telegram.consent.declined': 'Tushunarli, sizga eslatma yuborilmaydi.',
+  'telegram.stop.done': "To'xtatildi. Endi xabar yuborilmaydi.",
+  'telegram.stop.none': 'Bu chat hech narsaga ulanmagan.',
+  'telegram.digest.title': '{org} — {date}',
+  'telegram.digest.net': 'Sof savdo: {amount}',
+  'telegram.digest.receipts': 'Cheklar: {count}',
+  'telegram.digest.returns': 'Qaytarishlar: {amount}',
+  'telegram.digest.profit': 'Yalpi foyda: {amount}',
+  'telegram.digest.stale':
+    "Diqqat: {stores} ma'lumoti to'liq bo'lmasligi mumkin (kassa bilan aloqa uzilgan).",
+  'telegram.debt.reminder': '{org}: hurmatli {name}, qarzingiz {amount}.',
+  'telegram.debt.overdue': "Shundan muddati o'tgani: {amount}.",
+  'telegram.debt.footer': "Eslatmalarni to'xtatish: /stop",
+  'admin.telegram.title': 'Telegram',
+  'admin.telegram.connect': 'Telegramni ulash',
+  'admin.telegram.connected': 'Telegram ulangan',
+  'admin.telegram.disconnect': 'Uzish',
+  'admin.telegram.disabled': 'Telegram bot sozlanmagan',
+  'admin.telegram.openLink': 'Havolani 15 daqiqa ichida oching: {url}',
+  'admin.telegram.customerLink': 'Eslatma havolasi',
   // T3.3 / T3.4 Fiscal core
   'fiscal.status.none': 'Fiskal emas',
   'fiscal.status.pending': 'Fiskal kutilmoqda',

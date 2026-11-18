@@ -383,6 +383,7 @@ export const RU_MESSAGES: Readonly<Record<I18nKey, string>> = {
   'admin.customers.balance': 'Баланс долга:',
   'admin.customers.overdue': 'Просрочено:',
   'admin.customers.notes': 'Заметка:',
+  'admin.customers.overpaid': 'Переплата: {amount} (деньги клиента)',
   'admin.report.title': 'Ежедневный отчёт о продажах',
   'admin.report.subtitle': 'Выручка, НДС, наличные и безналичные оплаты, валовая прибыль по дням',
   'admin.report.from': 'С:',
@@ -401,6 +402,38 @@ export const RU_MESSAGES: Readonly<Record<I18nKey, string>> = {
   'admin.report.loading': 'Загрузка отчёта...',
   'admin.report.empty': 'За этот период нет данных о продажах',
   'admin.report.total': 'ИТОГО:',
+
+  // T2.8 Telegram bot
+  'telegram.start.welcome':
+    'Здравствуйте! Это бот Guzar. Чтобы подключиться, откройте ссылку из бизнес-кабинета или полученную в магазине.',
+  'telegram.link.invalid': 'Ссылка устарела или неверна. Получите новую ссылку.',
+  'telegram.link.staffOk':
+    'Подключено. Каждый день в {hour}:00 будет приходить сводка по «{org}». Отключить: /stop',
+  'telegram.link.customerAsk':
+    '«{org}» хочет присылать вам напоминания о долге. Если у вас есть долг, сообщение придёт не чаще раза в неделю. Вы согласны?',
+  'telegram.consent.yes': 'Да, согласен',
+  'telegram.consent.no': 'Нет',
+  'telegram.consent.accepted': 'Спасибо. Чтобы отключить напоминания, напишите /stop.',
+  'telegram.consent.declined': 'Понятно, напоминания отправляться не будут.',
+  'telegram.stop.done': 'Отключено. Сообщения больше не будут приходить.',
+  'telegram.stop.none': 'Этот чат ни к чему не подключён.',
+  'telegram.digest.title': '{org} — {date}',
+  'telegram.digest.net': 'Чистые продажи: {amount}',
+  'telegram.digest.receipts': 'Чеки: {count}',
+  'telegram.digest.returns': 'Возвраты: {amount}',
+  'telegram.digest.profit': 'Валовая прибыль: {amount}',
+  'telegram.digest.stale':
+    'Внимание: данные по {stores} могут быть неполными (нет связи с кассой).',
+  'telegram.debt.reminder': '{org}: уважаемый(ая) {name}, ваш долг составляет {amount}.',
+  'telegram.debt.overdue': 'Из них просрочено: {amount}.',
+  'telegram.debt.footer': 'Отключить напоминания: /stop',
+  'admin.telegram.title': 'Telegram',
+  'admin.telegram.connect': 'Подключить Telegram',
+  'admin.telegram.connected': 'Telegram подключён',
+  'admin.telegram.disconnect': 'Отключить',
+  'admin.telegram.disabled': 'Telegram-бот не настроен',
+  'admin.telegram.openLink': 'Откройте ссылку в течение 15 минут: {url}',
+  'admin.telegram.customerLink': 'Ссылка для напоминаний',
   // T3.3 / T3.4 Fiscal core
   'fiscal.status.none': 'Не фискальный',
   'fiscal.status.pending': 'Ожидает фискализации',

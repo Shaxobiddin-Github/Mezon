@@ -11,3 +11,8 @@ export {
 } from './tables.js';
 export { cloudSyncEvents, cloudStoreSyncPositions, cloudSyncParked } from './sync-tables.js';
 export * from './domain-tables.js';
+export {
+  cloudTelegramLinkCodes,
+  cloudTelegramLinks,
+  cloudTelegramDeliveries,
+} from './telegram-tables.js';
