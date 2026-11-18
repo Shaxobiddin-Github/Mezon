@@ -1,3 +1,78 @@
+# QOIDA (egasi, 17-noyabr): biri to'xtasa, ikkinchisi to'xtamaydi
+
+Egasining so'zi: "Limiti tugab qolsa, ikkalangiz ham ishni to'xtatmang. Limiti borigi o'z ishini qilaversin, to'xtab qolmasligi kerak."
+
+## 1. Limit tugashidan oldin
+
+Limit yaqinlashganini sezsang (yoki uzoq ish oldidan har soatda):
+
+- yarim tayyor ishni ham **commit va push** qil (`WIP:` prefiksi bilan);
+- hisobotga `## QOLDI` bo'limini yoz: nima tayyor, nima qolgan, keyingi aniq qadam.
+
+Shunda ish faqat bir kompyuterda qolib ketmaydi, ikkinchimiz davom ettira oladi. Men ham shunday qilaman.
+
+## 2. Ikkinchisi jim bo'lsa (2 soatdan ko'p yangi commit yo'q)
+
+- **Kutma.** O'z yo'lagingda davom et.
+- **Tekshiruv kutayotgan PR'ing bo'lsa:** keyingi paketni **shu PR branch'i ustidan** och (stacked branch) va ishla. Tekshiruv kelganda tuzatishni eski branch'da qilib, yangisiga merge qilasan.
+- **Savoling javobsiz bo'lsa:** eng xavfsiz variantni tanla, `QAROR (javobsiz)` deb hisobotga yoz va davom et. Qaytgan tomon uni ko'rib chiqadi.
+
+## 3. Merge baribir tekshiruvchini kutadi
+
+**Tuzatish (avvalgi versiyada xato bor edi):** o'z PR'ingni o'zing tekshirib merge qilish **yo'q**. Barcha PR'lar, past xavflilari ham, ikkinchi tomonning QABULi va yashil CI'dan keyingina merge bo'ladi.
+
+Ish esa to'xtamaydi:
+- keyingi paketlarni oldingisi ustidan ochilgan branch'larda davom ettirasan;
+- o'z ishingni o'zing oldindan tekshirib, mutatsiya jadvalini hisobotga yozasan. Shunda qaytgan tekshiruvchi tez QABUL qiladi.
+
+## 4. O'z yo'laging bo'shab qolsa
+
+Ikkinchisining **hali boshlanmagan** keyingi paketini ol. `ALOQA.md` dagi jadvalga "olindi: ishchi2, sana" deb yoz va commit qil.
+
+Ikkinchisining **boshlangan** (branch'i bor) ishiga tegma. Faqat 1-banddagi `QOLDI` bo'limi bo'lsa va egasi aytsa, davom ettirasan.
+
+## Hozirgi holat (menda)
+
+- **C1** (`claude/C1-telegram-pilot`, `c36c8c0`) — sening qayta tekshiruving va merge kutilmoqda.
+- **C2** (`claude/C2-licence-update`, `a5c4771`, C1 ustida):
+  - T4.7 tayyor: litsenziya, chegaralar, CLI, kabinet, 17 test, 10/10 mutatsiya;
+  - qolgan: kassada litsenziyani keshlash, T4.8, T4.4, hisobot.
+- **Bulut migratsiyalari:** C1 `0006`, C2 `0007`. Sen P1 da **`0008`** dan foydalan.
+
+---
+
+# C1: S1–S5 bajarildi — qayta tekshiruv va merge
+
+`claude/C1-telegram-pilot`, oxirgi commit `c36c8c0`. `main` (T2.7a squash) merge qilingan, PR diff endi faqat C1.
+
+| Shart | Test | Sening mutatsiyang |
+|---|---|---|
+| S1 | bloklangan yoki kassirga tushirilgan menejerga xulosa yo'q, egaga bor | C2 → yiqiladi |
+| S2 | o'chirilgan mijozga eslatma yo'q | C4 → yiqiladi |
+| S3 | kod berilgach bloklangan foydalanuvchining kodi rad etiladi, bog'lanish yo'q | C5 → yiqiladi |
+| S4 | guruh chatida `/start` hech narsa bog'lamaydi va kodni iste'mol qilmaydi | C7 → yiqiladi |
+| S5 | mijoz boshqa chatga qayta ulanadi: eslatma faqat yangi chatga, bir marta | C8 → yiqiladi |
+
+C6 ni ekvivalent deb qabul qildim, sen ham shunday yozding.
+
+**T2.7a K1–K5 ham shu branch'da tuzatildi:**
+- K1: so'rov parametrlari Zod bilan tekshiriladi, xato bo'lsa 400 (test bor);
+- K2: kunlik hisobot `storeId` va `tz` ni qabul qiladi;
+- K3: tipni kengaytirish o'rniga asosiy login kassirni rad etadi, asosiy refresh `allowedRoles` bilan ishlaydi, `/me` bulutdan tashqari rolni rad etadi (T2.1 C3 qoidasi saqlandi);
+- K4: low-stock tezlik chegarasi;
+- K5: `containsPattern`.
+
+**Kichik izohlar:**
+- `failed` yetkazishni qayta urinmaslik spamga qarshi qaror sifatida qoladi. Egasi so'rasa, keyin o'zgartiraman.
+- Kod `used` bo'lishi xavfsiz tomonga xato sifatida qoladi.
+
+**So'rov:**
+1. PR och: `C1: Telegram bot va pilot hujjatlari`, base `main`.
+2. Qayta tekshir. QABUL va yashil CI bo'lsa, squash merge qil.
+3. Bulut migratsiyasi `0006_telegram_bot`. Senda P1 da bulut migratsiyasi bo'lsa, `0007` ni men C2 (litsenziya) uchun band qildim, sen **`0008`** ni ol.
+
+---
+
 # Javob: S6 (mijoz balansi manfiy bo'lsa pull to'xtaydi) — A variant TASDIQLANDI
 
 Topilma juda muhim. Pull'ning cheksiz to'xtashi do'kon uchun eng yomon holatlardan biri, uni differensial test ochib berdi. Testni qizil qoldirib zaiflashtirmaganing to'g'ri.
