@@ -81,7 +81,7 @@ describe('@mezon/hub - licence cache (T4.7)', () => {
     const { svc, calls } = setup({ paired: false });
     expect(await svc.refresh()).toBe(false);
     expect(calls).toHaveLength(0);
-    expect(svc.getView().state).toBe('unknown');
+    expect((await svc.getView()).state).toBe('unknown');
   });
 
   it('fetches with the device token, caches, and works offline afterwards', async () => {
@@ -90,7 +90,7 @@ describe('@mezon/hub - licence cache (T4.7)', () => {
     });
     expect(await ok.svc.refresh()).toBe(true);
     expect(ok.calls[0]).toBe('https://cloud.test/api/v1/devices/licence Bearer device-token');
-    expect(ok.svc.getView()).toMatchObject({
+    expect(await ok.svc.getView()).toMatchObject({
       state: 'active',
       plan: 'start',
       invalidLicence: false,
@@ -104,7 +104,7 @@ describe('@mezon/hub - licence cache (T4.7)', () => {
     const offline = setup({ fetchFails: true });
     fs.writeFileSync(path.join(offline.dir, 'licence-cache.json'), cache);
     expect(await offline.svc.refresh()).toBe(false);
-    expect(offline.svc.getView().plan).toBe('start');
+    expect((await offline.svc.getView()).plan).toBe('start');
   });
 
   it('a hand-edited cache gains nothing: the tampered licence is ignored and flagged', async () => {
@@ -118,7 +118,7 @@ describe('@mezon/hub - licence cache (T4.7)', () => {
     };
     cache.envelopes[0].payload.plan = 'pro';
     fs.writeFileSync(file, JSON.stringify(cache));
-    const view = svc.getView();
+    const view = await svc.getView();
     expect(view.invalidLicence).toBe(true);
     // Without a valid licence the hub falls back to the trial (day 10 of 14), not to "pro".
     expect(view.plan).toBe(null);
@@ -131,12 +131,55 @@ describe('@mezon/hub - licence cache (T4.7)', () => {
       now: 20n * DAY,
     });
     await svc.refresh();
-    expect(svc.getView()).toMatchObject({ state: 'expired', invalidLicence: true });
+    expect(await svc.getView()).toMatchObject({ state: 'expired', invalidLicence: true });
+  });
+
+  it('a cache rewritten to name another organization (with its valid licence) applies nothing', async () => {
+    const { svc, dir } = setup({
+      response: { organizationCreatedAtMs: '0', envelopes: [envelope()] },
+      now: 20n * DAY,
+    });
+    await svc.refresh();
+    expect((await svc.getView()).plan).toBe('start');
+    const file = path.join(dir, 'licence-cache.json');
+    // A genuine Pro licence of ANOTHER organization, and the cache edited to name that organization.
+    const foreign = envelope({
+      organizationId: OTHER,
+      plan: 'pro',
+      limits: PLAN_CATALOG.pro.limits,
+    });
+    fs.writeFileSync(
+      file,
+      JSON.stringify({
+        organizationId: OTHER,
+        organizationCreatedAtMs: '0',
+        envelopes: [foreign],
+        fetchedAtMs: '1',
+      }),
+    );
+    const view = await svc.getView();
+    expect(view.plan).toBe(null);
+    expect(view.invalidLicence).toBe(true);
+    expect(view.state).toBe('expired');
+  });
+
+  it('a cache left over from another organization is flagged even with no licence in it', async () => {
+    const { svc, dir } = setup({ now: 2n * DAY });
+    fs.writeFileSync(
+      path.join(dir, 'licence-cache.json'),
+      JSON.stringify({
+        organizationId: OTHER,
+        organizationCreatedAtMs: '0',
+        envelopes: [],
+        fetchedAtMs: '1',
+      }),
+    );
+    expect(await svc.getView()).toMatchObject({ state: 'trial', invalidLicence: true });
   });
 
   it('a malformed cloud answer is not cached', async () => {
     const { svc } = setup({ response: { envelopes: 'nope' } });
     expect(await svc.refresh()).toBe(false);
-    expect(svc.getView().state).toBe('unknown');
+    expect((await svc.getView()).state).toBe('unknown');
   });
 });

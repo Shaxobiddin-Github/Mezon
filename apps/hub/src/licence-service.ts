@@ -86,26 +86,34 @@ export class HubLicenceService {
     }
   }
 
-  getView(): HubLicenceView {
+  /**
+   * Verifies the cached envelopes against the organization this hub is PAIRED with (never the
+   * organization written in the cache file): a cache copied from another organization, or edited to
+   * name one, applies nothing.
+   */
+  async getView(): Promise<HubLicenceView> {
+    const unknown: HubLicenceView = {
+      state: 'unknown',
+      plan: null,
+      daysLeft: null,
+      invalidLicence: false,
+      fetchedAtMs: null,
+    };
+    const status = await this.opts.cloud.getStatus();
+    const organizationId = status.organizationId;
+    if (!organizationId) return unknown;
     let cache: HubLicenceCache;
     try {
       cache = JSON.parse(fs.readFileSync(this.opts.cachePath, 'utf8')) as HubLicenceCache;
     } catch {
-      return {
-        state: 'unknown',
-        plan: null,
-        daysLeft: null,
-        invalidLicence: false,
-        fetchedAtMs: null,
-      };
+      return unknown;
     }
-    let invalid = false;
+    let invalid = cache.organizationId !== organizationId;
     const payloads = [];
     for (const env of Array.isArray(cache.envelopes) ? cache.envelopes : []) {
       try {
         payloads.push(
-          verifyLicence(env, cache.organizationId, this.opts.trustedKeys, this.opts.verifier)
-            .payload,
+          verifyLicence(env, organizationId, this.opts.trustedKeys, this.opts.verifier).payload,
         );
       } catch {
         invalid = true;

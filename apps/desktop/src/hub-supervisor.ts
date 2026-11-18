@@ -20,7 +20,31 @@ export type HubWorkerIncoming =
   | {
       readonly type: 'error';
       readonly message: string;
+    }
+  | {
+      readonly type: 'update-readiness';
+      readonly requestId: string;
+      readonly readiness: HubUpdateReadiness | null;
+      readonly backupId: string | null;
     };
+
+/** T4.8: answer of the hub worker to `update-prepare` (see `apps/hub/src/update-readiness.ts`). */
+export interface HubUpdateReadiness {
+  readonly openReceipts: number;
+  readonly openShifts: number;
+  readonly pendingFiscalDocs: number;
+}
+
+function parseReadiness(raw: unknown): HubUpdateReadiness | null {
+  if (typeof raw !== 'object' || raw === null) return null;
+  const r = raw as Record<string, unknown>;
+  const n = (v: unknown) => (typeof v === 'number' && Number.isInteger(v) && v >= 0 ? v : null);
+  const openReceipts = n(r['openReceipts']);
+  const openShifts = n(r['openShifts']);
+  const pendingFiscalDocs = n(r['pendingFiscalDocs']);
+  if (openReceipts === null || openShifts === null || pendingFiscalDocs === null) return null;
+  return { openReceipts, openShifts, pendingFiscalDocs };
+}
 
 export interface HubChildProcessLike {
   readonly pid: number | undefined;
@@ -82,6 +106,14 @@ function parseWorkerMessage(raw: unknown): HubWorkerIncoming | null {
   if (record['type'] === 'error' && typeof record['message'] === 'string') {
     return { type: 'error', message: record['message'] };
   }
+  if (record['type'] === 'update-readiness' && typeof record['requestId'] === 'string') {
+    return {
+      type: 'update-readiness',
+      requestId: record['requestId'],
+      readiness: parseReadiness(record['readiness']),
+      backupId: typeof record['backupId'] === 'string' ? record['backupId'] : null,
+    };
+  }
   return null;
 }
 
@@ -92,6 +124,11 @@ export class HubSupervisor {
   private shutdownPromise: Promise<void> | null = null;
   private lastKnownPort: number | undefined;
   private consecutiveRestarts = 0;
+  private updateRequestSeq = 0;
+  private readonly pendingUpdateRequests = new Map<
+    string,
+    (answer: { readiness: HubUpdateReadiness | null; backupId: string | null }) => void
+  >();
   private state: HubBridgeState = {
     baseUrl: null,
     restartCount: 0,
@@ -102,6 +139,40 @@ export class HubSupervisor {
 
   getState(): HubBridgeState {
     return this.state;
+  }
+
+  /**
+   * T4.8: asks the hub worker what an update would interrupt (and, with `backup`, to take a backup
+   * when nothing blocks). No worker, a restart or no answer in time → `readiness: null` (wait).
+   */
+  prepareUpdate(
+    targetVersion: string,
+    backup: boolean,
+    timeoutMs = 30_000,
+  ): Promise<{ readonly readiness: HubUpdateReadiness | null; readonly backupId: string | null }> {
+    const worker = this.currentWorker;
+    if (worker === null || this.shuttingDown || this.state.status !== 'ready') {
+      return Promise.resolve({ readiness: null, backupId: null });
+    }
+    this.updateRequestSeq += 1;
+    const requestId = `upd-${String(this.updateRequestSeq)}`;
+    return new Promise((resolve) => {
+      const timer = setTimeout(() => {
+        this.pendingUpdateRequests.delete(requestId);
+        resolve({ readiness: null, backupId: null });
+      }, timeoutMs);
+      this.pendingUpdateRequests.set(requestId, (answer) => {
+        clearTimeout(timer);
+        this.pendingUpdateRequests.delete(requestId);
+        resolve(answer);
+      });
+      worker.postMessage({
+        type: 'update-prepare',
+        requestId,
+        backupIfReady: backup,
+        targetVersion,
+      });
+    });
   }
 
   start(): void {
@@ -193,6 +264,14 @@ export class HubSupervisor {
       }
       const message = parseWorkerMessage(raw);
       if (message === null) {
+        return;
+      }
+
+      if (message.type === 'update-readiness') {
+        this.pendingUpdateRequests.get(message.requestId)?.({
+          readiness: message.readiness,
+          backupId: message.backupId,
+        });
         return;
       }
 

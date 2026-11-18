@@ -17,6 +17,7 @@ import { PosWorkspaceScreen } from './components/PosWorkspaceScreen.js';
 import { CatalogScreen } from './components/CatalogScreen.js';
 import { FiscalOfflineBanner, FiscalUnsettledModal } from './components/FiscalPanels.js';
 import { LicenceBanner } from './components/LicenceBanner.js';
+import { UpdateBanner } from './components/UpdateBanner.js';
 import {
   ShortcutsModal,
   QuickSaleModal,
@@ -713,6 +714,7 @@ export function App() {
 
       {screen === 'pos' && <FiscalOfflineBanner api={api} />}
       {screen === 'pos' && <LicenceBanner api={api} />}
+      {screen === 'pos' && <UpdateBanner />}
 
       {errorBanner && (
         <div className="pos-error-banner" role="alert" data-testid="pos-error-banner">

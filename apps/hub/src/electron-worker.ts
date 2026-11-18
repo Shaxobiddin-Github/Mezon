@@ -2,6 +2,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { createRotatingHubLogStream } from './logger.js';
 import { createHubServer, type CreateHubServerOptions, type HubServer } from './server.js';
+import { readUpdateReadiness, type UpdateReadiness } from './update-readiness.js';
 
 export interface HubWorkerStartMessage {
   readonly type: 'start';
@@ -17,7 +18,19 @@ export interface HubWorkerShutdownMessage {
   readonly type: 'shutdown';
 }
 
-export type HubWorkerIncomingMessage = HubWorkerStartMessage | HubWorkerShutdownMessage;
+/**
+ * T4.8: the desktop shell asks what an update would interrupt. With `backupIfReady`, a database
+ * backup is taken when nothing blocks the update (no open receipt), right before installing.
+ */
+export interface HubWorkerUpdatePrepareMessage {
+  readonly type: 'update-prepare';
+  readonly requestId: string;
+  readonly backupIfReady: boolean;
+  readonly targetVersion: string;
+}
+
+export type HubWorkerIncomingMessage =
+  HubWorkerStartMessage | HubWorkerShutdownMessage | HubWorkerUpdatePrepareMessage;
 
 export type HubWorkerOutgoingMessage =
   | {
@@ -32,6 +45,14 @@ export type HubWorkerOutgoingMessage =
   | {
       readonly type: 'error';
       readonly message: string;
+    }
+  | {
+      readonly type: 'update-readiness';
+      readonly requestId: string;
+      /** `null` when the hub is not running (the update must wait). */
+      readonly readiness: UpdateReadiness | null;
+      readonly backupId: string | null;
+      readonly error?: string;
     };
 
 export interface HubWorkerPortLike {
@@ -87,6 +108,18 @@ function parseStartMessage(raw: unknown): HubWorkerStartMessage | null {
     allowedOrigins,
     maxLogBytes,
     maxLogFiles,
+  };
+}
+
+function parseUpdatePrepareMessage(raw: unknown): HubWorkerUpdatePrepareMessage | null {
+  if (typeof raw !== 'object' || raw === null) return null;
+  const r = raw as Record<string, unknown>;
+  if (r['type'] !== 'update-prepare' || typeof r['requestId'] !== 'string') return null;
+  return {
+    type: 'update-prepare',
+    requestId: r['requestId'],
+    backupIfReady: r['backupIfReady'] === true,
+    targetVersion: typeof r['targetVersion'] === 'string' ? r['targetVersion'].slice(0, 32) : '',
   };
 }
 
@@ -208,6 +241,44 @@ export function attachHubWorkerController(deps: HubWorkerControllerDeps) {
     return shutdownPromise;
   }
 
+  async function handleUpdatePrepare(msg: HubWorkerUpdatePrepareMessage): Promise<void> {
+    const hub = activeHub;
+    if (hub === null || shuttingDown) {
+      deps.port.postMessage({
+        type: 'update-readiness',
+        requestId: msg.requestId,
+        readiness: null,
+        backupId: null,
+      });
+      return;
+    }
+    try {
+      const readiness = readUpdateReadiness(hub.connection);
+      let backupId: string | null = null;
+      if (msg.backupIfReady && readiness.openReceipts === 0) {
+        const meta = await hub.backupService.createBackup({
+          reason: `Yangilanishdan oldin (${msg.targetVersion || '?'})`,
+          actorUserId: null,
+        });
+        backupId = meta.id;
+      }
+      deps.port.postMessage({
+        type: 'update-readiness',
+        requestId: msg.requestId,
+        readiness,
+        backupId,
+      });
+    } catch (error) {
+      deps.port.postMessage({
+        type: 'update-readiness',
+        requestId: msg.requestId,
+        readiness: null,
+        backupId: null,
+        error: error instanceof Error ? error.message : String(error),
+      });
+    }
+  }
+
   let operationQueue: Promise<void> = Promise.resolve();
 
   const enqueue = (task: () => Promise<void>) => {
@@ -220,6 +291,11 @@ export function attachHubWorkerController(deps: HubWorkerControllerDeps) {
       const start = parseStartMessage(event.data);
       if (start !== null) {
         void enqueue(() => handleStart(start));
+        return;
+      }
+      const prepare = parseUpdatePrepareMessage(event.data);
+      if (prepare !== null) {
+        void enqueue(() => handleUpdatePrepare(prepare));
         return;
       }
       if (isShutdownMessage(event.data)) {

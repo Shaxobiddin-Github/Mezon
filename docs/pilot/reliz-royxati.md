@@ -37,6 +37,8 @@ Pilot do'konga har yangi versiya o'rnatishdan oldin. Har band belgilanmaguncha r
 - [ ] Oldingi o'rnatuvchi va o'rnatishdan oldingi baza zaxirasi saqlangan.
 - [ ] Qaytish tartibi: dasturni yopish → zaxirani tiklash → oldingi versiyani o'rnatish → sinxron.
 - [ ] Qaytish faqat smena yopilgandan keyin; ochiq smenada reliz qilinmaydi.
+- [ ] Avtomatik yangilanish faqat **oldinga** ishlaydi (eski manifest rad etiladi): qaytishda oldingi o'rnatuvchi qo'lda o'rnatiladi.
+- [ ] Birinchi imzolangan yangilanish pilot kompyuterida qo'lda sinaldi: "Hozir" (ochiq chek bilan kutadi, chek yopilgach o'rnatadi), dastur o'zi qayta ochildi, "Yangilanishdan oldin" zaxirasi bor ([yo'riqnoma](yangilash-va-tiklash.md)).
 
 ## F. Pilot mezonlari (F3 yakuni)
 

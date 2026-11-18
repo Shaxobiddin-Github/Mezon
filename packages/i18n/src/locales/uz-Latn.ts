@@ -488,6 +488,22 @@ export const UZ_LATN_MESSAGES = {
     "Tarif tugadi: {days} kun ichida to'lanmasa, yangi kassa qo'shib bo'lmaydi. Savdo davom etadi.",
   'pos.licence.expired': 'Tarif muddati tugagan. Savdo davom etadi; egasiga ayting.',
   'pos.licence.invalid': "Litsenziya fayli tekshiruvdan o'tmadi. Egasiga ayting.",
+  // T4.8 POS update banner
+  'pos.update.ready': "Yangi versiya {version} yuklab olindi. Qachon o'rnatilsin?",
+  'pos.update.now': 'Hozir',
+  'pos.update.shiftClose': 'Smena yopilganda',
+  'pos.update.tonight': 'Soat 22:00 da',
+  'pos.update.cancel': 'Bekor qilish',
+  'pos.update.waiting.open_receipt':
+    'Yangilanish {version}: ochiq chek yopilishi kutilmoqda. Chek buzilmaydi.',
+  'pos.update.waiting.open_shift': "Yangilanish {version}: smena yopilgach o'rnatiladi.",
+  'pos.update.waiting.not_yet': "Yangilanish {version}: {time} da o'rnatiladi.",
+  'pos.update.waiting.hub_unavailable':
+    'Yangilanish {version}: kassa xizmati javob bermayapti, kutilmoqda.',
+  'pos.update.waiting.pending': "Yangilanish {version} o'rnatishga tayyorlanmoqda.",
+  'pos.update.installing':
+    "Yangilanish o'rnatilmoqda. Dastur bir necha daqiqada o'zi qayta ochiladi.",
+  'pos.update.error': "Yangilanishni yuklab bo'lmadi. Keyinroq yana urinib ko'riladi.",
 } as const;
 
 export type I18nKey = keyof typeof UZ_LATN_MESSAGES;

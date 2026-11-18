@@ -492,4 +492,20 @@ export const RU_MESSAGES: Readonly<Record<I18nKey, string>> = {
     'Тариф закончился: если не оплатить за {days} дн., нельзя будет добавить новую кассу. Продажи продолжаются.',
   'pos.licence.expired': 'Срок тарифа истёк. Продажи продолжаются; сообщите владельцу.',
   'pos.licence.invalid': 'Файл лицензии не прошёл проверку. Сообщите владельцу.',
+
+  // T4.8 POS update banner
+  'pos.update.ready': 'Новая версия {version} загружена. Когда установить?',
+  'pos.update.now': 'Сейчас',
+  'pos.update.shiftClose': 'При закрытии смены',
+  'pos.update.tonight': 'В 22:00',
+  'pos.update.cancel': 'Отменить',
+  'pos.update.waiting.open_receipt':
+    'Обновление {version}: ждём закрытия открытого чека. Чек не пострадает.',
+  'pos.update.waiting.open_shift': 'Обновление {version}: установится после закрытия смены.',
+  'pos.update.waiting.not_yet': 'Обновление {version}: установится в {time}.',
+  'pos.update.waiting.hub_unavailable': 'Обновление {version}: служба кассы не отвечает, ожидание.',
+  'pos.update.waiting.pending': 'Обновление {version} готовится к установке.',
+  'pos.update.installing':
+    'Идёт установка обновления. Программа сама откроется через несколько минут.',
+  'pos.update.error': 'Не удалось загрузить обновление. Попробуем позже.',
 };

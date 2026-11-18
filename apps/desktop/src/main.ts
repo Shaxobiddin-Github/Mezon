@@ -25,6 +25,18 @@ import {
   isAllowedNavigationUrl,
   resolveAppProtocolFilePath,
 } from './security-policy.js';
+import {
+  DEFAULT_UPDATE_MANIFEST_URL,
+  PRODUCTION_TRUSTED_UPDATE_KEYS,
+  nodeEd25519UpdateVerifier,
+} from './update/update-manifest.js';
+import { UpdateManager, type UpdateSchedule, type UpdateState } from './update/update-manager.js';
+import {
+  downloadInstaller,
+  fetchUpdateEnvelope,
+  sha256File,
+  startInstallerDetached,
+} from './update/update-node-ports.js';
 
 // Redirect userData to persistent local path BEFORE single-instance lock & Chromium profile init.
 const dataDir = createProcessDesktopDataDir(app.isPackaged);
@@ -66,6 +78,9 @@ let supervisor: HubSupervisor | null = null;
 let currentHubBaseUrl: string | null = null;
 let hubShutdownCompleted = false;
 let shutdownInProgress: Promise<void> | null = null;
+let updateManager: UpdateManager | null = null;
+const UPDATE_CHECK_EVERY_MS = 6 * 60 * 60_000;
+const UPDATE_TICK_EVERY_MS = 60_000;
 
 function focusMainWindow(): void {
   if (mainWindow === null || mainWindow.isDestroyed()) {
@@ -335,6 +350,55 @@ if (singleInstanceLockAcquired) {
 
       supervisor.start();
       await initialHubReadyPromise;
+
+      // T4.8: signed automatic update. Off until the owner's update key is built in and a
+      // manifest URL is configured (MEZON_UPDATE_MANIFEST_URL).
+      const manifestUrl = process.env['MEZON_UPDATE_MANIFEST_URL'] ?? DEFAULT_UPDATE_MANIFEST_URL;
+      const hub = supervisor;
+      updateManager = new UpdateManager({
+        dir: path.join(layoutPaths.userDataDir, 'updates'),
+        currentVersion: app.getVersion(),
+        platform: `${process.platform}-${process.arch}`,
+        channel: 'stable',
+        enabled:
+          app.isPackaged &&
+          PRODUCTION_TRUSTED_UPDATE_KEYS.length > 0 &&
+          manifestUrl.startsWith('https://'),
+        trustedKeys: PRODUCTION_TRUSTED_UPDATE_KEYS,
+        verifier: nodeEd25519UpdateVerifier,
+        ports: {
+          fetchEnvelope: () => fetchUpdateEnvelope(manifestUrl),
+          download: (url, dest, maxBytes) => downloadInstaller(url, dest, maxBytes),
+          sha256File,
+          prepare: (version, backup) => hub.prepareUpdate(version, backup),
+          launchInstaller: async (installerPath) => {
+            desktopLog.logger.info({ installerPath }, 'desktop_update_installing');
+            await performCleanShutdown('update-install');
+            startInstallerDetached(installerPath);
+            app.quit();
+          },
+          nowMs: () => BigInt(Date.now()),
+        },
+        onState: (state: UpdateState) => {
+          desktopLog.logger.info(
+            { phase: state.phase, version: state.version, waitReason: state.waitReason },
+            'desktop_update_state',
+          );
+          if (mainWindow !== null && !mainWindow.isDestroyed()) {
+            mainWindow.webContents.send('mezon:update-state', state);
+          }
+        },
+      });
+      const updates = updateManager;
+      ipcMain.handle('mezon:update-get-state', (): UpdateState => updates.getState());
+      ipcMain.handle('mezon:update-schedule', (_event, choice: unknown) =>
+        updates.schedule(choice as UpdateSchedule),
+      );
+      ipcMain.handle('mezon:update-cancel', () => updates.cancelSchedule());
+      await updates.init();
+      void updates.check();
+      setInterval(() => void updates.check(), UPDATE_CHECK_EVERY_MS).unref();
+      setInterval(() => void updates.tick(), UPDATE_TICK_EVERY_MS).unref();
 
       mainWindow = createMainWindow();
       await mainWindow.loadURL(APP_HOME_URL);
