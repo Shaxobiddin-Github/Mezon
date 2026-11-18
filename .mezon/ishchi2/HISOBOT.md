@@ -1,92 +1,93 @@
-# P2 — reja: T3.8 audit xesh zanjiri, T3.7 markirovka (Fake), T3.6 UzQR va to'lov yadrosi (Fake)
+# Hisobot: P2 — T3.8 audit xesh zanjiri, T3.7 markirovka (Fake), T3.6 UzQR to'lov yadrosi (Fake)
 
-Branch: `ishchi2/P2-payments`. U P1 (PR #31) ustidan ochilgan, chunki P1 hali tekshiruvda. P1 merge bo'lgach, `main` shu branch'ga merge qilinadi.
-Holat: **REJA**. Yangi tartib bo'yicha tasdiq kutmasdan kodga o'tyapman. Bajarish tartibi: T3.8 → T3.7 → T3.6.
-Tashqi tizimlar (UzQR, Asl belgisi) uchun endpoint, maydon yoki imzo o'ylab topilmaydi: faqat port va `Fake…Driver` (§3.3).
+Branch: `ishchi2/P2-payments`. U P1 (PR #31) ustidan ochilgan. P1 merge bo'lgach, base `main` bo'ladi va `main` shu branch'ga merge qilinadi.
+Holat: **HISOBOT**. Tekshiruv kutilyapti. O'zim merge qilmayman.
+Tashqi tizimlar (UzQR provayderi, Asl belgisi operatori) uchun endpoint, maydon yoki imzo o'ylab topilmagan. Faqat port va `Fake…Driver` bor; haqiqiy drayverlar T3.0 hujjatidan keyin.
 
-## T3.8 — audit jurnali (xesh zanjiri)
+## Qisqa xulosa
 
-**Jadval `local_audit_log`** (LOCAL, tashkilot doirasida). Ustunlar:
-- `seq` — qat'iy ketma-ket, UNIQUE;
-- `event_type`, `actor_user_id`, `entity`, `entity_id`;
-- `details_json` — kanonik JSON;
-- `prev_hash`, `hash` — SHA-256 hex, kanonik satrdan;
-- `created_at_ms`.
-
-**Faqat qo'shiladi.** UPDATE va DELETE trigger bilan bloklanadi.
-
-**Yozish.** `appendAuditInTxSync(session, …)` amalning **o'z tranzaksiyasi ichida** chaqiriladi (§3.1.10). Amal rollback bo'lsa, audit yozuvi ham qolmaydi (test bilan). Yoziladigan amallar:
-- kirish: muvaffaqiyatli va muvaffaqiyatsiz;
-- savdo void va qaytarish;
-- narx o'zgarishi va chegirma;
-- smena ochish va yopish, kassa naqd harakati;
-- rol yoki foydalanuvchi o'zgarishi;
-- kun yakuni.
-
-**Tekshiruv buyrug'i.**
-- `verifyAuditChain()` qaytaradi: `{ ok, checked, firstBrokenSeq, reason }`.
-- `GET /audit/verify` (faqat owner) va CLI `pnpm --filter @mezon/hub audit:verify <db>`.
-- Aniqlanadigan holatlar: tahrirlangan maydon, o'chirilgan yozuv (seq bo'shlig'i), almashtirilgan tartib, soxta `prev_hash`.
-
-**Testlar va mutatsiyalar.**
-- Trigger o'chirib `details` tahrirlansa → aniqlanadi.
-- Qator o'chirilsa → aniqlanadi.
-- Har hodisa turi o'z yo'lida yoziladi.
-- Rollback'da yozuv qolmaydi.
-- Mutatsiyalar: hash'dan maydon tushirilsa; `prev_hash` bog'lanmasa; seq tekshirilmasa.
-
-**Cheklov (hisobotda aytiladi).** Qurilma egasi butun zanjirni qayta hisoblab chiqsa, lokal tekshiruv buni sezmaydi. Bunga qarshi oxirgi xeshni bulutga "langar" qilish kerak, buni keyingi bosqichga taklif qilaman.
-
-## T3.7 — markirovka
-
-**Tahlilchi.** GS1 DataMatrix: FNC1 yoki GS (`\x1d`) ajratgich, AI `01` GTIN-14, `21` seriya, `91`/`92` kripto-dum. Ochiq GS1 standarti, o'ylab topilmaydi. Namunalar bilan jadval testlari.
-
-**Savat va savdo.**
-- Mahsulotda `requires_marking` bayrog'i.
-- Har birlik uchun bitta kod; kodlar soni miqdorga teng (milli-birlikda butun dona).
-- Bir chekda yoki oldin sotilgan kod takrorlansa → rad etiladi (UNIQUE `org + kod`).
-- Qaytarishda kod qaytib bo'shatiladi.
-
-**Driver.** `MarkingDriver.check(code, mxik)` → `ok` / `mismatch` / `already_sold` / `unknown`, va `FakeMarkingDriver`. MXIK mosligi GTIN↔MXIK jadvali orqali Fake'da tekshiriladi. Haqiqiy tekshiruv T3.0 hujjatidan keyin.
-
-**Skaner.** Oddiy EAN-13 skaneri buzilmaydi: DataMatrix belgisi bo'lmasa, avvalgidek shtrix-kod sifatida qidiriladi.
-
-## T3.6 — UzQR va to'lov yadrosi
-
-**Driver.** `PaymentDriver`: `createQr`, `status`, `refund`, va `FakePaymentDriver`. Rejimlari: to'landi, kech to'landi, vaqt tugadi, rad etildi, javob yo'q.
-
-**`payment_intents`** (MONOTONE). Holatlar: `pending → paid | expired | cancelled | failed`.
-- Kalit `cart` + urinish.
-- Dinamik QR: driver `status()` tasdiqlaydi.
-- Statik QR: kassir qo'lda tasdiqlaydi, owner/manager ruxsati va izoh bilan, audit (T3.8).
-
-**Asosiy qoida (mezon):** tasdiqlanmagan intent bilan chek yopilmaydi. `completeSale` UzQR to'lovini faqat `paid` intent bilan qabul qiladi.
-
-**Kech tasdiq.** Vaqt tugagach `paid` kelsa, ikki marta yozilmaydi:
-- intent bitta savdoga bog'langan (UNIQUE);
-- savdo yopilmagan bo'lsa, intent `paid_late` sifatida kassirga ko'rsatiladi va keyingi urinishda ishlatiladi yoki `refund` qilinadi.
-
-**Testlar.** Qulash va takror; ikki marta bosish; vaqt tugashi bilan bir vaqtda kelgan tasdiq (poyga).
-
-## Bajarish tartibi
-
-1. T3.8: commit, testlar, mutatsiyalar.
-2. T3.7: commit, testlar, mutatsiyalar.
-3. T3.6: commit, testlar, mutatsiyalar.
-4. `pnpm verify`, PR (P1 merge bo'lgach base `main`), hisobot.
-
-## QOLDI (limit qoidasi)
-
-**Tayyor:**
-
-| Vazifa | Commit | Tekshiruv |
+| Vazifa | Natija | Asosiy isbot |
 |---|---|---|
-| T3.8 audit | `5a00938`, `1d90a1a` | xesh zanjiri, `0021`, amallarga ulangan, `GET /audit`, `/audit/verify`, CLI `audit:verify`; mutatsiyalar A1–A8 o'ldi |
-| T3.7 markirovka | `b86a357` … `d780442` | GS1 tahlilchisi, `MarkingDriver` + Fake, `0022`, `/carts/:id/marks`, `completeSale` da kodlar = dona, void va qaytarish kodni bo'shatadi; mutatsiyalar K1–K8 o'ldi |
+| T3.8 audit | tayyor | faqat qo'shiladigan SHA-256 zanjir (`0021`), amal tranzaksiyasi ichida yoziladi; `GET /audit`, `GET /audit/verify` (owner), CLI `audit:verify` (chiqish 0/1/2); mutatsiyalar A1–A8 o'ldi |
+| T3.7 markirovka | tayyor | GS1 tahlilchisi (17 test), `MarkingDriver` + Fake, `0022`, `/carts/:id/marks`; `completeSale`: kodlar = dona; void va qaytarishda kod bo'shaydi; K1–K8 o'ldi |
+| T3.6 UzQR | tayyor | `PaymentDriver` + Fake, `payment_intents` (`0023`); chek faqat `paid` intent bilan yopiladi; kech tasdiq bitta chekka bir marta; Q1–Q8 o'ldi |
 
-**Qolgan:** T3.6 UzQR (`PaymentDriver`, intent, kech tasdiq), keyin `pnpm verify`, PR va hisobot.
+`pnpm verify`: yashil (1011 + 17 test).
 
-**Keyingi aniq qadam:** `PaymentDriver` porti va `FakePaymentDriver`.
+## T3.6 — qanday ishlaydi
+
+**Holatlar.** Oldinga yo'naluvchi:
+- `pending → paid | expired | cancelled | failed`;
+- `expired | cancelled → paid` — kech tasdiq, `paid_late = 1`;
+- `paid → refunded` — faqat ishlatilmagan intent.
+
+Har o'tish bitta himoyalangan `UPDATE … WHERE status IN (…)`. Ikki parallel so'rov uni ikki marta qo'llay olmaydi.
+
+**Chek yopish.** `completeSale` ichida har `uzqr` to'lovi intentni `provider_ref` bo'yicha atomik oladi. Shartlar:
+- `status='paid'`;
+- `consumed_by_sale_id IS NULL`;
+- summa aniq teng.
+
+Bo'lmasa `PAYMENT_NOT_CONFIRMED` (409) va chek yopilmaydi. Bitta chekda bir nechta QR to'lovi bo'lishi mumkin.
+
+**Provayder.** Provayder SQLite tranzaksiyasidan **tashqarida** chaqiriladi. Oflayn bo'lsa:
+- yaratish → 502;
+- yangilash holatni o'zgartirmaydi (hech narsa taxmin qilinmaydi).
+
+**Statik QR.** Faqat owner/manager (`payments:confirm`) izoh bilan qo'lda tasdiqlaydi. Tasdiq va `payment.manual_confirmed` audit yozuvi bitta tranzaksiyada.
+
+**Qaytarish.** Faqat `paid` va hech bir chekda ishlatilmagan intent (`payments:confirm`). Dinamik QR'da avval provayder `refund`, keyin holat.
+
+**API:**
+- `POST /payments/intents`;
+- `GET /payments/intents/:id` — yangilash;
+- `POST …/cancel` — kassir;
+- `POST …/confirm` va `POST …/refund` — manager/owner.
+
+**Testlar** (`apps/hub/src/payment.test.ts`, 8 ta):
+- tasdiqsiz chek yopilmaydi;
+- bitta QR ikkinchi chekni yopmaydi;
+- noto'g'ri summa yoki noma'lum havola rad etiladi;
+- vaqt tugagach kelgan to'lov `paid_late`, bir marta ishlatiladi, qayta yangilash hech narsa yozmaydi;
+- bekor qilingan, keyin to'langan → manager qaytaradi (kassir 403, ikkinchi qaytarish 409);
+- ishlatilgan QR qaytarilmaydi;
+- statik tasdiq: kassir 403, audit yozuvi bor;
+- poyga: bir QR bilan ikki chek parallel → aniq bittasi 200;
+- provayder oflayn.
+
+**Mutatsiyalar** (hammasi o'ldi):
+- Q1 — ishlatilgan tekshiruvi olib tashlandi;
+- Q2 — `paid` tekshiruvi olib tashlandi;
+- Q3 — summa e'tiborsiz;
+- Q4 — kech to'lov belgilanmaydi;
+- Q5 — statik tasdiq auditsiz;
+- Q6 — ishlatilgan intent qaytariladi;
+- Q7 — muddat tugashi qo'llanmaydi;
+- Q8 — kassirga `payments:confirm`.
+
+## Rejadan farqlar (ko'rib chiqing)
+
+1. **`consumed_by_sale_id` UNIQUE emas, oddiy indeks.** Bitta chekda ikki QR to'lovi bo'lishi mumkin (fuzz testi buni topdi). Bir intent ikki chekka tushmasligini atomik `UPDATE … consumed_by_sale_id IS NULL` kafolatlaydi (Q1 va poyga testi).
+2. **Statik QR'ni kassir emas, owner/manager tasdiqlaydi.** Rejada "kassir, ruxsat bilan" edi. Xavfsizroq variantni tanladim — `QAROR (javobsiz)`.
+3. **QR muddati `DEFAULT_QR_TTL_MS = 120 s`** `[TASDIQLANSIN]`.
+
+## Migratsiyalar (lokal)
+
+`0021_audit_log`, `0022_marking`, `0023_payment_intents`. `main` merge bo'lganda, raqamlar nazoratchining lokal migratsiyalari bilan to'qnashsa qayta yaratiladi.
+
+## Egasi uchun savollar
+
+1. MXIK prefikslari ro'yxati (markirovka talab qilinadigan tovarlar) — hozir sozlama `[]` `[TASDIQLANSIN]`.
+2. QR muddati: 120 s maqulmi?
+3. Statik QR'ni kassir ham tasdiqlay oladimi, yoki faqat manager?
+4. Audit zanjirining oxirgi xeshini bulutga "langar" qilish (qurilma egasi butun zanjirni qayta hisoblasa, lokal tekshiruv sezmaydi) — keyingi bosqichga taklif.
+
+## Commit'lar
+
+- `5a00938`, `1d90a1a` — T3.8;
+- `b86a357` … `d780442` — T3.7;
+- `e771164` … `706f619` — T3.6;
+- `096da24` — test turlari.
 
 ---
 
