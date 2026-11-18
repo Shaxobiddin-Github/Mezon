@@ -1,3 +1,117 @@
+# Hisobot: P1 — T2.6 + T2.5 + bulut buyruq yozuvchi porti + fiskal test qarzi
+
+Branch: `ishchi2/T2.6-projections`. PR: [#31](https://github.com/Shaxobiddin-Github/Mezon/pull/31) (base `main`).
+Holat: **HISOBOT**. Tekshiruv kutilyapti.
+
+## Qisqa xulosa
+
+| Qism | Natija | Asosiy isbot |
+|---|---|---|
+| Fiskal test qarzi + `device_id` | tayyor | nazoratchining Z/OPEN mutatsiyalari 1 o'rniga 5 tadan testda; DEV1/DEV2 o'ldi |
+| T2.6 qisman proyeksiya | tayyor | differensial test 200/200 seed; perf p95 9,5 ms (avval 1,23 s) |
+| S6 (manfiy balans, A) | tayyor | S6a–S6e mutatsiyalari o'ldi; pull hech qachon proyeksiya xatosida to'xtamaydi |
+| Konfliktlar (hub + bulut) | tayyor | API va POS ekrani; tahrir yo'q (strict body testi); audit ustunlari |
+| Bulut yozuvchi porti (T2.7b) | tayyor | W1–W6 o'ldi |
+| T2.5 bootstrap va tiklash | tayyor | uzilish = uzilmagan (20 seed); tenant filtri har jadval bo'yicha; tiklashda fiskal |
+
+## Commit'lar
+
+| Commit | Mazmun |
+|---|---|
+| `319f1ba` | T2.6: tegilgan kalitlar bo'yicha qayta hisoblash. Park'dan retry endi proyeksiyalardan **oldin** ishlaydi (T2.4 xatosi). |
+| `3009c8b` | Fiskal: faqat yaratgan hub yuboradi; Fake operator smena invariantlari; tasodifiy drayver jadvali testi. |
+| `6d6fbfa` | Differensial test, S6 savoli. |
+| `5f43ba3` | S6 (A): `0020`, domen, `PROJECTION_FAILED`, `CUSTOMER_OVERPAID`, POS "Ortiqcha to'lov". |
+| `d367afd` | Perf testi (50k / 100k / 100k). |
+| `87a8adc`, `5ac8a60` | Hub konflikt API'si va POS ekrani. |
+| `cd4c8ab` | Bulut `cloud_sync_parked`: ko'rish, retry, o'rganildi; hub proksisi. |
+| `b96fa91` | Bulut buyruq yozuvchi porti (`CloudEventWriter`). |
+| `d919609`, `732e822`, `a7bc935` | T2.5: bootstrap, tenant filtri, endpoint'lar. |
+| `a7bc935`, `ba58e1e` | T2.5: tiklashda `device_id` saqlanadi, `sent` fiskal hujjat davom etadi. |
+| `2fcbe3c` | `ALOQA.md` yo'laklar jadvali. |
+
+## T2.6 — proyeksiyalar
+
+- **Kalitlar.** `collectTouchedProjectionKeys`: `stock_moves`, `batches`, `receiving_cost_confirmations`, `goods_receiving_lines`, `products` → mahsulot; `customer_ledger`, `customers` → mijoz; `supplier_ledger`, `suppliers` → yetkazib beruvchi.
+- **Hisoblash.** Faqat **qo'llangan** hodisalar hisobga olinadi, park'dan retry ham shunga kiradi. Stock to'liq qayta qurish bilan bitta funksiyada hisoblanadi (`productIds` filtri). 500 dan ortiq mahsulot bo'lsa, bitta to'liq o'tish qilinadi.
+- **Differensial test** (`sync-projections-diff.test.ts`):
+  - haqiqiy HTTP amallari: savdo, nasiya, qaytarish, void, kirim, narxi noma'lum kirim va tasdiqlash, to'lovlar, tuzatish, yangi mijoz;
+  - tasodifiy partiyalar, ota-yozuvni kechiktirish (park/retry), boshqa do'kon ledger hodisalari;
+  - har partiyadan keyin 5 proyeksiya jadvali to'liq qayta qurish bilan teng;
+  - 200 seed, 207 s.
+- **Deterministik testlar.** Kalit yig'uvchining unit testi (D0–D8); D6 park/retry ssenariysi.
+- **Perf.** p95 9,5 ms. Mutatsiya (to'liq qayta qurish) bilan 7 805 ms → yiqiladi.
+
+## S6 — manfiy balans (A tasdiqlangan)
+
+- **Migratsiya va domen.** `0020` da `balance >= 0` CHECK yo'q. Domenda manfiy balansda lokal amallar ishlaydi; kamaytirish uni yarata yoki chuqurlashtira olmaydi. Kredit limiti ortiqcha to'lovni 0 qarz deb hisoblaydi.
+- **Pull himoyasi.** Har proyeksiya kaliti alohida SAVEPOINT'da. Xato bo'lsa partiya, hodisalar va kursorlar baribir commit bo'ladi, kalit `PROJECTION_FAILED` ga yoziladi va keyingi partiyalarda qayta uriniladi. Sun'iy CHECK testi bor.
+- **`CUSTOMER_OVERPAID`.** Faqat ko'rish va "o'rganildi". Balans ≥ 0 bo'lsa o'zi yopiladi. "O'rganildi" qilingani summa o'zgarmaguncha qayta ochilmaydi.
+- **POS.** "Ortiqcha toʻlov: X soʻm (mijoz haqqi)".
+- **S7 (ochiq savol).** Ortiqcha to'lovli mijozga yangi nasiya ruxsat etilgan; musbat delta ortiqcha to'lovni kamaytiradi. Egasi boshqacha desa, bitta qator o'zgaradi.
+
+## Konfliktlar
+
+| Joy | Endpoint | Ruxsat |
+|---|---|---|
+| Hub | `GET /sync/conflicts`, `GET /sync/parked` | `sync:read` |
+| Hub | `POST /sync/conflicts/:id/resolve` | `sync:resolve` |
+| Hub (proksi) | `GET/POST /sync/cloud-parked...` | `sync:read` / `sync:resolve` |
+| Bulut | `GET /api/v1/sync/parked`, `POST /api/v1/sync/parked/:id/resolve` | device token, RLS + o'z do'koni |
+
+- Owner va manager kiradi, kassir 403.
+- **Retry:**
+  - push → o'sha `eventId` bilan outbox'ga qaytadi;
+  - pull → saqlangan `event_json` oddiy pull yo'lidan qo'llanadi;
+  - projection → kalit qayta hisoblanadi;
+  - bulutda → urinishlar oynasi tiklanadi va lokal rad etilgan outbox hodisasi qayta navbatga qo'yiladi.
+- **Audit:** `resolution`, `resolved_by_user_id`, `resolution_note`; loglar `sync.conflict_resolved` va `sync.parked_resolved`.
+- **POS:** "Sinxron konfliktlar" ekrani va "Bulutda kutayotganlar" bo'limi (uz-Latn, ru).
+
+## Bulut buyruq yozuvchi porti (T2.7b uchun)
+
+Batafsil foydalanish quyidagi "T2.7b uchun port tayyor" bo'limida.
+
+| Mavzu | Qanday ishlaydi |
+|---|---|
+| HLC | `cloud_hlc_state`, `org_hlc:<org>` lock ostida. HLC joriy vaqt, oxirgi HLC va yozuvning HLC'sidan katta. |
+| Oqim | Tashkilot oqimi `store_id = organization_id`; pull kursorida tashkilot kaliti qabul qilinadi. |
+| Virtual qurilma | `status = 'system'`, token yo'q. |
+| Validatsiya | `processSyncPushBatch`, ya'ni push bilan bir xil yo'l. Store jadvallari rad etiladi. |
+
+## T2.5 — bootstrap va tiklash
+
+| Savol | Javob va isbot |
+|---|---|
+| Snapshot va pull | Variant A: pull'ning o'zi yuklash. Har sahifa kursorlari bilan bitta tranzaksiyada qo'llanadi, shuning uchun hodisa yo'qolmaydi va ikki marta qo'llanmaydi. `HubSyncBootstrap`: `none` → `in_progress` → `done`; `GET/POST /sync/bootstrap`. |
+| Davom ettirish | Test (20 seed): N-sahifada uzilish va jarayon qayta ishga tushishi = uzilmagan yuklash (barcha sinxron jadvallar, proyeksiyalar, kursorlar) va mutlaq to'liqlik. Kursor +1 va "hasMore'siz done" mutatsiyalari 20/20 seed'da o'ldi. |
+| Tenant filtri | Registrdan generatsiya qilingan PG testi (har sinxron jadval). Boshqa tashkilot hech qachon; boshqa do'kon faqat tashkilot jadvallari uchun. `scopeFilter` mutatsiyasi o'ldi. |
+| Zaxira yoki bulut ustun | Zaxira (T1.13) tiklanadi. Kursorlar zaxiradagi qiymatdan davom etadi va bulut zaxiradan keyingi hodisalarni pull bilan qaytaradi; o'z hodisalari ham keladi, chunki tiklangan outbox'da ular yo'q. Restore B4 `device_seq` va HLC'ni `max(tiklangan, joriy)` qiladi, shuning uchun ketma-ketlik qayta ishlatilmaydi. |
+| Zaxirada bor, lekin yuborilmagan hodisalar | Odatdagidek push qilinadi; bulut `eventId` bo'yicha dedup qiladi. |
+| Zaxiradan keyin yaratilib yuborilmagan hodisalar | Ular yo'qolgan. Bu T1.13 zaxirasining tabiati, egasini ogohlantirish kerak. |
+| `device_id` | **Eski `device_id` saqlanadi** (DB bilan tiklanadi). Shuning uchun `sent` fiskal hujjatlar yetim qolmaydi. Test: zaxiradagi `sent` hujjat tiklangandan keyin `status()` bilan tasdiqlanadi, `submitCount = 1`. |
+
+**Ochiq risk.** Zaxiradan keyin qurilma tokeni almashtirilgan bo'lsa, tiklangan hub eski token bilan 401 oladi va qayta juftlash kerak bo'ladi. Buni T4.x yoki egasining tiklash yo'riqnomasiga yozish kerak.
+
+## Migratsiyalar
+
+- **Lokal `0020_sync_overpaid_conflicts_bootstrap`:**
+  - `local_customer_balances` (CHECK olib tashlandi) va `local_sync_conflicts` (audit ustunlari) qayta yaratiladi;
+  - `local_sync_apply_state` ga ustunlar `ALTER ADD` bilan qo'shiladi, chunki bu jadvalni sotuv triggeri ishlatadi;
+  - `INSERT … SELECT` dagi yangi ustunlar qo'lda tuzatildi: eski yopilgan konfliktlar `auto` oladi.
+- **Bulut `0006_sync_parked_and_cloud_hlc`.** C1 ham `0006` ni oladi: kim keyin merge bo'lsa, raqamni o'sha qayta yaratadi.
+
+## Tekshiruv
+
+`pnpm verify` (`ba58e1e`, lokal): 118 test fayli, 968 test; perf 12 fayl, 17 test; E2E 1; `db:check` 0 diff (SQLite va PostgreSQL); depcruise toza (547 modul).
+
+## Ochiq savollar
+
+- **S7.** Ortiqcha to'lovli mijozga nasiya (yuqorida).
+- **Bulut va ikki hub paritet testi.** Bulutda mijoz balansi proyeksiyasi yo'q; kabinet C1 da FIFO'ni o'qishda hisoblaydi. Uchta tomonni birga tekshiradigan PG testini C1 merge bo'lgach `loadCustomerDebts` bilan yozish mumkin.
+
+---
+
 # T2.7b uchun port tayyor: `CloudEventWriter` (`b96fa91`)
 
 ```ts
