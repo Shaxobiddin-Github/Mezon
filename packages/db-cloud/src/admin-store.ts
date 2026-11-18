@@ -11,7 +11,17 @@ import {
 } from '@mezon/domain';
 import type { Pool } from 'pg';
 import { withPgTenantContext } from './connection.js';
+import { loadCustomerDebts } from './customer-debt.js';
 import { resolveIntlDateKey } from './timezone.js';
+
+/**
+ * `ILIKE` "contains" pattern for user input: `%`, `_` and the escape character itself are
+ * escaped (PostgreSQL's default `ILIKE` escape is the backslash), so "50%" finds "50%",
+ * not everything starting with "50" (ishchi2 review K5).
+ */
+export function containsPattern(input: string): string {
+  return `%${input.replace(/[\\%_]/g, (c) => `\\${c}`)}%`;
+}
 
 export function maskPhoneNumber(phone: string | null | undefined): string | null {
   if (!phone) return null;
@@ -571,6 +581,8 @@ export class AdminReadStore {
       hasDebtOnly?: boolean;
       cursor?: string;
       limit?: number;
+      /** "Now" for the overdue calculation (tests); defaults to the wall clock. */
+      nowMs?: UnixMs;
     },
   ): Promise<{ items: readonly CloudCustomerItem[]; nextCursor: string | null }> {
     const limit = Math.min(query.limit ?? 50, 200);
@@ -584,7 +596,7 @@ export class AdminReadStore {
         conditions.push(
           `(c.full_name ILIKE $${argIdx} OR c.phone_normalized ILIKE $${argIdx} OR c.name_search ILIKE $${argIdx})`,
         );
-        args.push(`%${query.search}%`);
+        args.push(containsPattern(query.search));
         argIdx++;
       }
 
@@ -635,12 +647,20 @@ export class AdminReadStore {
         }
       }
 
+      // Same FIFO rule as the hub (T1.7) for the page's customers only.
+      const debts = await loadCustomerDebts(client, {
+        organizationId,
+        customerIds: pageRows.map((r) => r.id),
+        asOfMs: query.nowMs ?? unixMsFromBigInt(BigInt(Date.now())),
+        tz: this.defaultTz,
+      });
+
       const items: CloudCustomerItem[] = pageRows.map((r) => ({
         id: parseUuidV7(r.id),
         fullName: r.full_name,
         maskedPhone: maskPhoneNumber(r.phone_normalized),
         balance: moneyFromTiyin(BigInt(r.balance_tiyin)),
-        overdueAmount: moneyFromTiyin(0n),
+        overdueAmount: debts.get(r.id)?.overdueAmount ?? moneyFromTiyin(0n),
         createdAtMs: unixMsFromBigInt(BigInt(r.created_at_ms)),
       }));
 
@@ -655,6 +675,7 @@ export class AdminReadStore {
     organizationId: UuidV7;
     customerId: UuidV7;
     isPrivilegedRole: boolean;
+    nowMs?: UnixMs;
   }): Promise<CloudCustomerDetail | null> {
     return withPgTenantContext(this.pool, params.organizationId, async (_tx, client) => {
       const custSql = `
@@ -717,6 +738,15 @@ export class AdminReadStore {
         createdAtMs: unixMsFromBigInt(BigInt(row.created_at_ms)),
       }));
 
+      const debt = (
+        await loadCustomerDebts(client, {
+          organizationId: params.organizationId,
+          customerIds: [c.id],
+          asOfMs: params.nowMs ?? unixMsFromBigInt(BigInt(Date.now())),
+          tz: this.defaultTz,
+        })
+      ).get(c.id);
+
       const phone = params.isPrivilegedRole
         ? c.phone_normalized
         : maskPhoneNumber(c.phone_normalized);
@@ -726,7 +756,7 @@ export class AdminReadStore {
         fullName: c.full_name,
         phone,
         balance: moneyFromTiyin(BigInt(c.balance_tiyin)),
-        overdueAmount: moneyFromTiyin(0n),
+        overdueAmount: debt?.overdueAmount ?? moneyFromTiyin(0n),
         earliestOverdueDueAtMs: null,
         notes: c.note,
         createdAtMs: unixMsFromBigInt(BigInt(c.created_at_ms)),
@@ -756,7 +786,7 @@ export class AdminReadStore {
 
       if (query.search) {
         conditions.push(`(p.name ILIKE $${argIdx} OR p.sku ILIKE $${argIdx})`);
-        args.push(`%${query.search}%`);
+        args.push(containsPattern(query.search));
         argIdx++;
       }
 

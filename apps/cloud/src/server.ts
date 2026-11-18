@@ -29,6 +29,7 @@ import {
 } from '@mezon/contracts';
 import {
   AdminReadStore,
+  CloudTelegramStore,
   CloudAuthStore,
   CloudDeviceStore,
   type CloudParkedEventRecord,
@@ -42,6 +43,10 @@ import {
   assertNonSuperuserNonBypassRls,
 } from '@mezon/db-cloud';
 import { registerAdminRoutes } from './admin-routes.js';
+import { isTelegramEnabled } from './config.js';
+import { TelegramBotService } from './telegram/bot-service.js';
+import { TelegramScheduler } from './telegram/scheduler.js';
+import { registerTelegramRoutes } from './telegram-routes.js';
 import {
   MIN_CLIENT_VERSION,
   SyncPushRequestSchema,
@@ -66,6 +71,7 @@ import Fastify, {
   type FastifyRequest,
   type FastifyError,
 } from 'fastify';
+import { HttpTelegramClient, type TelegramClient } from '@mezon/drivers';
 import type { CloudConfig } from './config.js';
 import { type CloudJwtPayload, CloudJwtService } from './jwt.js';
 
@@ -85,6 +91,8 @@ export interface BuildServerOptions {
   readonly deviceStore?: CloudDeviceStore;
   readonly syncPushStore?: CloudSyncPushStore;
   readonly adminStore?: AdminReadStore;
+  /** T2.8: injected in tests (FakeTelegramClient); production builds HttpTelegramClient. */
+  readonly telegramClient?: TelegramClient;
   readonly syncPullStore?: CloudSyncPullStore;
   readonly syncParkedStore?: CloudSyncParkedStore;
   readonly idGen?: { nextId(): UuidV7 };
@@ -105,6 +113,13 @@ export function cloudErrorHandler(err: FastifyError, req: FastifyRequest, reply:
     return reply.code(500).send({ error: 'Internal Server Error' });
   }
   return reply.code(statusCode).send({ error: err.name, code: err.code, message: err.message });
+}
+
+declare module 'fastify' {
+  interface FastifyInstance {
+    /** T2.8: null when the Telegram bot is not configured; started by `startCloudServer`. */
+    telegramScheduler: TelegramScheduler | null;
+  }
 }
 
 export async function buildCloudServer(options: BuildServerOptions): Promise<FastifyInstance> {
@@ -237,6 +252,15 @@ export async function buildCloudServer(options: BuildServerOptions): Promise<Fas
         return reply.code(403).send({ error: 'Forbidden', message: 'User account is suspended' });
       }
 
+      // Cloud accounts are owners and managers only (T2.1 C3): a cashier row never gets a cloud
+      // token (ishchi2 review K3).
+      if (lookup.userRole !== 'owner' && lookup.userRole !== 'manager') {
+        return reply.code(403).send({
+          error: 'Forbidden',
+          message: 'Only owners and managers have cloud accounts',
+        });
+      }
+
       // Check progressive lockout
       if (lookup.lockedUntilMs !== null && lookup.lockedUntilMs > BigInt(nowMs)) {
         return reply.code(429).send({
@@ -362,6 +386,7 @@ export async function buildCloudServer(options: BuildServerOptions): Promise<Fas
         newTokenHash: nextHash,
         newExpiresAtMs,
         nowMs,
+        allowedRoles: ['owner', 'manager'],
       });
 
       // S1: claims are re-read from the user row on every refresh.
@@ -381,6 +406,12 @@ export async function buildCloudServer(options: BuildServerOptions): Promise<Fas
     } catch (err) {
       if (err instanceof DomainError && err.code === 'AUTH_UNAUTHORIZED') {
         return reply.code(401).send({ error: 'Unauthorized', message: err.message });
+      }
+      if (err instanceof DomainError && err.code === 'AUTH_FORBIDDEN') {
+        return reply.code(403).send({
+          error: 'Forbidden',
+          message: 'Only owners and managers have cloud accounts',
+        });
       }
       throw err;
     }
@@ -425,11 +456,14 @@ export async function buildCloudServer(options: BuildServerOptions): Promise<Fas
       return;
     }
 
+    if (auth.role !== 'owner' && auth.role !== 'manager') {
+      return reply.code(403).send({ error: 'Forbidden', message: 'Not a cloud account' });
+    }
     const user: CloudUserDto = {
       id: auth.sub,
       organizationId: auth.org,
       username: auth.name,
-      role: auth.role as 'owner' | 'manager',
+      role: auth.role,
     };
 
     return reply.code(200).send({ user });
@@ -872,6 +906,44 @@ export async function buildCloudServer(options: BuildServerOptions): Promise<Fas
   });
 
   // Admin Cabinet API routes (T2.7a)
+  // T2.8 Telegram bot: enabled only when the token and the webhook secret are configured.
+  const telegramStore = new CloudTelegramStore(conn.pool, idGen);
+  let telegramBot: TelegramBotService | undefined;
+  let telegramScheduler: TelegramScheduler | null = null;
+  if (isTelegramEnabled(config)) {
+    const client =
+      options.telegramClient ?? new HttpTelegramClient({ token: config.telegramBotToken ?? '' });
+    telegramBot = new TelegramBotService({
+      store: telegramStore,
+      client,
+      clock,
+      digestHour: config.telegramDigestHour,
+      logger: app.log,
+    });
+    telegramScheduler = new TelegramScheduler({
+      store: telegramStore,
+      adminStore,
+      client,
+      clock,
+      digestHour: config.telegramDigestHour,
+      reminderHour: config.telegramReminderHour,
+      logger: app.log,
+    });
+    const scheduler = telegramScheduler;
+    app.addHook('onClose', () => {
+      scheduler.stop();
+      return Promise.resolve();
+    });
+  }
+  app.decorate('telegramScheduler', telegramScheduler);
+  await registerTelegramRoutes(app, {
+    config,
+    jwtService,
+    store: telegramStore,
+    bot: telegramBot,
+    clock,
+  });
+
   await registerAdminRoutes(app, {
     config,
     conn,

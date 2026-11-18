@@ -179,6 +179,39 @@ export class AdminApiClient {
     const qs = query.toString() ? `?${query.toString()}` : '';
     return this.request<DailySalesReportResponseDto>(`/api/v1/admin/reports/daily${qs}`);
   }
+
+  // T2.8 Telegram
+  async getTelegramStatus(): Promise<TelegramStatus> {
+    return this.request<TelegramStatus>('/api/v1/admin/telegram/status');
+  }
+
+  async createTelegramLink(): Promise<TelegramLink> {
+    return this.request<TelegramLink>('/api/v1/admin/telegram/link', { method: 'POST' });
+  }
+
+  async deleteTelegramLink(): Promise<void> {
+    await this.request<unknown>('/api/v1/admin/telegram/link', { method: 'DELETE' });
+  }
+
+  async createCustomerTelegramLink(customerId: string): Promise<TelegramLink> {
+    return this.request<TelegramLink>(
+      `/api/v1/admin/customers/${encodeURIComponent(customerId)}/telegram-link`,
+      { method: 'POST' },
+    );
+  }
+}
+
+export interface TelegramStatus {
+  readonly enabled: boolean;
+  readonly linked: boolean;
+  readonly linkedAtMs: string | null;
+}
+
+export interface TelegramLink {
+  readonly code: string;
+  /** Null when the bot username is not configured. */
+  readonly url: string | null;
+  readonly expiresAtMs: string;
 }
 
 export const adminApi = new AdminApiClient();

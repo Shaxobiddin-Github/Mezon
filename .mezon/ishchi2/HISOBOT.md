@@ -192,7 +192,7 @@ Batafsil foydalanish quyidagi "T2.7b uchun port tayyor" bo'limida.
   - `local_customer_balances` (CHECK olib tashlandi) va `local_sync_conflicts` (audit ustunlari) qayta yaratiladi;
   - `local_sync_apply_state` ga ustunlar `ALTER ADD` bilan qo'shiladi, chunki bu jadvalni sotuv triggeri ishlatadi;
   - `INSERT … SELECT` dagi yangi ustunlar qo'lda tuzatildi: eski yopilgan konfliktlar `auto` oladi.
-- **Bulut `0006_sync_parked_and_cloud_hlc`.** C1 ham `0006` ni oladi: kim keyin merge bo'lsa, raqamni o'sha qayta yaratadi.
+- **Bulut `0007_sync_parked_and_cloud_hlc`.** C1 ham `0006` ni oladi: kim keyin merge bo'lsa, raqamni o'sha qayta yaratadi.
 
 ## Tekshiruv
 

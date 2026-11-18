@@ -47,13 +47,14 @@ describe('T4.6 locales', () => {
 
   it('Russian texts are actually Russian (Cyrillic) unless the source is a symbol or brand', () => {
     const latinOnly = KEYS.filter((k) => {
-      const src = UZ_LATN_MESSAGES[k];
+      const src = UZ_LATN_MESSAGES[k].replace(/\{\w+\}/g, '');
       const ru = RU_MESSAGES[k];
       return /[a-z]{3,}/i.test(src) && !/[а-яё]/i.test(ru);
     });
     // Brand-only / provider-only labels legitimately stay Latin.
     expect(latinOnly.sort()).toEqual(
       [
+        'admin.telegram.title',
         'payment.method.click',
         'payment.method.payme',
         'payment.method.uzqr',
@@ -68,10 +69,11 @@ describe('T4.6 locales', () => {
       const leftover = cyrl[key]
         .replace(/\{\w+\}/g, '')
         .replace(
-          /\b(F\d{1,2}|Enter|Esc|Delete|SKU|UzQR|Payme|Click|Uzum|Humo|Uzcard|Hub|Renderer|Mezon|Guzar|Owner|Manager|username|cash_in|cash_out|C)\b/g,
+          /\b(F\d{1,2}|Enter|Esc|Delete|SKU|UzQR|Payme|Click|Uzum|Humo|Uzcard|Hub|Renderer|Mezon|Guzar|Telegram|Owner|Manager|username|cash_in|cash_out|C)\b/g,
           '',
         )
-        .replace(/\/health/g, '');
+        .replace(/\/health/g, '')
+        .replace(/\/[a-z]+/g, '');
       expect(/[A-Za-z]/.test(leftover), `${key}: ${cyrl[key]}`).toBe(false);
     }
   });

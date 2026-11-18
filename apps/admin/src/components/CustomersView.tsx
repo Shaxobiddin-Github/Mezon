@@ -5,11 +5,20 @@ import type {
   AdminCustomersResponseDto,
 } from '@mezon/contracts';
 import { t } from '@mezon/i18n';
-import { adminApi } from '../api-client.js';
+import { type TelegramLink, adminApi } from '../api-client.js';
 import { describeApiError, formatDateTime, formatSom } from '../utils/format.js';
 
 /** A customer balance is the amount the customer owes; shown as debt (red) when non-zero. */
 function debt(tiyin: string): React.ReactNode {
+  // A negative balance is an overpayment (two stores took the same debt offline): the customer's
+  // money, not a debt (P1/S6).
+  if (tiyin.startsWith('-')) {
+    return (
+      <span className="text-emerald-700">
+        {t('admin.customers.overpaid', { amount: formatSom(tiyin.slice(1)) })}
+      </span>
+    );
+  }
   return tiyin !== '0' ? (
     <span className="text-red-600">{formatSom(tiyin)}</span>
   ) : (
@@ -27,6 +36,7 @@ export const CustomersView: React.FC = () => {
   const [selectedCustId, setSelectedCustId] = useState<string | null>(null);
   const [detail, setDetail] = useState<AdminCustomerDetailResponseDto | null>(null);
   const [detailError, setDetailError] = useState<string | null>(null);
+  const [tgLink, setTgLink] = useState<TelegramLink | null>(null);
 
   const loadCustomers = async (reset: boolean) => {
     if (reset) {
@@ -68,6 +78,7 @@ export const CustomersView: React.FC = () => {
   };
 
   const closeCustomer = () => {
+    setTgLink(null);
     setSelectedCustId(null);
     setDetail(null);
     setDetailError(null);
@@ -222,6 +233,27 @@ export const CustomersView: React.FC = () => {
                     <span className="text-red-500 font-semibold">
                       {formatSom(detail.overdueAmountTiyin)}
                     </span>
+                  </div>
+
+                  <div className="flex flex-col gap-1 py-1">
+                    <button
+                      onClick={() => {
+                        void adminApi
+                          .createCustomerTelegramLink(detail.id)
+                          .then(setTgLink)
+                          .catch((err: unknown) => setDetailError(describeApiError(err)));
+                      }}
+                      className="self-start text-xs px-3 py-1.5 rounded border border-indigo-200 text-indigo-700 hover:bg-indigo-50"
+                    >
+                      {t('admin.telegram.customerLink')}
+                    </button>
+                    {tgLink && (
+                      <span className="text-xs text-slate-600 break-all">
+                        {t('admin.telegram.openLink', {
+                          url: tgLink.url ?? `/start ${tgLink.code}`,
+                        })}
+                      </span>
+                    )}
                   </div>
 
                   {detail.notes && (

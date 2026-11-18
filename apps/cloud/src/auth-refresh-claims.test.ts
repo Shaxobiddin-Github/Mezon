@@ -163,24 +163,39 @@ describePg('@mezon/cloud - refresh re-reads identity claims (S1, S2)', () => {
     await container?.stop();
   });
 
-  it('device refresh keeps the cashier a cashier, with the real username', async () => {
-    const login = await deviceLogin('cashier_rc@guzar.uz');
-    const res = await deviceRefresh(login.refreshToken);
-    expect(res.statusCode).toBe(200);
-    const claims = await claimsOf(res.payload);
-    expect(claims.role).toBe('cashier');
-    expect(claims.sub).toBe(cashier);
-    expect(claims.name).toBe('cashier_rc');
+  it('a cashier cannot log in to the cloud on either channel (review K3)', async () => {
+    const device = await server.inject({
+      method: 'POST',
+      url: '/api/v1/auth/login',
+      payload: { login: 'cashier_rc@guzar.uz', password },
+    });
+    expect(device.statusCode).toBe(403);
+    const admin = await server.inject({
+      method: 'POST',
+      url: '/api/v1/admin/auth/login',
+      payload: { login: 'cashier_rc@guzar.uz', password },
+    });
+    expect(admin.statusCode).toBe(403);
   });
 
-  it('a cashier refresh token on the admin channel gets 403 and its whole family is revoked', async () => {
-    const login = await deviceLogin('cashier_rc@guzar.uz');
-    const res = await adminRefresh(login.refreshToken);
-    expect(res.statusCode).toBe(403);
-    expect(String(res.headers['set-cookie'])).toContain('Max-Age=0');
-    expect(JSON.parse(res.payload)).not.toHaveProperty('accessToken');
-    // The same token can no longer be used on the device channel either.
-    expect((await deviceRefresh(login.refreshToken)).statusCode).toBe(401);
+  it('a user demoted to cashier: refresh is refused on both channels and the family revoked', async () => {
+    await setUser(cashier, 'role', 'manager');
+    const device = await deviceLogin('cashier_rc@guzar.uz');
+    const cookie = await adminLoginCookie('cashier_rc@guzar.uz');
+    await setUser(cashier, 'role', 'cashier');
+
+    // Device channel: 403, and EVERY token of the user is revoked...
+    const deviceRes = await deviceRefresh(device.refreshToken);
+    expect(deviceRes.statusCode).toBe(403);
+    expect(JSON.parse(deviceRes.payload)).not.toHaveProperty('accessToken');
+    // ...so the cabinet cookie is dead too (401) and is cleared.
+    const adminRes = await adminRefresh(cookie);
+    expect(adminRes.statusCode).toBe(401);
+    expect(String(adminRes.headers['set-cookie'])).toContain('Max-Age=0');
+    // Restoring the role does not revive the old tokens.
+    await setUser(cashier, 'role', 'manager');
+    expect((await deviceRefresh(device.refreshToken)).statusCode).toBe(401);
+    await setUser(cashier, 'role', 'cashier');
   });
 
   it('admin refresh keeps a manager a manager', async () => {
