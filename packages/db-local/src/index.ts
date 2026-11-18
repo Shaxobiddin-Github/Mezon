@@ -601,3 +601,18 @@ export {
   insertPaymentIntentSync,
   transitionPaymentIntentSync,
 } from './payment-intent-repo.js';
+export {
+  type LanIdentityRow,
+  type LanPairingCodeRow,
+  type LanTerminalRow,
+  consumeLanPairingCodeAndAddTerminalSync,
+  getLanIdentitySync,
+  getLanTerminalSync,
+  insertLanIdentityIfAbsentSync,
+  insertLanPairingCodeSync,
+  listActiveLanPairingCodesSync,
+  listLanTerminalsSync,
+  recordLanPairingFailureSync,
+  revokeLanTerminalSync,
+  touchLanTerminalSync,
+} from './lan-repo.js';

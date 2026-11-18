@@ -3377,3 +3377,78 @@ export const paymentIntents = localSchemaRegistry.defineTable(
     ),
   ],
 );
+
+/**
+ * T4.1 LAN hub identity: the self-signed TLS certificate terminals pin. The private key is stored
+ * encrypted with the hub's SafeStoragePort (`key_enc_b64`), never in clear and never committed.
+ */
+export const localLanIdentity = localSchemaRegistry.defineTable(
+  {
+    name: 'local_lan_identity',
+    tableClass: 'LOCAL',
+    tenantScope: 'organization',
+  },
+  (common) => ({
+    ...common,
+    certPem: text('cert_pem').notNull(),
+    keyEncB64: text('key_enc_b64').notNull(),
+    fingerprint256: text('fingerprint256').notNull(),
+    notAfterMs: sqliteUnixMs('not_after_ms').notNull(),
+    lanEnabled: sqliteBigint('lan_enabled')
+      .notNull()
+      .default(sql`0`),
+  }),
+  (self) => [uniqueIndex('uidx_local_lan_identity_org').on(self.organizationId)],
+);
+
+/** T4.1 one-time pairing codes (only a hash is stored; short TTL; limited attempts). */
+export const localLanPairingCodes = localSchemaRegistry.defineTable(
+  {
+    name: 'local_lan_pairing_codes',
+    tableClass: 'LOCAL',
+    tenantScope: 'organization',
+  },
+  (common) => ({
+    ...common,
+    codeEnc: text('code_enc').notNull(),
+    createdByUserId: sqliteUuidV7('created_by_user_id').notNull(),
+    expiresAtMs: sqliteUnixMs('expires_at_ms').notNull(),
+    failedAttempts: sqliteBigint('failed_attempts')
+      .notNull()
+      .default(sql`0`),
+    usedAtMs: sqliteUnixMs('used_at_ms'),
+    usedByTerminalId: sqliteUuidV7('used_by_terminal_id'),
+  }),
+  (self) => [
+    index('idx_local_lan_pairing_codes_active').on(self.organizationId, self.expiresAtMs),
+    check('chk_local_lan_pairing_codes_attempts', sql`${self.failedAttempts} >= 0`),
+  ],
+);
+
+/** T4.1 paired LAN terminals. Only the SHA-256 of the terminal key is stored. */
+export const localLanTerminals = localSchemaRegistry.defineTable(
+  {
+    name: 'local_lan_terminals',
+    tableClass: 'LOCAL',
+    tenantScope: 'organization',
+  },
+  (common) => ({
+    ...common,
+    name: text('name').notNull(),
+    keyHash: text('key_hash').notNull(),
+    status: text('status').notNull(),
+    pairedAtMs: sqliteUnixMs('paired_at_ms').notNull(),
+    pairedByUserId: sqliteUuidV7('paired_by_user_id').notNull(),
+    revokedAtMs: sqliteUnixMs('revoked_at_ms'),
+    lastSeenAtMs: sqliteUnixMs('last_seen_at_ms'),
+  }),
+  (self) => [
+    uniqueIndex('uidx_local_lan_terminals_key').on(self.keyHash),
+    check('chk_local_lan_terminals_status', sql`${self.status} IN ('active', 'revoked')`),
+    check(
+      'chk_local_lan_terminals_revoked',
+      sql`(${self.status} = 'active' AND ${self.revokedAtMs} IS NULL) OR (${self.status} = 'revoked' AND ${self.revokedAtMs} IS NOT NULL)`,
+    ),
+    check('chk_local_lan_terminals_name', sql`length(trim(${self.name})) BETWEEN 1 AND 60`),
+  ],
+);

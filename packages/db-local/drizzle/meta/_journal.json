@@ -169,6 +169,13 @@
       "when": 1795009015404,
       "tag": "0023_payment_intents",
       "breakpoints": true
+    },
+    {
+      "idx": 24,
+      "version": "6",
+      "when": 1795011684994,
+      "tag": "0024_lan_terminals",
+      "breakpoints": true
     }
   ]
 }
