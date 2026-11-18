@@ -582,3 +582,13 @@ export {
   type InsertFiscalDocInput,
   type StoredFiscalDocRecord,
 } from './fiscal-repo.js';
+export {
+  type CartMarkRow,
+  consumeCartMarksForSaleLineInTxSync,
+  findActiveMarkSync,
+  insertCartMarkSync,
+  isMarkedMxik,
+  listCartMarksSync,
+  readMarkingPrefixesSync,
+  releaseSaleMarksInTxSync,
+} from './marking-repo.js';

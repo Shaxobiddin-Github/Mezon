@@ -38,6 +38,11 @@ import {
 } from './cart-repo.js';
 import type { LocalSqliteConnection } from './connection.js';
 import {
+  consumeCartMarksForSaleLineInTxSync,
+  isMarkedMxik,
+  readMarkingPrefixesSync,
+} from './marking-repo.js';
+import {
   assertFiscalSaleAllowedInTxSync,
   insertSaleFiscalDocIfEnabledInTxSync,
 } from './fiscal-repo.js';
@@ -707,6 +712,7 @@ export function completeSaleCoreInTxSync(
   const insertedLines: (typeof saleLines.$inferSelect)[] = [];
   const rulesLines: SaleRulesCheckLine[] = [];
 
+  const markingPrefixes = readMarkingPrefixesSync(session.internalGetSqlite());
   for (const line of evaluated.lines) {
     let lineCostTiyin = 0n;
     const lineLegs: { expiryDateMs: bigint | null; qtyMilli: bigint }[] = [];
@@ -781,6 +787,26 @@ export function completeSaleCoreInTxSync(
       schemaVersion: 1,
     });
     insertedLines.push(lineWrite.row);
+    // T3.7: a marked product carries exactly one marking code per unit; the codes move from the
+    // cart to the sale in THIS transaction (any mismatch aborts the whole receipt).
+    if (
+      line.lineKind === 'catalog' &&
+      line.productId !== null &&
+      isMarkedMxik(line.mxikSnapshot, markingPrefixes)
+    ) {
+      consumeCartMarksForSaleLineInTxSync(session.internalGetSqlite(), {
+        organizationId: input.organizationId,
+        storeId: input.storeId,
+        cartId: input.sourceCartId,
+        cartLineId: line.id,
+        saleId,
+        saleLineId: lineWrite.entityId,
+        productId: line.productId,
+        qtyMilli: quantityToMilli(line.qty),
+        nowMs: input.nowMs,
+        nextId: () => session.nextId(),
+      });
+    }
     rulesLines.push({
       lineId: lineWrite.entityId,
       lineKind: line.lineKind,
