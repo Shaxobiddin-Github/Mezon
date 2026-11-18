@@ -1,7 +1,16 @@
-# P3 — reja: T4.1 LAN hub (pinned TLS), T4.2 ko'p kassa, T4.3 terminal printeri va yashik, T2.8 yakuniy integratsion test
+# Hisobot: P3 — T4.1 LAN hub (pinned TLS), T4.2 ko'p kassa, T4.3 terminal printeri va yashik, T2.8 yakuniy integratsion test
 
 Branch: `ishchi2/P3-lan`. U P2 (PR #32) ustidan ochilgan.
-Holat: **REJA**. Tasdiq kutmasdan kodga o'tyapman. Tartib: T4.1 → T4.2 → T4.3 → T2.8.
+Holat: **HISOBOT**. Tekshiruv kutilyapti. O'zim merge qilmayman.
+
+## Qisqa xulosa
+
+| Vazifa | Natija | Isbot |
+|---|---|---|
+| T4.1 LAN hub | tayyor | haqiqiy HTTPS + pin. Juftlanmagan, soxta yoki bekor qilingan terminal → 401 (route'ga yetmaydi). MITM sertifikati so'rovni umuman olmaydi. Kod bir martalik, muddatli, 5 xatoda yonadi. L1–L10 o'ldi |
+| T4.2 ko'p kassa | **qisman** | 3 terminal 30 dona uchun poyga: aniq 30 chek, zaxira 0, chek raqamlari 1..30 bo'shliqsiz; savdo kassaga bog'langan. Har kassaning o'z smenasi va yashigi: **[ishchi2-savol]** (pastda) |
+| T4.3 printer | tayyor | har kassa o'z printeri va yashigi; printersiz kassa begona printerga chiqarmaydi; P1–P4, M1 o'ldi |
+| T2.8 yakuniy test | tayyor | hub SQLite + bulut PostgreSQL (RLS app roli), 10 seed, 10/10 (3 marta ketma-ket: 30/30). Oxirida qoldiq, qarz, tushum va qaytarishlar ikki tomonda teng. E1–E3 o'ldi, nazorat mutatsiyasi tirik qoldi |
 
 ## T4.1 — LAN hub, juftlangan terminallar, pinned TLS
 
@@ -102,16 +111,40 @@ Javob B bo'lsa, alohida commit'lar bilan shu paketda qilaman.
 - P4 — yashik kassani bilmaydi;
 - M1 — savat kassaga bog'lanmaydi.
 
-## T2.8 — yakuniy integratsion test
+## T2.8 — yakuniy integratsion test (bajarildi)
 
-Ikki baza: hub SQLite va bulut PostgreSQL. Ssenariy:
-- oflayn savdo;
-- ikki tomon sinxron;
-- bekor qilish va qaytarish;
-- uzilish;
-- soat farqi.
+**Fayl:** `apps/hub/src/hub-cloud-e2e.integration.test.ts` (`pg-cloud` loyihasi).
 
-**Mezon:** oxirida ikki tomonda qoldiq, qarz va tushum teng. Test 10 marta barqaror (seed bilan).
+**Ikki baza.** Haqiqiy hub (`createHubServer`, SQLite) va haqiqiy bulut (testcontainers PostgreSQL, `mezon_app` roli bilan RLS). Push va pull `CloudSyncPushStore` / `CloudSyncPullStore` orqali, ya'ni production kodi.
+
+**Har seed ssenariysi:**
+1. Hub `/setup` → katalog, kirim, mijoz (kredit limiti), smena → sinxron.
+2. Onlayn naqd va qarzga savdolar → sinxron.
+3. **Bulut uzildi (503):**
+   - savdo davom etadi;
+   - push muvaffaqiyatsiz, hech narsa yo'qolmaydi;
+   - bekor qilish (void) va qisman qaytarish;
+   - mijoz qarzining yarmini to'laydi.
+4. Bulut qaytdi → sinxron.
+5. **Kabinetdan narx o'zgarishi:** `CloudEventWriter` (P1) → hub pull qiladi. Hub soati bulutdan **10 daqiqa orqada** bo'lsa ham kabinet o'zgarishi yutadi (HLC "receive"). Keyingi savdo yangi narxda.
+6. **Tenglik:**
+   - outbox bo'sh, `cloud_sync_parked` bo'sh;
+   - mahsulot bo'yicha `SUM(stock_moves.qty_delta)`;
+   - mijoz bo'yicha `SUM(customer_ledger.amount_delta)`;
+   - bekor qilinmagan savdolar tushumi va qaytarishlar summasi;
+   - ikki tomonda teng. Hub proyeksiyalari (`local_stock_balances`, `local_customer_balances`) ham shu yig'indilarga teng.
+
+**Barqarorlik.** 10 seed (`it.each`), 10/10. Uch marta ketma-ket yurgizildi: 30/30.
+
+**Mutatsiyalar** (outbox'dan bitta turdagi hodisa jim tashlab yuborilsa):
+
+| Mutatsiya | Natija |
+|---|---|
+| E1 qaytarish | o'ldi |
+| E2 void | o'ldi |
+| E3 qarz to'lovi | o'ldi |
+| Nazorat (mavjud bo'lmagan entity) | tirik qoldi, ya'ni test soxta yiqilmaydi |
+| Test o'zida oxirgi sinxronsiz | yiqildi |
 
 ---
 
