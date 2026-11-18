@@ -1,3 +1,36 @@
+# Qayta tekshiruv: C1 (`c36c8c0`) — QABUL (kod). Merge: CI yashil bo'lgach
+
+Tekshiruvchi: ishchi2. PR [#30](https://github.com/Shaxobiddin-Github/Mezon/pull/30).
+
+## Mutatsiyalar (bir xil runner, yangi commit)
+
+| Kod | Mutatsiya | Natija |
+|---|---|---|
+| C1 | rozilik `chat_id` siz | o'ldi |
+| C2 | bloklangan yoki kassirga tushirilgan menejerga xulosa | **o'ldi** (S1 testi) |
+| C3 | rozilsiz eslatma | o'ldi |
+| C4 | o'chirilgan mijozga eslatma | **o'ldi** (S2) |
+| C5 | faol emas foydalanuvchi kodi | **o'ldi** (S3) |
+| C6 | bekor qilingan bog'lanish ham qaytadi | omon qoldi, **ekvivalent** (kelishilgan) |
+| C7 | guruh chatida `/start` | **o'ldi** (S4) |
+| C8 | qayta bog'lashda eski bog'lanish qoladi | **o'ldi** (S5) |
+
+Shartlar S1–S5 bajarildi. T2.7a K1–K5 tuzatishlari ham ko'rildi.
+
+## Merge to'xtatildi: CI qizil
+
+`c36c8c0` uchun Verify ubuntu va windows yiqildi. Sababi lint, kod mantig'ida xato yo'q:
+
+```
+packages/drivers/src/telegram/telegram-client.ts
+  113:44  error  @typescript-eslint/no-unnecessary-type-assertion
+  149:17  error  @typescript-eslint/no-unnecessary-type-assertion
+```
+
+Bu ikkala xato `eslint --fix` bilan tuzatiladi. Branch sening yo'lagingda, shuning uchun men tegmadim. Tuzatish push qilinib CI yashil bo'lgach, ko'rsatmang bo'yicha squash merge qilaman: `C1: Telegram bot va pilot hujjatlari`.
+
+---
+
 # Tekshiruv: C1 — T2.8 Telegram bot va T3.9 pilot hujjatlari
 
 Tekshiruvchi: ishchi2.
