@@ -3216,3 +3216,36 @@ export const fiscalDocs = localSchemaRegistry.defineTable(
     ),
   ],
 );
+
+/**
+ * T3.8 append-only audit journal (`LOCAL`, organization-scoped) with a SHA-256 hash chain:
+ * `hash = sha256(canonical(fields, prev_hash))`. UPDATE / DELETE are refused by triggers
+ * (`buildAuditLogTriggersSql`); `verifyAuditChainSync` names the first broken `seq`.
+ */
+export const localAuditLog = localSchemaRegistry.defineTable(
+  {
+    name: 'local_audit_log',
+    tableClass: 'LOCAL',
+    tenantScope: 'organization',
+  },
+  (common) => ({
+    ...common,
+    seq: sqliteBigint('seq').notNull(),
+    eventType: text('event_type').notNull(),
+    actorUserId: sqliteUuidV7('actor_user_id'),
+    entity: text('entity').notNull(),
+    entityId: text('entity_id'),
+    detailsJson: text('details_json').notNull(),
+    prevHash: text('prev_hash').notNull(),
+    hash: text('hash').notNull(),
+  }),
+  (self) => [
+    uniqueIndex('uidx_local_audit_log_org_seq').on(self.organizationId, self.seq),
+    index('idx_local_audit_log_event').on(self.organizationId, self.eventType, self.createdAtMs),
+    check('chk_local_audit_log_seq', sql`${self.seq} >= 1`),
+    check(
+      'chk_local_audit_log_hash',
+      sql`length(${self.hash}) = 64 AND length(${self.prevHash}) = 64`,
+    ),
+  ],
+);

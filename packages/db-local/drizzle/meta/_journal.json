@@ -148,6 +148,13 @@
       "when": 1794914388182,
       "tag": "0020_sync_overpaid_conflicts_bootstrap",
       "breakpoints": true
+    },
+    {
+      "idx": 21,
+      "version": "6",
+      "when": 1795007099378,
+      "tag": "0021_audit_log",
+      "breakpoints": true
     }
   ]
 }

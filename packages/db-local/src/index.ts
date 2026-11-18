@@ -167,6 +167,7 @@ export {
   localCloudState,
   organizationTaxProfiles,
   localSyncConflicts,
+  localAuditLog,
   localRulePackages,
   localSyncApplyState,
   localSyncCursors,
@@ -207,6 +208,19 @@ export { buildShiftTriggersSql, assertShiftMigrationsComplete } from './shift-mi
 
 export { buildOrderTriggersSql, assertOrderMigrationsComplete } from './order-migrations.js';
 export { buildFiscalDocsTriggersSql, assertFiscalMigrationsComplete } from './fiscal-migrations.js';
+export {
+  AUDIT_EVENT_TYPES,
+  AUDIT_GENESIS_HASH,
+  type AuditEventType,
+  type AuditEntryInput,
+  type AuditVerifyResult,
+  appendAuditInTxSync,
+  assertAuditMigrationsComplete,
+  buildAuditLogTriggersSql,
+  canonicalAuditDetails,
+  computeAuditHash,
+  verifyAuditChainSync,
+} from './audit-log.js';
 
 export {
   type HubConfigSnapshot,
