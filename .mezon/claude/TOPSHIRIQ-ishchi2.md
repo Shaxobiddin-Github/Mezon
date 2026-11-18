@@ -1,3 +1,48 @@
+# [claude-tekshiruv] P1 (PR #31): QABUL
+
+Tekshirilgan commit: `805403b` (kod). `02a0591` faqat `main` (C1) merge'i va migratsiya raqami: SQL `0006` → `0007` bilan bayt-ma-bayt bir xil (diff bilan tekshirdim).
+
+**Merge sharti:** `02a0591` da CI yashil bo'lsin. Keyin sen merge qilasan. Tartib: P1 → C2. C2 o'z bulut migratsiyasini `0008` qilib qayta yaratadi. `0007` haqidagi QARORing to'g'ri: drizzle raqamni bo'shliqsiz beradi.
+
+## Toza muhitda nima qildim
+
+| Tekshiruv | Natija |
+|---|---|
+| Yangi worktree, `pnpm install --frozen-lockfile`, to'liq build | yashil |
+| Keshsiz `pnpm lint`, `prettier --check` | yashil |
+| `vitest run apps/hub apps/cloud packages`, `MEZON_REQUIRE_PG_TESTS=1` (Testcontainers PG) | **120 fayl, 954 test, hammasi o'tdi** (890 s; diff testi 200 seed bilan) |
+
+## Mustaqil mutatsiyalar (seniki emas, o'zimniki)
+
+| # | Mutatsiya | Natija |
+|---|---|---|
+| R1 | `CloudEventWriter` qatordagi HLC'ni hisobga olmaydi (hub soati oldinda) | o'ldi |
+| R2 | yozuvchi store jadvallarini ham qabul qiladi | o'ldi |
+| R3 | push konflikti retry'da outbox `pending` ga qaytarilmaydi | o'ldi |
+| R4 | pull konflikti retry'da yana park bo'lsa, konflikt qayta ochilmaydi | **omon qoldi** (`sync-conflicts`, `sync-pull*`, `sync-two-hubs` testlarida) |
+| R5 | "o'rganildi" qilingan `CUSTOMER_OVERPAID` bir xil summada qayta ochiladi | o'ldi |
+| R6 | ko'p mahsulotli "birga" yo'lda stock umuman hisoblanmaydi | o'ldi (diff testi) |
+| R7 | bootstrap `hasMore` dan qat'i nazar `done` bo'ladi | o'ldi |
+
+## Kod bo'yicha xulosalar
+
+1. **S8 (kichik, merge'ni to'xtatmaydi; P2 bilan birga yopilsin).** R4 uchun test qo'sh.
+   - Ssenariy: pull konflikti → retry → hodisa endi park bo'ladi (ota-qator yo'q).
+   - Kutilgan natija: konflikt ochiq qoladi va `applied = false`.
+   - Hozir bu yo'l (`retryConflictEvent` ichidagi `if (parked)`) hech qanday test bilan himoyalanmagan, vaholanki izohda va'da qilingan.
+2. **Ma'lumot uchun (T2.7b, menga tegishli).**
+   - `CloudEventWriter` HLC'ni bitta tranzaksiyada ajratadi, push esa keyingi tranzaksiyada bo'ladi.
+   - Shu oraliqda hub o'sha qatorga yuqoriroq HLC bilan yozsa, kabinet o'zgarishi LWW bo'yicha yutqazadi, lekin natija `accepted` bo'ladi.
+   - Bu LWW semantikasiga to'g'ri keladi. Kabinetda saqlagandan keyin qatorni qayta o'qib ko'rsataman, port o'zgarmaydi.
+3. **Ma'lumot uchun.**
+   - Bulutdagi `resolve` da `userId` ni hub yuboradi: qurilma darajasidagi ishonch, faqat audit uchun. Hub proksisi uni sessiyadan oladi, body'dan emas (tekshirdim), shuning uchun yetarli.
+   - Push retry'da outbox qatori `rejected` bo'lmasa (masalan, tozalangan), konflikt `retried` deb yopiladi, lekin hech narsa qayta yuborilmaydi. Amalda `in_outbox` sharti buni deyarli istisno qiladi; hozircha qoldirsa bo'ladi.
+4. Konflikt API'sida tahrir yo'qligi, RBAC (kassir 403), tenant filtri, bootstrap'ni uzib davom ettirish va tiklashda `device_id` saqlanishi kod va testlarda tasdiqlandi.
+
+**S7 (ortiqcha to'lovli mijozga nasiya):** sening variantingni (ruxsat) qabul qilaman. Egasiga savollar ro'yxatiga qo'shdim.
+
+---
+
 # QOIDA (egasi, 17-noyabr): biri to'xtasa, ikkinchisi to'xtamaydi
 
 Egasining so'zi: "Limiti tugab qolsa, ikkalangiz ham ishni to'xtatmang. Limiti borigi o'z ishini qilaversin, to'xtab qolmasligi kerak."
