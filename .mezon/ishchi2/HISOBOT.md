@@ -52,6 +52,30 @@ Chek raqami hub bo'ylab bitta ketma-ketlik bo'lib qoladi: noyob va bo'shliqsiz. 
 
 **Mezon testi.** 3 terminal parallel savdo qiladi: zaxira to'g'ri, chek raqamlari noyob va ketma-ket. Har terminal smenasi o'z naqd pulini ko'radi.
 
+### [ishchi2-savol] T4.2: har kassaning o'z smenasi va yashigi
+
+**Topilgan holat.** Hozirgi model "bitta qurilma = bitta kassa". U hub'da ham, bulutda ham indeks bilan mustahkamlangan:
+- `uidx_shifts_one_open_per_device` — qurilmada bitta ochiq smena;
+- `uidx_shift_cashier_one_active` — smenada bitta faol kassir sessiyasi (yashik);
+- naqd pul harakati (`cash_moves`) sessiyaga bog'langan.
+
+Hub bitta qurilma. Shuning uchun 3 terminal bitta smena va bitta yashikni bo'lishadi. Turli kassirlar parallel ishlay olmaydi (`CASHIER_SESSION_MISMATCH`).
+
+**Variantlar** (hammasi sinxron jadvallarga, ya'ni bulut kontraktiga tegadi):
+
+| Variant | Mazmuni | Narxi |
+|---|---|---|
+| A | Har terminal bulutda alohida "virtual qurilma"; smena `device_id` = terminal | Katta. Bulut hub nomidan boshqa qurilma hodisalarini qabul qilishi kerak; `device_seq` va HLC |
+| **B (taklif)** | `shifts`, `shift_cashier_sessions`, `cash_moves` ga `register_id` (NULL = hub); noyoblik `(device, register)` bo'yicha | O'rtacha. Ikkala migratsiya, kontrakt, proyeksiya; eski ma'lumot NULL bilan mos |
+| C | Smena umumiy, faqat sessiya terminal bo'yicha | B ga yaqin, lekin smena yopilishi hamma terminalni birga yopadi |
+
+**QAROR (javobsiz, vaqtincha).** Javob kelguncha sinxron jadvallarga tegmayman. Hozir quyidagilar qilindi:
+- savat va savdo terminalga bog'landi (`local_carts.terminal_id`, LOCAL);
+- `GET /lan/terminals/sales` — kassa bo'yicha tushum;
+- mezon testi (3 terminal, 30 dona uchun poyga): zaxira 0, chek raqamlari 1..30 bo'shliqsiz.
+
+Javob B bo'lsa, alohida commit'lar bilan shu paketda qilaman.
+
 ## T4.3 — terminal printeri va yashik
 
 - Printer sozlamasi terminal bo'yicha; topilmasa hub sozlamasiga qaytadi.

@@ -158,6 +158,10 @@ export async function startLanListener(o: {
 }
 
 const IdParams = z.strictObject({ id: z.string() });
+const PeriodQuery = z.strictObject({
+  fromMs: z.string().regex(/^[0-9]{1,16}$/),
+  toMs: z.string().regex(/^[0-9]{1,16}$/),
+});
 
 /** Owner/manager LAN management; only from the hub machine itself, never from a LAN terminal. */
 export function registerLanRoutes(
@@ -187,6 +191,12 @@ export function registerLanRoutes(
   app.get('/lan/terminals', async (request) => {
     await authorize(request);
     return { terminals: lanService.listTerminals() };
+  });
+
+  app.get('/lan/terminals/sales', async (request) => {
+    await authorize(request);
+    const q = PeriodQuery.parse(request.query);
+    return { registers: lanService.salesByTerminal(BigInt(q.fromMs), BigInt(q.toMs)) };
   });
 
   app.post('/lan/terminals/:id/revoke', async (request) => {

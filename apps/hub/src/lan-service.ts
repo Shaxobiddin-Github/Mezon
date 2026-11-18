@@ -9,6 +9,7 @@ import {
   insertLanPairingCodeSync,
   listActiveLanPairingCodesSync,
   listLanTerminalsSync,
+  listSalesByTerminalSync,
   recordLanPairingFailureSync,
   revokeLanTerminalSync,
   touchLanTerminalSync,
@@ -226,6 +227,18 @@ export class HubLanService {
 
   listTerminals(): LanTerminalDto[] {
     return listLanTerminalsSync(this.sqlite, this.org()).map(toDto);
+  }
+
+  /** T4.2 per-register sales (non-voided) for a period. */
+  salesByTerminal(fromMs: bigint, toMs: bigint) {
+    return listSalesByTerminalSync(this.sqlite, { organizationId: this.org(), fromMs, toMs }).map(
+      (r) => ({
+        terminalId: r.terminalId,
+        terminalName: r.terminalName,
+        saleCount: r.saleCount,
+        totalFinal: r.totalFinal.toString(),
+      }),
+    );
   }
 
   revoke(id: UuidV7): LanTerminalDto {

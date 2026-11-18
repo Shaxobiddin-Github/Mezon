@@ -240,3 +240,53 @@ export function touchLanTerminalSync(sqlite: SqliteLike, id: UuidV7, nowMs: Unix
     )
     .run(nowMs, id, BigInt(nowMs) - 30_000n);
 }
+
+export interface TerminalSalesRow {
+  readonly terminalId: UuidV7 | null;
+  readonly terminalName: string | null;
+  readonly saleCount: number;
+  readonly totalFinal: bigint;
+}
+
+/**
+ * T4.2 per-register breakdown of non-voided sales in `[fromMs, toMs)`. The register is the
+ * terminal the cart was opened on (`local_carts.terminal_id`; NULL = the hub computer).
+ */
+export function listSalesByTerminalSync(
+  sqlite: SqliteLike,
+  p: { readonly organizationId: UuidV7; readonly fromMs: bigint; readonly toMs: bigint },
+): TerminalSalesRow[] {
+  return (
+    sqlite
+      .prepare(
+        `SELECT c.terminal_id AS terminal_id, t.name AS terminal_name,
+                COUNT(*) AS n, COALESCE(SUM(s.total_final), 0) AS total
+           FROM sales s
+           JOIN local_carts c ON c.completed_sale_id = s.id
+           LEFT JOIN local_lan_terminals t ON t.id = c.terminal_id
+          WHERE s.organization_id = ? AND s.voided_at_ms IS NULL
+            AND s.created_at_ms >= ? AND s.created_at_ms < ?
+          GROUP BY c.terminal_id
+          ORDER BY t.name IS NOT NULL, t.name`,
+      )
+      .all(p.organizationId, p.fromMs, p.toMs) as {
+      terminal_id: UuidV7 | null;
+      terminal_name: string | null;
+      n: bigint | number;
+      total: bigint | number;
+    }[]
+  ).map((r) => ({
+    terminalId: r.terminal_id,
+    terminalName: r.terminal_name,
+    saleCount: Number(r.n),
+    totalFinal: BigInt(r.total),
+  }));
+}
+
+/** T4.3: the register a sale was rung up on (NULL = hub computer or unknown). */
+export function getSaleTerminalIdSync(sqlite: SqliteLike, saleId: string): UuidV7 | null {
+  const r = sqlite
+    .prepare('SELECT terminal_id FROM local_carts WHERE completed_sale_id = ? LIMIT 1')
+    .get(saleId) as { terminal_id: UuidV7 | null } | undefined;
+  return r?.terminal_id ?? null;
+}

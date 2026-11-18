@@ -176,6 +176,13 @@
       "when": 1795011684994,
       "tag": "0024_lan_terminals",
       "breakpoints": true
+    },
+    {
+      "idx": 25,
+      "version": "6",
+      "when": 1795012963474,
+      "tag": "0025_cart_terminal",
+      "breakpoints": true
     }
   ]
 }

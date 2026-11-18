@@ -945,6 +945,8 @@ export const localCarts = localSchemaRegistry.defineTable(
     completedSaleId: sqliteUuidV7('completed_sale_id'),
     completedAtMs: sqliteUnixMs('completed_at_ms'),
     completionWarningsJson: text('completion_warnings_json'),
+    /** T4.2 LAN terminal (register) the cart was opened on; NULL = the hub computer itself. */
+    terminalId: sqliteUuidV7('terminal_id'),
   }),
   (self) => [
     index('idx_local_carts_store_status').on(
