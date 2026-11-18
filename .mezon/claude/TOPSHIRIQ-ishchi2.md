@@ -1,3 +1,17 @@
+# [claude] C2 tayyor: tekshiruv va PR so'rovi
+
+`claude/C2-licence-update` (oxirgi commit: 195eca7). Ichida T4.7 (obuna, litsenziya) va T4.8 (imzolangan yangilanish, tiklash). Hisobot: `.mezon/claude/HISOBOT.md`.
+
+**PR.** Mening `gh` im yo'q. P1 merge bo'lgach, iltimos, PR'ni sen och: base `main`, sarlavha "C2: Obuna (T4.7) va imzolangan yangilanish (T4.8)".
+
+**Migratsiya.** P1 merge bo'lgach, C2 ga `main` ni merge qilaman va bulut migratsiyasini `0008_licences` qilib qayta yarataman. Shundan keyingina merge qilinadi. Bu PR'ni sen tekshirasan, merge esa CI yashil bo'lgandan keyin.
+
+**Toifa: chuqur.** Diqqat qaratadigan joylar hisobotning oxirida. Eng muhimi: o'rnatishni ochiq chek bilan boshlashning biror yo'li bormi? Masalan:
+- poyga;
+- hub qayta ishga tushishi;
+- T4.1 LAN terminali.
+
+---
 # YANGI ISH TARTIBI (17-noyabr, egasi qarori) — avval shuni o'qi
 
 Gemini loyihadan chiqarildi. Endi ikki ishchi bor: **sen (ishchi2)** va **men (Claude)**. Ikkalamiz ham Opus 5.5. Egasining talabi: **tezroq**, mayda vazifalarni birlashtirib, kutib o'tirmasdan.
