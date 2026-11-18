@@ -1,3 +1,69 @@
+# Tekshiruv: C2 — T4.7 (obuna, litsenziya) va T4.8 (imzolangan yangilanish) — TUZATISH KERAK
+
+Tekshiruvchi: ishchi2. Branch: `claude/C2-licence-update` (`195eca7` / `4e0974d`). Toifa: chuqur.
+
+**Xulosa.** Imzo, manifest, downgrade va litsenziya tekshiruvi puxta. Lekin T4.8 ning asosiy mezoni ("yangilanish ochiq chekni buzmaydi") bitta poyga bilan buziladi (B1). Litsenziya chegarasida ham poyga bor (B2). Ikkalasi tuzatilgach QABUL beraman. PR'ni P1 merge bo'lgach men ochaman (so'rovingga ko'ra).
+
+## B1 — bloklovchi: zaxira paytida chek ochilsa ham o'rnatish boshlanadi
+
+`electron-worker.ts` `handleUpdatePrepare` va `update-manager.ts` `tick` da qadamlar tartibi:
+1. `readUpdateReadiness` → `openReceipts === 0`;
+2. **shundan keyin** `createBackup(...)`. Hisobotga ko'ra katta bazada daqiqalab davom etadi; kutish vaqti 10 daqiqaga ko'tarilgan;
+3. javob `{ readiness (1-qadamdagi!), backupId }`;
+4. desktop: `decideInstall` → `launchInstaller` → `performCleanShutdown` → NSIS.
+
+**Muammo.** 1-qadamdan 4-qadamgacha hub HTTP'ni **xizmat qilishda davom etadi**. Bunga lokal POS ham, T4.1 dan keyin LAN terminallar ham kiradi. Kassir zaxira davomida yangi chek ochib tovar urishi mumkin. Shunda o'rnatish ochiq chek bilan boshlanadi: o'qilgan `readiness` zaxiradan oldingi holat.
+
+"Ikki marta tekshiruv" buni yopmaydi: ikkinchi tekshiruv ham zaxiradan **oldin** o'qiladi. Darcha zaxira davomiyligiga teng.
+
+**Tuzatish taklifi** (hub tomonida, bitta joy):
+- `update-prepare` + `backupIfReady` kelganda hub **yangilash darvozasini** yopadi. Yangi savat ochish va qator qo'shish (va LAN orqali kelgan har yozuv) `503 UPDATE_IN_PROGRESS` bilan rad etiladi. O'qish va chekni yakunlash ishlayveradi.
+- Darvoza yopilgach readiness **qayta** o'qiladi. Ochiq chek bo'lsa, darvoza ochiladi va "kut" qaytariladi.
+- Zaxira olinadi. Readiness **zaxiradan keyin yana bir bor** o'qiladi va shu javob qaytariladi.
+- Darvoza `shutdown` gacha yopiq turadi. O'rnatish boshlanmasa (desktop `update-cancel` yuboradi yoki N daqiqa timeout), u ochiladi.
+
+**Test.** Zaxira Fake bilan sekinlashtirilsin. Zaxira davomida `POST /carts` + qator → 503. Darvozadan oldin ochilgan chek bo'lsa → o'rnatish yo'q. `cancel` yoki timeout'dan keyin savdo yana ishlaydi.
+
+## B2 — tuzatish kerak: tarif chegarasi poygada oshib ketadi
+
+`CloudLicenceService.assertCanAdd` hisobni (`getUsage`) bir tranzaksiyada o'qiydi. `createStore` / `pairDevice` esa **boshqa** tranzaksiyada yozadi.
+
+**Ssenariy.** Start tarifi, 1 kassa band. Ikkita `POST /devices/pair` parallel kelsa, ikkalasi ham "1 < 2" ko'radi va 3 ta kassa bo'ladi. Do'konlar uchun ham xuddi shunday.
+
+**Tuzatish.** Tekshiruv va insert bitta tranzaksiyada bo'lsin. Avval tashkilot bo'yicha `pg_advisory_xact_lock(hashtext('mezon.growth.' || org))` (yoki `cloud_organizations` qatoriga `FOR UPDATE`) olinsin, keyin hisob va insert.
+
+**Test.** Chegaradan 1 kam holatda 5 ta parallel `pair` → aniq bittasi o'tadi, qolganlari `402`.
+
+## B3 — tavsiya: o'rnatuvchi xeshi ishga tushirishdan oldin qayta tekshirilmaydi
+
+`installerMatches` ikkinchi `prepare` dan, ya'ni zaxiradan (daqiqalar) **oldin** chaqiriladi. `launchInstaller` esa faylni qayta tekshirmay ishga tushiradi. `userData/updates` ga yoza oladigan boshqa jarayon shu darchada faylni almashtirishi mumkin.
+
+**Tuzatish.** Xeshni `performCleanShutdown` dan keyin, `spawn` dan bevosita oldin tekshirish. Yoki faylni ochiq dastak bilan ushlab turib, o'sha nusxani ishga tushirish. Yengil holat ham yetadi: tekshiruvni `launchInstaller` ichiga ko'chirish.
+
+## Integratsiya eslatmalari (P2/P3 merge bo'lgach; men o'z tomonimda qilaman)
+
+- **P2 (T3.6):** to'langan, lekin chekka ishlatilmagan QR (`payment_intents.status='paid' AND consumed_by_sale_id IS NULL`) va `pending` QR ham "ochiq chek" hisoblanishi kerak. `readUpdateReadiness` ga qo'shaman.
+- **P3 (T4.1):** LAN terminallari ham "kassa". Hub juftlashda keshdagi imzolangan litsenziya bo'yicha `devices` chegarasini tekshirishi kerak, aks holda chegarani LAN orqali aylanib o'tish mumkin. Faqat o'sish to'xtaydi, savdo emas. P3 da qilaman.
+
+## Mayda
+
+- Bo'sh ochiq savat (qatorsiz) bloklamaydi: kassir birinchi tovarni endi urayotganda o'rnatish boshlanishi mumkin. B1 darvozasi buni ham yopadi.
+- 3-savolga javob: 30 s / 10 daqiqa mantiqan to'g'ri. Darvoza bilan zaxira davomiyligi xavfsizlikka ta'sir qilmaydi, faqat kutishga.
+
+## Yaxshi tomonlar (tasdiqlayman)
+
+- Manifest: imzo ichida versiya, platforma, kanal, URL, SHA-256, hajm. Eski manifest qaytarilsa → downgrade rad etiladi. `redirect: 'error'`. O'rnatuvchi URL'idagi redirect zararsiz, chunki xesh va hajm imzolangan.
+- `.part` → xesh va hajm → nom almashtirish; diskda almashtirilsa o'chiriladi (test bor).
+- `update-state.json` qayta ishga tushganda imzo bilan qayta tekshiriladi.
+- Kalit va URL yo'q bo'lsa → yangilanish o'chiq. `keygen` repoga yozmaydi.
+- Litsenziya:
+  - `verifyLicence` — tashkilot, kalit amal qilish oralig'i, imzo;
+  - DB ustunlari faqat indeks, har o'qishda qayta tekshiriladi;
+  - production'da test kaliti man etilgan.
+- Muddat tugashi savdoni to'xtatmaydi: `licence` holati savdo yo'llarida ishlatilmaydi (grep bilan tekshirdim).
+
+---
+
 # Qayta tekshiruv: C1 (`c36c8c0`) — QABUL (kod). Merge: CI yashil bo'lgach
 
 Tekshiruvchi: ishchi2. PR [#30](https://github.com/Shaxobiddin-Github/Mezon/pull/30).
