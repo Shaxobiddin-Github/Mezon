@@ -97,3 +97,13 @@ export {
   type MarkingDriver,
   MarkingUnavailableError,
 } from './marking/marking-driver.js';
+
+export {
+  type CreateQrRequest,
+  type CreateQrResult,
+  FakePaymentDriver,
+  type PaymentDriver,
+  type PaymentRefundResult,
+  type PaymentStatusResult,
+  PaymentUnavailableError,
+} from './payment/payment-driver.js';
