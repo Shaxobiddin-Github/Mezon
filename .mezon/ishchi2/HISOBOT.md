@@ -1,3 +1,78 @@
+# P3 — reja: T4.1 LAN hub (pinned TLS), T4.2 ko'p kassa, T4.3 terminal printeri va yashik, T2.8 yakuniy integratsion test
+
+Branch: `ishchi2/P3-lan`. U P2 (PR #32) ustidan ochilgan.
+Holat: **REJA**. Tasdiq kutmasdan kodga o'tyapman. Tartib: T4.1 → T4.2 → T4.3 → T2.8.
+
+## T4.1 — LAN hub, juftlangan terminallar, pinned TLS
+
+**Hozir.** Hub faqat `127.0.0.1` da HTTP tinglaydi. Bu o'zgarmaydi: lokal POS avvalgidek ishlaydi.
+
+**Yangi LAN tinglovchisi.** Ikkinchi, ixtiyoriy tinglovchi:
+- faqat HTTPS, o'z-o'zidan imzolangan ECDSA P-256 sertifikat;
+- sertifikat birinchi yoqilganda hub'da yaratiladi;
+- yopiq kalit `SafeStoragePort` bilan shifrlanib saqlanadi, repo'ga hech narsa tushmaydi.
+
+DER/X.509 yangi kutubxonasiz, kichik DER yozuvchi bilan yasaladi. Natija Node `X509Certificate` va haqiqiy TLS ulanishida tekshiriladi.
+
+**Juftlash** (TOFU emas, kod bilan o'zaro isbot):
+1. Owner/manager hub ekranida bir martalik kod oladi: 10 belgi base32, 5 daqiqa, 5 ta xato urinish `[TASDIQLANSIN]`.
+2. Terminal hub sertifikatining SHA-256 barmoq izini ko'radi va kodni **yubormaydi**. Uning o'rniga `HMAC(kod, "terminal" ‖ ko'rgan_barmoq_izi ‖ nonce)` yuboradi.
+3. Hub o'z haqiqiy barmoq izi bilan tekshiradi. O'rtadagi odam (MITM) bo'lsa, barmoq izi boshqa bo'ladi va hub rad etadi.
+4. Hub `HMAC(kod, "hub" ‖ barmoq_izi ‖ nonce)` bilan javob beradi. Terminal ham hubni tekshiradi.
+5. Muvaffaqiyatda hub `terminalId` va 32 baytli maxfiy kalit beradi; hub'da faqat SHA-256 xeshi saqlanadi. Terminal barmoq izini "pin" qiladi. Keyingi ulanishlarda boshqa sertifikat bo'lsa, TLS'ni o'zi uzadi.
+
+**Har LAN so'rovi:**
+- TLS + `x-mezon-terminal: <id>.<kalit>` sarlavhasi;
+- juftlanmagan yoki bekor qilingan terminal → 401 `TERMINAL_NOT_PAIRED`, route'ga yetmaydi;
+- `/lan/pair` yagona ochiq yo'l;
+- foydalanuvchi sessiyasi (PIN/token) avvalgidek alohida talab qilinadi.
+
+**Ichki tuzilish.** LAN tinglovchisi so'rovni asosiy ilovaga `inject` orqali uzatadi. Unga ichki, jarayon-maxfiy sarlavha bilan `terminalId` qo'shiladi. Tashqaridan kelgan shu sarlavha olib tashlanadi.
+
+**API (owner/manager, `lan:manage`):**
+- `POST /lan/pairing-codes`;
+- `GET /lan/terminals`;
+- `POST /lan/terminals/:id/revoke`;
+- `GET /lan/status` (barmoq izi).
+
+**Testlar.**
+- Haqiqiy HTTPS port 0 da: juftlangan terminal ishlaydi.
+- Sarlavhasiz, soxta kalit yoki bekor qilingan terminal → 401.
+- Boshqa sertifikat (MITM) → TLS rad etiladi; juftlashda barmoq izi mos kelmasa → rad.
+- Kod qayta ishlatilmaydi, muddati o'tadi, urinishlar tugaydi.
+- Mutatsiyalar.
+
+## T4.2 — ko'p kassa va parallel savdo
+
+**Model.** Har terminal o'z kassasi:
+- bitta ochiq smena **terminal bo'yicha** (hozir qurilma bo'yicha);
+- savat va savdoda `terminal_id`.
+
+Chek raqami hub bo'ylab bitta ketma-ketlik bo'lib qoladi: noyob va bo'shliqsiz. Sinxron qilinadigan jadvallarga ustun qo'shish bulut kontraktiga ham ta'sir qiladi. Shu sabab avval kontraktni tekshiraman va farqni hisobotda yozaman.
+
+**Mezon testi.** 3 terminal parallel savdo qiladi: zaxira to'g'ri, chek raqamlari noyob va ketma-ket. Har terminal smenasi o'z naqd pulini ko'radi.
+
+## T4.3 — terminal printeri va yashik
+
+- Printer sozlamasi terminal bo'yicha; topilmasa hub sozlamasiga qaytadi.
+- Chek, qaytarish va smena hisoboti savdo qilingan terminal printeriga chiqadi.
+- Yashik ham o'sha terminalniki.
+
+**Test.** 2 terminal, 2 Fake printer: har chek o'z printerida.
+
+## T2.8 — yakuniy integratsion test
+
+Ikki baza: hub SQLite va bulut PostgreSQL. Ssenariy:
+- oflayn savdo;
+- ikki tomon sinxron;
+- bekor qilish va qaytarish;
+- uzilish;
+- soat farqi.
+
+**Mezon:** oxirida ikki tomonda qoldiq, qarz va tushum teng. Test 10 marta barqaror (seed bilan).
+
+---
+
 # Hisobot: P2 — T3.8 audit xesh zanjiri, T3.7 markirovka (Fake), T3.6 UzQR to'lov yadrosi (Fake)
 
 Branch: `ishchi2/P2-payments`. U P1 (PR #31) ustidan ochilgan. P1 merge bo'lgach, base `main` bo'ladi va `main` shu branch'ga merge qilinadi.
