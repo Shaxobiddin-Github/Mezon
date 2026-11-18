@@ -76,16 +76,8 @@ export class FakePaymentDriver implements PaymentDriver {
     return this.byRef.get(providerRef)?.state;
   }
 
-  private guard(): void {
-    if (!this.online) throw new PaymentUnavailableError();
-  }
-
   createQr(request: CreateQrRequest): Promise<CreateQrResult> {
-    try {
-      this.guard();
-    } catch (err) {
-      return Promise.reject(err);
-    }
+    if (!this.online) return Promise.reject(new PaymentUnavailableError());
     let ref = this.refByIntent.get(request.intentId);
     if (ref === undefined) {
       this.seq += 1;
@@ -100,11 +92,7 @@ export class FakePaymentDriver implements PaymentDriver {
   }
 
   status(providerRef: string): Promise<PaymentStatusResult> {
-    try {
-      this.guard();
-    } catch (err) {
-      return Promise.reject(err);
-    }
+    if (!this.online) return Promise.reject(new PaymentUnavailableError());
     const p = this.byRef.get(providerRef);
     if (!p) return Promise.resolve({ state: 'failed', reason: 'unknown reference' });
     if (p.state === 'paid' || p.state === 'refunded') {
@@ -115,11 +103,7 @@ export class FakePaymentDriver implements PaymentDriver {
   }
 
   refund(providerRef: string, amountTiyin: bigint): Promise<PaymentRefundResult> {
-    try {
-      this.guard();
-    } catch (err) {
-      return Promise.reject(err);
-    }
+    if (!this.online) return Promise.reject(new PaymentUnavailableError());
     const p = this.byRef.get(providerRef);
     if (!p || p.state !== 'paid' || p.amountTiyin !== amountTiyin) {
       return Promise.resolve({ state: 'failed', reason: 'not refundable' });
