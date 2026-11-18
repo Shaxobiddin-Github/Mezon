@@ -1490,6 +1490,11 @@ export class SqliteCartStore {
       if (deleted.changes === 0) {
         throw new DomainError('CART_LINE_NOT_FOUND', `Cart line "${lineId}" was not found`);
       }
+      // T3.7: the line's marking codes go with it (they are free for another cart again).
+      session
+        .internalGetSqlite()
+        .prepare('DELETE FROM local_cart_marks WHERE cart_id = ? AND cart_line_id = ?')
+        .run(cartRow.id, validLineId);
 
       session.db
         .update(localCarts)

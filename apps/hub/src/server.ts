@@ -48,6 +48,8 @@ import {
 import {
   CryptoRandomSource,
   FakeFiscalDriver,
+  FakeMarkingDriver,
+  type MarkingDriver,
   type FiscalDriver,
   SystemClock,
   type DiscoveredWindowsPrinter,
@@ -86,6 +88,8 @@ import { HubSyncPullService } from './sync-pull-service.js';
 import { HubSyncPullWorker } from './sync-pull-worker.js';
 import { registerFiscalRoutes } from './fiscal-routes.js';
 import { registerAuditRoutes } from './audit-routes.js';
+import { registerMarkingRoutes } from './marking-routes.js';
+import { HubMarkingService } from './marking-service.js';
 import { registerSyncConflictRoutes } from './sync-conflicts-routes.js';
 import { HubSyncConflictService } from './sync-conflicts-service.js';
 import { HubCloudParkedService } from './sync-cloud-parked.js';
@@ -130,6 +134,8 @@ export interface CreateHubServerOptions {
    * driver whose ledger lives next to the database so it survives restarts.
    */
   readonly fiscalDriver?: FiscalDriver;
+  /** T3.7 marking operator port; default: the Fake (no real operator until T3.0). */
+  readonly markingDriver?: MarkingDriver;
   /** TEST ONLY: fiscal worker timing / seams. */
   readonly fiscalWorkerOptions?: Pick<
     HubFiscalWorkerOptions,
@@ -582,6 +588,24 @@ export async function createHubServer(options: CreateHubServerOptions): Promise<
     );
     registerRulesRoutes(app, authService, rulesService, cartService, () => BigInt(clock.now()));
     registerFiscalRoutes(app, authService, fiscalService);
+    registerMarkingRoutes(
+      app,
+      authService,
+      new HubMarkingService({
+        connection,
+        cartStore,
+        catalogStore,
+        driver: options.markingDriver ?? new FakeMarkingDriver(),
+        getContext: () => {
+          const ctx = store.getActiveRuntimeContext();
+          return ctx
+            ? { organizationId: ctx.config.organizationId, storeId: ctx.config.storeId }
+            : null;
+        },
+        nowMs: () => clock.now(),
+        nextId: () => idGen.nextId(),
+      }),
+    );
     registerAuditRoutes(
       app,
       authService,

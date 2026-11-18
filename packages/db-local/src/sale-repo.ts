@@ -817,6 +817,14 @@ export function completeSaleCoreInTxSync(
     });
   }
 
+  // T3.7: codes left in the cart (of a line no longer in it) are released with the cart.
+  if (input.sourceCartId !== null) {
+    session
+      .internalGetSqlite()
+      .prepare('DELETE FROM local_cart_marks WHERE cart_id = ?')
+      .run(input.sourceCartId);
+  }
+
   // T3.2 FINAL legal rules check (single choke point for cart complete AND order deliver).
   // Runs after FIFO legs are known (expiry) and before payments/cash moves; any block aborts the
   // whole transaction (receipt_no, stock moves, lines, outbox all roll back).

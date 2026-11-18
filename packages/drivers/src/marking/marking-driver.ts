@@ -43,7 +43,14 @@ export class FakeMarkingDriver implements MarkingDriver {
   private readonly soldKeys = new Set<string>();
   private calls = 0;
 
-  constructor(private readonly gtinMxik: Readonly<Record<string, string>> = {}) {}
+  /**
+   * @param gtinMxik known GTIN → MXIK pairs (a GTIN listed with another MXIK is a mismatch)
+   * @param strict unknown GTINs are `unknown_code` when true; accepted when false (default Fake)
+   */
+  constructor(
+    private readonly gtinMxik: Readonly<Record<string, string>> = {},
+    private readonly strict = false,
+  ) {}
 
   setOnline(online: boolean): void {
     this.online = online;
@@ -61,9 +68,11 @@ export class FakeMarkingDriver implements MarkingDriver {
     this.calls += 1;
     if (!this.online) return Promise.reject(new MarkingUnavailableError());
     const expected = this.gtinMxik[request.gtin];
-    if (expected === undefined) return Promise.resolve({ status: 'unknown_code' });
     if (this.soldKeys.has(`${request.gtin}:${request.serial}`)) {
       return Promise.resolve({ status: 'already_sold' });
+    }
+    if (expected === undefined) {
+      return Promise.resolve(this.strict ? { status: 'unknown_code' } : { status: 'ok' });
     }
     if (request.mxik !== null && request.mxik !== expected) {
       return Promise.resolve({ status: 'mismatch', expectedMxik: expected });
