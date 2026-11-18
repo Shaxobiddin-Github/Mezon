@@ -1,7 +1,7 @@
 {
   "version": "6",
   "dialect": "sqlite",
-  "id": "fc95362e-bb7f-4a3c-abdd-d6674b3119ff",
+  "id": "4de66006-9a72-426c-9665-6f2837dfc400",
   "prevId": "44a7023c-d4b7-46aa-80be-17039677acc0",
   "tables": {
     "batches": {
@@ -8035,11 +8035,10 @@
           "columns": ["organization_id", "provider_ref"],
           "isUnique": true
         },
-        "uidx_payment_intents_consumed": {
-          "name": "uidx_payment_intents_consumed",
+        "idx_payment_intents_consumed": {
+          "name": "idx_payment_intents_consumed",
           "columns": ["consumed_by_sale_id"],
-          "isUnique": true,
-          "where": "\"payment_intents\".\"consumed_by_sale_id\" IS NOT NULL"
+          "isUnique": false
         },
         "idx_payment_intents_cart": {
           "name": "idx_payment_intents_cart",

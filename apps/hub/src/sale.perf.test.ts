@@ -13,6 +13,38 @@ import { FixedClock, SeededRandomSource } from '@mezon/test-utils';
 import { afterEach, describe, expect, it } from 'vitest';
 import { createHubServer } from './index.js';
 
+/**
+ * T3.6: an UzQR payment closes a receipt only through a PAID payment intent. Tests that pay by
+ * UzQR first record the confirmed QR payment (as the provider would), with the same reference.
+ */
+function seedPaidUzqrIntent(
+  sqlite: { prepare: (sql: string) => { get: () => unknown; run: (...a: unknown[]) => unknown } },
+  providerRef: string,
+  amountTiyin: bigint,
+): void {
+  const c = sqlite
+    .prepare('SELECT organization_id AS o, store_id AS s FROM local_hub_config LIMIT 1')
+    .get() as {
+    o: string;
+    s: string;
+  };
+  seededQrIntents += 1;
+  sqlite
+    .prepare(
+      `INSERT INTO payment_intents (id, organization_id, store_id, created_at_ms, updated_at_ms, method, kind,
+         amount, status, provider_ref, expires_at_ms, paid_at_ms)
+       VALUES (?, ?, ?, 0, 0, 'uzqr', 'dynamic', ?, 'paid', ?, 0, 0)`,
+    )
+    .run(
+      `01998800-0000-7000-8000-${seededQrIntents.toString(16).padStart(12, '0')}`,
+      c.o,
+      c.s,
+      amountTiyin,
+      providerRef,
+    );
+}
+let seededQrIntents = 0;
+
 const tempDirs: string[] = [];
 const TEST_PORT = 47846;
 
@@ -259,6 +291,7 @@ describe('@mezon/hub [PERF] - T1.4 & T1.5 HTTP E2E benchmarks', () => {
         const pCard = (totalBig / 3n).toString();
         const pUzqr = (totalBig / 3n).toString();
         const cashNeed = totalBig - BigInt(pCard) - BigInt(pUzqr);
+        seedPaidUzqrIntent(hub.connection.sqlite, `HTTP-QR-${run}`, BigInt(pUzqr));
 
         const t0 = performance.now();
         const completeRes = await hub.app.inject({
@@ -270,7 +303,7 @@ describe('@mezon/hub [PERF] - T1.4 & T1.5 HTTP E2E benchmarks', () => {
             expectedTotal: runTotal,
             payments: [
               { method: 'card', amount: pCard, providerRef: 'HTTP-CARD' },
-              { method: 'uzqr', amount: pUzqr, providerRef: 'HTTP-QR' },
+              { method: 'uzqr', amount: pUzqr, providerRef: `HTTP-QR-${run}` },
               { method: 'cash', tenderedAmount: (cashNeed + 25_000n).toString() },
             ],
           },

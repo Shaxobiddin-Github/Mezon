@@ -3327,7 +3327,7 @@ export const localSaleMarks = localSchemaRegistry.defineTable(
 /**
  * T3.6 QR payment intents (`LOCAL`). One intent = one QR the customer pays; a sale may close with
  * an `uzqr` payment only through a `paid` intent of exactly that amount, consumed ONCE
- * (`consumed_by_sale_id`, partial UNIQUE). Status moves forward only:
+ * (`consumed_by_sale_id`, set once by an atomic UPDATE). Status moves forward only:
  * pending → paid | expired | cancelled | failed; expired → paid (late, `paid_late = 1`);
  * paid (not consumed) → refunded.
  */
@@ -3356,9 +3356,9 @@ export const paymentIntents = localSchemaRegistry.defineTable(
   }),
   (self) => [
     uniqueIndex('uidx_payment_intents_provider_ref').on(self.organizationId, self.providerRef),
-    uniqueIndex('uidx_payment_intents_consumed')
-      .on(self.consumedBySaleId)
-      .where(sql`${self.consumedBySaleId} IS NOT NULL`),
+    // A sale may consume several intents (two QR payments); each intent is consumed at most once by
+    // the atomic UPDATE ... WHERE consumed_by_sale_id IS NULL (not by a unique index).
+    index('idx_payment_intents_consumed').on(self.consumedBySaleId),
     index('idx_payment_intents_cart').on(self.cartId),
     check('chk_payment_intents_method', sql`${self.method} IN ('uzqr')`),
     check('chk_payment_intents_kind', sql`${self.kind} IN ('dynamic', 'static')`),

@@ -147,8 +147,9 @@ export function transitionPaymentIntentSync(
 
 /**
  * Inside `completeSale`: an `uzqr` payment closes the receipt only with a `paid` intent of exactly
- * that amount, consumed by THIS sale (one atomic UPDATE; the partial UNIQUE index makes a second
- * sale with the same intent impossible even under a race).
+ * that amount, consumed by THIS sale. One atomic UPDATE guarded by `consumed_by_sale_id IS NULL`:
+ * under a race only one sale changes the row, the other gets 0 changes and is refused. A sale may
+ * consume several intents (two QR payments in one receipt).
  */
 export function consumeUzqrPaymentInTxSync(
   sqlite: SqliteLike,

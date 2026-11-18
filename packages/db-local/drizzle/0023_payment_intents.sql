@@ -34,5 +34,5 @@ CREATE TABLE `payment_intents` (
 );
 --> statement-breakpoint
 CREATE UNIQUE INDEX `uidx_payment_intents_provider_ref` ON `payment_intents` (`organization_id`,`provider_ref`);--> statement-breakpoint
-CREATE UNIQUE INDEX `uidx_payment_intents_consumed` ON `payment_intents` (`consumed_by_sale_id`) WHERE "payment_intents"."consumed_by_sale_id" IS NOT NULL;--> statement-breakpoint
+CREATE INDEX `idx_payment_intents_consumed` ON `payment_intents` (`consumed_by_sale_id`);--> statement-breakpoint
 CREATE INDEX `idx_payment_intents_cart` ON `payment_intents` (`cart_id`);

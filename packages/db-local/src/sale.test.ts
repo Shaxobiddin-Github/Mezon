@@ -58,6 +58,38 @@ import {
   stockMoves,
 } from './index.js';
 
+/**
+ * T3.6: an UzQR payment closes a receipt only through a PAID payment intent. Tests that pay by
+ * UzQR first record the confirmed QR payment (as the provider would), with the same reference.
+ */
+let seededQrIntents = 0;
+function seedPaidUzqrIntent(
+  sqlite: { prepare: (sql: string) => { get: () => unknown; run: (...a: unknown[]) => unknown } },
+  providerRef: string,
+  amountTiyin: bigint,
+): void {
+  const c = sqlite
+    .prepare('SELECT organization_id AS o, store_id AS s FROM local_hub_config LIMIT 1')
+    .get() as {
+    o: string;
+    s: string;
+  };
+  seededQrIntents += 1;
+  sqlite
+    .prepare(
+      `INSERT INTO payment_intents (id, organization_id, store_id, created_at_ms, updated_at_ms, method, kind,
+         amount, status, provider_ref, expires_at_ms, paid_at_ms)
+       VALUES (?, ?, ?, 0, 0, 'uzqr', 'dynamic', ?, 'paid', ?, 0, 0)`,
+    )
+    .run(
+      `01998800-0000-7000-8000-${seededQrIntents.toString(16).padStart(12, '0')}`,
+      c.o,
+      c.s,
+      amountTiyin,
+      providerRef,
+    );
+}
+
 const FAST_TEST_HASHER: PinHasher = {
   hash: (pin) => Promise.resolve(`$stub$${pin}`),
   verify: (hash, pin) => Promise.resolve(hash === `$stub$${pin}`),
@@ -1056,6 +1088,7 @@ describe('@mezon/db-local - T1.4 completeSale atomic TX, receipts, stock policy,
       });
       expect(detail1.totalFinal).toBe(moneyFromTiyin(200_000n));
 
+      seedPaidUzqrIntent(env.connection.sqlite, 'UZQR-1', 15_000n);
       const reqMixedId = parseUuidV7('01950000-0000-7000-8000-888888888801');
       const mixedPayments: SalePaymentInput[] = [
         { method: 'card', amount: moneyFromTiyin(30_000n), providerRef: '  CARD-RRN-1 ' },
@@ -1878,9 +1911,16 @@ describe('@mezon/db-local - T1.4 completeSale atomic TX, receipts, stock policy,
                     ? budget - nonCashUsed
                     : (budget * BigInt(s.weight)) / sumW;
                 if (part > 0n) {
+                  const method = nonCashPool[s.methodIdx];
+                  // T3.6: an UzQR part is paid through a confirmed QR of exactly that amount.
+                  const providerRef = method === 'uzqr' ? `FUZZ-QR-${reqSeq}-${i}` : undefined;
+                  if (providerRef !== undefined) {
+                    seedPaidUzqrIntent(env.connection.sqlite, providerRef, part);
+                  }
                   payInputs.push({
-                    method: nonCashPool[s.methodIdx],
+                    method,
                     amount: moneyFromTiyin(part),
+                    ...(providerRef !== undefined ? { providerRef } : {}),
                   });
                   nonCashUsed += part;
                 }
