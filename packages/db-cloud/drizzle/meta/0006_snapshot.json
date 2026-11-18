@@ -1,5 +1,5 @@
 {
-  "id": "6b513a42-b424-40c3-b3a4-b73e30bb5f7a",
+  "id": "7d4c145a-0b21-4a6e-a7cc-0ed99b7c629e",
   "prevId": "3d89a7ab-bd51-4d9d-b1af-6015a7dc56e4",
   "version": "7",
   "dialect": "postgresql",
@@ -379,97 +379,6 @@
         }
       },
       "checkConstraints": {},
-      "isRLSEnabled": true
-    },
-    "public.cloud_hlc_state": {
-      "name": "cloud_hlc_state",
-      "schema": "",
-      "columns": {
-        "id": {
-          "name": "id",
-          "type": "uuid",
-          "primaryKey": true,
-          "notNull": true
-        },
-        "organization_id": {
-          "name": "organization_id",
-          "type": "uuid",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "created_at_ms": {
-          "name": "created_at_ms",
-          "type": "bigint",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "updated_at_ms": {
-          "name": "updated_at_ms",
-          "type": "bigint",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "device_id": {
-          "name": "device_id",
-          "type": "uuid",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "physical_ms": {
-          "name": "physical_ms",
-          "type": "bigint",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "logical": {
-          "name": "logical",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "last_device_seq": {
-          "name": "last_device_seq",
-          "type": "bigint",
-          "primaryKey": false,
-          "notNull": true
-        }
-      },
-      "indexes": {
-        "uidx_cloud_hlc_state_org": {
-          "name": "uidx_cloud_hlc_state_org",
-          "columns": [
-            {
-              "expression": "organization_id",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            }
-          ],
-          "isUnique": true,
-          "concurrently": false,
-          "method": "btree",
-          "with": {}
-        }
-      },
-      "foreignKeys": {},
-      "compositePrimaryKeys": {},
-      "uniqueConstraints": {},
-      "policies": {
-        "cloud_hlc_state_tenant_isolation": {
-          "name": "cloud_hlc_state_tenant_isolation",
-          "as": "PERMISSIVE",
-          "for": "ALL",
-          "to": ["mezon_app"],
-          "using": "\"organization_id\" = mezon_current_organization_id()",
-          "withCheck": "\"organization_id\" = mezon_current_organization_id()"
-        }
-      },
-      "checkConstraints": {
-        "chk_cloud_hlc_state_logical": {
-          "name": "chk_cloud_hlc_state_logical",
-          "value": "\"cloud_hlc_state\".\"logical\" >= 0 AND \"cloud_hlc_state\".\"logical\" <= 65535"
-        }
-      },
       "isRLSEnabled": true
     },
     "public.cloud_login_identities": {
@@ -1199,30 +1108,6 @@
           "primaryKey": false,
           "notNull": true,
           "default": "'parked'"
-        },
-        "resolution": {
-          "name": "resolution",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "resolved_by_user_id": {
-          "name": "resolved_by_user_id",
-          "type": "uuid",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "resolved_at_ms": {
-          "name": "resolved_at_ms",
-          "type": "bigint",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "resolution_note": {
-          "name": "resolution_note",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false
         }
       },
       "indexes": {
@@ -1288,10 +1173,403 @@
           "withCheck": "\"organization_id\" = mezon_current_organization_id()"
         }
       },
+      "checkConstraints": {},
+      "isRLSEnabled": true
+    },
+    "public.cloud_telegram_deliveries": {
+      "name": "cloud_telegram_deliveries",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "uuid",
+          "primaryKey": true,
+          "notNull": true
+        },
+        "organization_id": {
+          "name": "organization_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "created_at_ms": {
+          "name": "created_at_ms",
+          "type": "bigint",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "updated_at_ms": {
+          "name": "updated_at_ms",
+          "type": "bigint",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "link_id": {
+          "name": "link_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "kind": {
+          "name": "kind",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "period_key": {
+          "name": "period_key",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "status": {
+          "name": "status",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "last_error": {
+          "name": "last_error",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        }
+      },
+      "indexes": {
+        "uidx_cloud_telegram_deliveries_once": {
+          "name": "uidx_cloud_telegram_deliveries_once",
+          "columns": [
+            {
+              "expression": "organization_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "link_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "kind",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "period_key",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": true,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        }
+      },
+      "foreignKeys": {},
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "policies": {
+        "cloud_telegram_deliveries_tenant_isolation": {
+          "name": "cloud_telegram_deliveries_tenant_isolation",
+          "as": "PERMISSIVE",
+          "for": "ALL",
+          "to": ["mezon_app"],
+          "using": "\"organization_id\" = mezon_current_organization_id()",
+          "withCheck": "\"organization_id\" = mezon_current_organization_id()"
+        }
+      },
       "checkConstraints": {
-        "chk_cloud_sync_parked_resolution": {
-          "name": "chk_cloud_sync_parked_resolution",
-          "value": "\"cloud_sync_parked\".\"resolution\" IS NULL OR \"cloud_sync_parked\".\"resolution\" IN ('retried', 'acknowledged')"
+        "chk_cloud_telegram_deliveries_kind": {
+          "name": "chk_cloud_telegram_deliveries_kind",
+          "value": "\"cloud_telegram_deliveries\".\"kind\" IN ('digest', 'debt_reminder')"
+        },
+        "chk_cloud_telegram_deliveries_status": {
+          "name": "chk_cloud_telegram_deliveries_status",
+          "value": "\"cloud_telegram_deliveries\".\"status\" IN ('claimed', 'sent', 'failed')"
+        }
+      },
+      "isRLSEnabled": true
+    },
+    "public.cloud_telegram_link_codes": {
+      "name": "cloud_telegram_link_codes",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "uuid",
+          "primaryKey": true,
+          "notNull": true
+        },
+        "organization_id": {
+          "name": "organization_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "created_at_ms": {
+          "name": "created_at_ms",
+          "type": "bigint",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "updated_at_ms": {
+          "name": "updated_at_ms",
+          "type": "bigint",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "kind": {
+          "name": "kind",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "user_id": {
+          "name": "user_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "customer_id": {
+          "name": "customer_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "code_hash": {
+          "name": "code_hash",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "expires_at_ms": {
+          "name": "expires_at_ms",
+          "type": "bigint",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "used_at_ms": {
+          "name": "used_at_ms",
+          "type": "bigint",
+          "primaryKey": false,
+          "notNull": false
+        }
+      },
+      "indexes": {
+        "uidx_cloud_telegram_link_codes_hash": {
+          "name": "uidx_cloud_telegram_link_codes_hash",
+          "columns": [
+            {
+              "expression": "organization_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "code_hash",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": true,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        }
+      },
+      "foreignKeys": {},
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "policies": {
+        "cloud_telegram_link_codes_tenant_isolation": {
+          "name": "cloud_telegram_link_codes_tenant_isolation",
+          "as": "PERMISSIVE",
+          "for": "ALL",
+          "to": ["mezon_app"],
+          "using": "\"organization_id\" = mezon_current_organization_id()",
+          "withCheck": "\"organization_id\" = mezon_current_organization_id()"
+        }
+      },
+      "checkConstraints": {
+        "chk_cloud_telegram_link_codes_kind": {
+          "name": "chk_cloud_telegram_link_codes_kind",
+          "value": "\"cloud_telegram_link_codes\".\"kind\" IN ('staff', 'customer')"
+        },
+        "chk_cloud_telegram_link_codes_target": {
+          "name": "chk_cloud_telegram_link_codes_target",
+          "value": "(\"cloud_telegram_link_codes\".\"kind\" = 'staff' AND \"cloud_telegram_link_codes\".\"user_id\" IS NOT NULL AND \"cloud_telegram_link_codes\".\"customer_id\" IS NULL) OR (\"cloud_telegram_link_codes\".\"kind\" = 'customer' AND \"cloud_telegram_link_codes\".\"customer_id\" IS NOT NULL AND \"cloud_telegram_link_codes\".\"user_id\" IS NULL)"
+        }
+      },
+      "isRLSEnabled": true
+    },
+    "public.cloud_telegram_links": {
+      "name": "cloud_telegram_links",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "uuid",
+          "primaryKey": true,
+          "notNull": true
+        },
+        "organization_id": {
+          "name": "organization_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "created_at_ms": {
+          "name": "created_at_ms",
+          "type": "bigint",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "updated_at_ms": {
+          "name": "updated_at_ms",
+          "type": "bigint",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "kind": {
+          "name": "kind",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "user_id": {
+          "name": "user_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "customer_id": {
+          "name": "customer_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "chat_id": {
+          "name": "chat_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "locale": {
+          "name": "locale",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'uz-Latn'"
+        },
+        "consent_at_ms": {
+          "name": "consent_at_ms",
+          "type": "bigint",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "revoked_at_ms": {
+          "name": "revoked_at_ms",
+          "type": "bigint",
+          "primaryKey": false,
+          "notNull": false
+        }
+      },
+      "indexes": {
+        "uidx_cloud_telegram_links_staff_active": {
+          "name": "uidx_cloud_telegram_links_staff_active",
+          "columns": [
+            {
+              "expression": "organization_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "user_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": true,
+          "where": "\"cloud_telegram_links\".\"kind\" = 'staff' AND \"cloud_telegram_links\".\"revoked_at_ms\" IS NULL",
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "uidx_cloud_telegram_links_customer_active": {
+          "name": "uidx_cloud_telegram_links_customer_active",
+          "columns": [
+            {
+              "expression": "organization_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "customer_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": true,
+          "where": "\"cloud_telegram_links\".\"kind\" = 'customer' AND \"cloud_telegram_links\".\"revoked_at_ms\" IS NULL",
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "idx_cloud_telegram_links_chat": {
+          "name": "idx_cloud_telegram_links_chat",
+          "columns": [
+            {
+              "expression": "chat_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        }
+      },
+      "foreignKeys": {},
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "policies": {
+        "cloud_telegram_links_tenant_isolation": {
+          "name": "cloud_telegram_links_tenant_isolation",
+          "as": "PERMISSIVE",
+          "for": "ALL",
+          "to": ["mezon_app"],
+          "using": "\"organization_id\" = mezon_current_organization_id()",
+          "withCheck": "\"organization_id\" = mezon_current_organization_id()"
+        }
+      },
+      "checkConstraints": {
+        "chk_cloud_telegram_links_kind": {
+          "name": "chk_cloud_telegram_links_kind",
+          "value": "\"cloud_telegram_links\".\"kind\" IN ('staff', 'customer')"
+        },
+        "chk_cloud_telegram_links_target": {
+          "name": "chk_cloud_telegram_links_target",
+          "value": "(\"cloud_telegram_links\".\"kind\" = 'staff' AND \"cloud_telegram_links\".\"user_id\" IS NOT NULL AND \"cloud_telegram_links\".\"customer_id\" IS NULL) OR (\"cloud_telegram_links\".\"kind\" = 'customer' AND \"cloud_telegram_links\".\"customer_id\" IS NOT NULL AND \"cloud_telegram_links\".\"user_id\" IS NULL)"
+        },
+        "chk_cloud_telegram_links_locale": {
+          "name": "chk_cloud_telegram_links_locale",
+          "value": "\"cloud_telegram_links\".\"locale\" IN ('uz-Latn', 'uz-Cyrl', 'ru')"
+        },
+        "chk_cloud_telegram_links_chat": {
+          "name": "chk_cloud_telegram_links_chat",
+          "value": "\"cloud_telegram_links\".\"chat_id\" ~ '^-?[0-9]{1,20}$'"
         }
       },
       "isRLSEnabled": true

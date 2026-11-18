@@ -129,4 +129,18 @@ export {
   CLOUD_VIRTUAL_DEVICE_STATUS,
 } from './cloud-event-writer.js';
 
+export {
+  CloudTelegramStore,
+  TELEGRAM_LINK_CODE_TTL_MS,
+  parseTelegramLinkCode,
+  type ConsumedLinkCode,
+  type TelegramDebtTarget,
+  type TelegramDeliveryKind,
+  type TelegramLinkKind,
+  type TelegramLocale,
+  type TelegramStaffLinkStatus,
+  type TelegramStaffTarget,
+} from './telegram-store.js';
+export { loadCustomerDebts, type CloudCustomerDebt } from './customer-debt.js';
+
 export { isDockerAvailable, shouldRunPgTests } from './pg-test-helper.js';

@@ -16,3 +16,8 @@ export {
   cloudHlcState,
 } from './sync-tables.js';
 export * from './domain-tables.js';
+export {
+  cloudTelegramLinkCodes,
+  cloudTelegramLinks,
+  cloudTelegramDeliveries,
+} from './telegram-tables.js';

@@ -1,6 +1,45 @@
 import { z } from 'zod';
 import { BigIntStringSchema, UuidV7Schema } from './auth.js';
-import { DateStringSchema } from './reports.js';
+import { DailySalesReportQuerySchema, DateStringSchema } from './reports.js';
+
+/**
+ * Keyset cursor `<createdAtMs>:<uuidv7>`. Validated here so a malformed cursor is a 400, not a
+ * BigInt/uuid cast failure (500) deep in the store (ishchi2 review K1).
+ */
+export const AdminCursorSchema = z
+  .string()
+  .trim()
+  .regex(/^\d{1,16}:[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/);
+
+function isIanaTimeZone(tz: string): boolean {
+  try {
+    new Intl.DateTimeFormat('en', { timeZone: tz });
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/** IANA time zone name accepted by `Intl` (e.g. `Asia/Tashkent`). */
+export const IanaTimeZoneSchema = z
+  .string()
+  .trim()
+  .max(64)
+  .refine(isIanaTimeZone, { message: 'Unknown time zone' });
+
+/** `?storeId=&tz=` of the dashboard and low-stock endpoints. */
+export const AdminStoreScopeQuerySchema = z
+  .object({
+    storeId: UuidV7Schema.optional(),
+    tz: IanaTimeZoneSchema.optional(),
+  })
+  .strict();
+
+/** Daily report in the cabinet: the hub's query plus a store filter and a zone (review K2). */
+export const AdminDailyReportQuerySchema = DailySalesReportQuerySchema.extend({
+  storeId: UuidV7Schema.optional(),
+  tz: IanaTimeZoneSchema.optional(),
+}).strict();
 
 // Phone masking helper: '+998 90 *** ** 12'
 export function maskPhoneNumber(phone: string | null | undefined): string | null {
@@ -59,7 +98,7 @@ export const AdminReceiptsQuerySchema = z
     status: z.enum(['completed', 'voided', 'returned']).optional(),
     fromDate: DateStringSchema.optional(),
     toDate: DateStringSchema.optional(),
-    cursor: z.string().trim().optional(), // Keyset cursor: encoded 'createdAtMs:id'
+    cursor: AdminCursorSchema.optional(),
     limit: z.coerce.number().int().min(1).max(200).optional().default(50),
   })
   .strict();
@@ -151,7 +190,7 @@ export const AdminCustomersQuerySchema = z
   .object({
     search: z.string().trim().max(100).optional(),
     hasDebtOnly: z.coerce.boolean().optional(),
-    cursor: z.string().trim().optional(),
+    cursor: AdminCursorSchema.optional(),
     limit: z.coerce.number().int().min(1).max(200).optional().default(50),
   })
   .strict();
@@ -216,7 +255,7 @@ export const AdminProductsQuerySchema = z
   .object({
     search: z.string().trim().max(100).optional(),
     categoryId: UuidV7Schema.optional(),
-    cursor: z.string().trim().optional(),
+    cursor: AdminCursorSchema.optional(),
     limit: z.coerce.number().int().min(1).max(200).optional().default(50),
   })
   .strict();

@@ -30,6 +30,7 @@ const PROTECTED_WORDS = new Set([
   'Renderer',
   'Mezon',
   'Guzar',
+  'Telegram',
   'Owner',
   'Manager',
   'username',
