@@ -605,6 +605,7 @@ export async function createHubServer(options: CreateHubServerOptions): Promise<
         nowMs: () => clock.now(),
         nextId: () => idGen.nextId(),
       }),
+      cartService,
     );
     registerAuditRoutes(
       app,
