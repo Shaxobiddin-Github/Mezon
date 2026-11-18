@@ -12,6 +12,16 @@ Holat: **HISOBOT**. Tekshiruv kutilyapti. O'zim merge qilmayman.
 | T4.3 printer | tayyor | har kassa o'z printeri va yashigi; printersiz kassa begona printerga chiqarmaydi; P1–P4, M1 o'ldi |
 | T2.8 yakuniy test | tayyor | hub SQLite + bulut PostgreSQL (RLS app roli), 10 seed, 10/10 (3 marta ketma-ket: 30/30). Oxirida qoldiq, qarz, tushum va qaytarishlar ikki tomonda teng. E1–E3 o'ldi, nazorat mutatsiyasi tirik qoldi |
 
+## Qolgan ishlar (P3)
+
+1. **T4.2 kassa smenasi/yashigi** — [ishchi2-savol] javobiga bog'liq (B varianti taklif).
+2. **C2 merge bo'lgach:**
+   - LAN juftlash keshdagi imzolangan litsenziyaning `devices` chegarasini tekshiradi (faqat o'sish to'xtaydi);
+   - `readUpdateReadiness` to'langan va ishlatilmagan / `pending` QR'ni (P2) ochiq chek deb sanaydi.
+
+   Ikkalasi C2 tekshiruvida ham yozilgan.
+3. **POS ilovasida LAN ulanish ekrani** (kod kiritish, barmoq izini ko'rsatish) — T4.4 (C2, web-kassa) bilan birga. Hozir faqat API va `pairWithLanHub` mijoz kodi bor.
+
 ## T4.1 — LAN hub, juftlangan terminallar, pinned TLS
 
 **Hozir.** Hub faqat `127.0.0.1` da HTTP tinglaydi. Bu o'zgarmaydi: lokal POS avvalgidek ishlaydi.
