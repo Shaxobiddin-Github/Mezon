@@ -485,4 +485,11 @@ export const RU_MESSAGES: Readonly<Record<I18nKey, string>> = {
   'admin.licence.invoice.issued': 'не оплачен',
   'admin.licence.invoice.paid': 'оплачен',
   'admin.licence.invoice.void': 'аннулирован',
+
+  // T4.7 POS licence banner
+  'pos.licence.endsSoon': 'Тариф закончится через {days} дн. Сообщите владельцу.',
+  'pos.licence.grace':
+    'Тариф закончился: если не оплатить за {days} дн., нельзя будет добавить новую кассу. Продажи продолжаются.',
+  'pos.licence.expired': 'Срок тарифа истёк. Продажи продолжаются; сообщите владельцу.',
+  'pos.licence.invalid': 'Файл лицензии не прошёл проверку. Сообщите владельцу.',
 };

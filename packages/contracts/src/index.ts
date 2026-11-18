@@ -866,3 +866,5 @@ export {
   SetFiscalModeRequestSchema,
   SetFiscalModeResponseSchema,
 } from './fiscal.js';
+
+export { LicenceStatusResponseSchema, type LicenceStatusResponseDto } from './licence.js';

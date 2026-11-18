@@ -353,6 +353,9 @@ importers:
       '@mezon/drivers':
         specifier: workspace:*
         version: link:../../packages/drivers
+      '@mezon/licensing':
+        specifier: workspace:*
+        version: link:../../packages/licensing
       '@mezon/rules':
         specifier: workspace:*
         version: link:../../packages/rules

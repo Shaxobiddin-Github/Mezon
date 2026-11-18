@@ -27,6 +27,19 @@ module.exports = {
       },
     },
     {
+      name: 'licensing-src-imports-only-domain-and-rules',
+      comment:
+        'packages/licensing (T4.7) is pure: it imports only itself, packages/domain and packages/rules (canonical JSON); Ed25519 is injected',
+      severity: 'error',
+      from: {
+        path: '^packages/licensing/src/',
+        pathNot: '\\.test\\.ts$',
+      },
+      to: {
+        pathNot: '^(packages/licensing/src/|packages/domain/|packages/rules/)',
+      },
+    },
+    {
       name: 'rules-src-imports-only-domain',
       comment:
         'packages/rules source files can only import within packages/rules/src or from packages/domain',
@@ -157,7 +170,7 @@ module.exports = {
       },
       to: {
         pathNot:
-          '^(apps/hub/src/|packages/(domain|contracts|db-local|drivers|sync|rules)/|node_modules/(\\.pnpm/)?(fastify|pino|@node-rs/argon2|@node-rs\\+argon2|zod|exceljs)@|(node:)?(crypto|fs|path|stream)$)',
+          '^(apps/hub/src/|packages/(domain|contracts|db-local|drivers|sync|rules|licensing)/|node_modules/(\\.pnpm/)?(fastify|pino|@node-rs/argon2|@node-rs\\+argon2|zod|exceljs)@|(node:)?(crypto|fs|path|stream)$)',
       },
     },
     {

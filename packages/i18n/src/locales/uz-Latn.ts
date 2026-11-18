@@ -481,6 +481,13 @@ export const UZ_LATN_MESSAGES = {
   'admin.licence.invoice.issued': "to'lanmagan",
   'admin.licence.invoice.paid': "to'langan",
   'admin.licence.invoice.void': 'bekor qilingan',
+
+  // T4.7 POS licence banner
+  'pos.licence.endsSoon': 'Tarif {days} kundan keyin tugaydi. Egasiga ayting.',
+  'pos.licence.grace':
+    "Tarif tugadi: {days} kun ichida to'lanmasa, yangi kassa qo'shib bo'lmaydi. Savdo davom etadi.",
+  'pos.licence.expired': 'Tarif muddati tugagan. Savdo davom etadi; egasiga ayting.',
+  'pos.licence.invalid': "Litsenziya fayli tekshiruvdan o'tmadi. Egasiga ayting.",
 } as const;
 
 export type I18nKey = keyof typeof UZ_LATN_MESSAGES;

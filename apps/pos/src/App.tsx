@@ -16,6 +16,7 @@ import { SetupScreen, LoginScreen, OpenShiftScreen } from './components/AuthAndS
 import { PosWorkspaceScreen } from './components/PosWorkspaceScreen.js';
 import { CatalogScreen } from './components/CatalogScreen.js';
 import { FiscalOfflineBanner, FiscalUnsettledModal } from './components/FiscalPanels.js';
+import { LicenceBanner } from './components/LicenceBanner.js';
 import {
   ShortcutsModal,
   QuickSaleModal,
@@ -711,6 +712,7 @@ export function App() {
       </header>
 
       {screen === 'pos' && <FiscalOfflineBanner api={api} />}
+      {screen === 'pos' && <LicenceBanner api={api} />}
 
       {errorBanner && (
         <div className="pos-error-banner" role="alert" data-testid="pos-error-banner">
