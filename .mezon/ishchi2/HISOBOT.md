@@ -81,12 +81,12 @@ Tashqi tizimlar (UzQR, Asl belgisi) uchun endpoint, maydon yoki imzo o'ylab topi
 
 | Vazifa | Commit | Tekshiruv |
 |---|---|---|
-| T3.8 audit | ,  | xesh zanjiri, , amallarga ulangan, , , CLI ; mutatsiyalar A1–A8 o'ldi |
-| T3.7 markirovka |  …  | GS1 tahlilchisi,  + Fake, , ,  da kodlar = dona, void va qaytarish kodni bo'shatadi; mutatsiyalar K1–K8 o'ldi |
+| T3.8 audit | `5a00938`, `1d90a1a` | xesh zanjiri, `0021`, amallarga ulangan, `GET /audit`, `/audit/verify`, CLI `audit:verify`; mutatsiyalar A1–A8 o'ldi |
+| T3.7 markirovka | `b86a357` … `d780442` | GS1 tahlilchisi, `MarkingDriver` + Fake, `0022`, `/carts/:id/marks`, `completeSale` da kodlar = dona, void va qaytarish kodni bo'shatadi; mutatsiyalar K1–K8 o'ldi |
 
-**Qolgan:** T3.6 UzQR (, intent, kech tasdiq), keyin , PR va hisobot.
+**Qolgan:** T3.6 UzQR (`PaymentDriver`, intent, kech tasdiq), keyin `pnpm verify`, PR va hisobot.
 
-**Keyingi aniq qadam:**  porti va .
+**Keyingi aniq qadam:** `PaymentDriver` porti va `FakePaymentDriver`.
 
 ---
 
