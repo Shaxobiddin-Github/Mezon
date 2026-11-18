@@ -1,3 +1,4 @@
+import type { LocalSqliteConnection } from '@mezon/db-local';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -18,7 +19,7 @@ import { createHubServer } from './index.js';
  * UzQR first record the confirmed QR payment (as the provider would), with the same reference.
  */
 function seedPaidUzqrIntent(
-  sqlite: { prepare: (sql: string) => { get: () => unknown; run: (...a: unknown[]) => unknown } },
+  sqlite: LocalSqliteConnection['sqlite'],
   providerRef: string,
   amountTiyin: bigint,
 ): void {

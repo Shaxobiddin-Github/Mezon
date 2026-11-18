@@ -1,3 +1,4 @@
+import type { LightMyRequestResponse } from 'fastify';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -41,7 +42,7 @@ interface Env {
     method: 'POST' | 'GET',
     url: string,
     payload?: Record<string, unknown>,
-  ) => ReturnType<HubServer['app']['inject']>;
+  ) => Promise<LightMyRequestResponse>;
 }
 
 async function boot(seed: number): Promise<Env> {

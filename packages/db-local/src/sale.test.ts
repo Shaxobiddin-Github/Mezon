@@ -1,3 +1,4 @@
+import type { LocalSqliteConnection } from './connection.js';
 import { spawnSync } from 'node:child_process';
 import fs from 'node:fs';
 import os from 'node:os';
@@ -64,7 +65,7 @@ import {
  */
 let seededQrIntents = 0;
 function seedPaidUzqrIntent(
-  sqlite: { prepare: (sql: string) => { get: () => unknown; run: (...a: unknown[]) => unknown } },
+  sqlite: LocalSqliteConnection['sqlite'],
   providerRef: string,
   amountTiyin: bigint,
 ): void {
