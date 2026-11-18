@@ -219,6 +219,11 @@ export const localHubConfig = localSchemaRegistry.defineTable(
     fiscalReceiptFieldsJson: text('fiscal_receipt_fields_json').notNull().default('[]'),
     /** T3.3 fiscal driver id stamped on new documents. Only `fake` exists until T3.5 (§3.3). */
     fiscalDriverId: text('fiscal_driver_id').notNull().default('fake'),
+    /**
+     * T3.7 [TASDIQLANSIN]: MXIK prefixes whose goods need a marking code per unit (JSON string
+     * array). Legal configuration, not product data: empty = nothing requires marking.
+     */
+    markingMxikPrefixesJson: text('marking_mxik_prefixes_json').notNull().default('[]'),
   }),
   (self) => [
     uniqueIndex('uidx_local_hub_config_singleton').on(self.singletonGuard),
@@ -3246,6 +3251,75 @@ export const localAuditLog = localSchemaRegistry.defineTable(
     check(
       'chk_local_audit_log_hash',
       sql`length(${self.hash}) = 64 AND length(${self.prevHash}) = 64`,
+    ),
+  ],
+);
+
+/**
+ * T3.7 marking codes scanned into an open cart (`LOCAL`). One row per physical unit; the same code
+ * can be in at most one open cart (UNIQUE). Moved to `local_sale_marks` by `completeSale`.
+ */
+export const localCartMarks = localSchemaRegistry.defineTable(
+  {
+    name: 'local_cart_marks',
+    tableClass: 'LOCAL',
+    tenantScope: 'store',
+  },
+  (common) => ({
+    ...common,
+    cartId: sqliteUuidV7('cart_id')
+      .notNull()
+      .references(() => localCarts.id, { onDelete: 'cascade' }),
+    cartLineId: sqliteUuidV7('cart_line_id').notNull(),
+    productId: sqliteUuidV7('product_id').notNull(),
+    codeKey: text('code_key').notNull(),
+    gtin: text('gtin').notNull(),
+    serial: text('serial').notNull(),
+    code: text('code').notNull(),
+    checkStatus: text('check_status').notNull(),
+  }),
+  (self) => [
+    uniqueIndex('uidx_local_cart_marks_code').on(self.organizationId, self.codeKey),
+    index('idx_local_cart_marks_line').on(self.cartId, self.cartLineId),
+    check('chk_local_cart_marks_status', sql`${self.checkStatus} IN ('ok', 'unchecked')`),
+  ],
+);
+
+/**
+ * T3.7 marking codes of completed sales (`LOCAL`). A code is "sold" while `released_at_ms` is NULL
+ * (partial UNIQUE); a void or a return releases it (the unit is back on the shelf).
+ */
+export const localSaleMarks = localSchemaRegistry.defineTable(
+  {
+    name: 'local_sale_marks',
+    tableClass: 'LOCAL',
+    tenantScope: 'store',
+  },
+  (common) => ({
+    ...common,
+    saleId: sqliteUuidV7('sale_id')
+      .notNull()
+      .references(() => sales.id),
+    saleLineId: sqliteUuidV7('sale_line_id').notNull(),
+    productId: sqliteUuidV7('product_id').notNull(),
+    codeKey: text('code_key').notNull(),
+    gtin: text('gtin').notNull(),
+    serial: text('serial').notNull(),
+    code: text('code').notNull(),
+    checkStatus: text('check_status').notNull(),
+    releasedAtMs: sqliteUnixMs('released_at_ms'),
+    releasedReason: text('released_reason'),
+    releaseSourceId: sqliteUuidV7('release_source_id'),
+  }),
+  (self) => [
+    uniqueIndex('uidx_local_sale_marks_active_code')
+      .on(self.organizationId, self.codeKey)
+      .where(sql`${self.releasedAtMs} IS NULL`),
+    index('idx_local_sale_marks_sale').on(self.saleId, self.saleLineId),
+    check('chk_local_sale_marks_status', sql`${self.checkStatus} IN ('ok', 'unchecked')`),
+    check(
+      'chk_local_sale_marks_release',
+      sql`(${self.releasedAtMs} IS NULL) = (${self.releasedReason} IS NULL)`,
     ),
   ],
 );

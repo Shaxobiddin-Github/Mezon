@@ -89,3 +89,11 @@ export {
   type FakeFiscalStatusMode,
   type FakeFiscalSubmitMode,
 } from './fiscal/fake-driver.js';
+
+export {
+  FakeMarkingDriver,
+  type MarkingCheckRequest,
+  type MarkingCheckResult,
+  type MarkingDriver,
+  MarkingUnavailableError,
+} from './marking/marking-driver.js';

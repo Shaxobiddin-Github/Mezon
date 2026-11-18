@@ -168,6 +168,8 @@ export {
   organizationTaxProfiles,
   localSyncConflicts,
   localAuditLog,
+  localCartMarks,
+  localSaleMarks,
   localRulePackages,
   localSyncApplyState,
   localSyncCursors,
