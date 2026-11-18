@@ -116,7 +116,7 @@ describe('@mezon/hub - licence cache (T4.7)', () => {
     const cache = JSON.parse(fs.readFileSync(file, 'utf8')) as {
       envelopes: { payload: Record<string, unknown> }[];
     };
-    cache.envelopes[0]!.payload.plan = 'pro';
+    cache.envelopes[0].payload.plan = 'pro';
     fs.writeFileSync(file, JSON.stringify(cache));
     const view = svc.getView();
     expect(view.invalidLicence).toBe(true);

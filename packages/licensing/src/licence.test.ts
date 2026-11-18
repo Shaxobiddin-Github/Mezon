@@ -80,7 +80,7 @@ describe('@mezon/licensing - signed licence (T4.7)', () => {
   });
 
   it('rejects a key used outside its validity window', () => {
-    const keys = [{ ...KEYS[0]!, validFromMs: 5_000n }];
+    const keys = [{ ...KEYS[0], validFromMs: 5_000n }];
     expect(() => verifyLicence(envelope(payload()), ORG, keys, verifier)).toThrow(
       /not valid at issue/,
     );
