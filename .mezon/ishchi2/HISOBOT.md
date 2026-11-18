@@ -76,13 +76,31 @@ Hub bitta qurilma. Shuning uchun 3 terminal bitta smena va bitta yashikni bo'lis
 
 Javob B bo'lsa, alohida commit'lar bilan shu paketda qilaman.
 
-## T4.3 — terminal printeri va yashik
+## T4.3 — terminal printeri va yashik (bajarildi)
 
-- Printer sozlamasi terminal bo'yicha; topilmasa hub sozlamasiga qaytadi.
-- Chek, qaytarish va smena hisoboti savdo qilingan terminal printeriga chiqadi.
-- Yashik ham o'sha terminalniki.
+- Har LAN kassada o'z printeri bor: `PUT /lan/terminals/:id/printer`. Sozlanadi:
+  - rejim, printer nomi yoki lokal IPv4;
+  - port, qog'oz kengligi, kodlash;
+  - avtomatik yashik.
 
-**Test.** 2 terminal, 2 Fake printer: har chek o'z printerida.
+  Chek sarlavhasi va pastki matni hub sozlamasidan olinadi.
+- Chek, qaytarish cheki, smena hisoboti, test chop etish va yashik **so'ralgan kassaning** printeriga chiqadi.
+- Hub kompyuterining o'zi hub printeridan foydalanadi.
+- **QAROR (javobsiz):** printeri sozlanmagan LAN kassa hub printeriga **chiqarmaydi**. Yozuv `disabled` bo'ladi, chunki chek boshqa peshtaxtada chiqib qolmasligi kerak.
+- Printerni faqat hub kompyuteridan (`LAN_LOCAL_ONLY`) va owner/manager boshqaradi. Ommaviy IP rad etiladi.
+
+**Test** (`multi-register.test.ts`). 3 kassa, Fake printerlar manzil bo'yicha:
+- K1 cheki → `.11`, K2 cheki → `.12`;
+- printersiz K3 → `disabled`, hech qayerga chiqmaydi;
+- K2 yashigi → `.12`;
+- hub test chop etishi → `.10`.
+
+**Mutatsiyalar** (hammasi o'ldi):
+- P1 — hub printeriga qaytish;
+- P2 — kassa printeri e'tiborsiz;
+- P3 — chek kassani bilmaydi;
+- P4 — yashik kassani bilmaydi;
+- M1 — savat kassaga bog'lanmaydi.
 
 ## T2.8 — yakuniy integratsion test
 

@@ -290,3 +290,23 @@ export function getSaleTerminalIdSync(sqlite: SqliteLike, saleId: string): UuidV
     .get(saleId) as { terminal_id: UuidV7 | null } | undefined;
   return r?.terminal_id ?? null;
 }
+
+/** T4.3 the register's printer settings (JSON) — NULL when none is configured. */
+export function getLanTerminalPrinterJsonSync(sqlite: SqliteLike, id: string): string | null {
+  const r = sqlite.prepare('SELECT printer_json FROM local_lan_terminals WHERE id = ?').get(id) as
+    { printer_json: string | null } | undefined;
+  return r?.printer_json ?? null;
+}
+
+export function setLanTerminalPrinterJsonSync(
+  sqlite: SqliteLike,
+  id: UuidV7,
+  json: string | null,
+  nowMs: UnixMs,
+): boolean {
+  return (
+    sqlite
+      .prepare('UPDATE local_lan_terminals SET printer_json = ?, updated_at_ms = ? WHERE id = ?')
+      .run(json, nowMs, id).changes === 1
+  );
+}

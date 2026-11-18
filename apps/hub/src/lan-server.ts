@@ -199,6 +199,19 @@ export function registerLanRoutes(
     return { registers: lanService.salesByTerminal(BigInt(q.fromMs), BigInt(q.toMs)) };
   });
 
+  app.get('/lan/terminals/:id/printer', async (request) => {
+    await authorize(request);
+    const { id } = IdParams.parse(request.params);
+    return { printer: lanService.terminalPrinter(parseUuidV7(id)) };
+  });
+
+  app.put('/lan/terminals/:id/printer', async (request) => {
+    await authorize(request);
+    const { id } = IdParams.parse(request.params);
+    const body = z.strictObject({ printer: z.unknown() }).parse(request.body);
+    return { printer: lanService.setTerminalPrinter(parseUuidV7(id), body.printer ?? null) };
+  });
+
   app.post('/lan/terminals/:id/revoke', async (request) => {
     await authorize(request);
     const { id } = IdParams.parse(request.params);

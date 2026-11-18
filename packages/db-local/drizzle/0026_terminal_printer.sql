@@ -1,0 +1,1 @@
+ALTER TABLE `local_lan_terminals` ADD `printer_json` text;

@@ -5,6 +5,8 @@ import {
   consumeLanPairingCodeAndAddTerminalSync,
   getLanIdentitySync,
   getLanTerminalSync,
+  getLanTerminalPrinterJsonSync,
+  setLanTerminalPrinterJsonSync,
   insertLanIdentityIfAbsentSync,
   insertLanPairingCodeSync,
   listActiveLanPairingCodesSync,
@@ -15,8 +17,23 @@ import {
   touchLanTerminalSync,
 } from '@mezon/db-local';
 import { DomainError, type UnixMs, type UuidV7 } from '@mezon/domain';
+import { PRINTER_ENCODINGS, PRINTER_MODES, assertValidLocalPrinterHost } from '@mezon/drivers';
 import { generateSelfSignedTlsMaterial, lanPairingProof } from '@mezon/drivers/node';
+import { z } from 'zod';
 import type { SafeStoragePort } from './safe-storage-port.js';
+
+/** T4.3 device part of a printer config: where THIS register prints and kicks its drawer. */
+export const TerminalPrinterSchema = z.strictObject({
+  mode: z.enum(PRINTER_MODES),
+  printerName: z.string().trim().min(1).max(200).nullable(),
+  host: z.string().nullable(),
+  port: z.number().int().min(1).max(65535),
+  timeoutMs: z.number().int().min(500).max(30_000),
+  paperWidthMm: z.union([z.literal(58), z.literal(80)]),
+  encoding: z.enum(PRINTER_ENCODINGS),
+  cashDrawerAutoOpen: z.boolean(),
+});
+export type TerminalPrinter = z.infer<typeof TerminalPrinterSchema>;
 
 /** [TASDIQLANSIN] pairing parameters. */
 export const LAN_PAIRING_CODE_TTL_MS = 5n * 60_000n;
@@ -239,6 +256,52 @@ export class HubLanService {
         totalFinal: r.totalFinal.toString(),
       }),
     );
+  }
+
+  private requireTerminal(id: UuidV7): LanTerminalRow {
+    const t = getLanTerminalSync(this.sqlite, id);
+    if (t === null || t.organizationId !== this.org()) {
+      throw new DomainError('LAN_TERMINAL_NOT_FOUND', 'Terminal not found');
+    }
+    return t;
+  }
+
+  /** The register's printer, or null (none set or stored JSON no longer valid). */
+  terminalPrinter(id: UuidV7): TerminalPrinter | null {
+    const raw = getLanTerminalPrinterJsonSync(this.sqlite, id);
+    if (raw === null) return null;
+    try {
+      return TerminalPrinterSchema.parse(JSON.parse(raw));
+    } catch {
+      return null;
+    }
+  }
+
+  setTerminalPrinter(id: UuidV7, input: unknown): TerminalPrinter | null {
+    this.requireTerminal(id);
+    if (input === null) {
+      setLanTerminalPrinterJsonSync(this.sqlite, id, null, this.o.nowMs());
+      return null;
+    }
+    const p = TerminalPrinterSchema.parse(input);
+    const printer: TerminalPrinter = {
+      ...p,
+      host: p.host === null ? null : assertValidLocalPrinterHost(p.host),
+    };
+    if (printer.mode === 'windows_raw' && printer.printerName === null) {
+      throw new DomainError(
+        'VALIDATION_ERROR',
+        'Windows RAW rejimi uchun printer nomi kiritilishi shart',
+      );
+    }
+    if (printer.mode === 'network_tcp' && printer.host === null) {
+      throw new DomainError(
+        'VALIDATION_ERROR',
+        'Tarmoq rejimi uchun lokal IPv4 manzil kiritilishi shart',
+      );
+    }
+    setLanTerminalPrinterJsonSync(this.sqlite, id, JSON.stringify(printer), this.o.nowMs());
+    return printer;
   }
 
   revoke(id: UuidV7): LanTerminalDto {

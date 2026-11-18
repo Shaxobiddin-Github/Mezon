@@ -3443,6 +3443,8 @@ export const localLanTerminals = localSchemaRegistry.defineTable(
     pairedByUserId: sqliteUuidV7('paired_by_user_id').notNull(),
     revokedAtMs: sqliteUnixMs('revoked_at_ms'),
     lastSeenAtMs: sqliteUnixMs('last_seen_at_ms'),
+    /** T4.3 the register's own printer / cash drawer (JSON, validated on read); NULL = none. */
+    printerJson: text('printer_json'),
   }),
   (self) => [
     uniqueIndex('uidx_local_lan_terminals_key').on(self.keyHash),

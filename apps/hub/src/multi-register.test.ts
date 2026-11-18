@@ -4,6 +4,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { LoginResponseSchema, ProductDetailResponseSchema } from '@mezon/contracts';
 import type { PinHasher } from '@mezon/domain';
+import { FakePrinterDriver, type PrinterConfig } from '@mezon/drivers';
 import {
   type PairedTerminalCredentials,
   pairWithLanHub,
@@ -11,7 +12,7 @@ import {
 } from '@mezon/drivers/node';
 import { FixedClock, SeededRandomSource } from '@mezon/test-utils';
 import { afterEach, describe, expect, it } from 'vitest';
-import { type HubServer, createHubServer } from './index.js';
+import { type CreateHubServerOptions, type HubServer, createHubServer } from './index.js';
 
 const HOST = '127.0.0.1:47880';
 const fastHasher: PinHasher = {
@@ -35,7 +36,12 @@ interface Register {
   ): Promise<{ status: number; json: { cart: { id: string } } }>;
 }
 
-async function bootWithRegisters(seed: number, registers: number, stockUnits: number) {
+async function bootWithRegisters(
+  seed: number,
+  registers: number,
+  stockUnits: number,
+  extra: Partial<CreateHubServerOptions> = {},
+) {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'mezon-mreg-'));
   dirs.push(dir);
   const hub = await createHubServer({
@@ -45,6 +51,7 @@ async function bootWithRegisters(seed: number, registers: number, stockUnits: nu
     clock: new FixedClock(BigInt(Date.now())),
     random: new SeededRandomSource(seed),
     pinHasher: fastHasher,
+    ...extra,
   });
   hubs.push(hub);
   const h = (t?: string) => (t ? { host: HOST, authorization: `Bearer ${t}` } : { host: HOST });
@@ -215,5 +222,131 @@ describe('T4.2 several registers sell in parallel through the LAN hub', () => {
       .prepare('SELECT terminal_id FROM local_carts WHERE id = ?')
       .get(viaLan.json.cart.id) as { terminal_id: string | null };
     expect(row2.terminal_id).toBe(env.regs[0].creds.terminalId);
+  });
+});
+
+describe('T4.3 every register prints on its own printer and opens its own drawer', () => {
+  it('receipts, test prints and drawer pulses go to the register they were asked from', async () => {
+    const printers = new Map<string, FakePrinterDriver>();
+    const printerAt = (host: string) => {
+      let p = printers.get(host);
+      if (!p) {
+        p = new FakePrinterDriver({ mode: 'network_tcp', target: `${host}:9100` });
+        printers.set(host, p);
+      }
+      return p;
+    };
+    const env = await bootWithRegisters(4301, 3, 10, {
+      printerDriverFactory: (config: PrinterConfig) => printerAt(config.host ?? 'none'),
+    });
+    const hubPrinter = await env.local('PATCH', '/printer/settings', env.owner, {
+      mode: 'network_tcp',
+      host: '192.168.1.10',
+      cashDrawerAutoOpen: true,
+    });
+    expect(hubPrinter.statusCode, hubPrinter.body).toBe(200);
+    const device = (host: string) => ({
+      printer: {
+        mode: 'network_tcp',
+        printerName: null,
+        host,
+        port: 9100,
+        timeoutMs: 3000,
+        paperWidthMm: 80,
+        encoding: 'translit',
+        cashDrawerAutoOpen: true,
+      },
+    });
+    const [r1, r2, r3] = env.regs as [Register, Register, Register];
+    for (const [r, host] of [
+      [r1, '192.168.1.11'],
+      [r2, '192.168.1.12'],
+    ] as const) {
+      const put = await env.local(
+        'PUT',
+        `/lan/terminals/${r.creds.terminalId}/printer`,
+        env.owner,
+        device(host),
+      );
+      expect(put.statusCode, put.body).toBe(200);
+    }
+    // Public address refused; managing printers from a register is refused.
+    expect(
+      (
+        await env.local(
+          'PUT',
+          `/lan/terminals/${r1.creds.terminalId}/printer`,
+          env.owner,
+          device('8.8.8.8'),
+        )
+      ).statusCode,
+    ).toBe(400);
+    const fromLan = await pinnedHubRequest(r1.creds.hub, {
+      method: 'PUT',
+      path: `/lan/terminals/${r1.creds.terminalId}/printer`,
+      headers: {
+        'x-mezon-terminal': `${r1.creds.terminalId}.${r1.creds.terminalKey}`,
+        authorization: `Bearer ${env.owner}`,
+      },
+      body: device('192.168.1.99'),
+    });
+    expect(fromLan.status).toBe(403);
+
+    expect(
+      (await r1.call('POST', '/shifts/open', { clientRequestId: reqId(), openingCash: '0' }))
+        .status,
+    ).toBe(201);
+    const sellAndPrint = async (r: Register) => {
+      const cart = await r.call('POST', '/carts', {});
+      await r.call('POST', `/carts/${cart.json.cart.id}/lines`, {
+        kind: 'catalog',
+        productId: env.product,
+        qty: '1000',
+      });
+      const done = await r.call('POST', `/carts/${cart.json.cart.id}/complete`, {
+        clientRequestId: reqId(),
+        expectedTotal: '5000',
+        payments: [{ method: 'cash', tenderedAmount: '5000' }],
+      });
+      expect(done.status).toBe(200);
+      const saleId = (done.json as unknown as { sale: { id: string } }).sale.id;
+      const print = await r.call('POST', `/sales/${saleId}/print`, { clientRequestId: reqId() });
+      expect(print.status).toBe(200);
+      return (
+        print.json as unknown as { printRecord: { status: string; printerTarget: string | null } }
+      ).printRecord;
+    };
+    expect(await sellAndPrint(r1)).toMatchObject({
+      status: 'printed',
+      printerTarget: '192.168.1.11:9100',
+    });
+    expect(await sellAndPrint(r2)).toMatchObject({
+      status: 'printed',
+      printerTarget: '192.168.1.12:9100',
+    });
+    // A register without its own printer never prints on someone else's.
+    expect(await sellAndPrint(r3)).toMatchObject({ status: 'disabled', printerTarget: null });
+    expect(printers.get('192.168.1.11')?.getSentJobs()).toHaveLength(1);
+    expect(printers.get('192.168.1.12')?.getSentJobs()).toHaveLength(1);
+    expect(printers.get('192.168.1.10')?.getSentJobs() ?? []).toHaveLength(0);
+
+    // Drawer on register 2 (owner logged in there) → pulse on register 2's printer only.
+    const ownerOnR2 = await pinnedHubRequest(r2.creds.hub, {
+      method: 'POST',
+      path: '/printer/cash-drawer/open',
+      headers: {
+        'x-mezon-terminal': `${r2.creds.terminalId}.${r2.creds.terminalKey}`,
+        authorization: `Bearer ${env.owner}`,
+      },
+      body: { clientRequestId: reqId(), reason: 'Maydalash' },
+    });
+    expect(ownerOnR2.status, ownerOnR2.body).toBe(200);
+    expect(printers.get('192.168.1.12')?.getSentJobs()).toHaveLength(2);
+    expect(printers.get('192.168.1.11')?.getSentJobs()).toHaveLength(1);
+
+    // The hub computer itself still uses the hub printer.
+    const hubTest = await env.local('POST', '/printer/test-print', env.owner);
+    expect(hubTest.statusCode, hubTest.body).toBe(200);
+    expect(printers.get('192.168.1.10')?.getSentJobs()).toHaveLength(1);
   });
 });

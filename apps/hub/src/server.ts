@@ -260,6 +260,7 @@ export async function createHubServer(options: CreateHubServerOptions): Promise<
   let shiftService: HubShiftService;
   let orderService: HubOrderService;
   let printerService: HubPrinterService;
+  let lanServiceRef: HubLanService | null = null;
   let cloudStore: SqliteCloudStore;
   let cloudService: HubCloudService;
   let app: FastifyInstance;
@@ -495,6 +496,7 @@ export async function createHubServer(options: CreateHubServerOptions): Promise<
     });
     printerService = new HubPrinterService({
       printerStore,
+      resolveTerminalPrinter: (terminalId) => lanServiceRef?.terminalPrinter(terminalId) ?? null,
       authService,
       saleStore,
       returnStore,
@@ -592,6 +594,7 @@ export async function createHubServer(options: CreateHubServerOptions): Promise<
       nowMs: () => clock.now(),
       nextId: () => idGen.nextId(),
     });
+    lanServiceRef = lanService;
     let lanListener: LanListener | null = null;
     registerHubErrorHandlers(app);
     registerHubRoutes(

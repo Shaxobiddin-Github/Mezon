@@ -608,6 +608,8 @@ export {
   consumeLanPairingCodeAndAddTerminalSync,
   getLanIdentitySync,
   getLanTerminalSync,
+  getLanTerminalPrinterJsonSync,
+  setLanTerminalPrinterJsonSync,
   getSaleTerminalIdSync,
   listSalesByTerminalSync,
   type TerminalSalesRow,
