@@ -77,7 +77,16 @@ Tashqi tizimlar (UzQR, Asl belgisi) uchun endpoint, maydon yoki imzo o'ylab topi
 
 ## QOLDI (limit qoidasi)
 
-Hozircha faqat reja. Keyingi aniq qadam: T3.8 jadvali va `appendAuditInTxSync`.
+**Tayyor:**
+
+| Vazifa | Commit | Tekshiruv |
+|---|---|---|
+| T3.8 audit | ,  | xesh zanjiri, , amallarga ulangan, , , CLI ; mutatsiyalar A1–A8 o'ldi |
+| T3.7 markirovka |  …  | GS1 tahlilchisi,  + Fake, , ,  da kodlar = dona, void va qaytarish kodni bo'shatadi; mutatsiyalar K1–K8 o'ldi |
+
+**Qolgan:** T3.6 UzQR (, intent, kech tasdiq), keyin , PR va hisobot.
+
+**Keyingi aniq qadam:**  porti va .
 
 ---
 
