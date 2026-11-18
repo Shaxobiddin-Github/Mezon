@@ -45,11 +45,14 @@ describe('@mezon/pos - update banner (T4.8)', () => {
         waitReason: 'not_yet',
       })?.text,
     ).toContain('22:00');
-    expect(updateBannerView({ ...base, phase: 'installing', schedule: { kind: 'now' } })).toEqual({
-      text: expect.stringContaining("o'rnatilmoqda") as unknown as string,
-      choices: [],
-      canCancel: false,
+    const installing = updateBannerView({
+      ...base,
+      phase: 'installing',
+      schedule: { kind: 'now' },
     });
+    expect(installing?.text).toContain("o'rnatilmoqda");
+    expect(installing?.choices).toEqual([]);
+    expect(installing?.canCancel).toBe(false);
     setLocale('ru');
     expect(
       updateBannerView({

@@ -45,7 +45,13 @@ afterEach(() => {
   for (const d of dirs.splice(0)) fs.rmSync(d, { recursive: true, force: true });
 });
 
-function setup(opts: { paired?: boolean; response?: unknown; fetchFails?: boolean; now?: bigint }) {
+function setup(opts: {
+  paired?: boolean;
+  response?: unknown;
+  fetchFails?: boolean;
+  tokenFails?: boolean;
+  now?: bigint;
+}) {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'mezon-hub-licence-'));
   dirs.push(dir);
   const calls: string[] = [];
@@ -61,7 +67,10 @@ function setup(opts: { paired?: boolean; response?: unknown; fetchFails?: boolea
           pairedAtMs: null,
           lastSyncAtMs: null,
         }),
-      getDecryptedToken: () => Promise.resolve('device-token'),
+      getDecryptedToken: () =>
+        opts.tokenFails
+          ? Promise.reject(new Error('Ciphertext is too short to be valid'))
+          : Promise.resolve('device-token'),
     },
     cachePath: path.join(dir, 'licence-cache.json'),
     trustedKeys: KEYS,
@@ -175,6 +184,12 @@ describe('@mezon/hub - licence cache (T4.7)', () => {
       }),
     );
     expect(await svc.getView()).toMatchObject({ state: 'trial', invalidLicence: true });
+  });
+
+  it('a token that cannot be decrypted is a failed refresh, never a thrown error', async () => {
+    const { svc, calls } = setup({ tokenFails: true });
+    await expect(svc.refresh()).resolves.toBe(false);
+    expect(calls).toHaveLength(0);
   });
 
   it('a malformed cloud answer is not cached', async () => {

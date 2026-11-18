@@ -50,11 +50,13 @@ export class HubLicenceService {
 
   /** Fetches the envelopes; keeps the old cache on any failure. Returns true when refreshed. */
   async refresh(): Promise<boolean> {
-    const status = await this.opts.cloud.getStatus();
-    if (status.status !== 'paired' || !status.cloudUrl || !status.organizationId) return false;
-    const token = await this.opts.cloud.getDecryptedToken();
-    if (!token) return false;
     try {
+      // Everything inside the try: a token that cannot be decrypted (or any other failure) must
+      // never become an unhandled rejection of the background refresh.
+      const status = await this.opts.cloud.getStatus();
+      if (status.status !== 'paired' || !status.cloudUrl || !status.organizationId) return false;
+      const token = await this.opts.cloud.getDecryptedToken();
+      if (!token) return false;
       const res = await this.fetchFn(`${status.cloudUrl}/api/v1/devices/licence`, {
         headers: { authorization: `Bearer ${token}` },
         signal: AbortSignal.timeout(10_000),

@@ -176,7 +176,7 @@ module.exports = {
     {
       name: 'desktop-src-imports',
       comment:
-        'apps/desktop source files can only import internal files, domain, contracts, drivers, electron, pino, koffi, and safe node builtins (never db-local, db-cloud, hub, or pos)',
+        'apps/desktop source files can only import internal files, domain, contracts, drivers, electron, pino, koffi, and safe node builtins (never db-local, db-cloud, hub, or pos). T4.8: crypto (update signature / SHA-256) and child_process (starting the verified installer) are allowed for the updater.',
       severity: 'error',
       from: {
         path: '^apps/desktop/src/',
@@ -184,7 +184,7 @@ module.exports = {
       },
       to: {
         pathNot:
-          '^(apps/desktop/src/|packages/(domain|contracts|drivers)/|electron$|node_modules/(\\.pnpm/)?(electron|pino|koffi)@|(node:)?(events|fs|fs/promises|os|path)$)',
+          '^(apps/desktop/src/|packages/(domain|contracts|drivers)/|electron$|node_modules/(\\.pnpm/)?(electron|pino|koffi)@|(node:)?(events|fs|fs/promises|os|path)$|(node:)?(crypto|child_process)$)',
       },
     },
     {

@@ -370,7 +370,10 @@ if (singleInstanceLockAcquired) {
           fetchEnvelope: () => fetchUpdateEnvelope(manifestUrl),
           download: (url, dest, maxBytes) => downloadInstaller(url, dest, maxBytes),
           sha256File,
-          prepare: (version, backup) => hub.prepareUpdate(version, backup),
+          // A backup of a large database can take minutes: wait for it, so a slow backup is never
+          // mistaken for "no answer" (which would start another backup on the next tick).
+          prepare: (version, backup) =>
+            hub.prepareUpdate(version, backup, backup ? 10 * 60_000 : 30_000),
           launchInstaller: async (installerPath) => {
             desktopLog.logger.info({ installerPath }, 'desktop_update_installing');
             await performCleanShutdown('update-install');
