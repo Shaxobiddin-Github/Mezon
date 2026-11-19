@@ -27,7 +27,7 @@ Nazoratchi tekshiruvi (`0e0150f`, QAYTARILDI) bo'yicha. `main` (P1 squash, #31) 
 
 **Ochiq qoldi (POS UI yo'q).** POS'da hozircha to'lov ekrani yo'q. K2 "menejerga ko'rinsin" API darajasida qilindi (`/payments/attention`). Ekran T4.4 bilan.
 
-`pnpm verify` (PG bilan): VERIFY_RESULT
+`pnpm verify` (PG bilan): **yashil**: 127 fayl, 1042 test; perf 17; E2E 1; lint, depcruise, db:check.
 
 ---
 
