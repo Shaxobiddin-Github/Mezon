@@ -1369,6 +1369,7 @@ describe('@mezon/db-local - T1.4 completeSale atomic TX, receipts, stock policy,
           organizationId: env.organizationId,
           storeId: env.storeId,
           deviceId: env.deviceId,
+          registerId: null,
         }),
       ).toBe(moneyFromTiyin(76_000n));
       expect(
@@ -1376,6 +1377,7 @@ describe('@mezon/db-local - T1.4 completeSale atomic TX, receipts, stock policy,
           organizationId: env.organizationId,
           storeId: env.storeId,
           deviceId: deviceB,
+          registerId: null,
         }),
       ).toBe(moneyFromTiyin(50_000n));
       expect(
@@ -1428,6 +1430,8 @@ describe('@mezon/db-local - T1.4 completeSale atomic TX, receipts, stock policy,
       for (const stmt of auditSql.split('--> statement-breakpoint')) {
         if (stmt.trim()) conn.sqlite.exec(stmt);
       }
+      // Same for T4.2 `local_carts.terminal_id` (today's cart code writes it); dropped before the upgrade.
+      conn.sqlite.exec('ALTER TABLE local_carts ADD terminal_id text');
 
       const authStore = await createSqliteHubAuthStore({ connection: conn, clock, random });
       const setup = await authStore.completeSetup({
@@ -1676,6 +1680,7 @@ describe('@mezon/db-local - T1.4 completeSale atomic TX, receipts, stock policy,
       const preStockMoveCount = conn.db.select().from(stockMoves).all().length;
 
       conn.sqlite.exec('DROP TABLE local_audit_log');
+      conn.sqlite.exec('ALTER TABLE local_carts DROP COLUMN terminal_id');
       // Apply 0007 migration cleanly under PRAGMA foreign_keys = ON inside Drizzle transaction
       migrateLocalDatabase(conn.db, migDir);
 

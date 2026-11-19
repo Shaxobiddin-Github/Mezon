@@ -431,6 +431,7 @@ describe('@mezon/db-local - T1.9 Shifts, Cashier Sessions, Cash Moves, Reclose &
         organizationId: env.organizationId,
         storeId: env.storeId,
         deviceId: env.deviceId,
+        registerId: null,
       }),
     ).toBe(moneyFromTiyin(40_000n));
 
@@ -1426,6 +1427,7 @@ describe('@mezon/db-local - T1.9 Shifts, Cashier Sessions, Cash Moves, Reclose &
           organizationId: open1.shift.organizationId,
           storeId: open1.shift.storeId,
           deviceId: open1.shift.deviceId,
+          registerId: null,
         }),
       ),
     ).toBe(90_000n);
@@ -1555,6 +1557,7 @@ describe('@mezon/db-local - T1.9 Shifts, Cashier Sessions, Cash Moves, Reclose &
         organizationId: env.organizationId,
         storeId: env.storeId,
         deviceId: env.deviceId,
+        registerId: null,
       }),
     ).toBe(moneyFromTiyin(8_473n));
     expect(

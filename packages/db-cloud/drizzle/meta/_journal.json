@@ -64,6 +64,13 @@
       "when": 1795077770767,
       "tag": "0008_licences",
       "breakpoints": true
+    },
+    {
+      "idx": 9,
+      "version": "7",
+      "when": 1795119433724,
+      "tag": "0009_register_shifts",
+      "breakpoints": true
     }
   ]
 }

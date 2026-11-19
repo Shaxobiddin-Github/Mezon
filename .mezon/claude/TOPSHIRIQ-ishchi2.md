@@ -87,6 +87,140 @@ Isbot testim endi o'tadi.
 
 ---
 
+# [claude] Olindi: "v1 bayroqlari" (sen 2 soatdan ko'p jim edding) — `claude/C5-v1-flags`
+
+Qoidaga ko'ra boshlanmagan kichik ishingni oldim. **LAN ulanish ekrani va "Bulutga ulash" ekrani SENDA qoladi.**
+
+`claude/C5-v1-flags` (P3 ustida, `284bf96` dan):
+
+- **Nom.** `app.title` → "Guzar Kassa" / "Guzar Касса"; printer job nomi ham. Exe va o'rnatuvchi nomi (`Mezon.exe`) **o'zgartirilmadi**, chunki skriptlar va E2E unga bog'langan. Agar kerak bo'lsa, buni alohida qilamiz.
+- **"FISKAL EMAS".** Ekranda va qog'oz chekda (sotuv, smena hisoboti, printer sinovi) endi "SINOV" so'zi yo'q. "SINOV — FISKAL EMAS" faqat **test fiskal drayveri** ishlatilganda qoladi (`fiscal.testBanner`). Testlar yangilandi.
+- **Fiskal UI.** "Fiskallashmagan cheklar" tugmasi faqat `GET /fiscal/status` → `modeEnabled = true` bo'lsa ko'rinadi.
+- **UzQR.** `NON_CASH_METHODS` dan olib tashlandi (test bor).
+- **Tekshiruv:** unit + sqlite + pg 910 test, perf 17, POS E2E, lint, depcruise — yashil.
+
+**Merge navbati:** C2 → P2 → P3 → C4 → C5. C5 P3 ustida, shuning uchun P3 dan keyin.
+
+**C2 CI qizil edi.** Sababi: desktop E2E preload API ro'yxatini qat'iy tekshiradi, T4.8 esa yangilanish metodlarini qo'shgan. Tuzatdim (`c27e23b`), lokal `pack:dir` + `test:e2e` yashil.
+
+---
+
+# [claude] C4 (T2.7b + v1 kabinet + v1 deploy) tayyor — tekshiruv va PR so'rovi
+
+Branch `claude/C4-cabinet-writes` (`82941e2`), P1 ustida (P1 daraxti `main` dagi squash bilan bir xil). Hisobot: `.mezon/claude/HISOBOT-T2.7b.md`.
+
+**Tarkibi:**
+- kabinetdan narx o'zgartirish (`CloudEventWriter` orqali, narx kassaga yetib borishi testlangan);
+- kassalar ro'yxati, bekor qilish, ulanish kodi;
+- xodimlar ro'yxati;
+- `org:create` endi standart parolsiz;
+- v1 deploy: Dockerfile butun workspace'ni yig'adi (avval yig'ilmas edi); Caddy kabinet va API'ni bitta domenda xizmat qiladi; compose'ga Telegram va domen o'zgaruvchilari qo'shildi;
+- **yangi CI workflow `deploy-images.yml`**: ikkala image yig'iladi va API stack `/health/ready` bilan tekshiriladi;
+- `docs/v1/README.md`.
+
+**Iltimos:**
+1. **PR och** (base `main`). Yangi workflow faqat PR'da ishga tushadi. Docker yig'ishni lokal tekshira olmadim: bu kompyuterda registry ~34 KB/s.
+2. Toifa **o'rta**. Diqqat qaratadigan joylar:
+   - kabinet foydalanuvchisi `is_active = false`, PIN'i yo'q, kassaga kira olmaydi;
+   - qurilmani faqat ega bekor qila oladi, bulutning `system` qurilmasini bekor qilib bo'lmaydi;
+   - Caddyfile.
+3. Merge navbati: C2 → P2 → P3 → C4. Hech qaysi PR bulut migratsiyasi bo'yicha C4 bilan to'qnashmaydi: C4 da migratsiya yo'q.
+
+---
+
+# [claude] v1: yana bitta bo'shliq — kassada "Bulutga ulash" ekrani yo'q
+
+Hub'da `POST /cloud/pair` (bulut manzili + ulanish kodi) bor, lekin POS'da uni chaqiradigan ekran yo'q. Ega kassani bulutga UI'dan ulay olmaydi.
+
+- **Men qildim (C4).** Kabinet "Kassalar va xodimlar" bo'limida "Yangi kassa ulash": do'kon, kassa nomi, "Ulanish kodini olish". Bu mavjud `POST /api/v1/devices/pairing-codes` ni ishlatadi (faqat ega, tarif chegarasi bilan).
+- **Senga (LAN ulanish ekrani bilan bir joyda).** POS sozlamalarida "Bulutga ulash" oynasi:
+  - bulut manzili (`https://…`) va kod;
+  - `/cloud/pair` chaqiriladi;
+  - holat ko'rsatiladi (`/cloud/status`: ulangan yoki yo'q, oxirgi sinxron);
+  - "Uzish" tugmasi;
+  - ruxsat: `users:write`, ya'ni ega.
+
+---
+
+# [claude] v1: dasturni haqiqiy ishga tushirdim — "v1 bayroqlari" ga 3 ta qo'shimcha
+
+Desktop dasturini (`pack:dir`, haqiqiy `app.asar`) Playwright bilan boshidan oxirigacha yurgizdim. Ketma-ketlik: birinchi sozlash → PIN bilan kirish → smena ochish → mahsulot → to'lov → **1-chek**. Hammasi ishladi.
+
+Ko'rinishda v1 uchun tuzatish kerak bo'lgan narsalar (POS, sening "v1 bayroqlari" ishing bilan birga):
+
+1. **Nom.** Sarlavha "Mezon Kassa" → **"Guzar Kassa"**. Kod nomi Mezon ichkarida qoladi, foydalanuvchi Guzar'ni ko'radi. Oyna sarlavhasi va o'rnatuvchi nomi ham shunday bo'lsin (`productName`).
+2. **"SINOV — FISKAL EMAS".** v1 haqiqiy do'konda ishlatiladi. Yuqori paneldagi va chekdagi yozuv **"FISKAL EMAS"** bo'lsin, "SINOV" olib tashlansin. `isTestDriver` faqat haqiqiy test drayverida "SINOV" desin. v1 da fiskal rejim o'chiq.
+3. **"Fiskallashmagan cheklar" tugmasi** v1 da yashirilsin: fiskal rejim o'chiq bo'lsa ko'rinmasin.
+
+Avvalgilari ham o'z kuchida:
+- naqdsiz ro'yxatdan `uzqr` olib tashlansin;
+- fiskal rejim va markirovka sozlamalari ko'rinmasin;
+- LAN ulanish ekrani bo'lsin.
+
+---
+
+# [claude] YANGI QAROR (egasi): v1 tezroq — qonuniy integratsiyalar v2 ga. Avval `.mezon/claude/V1-REJA.md` ni o'qi
+
+Egasi: "To'lov va qonun-qoidalarga v2 da chuqur kiramiz. Ungacha v1 da ishlaydigan versiya qilaylik."
+
+**Sening v1 ishlaring** (batafsil `V1-REJA.md` da):
+
+1. **Merge navbati:** C2 (`fd1c89c`, tayyor) → P2 → P3 (bulut migratsiyasi `0009`) → C4 (T2.7b, P1 ustida; `main` ni men qabul qilaman).
+2. **LAN terminal ulanish ekrani** (POS va hub):
+   - terminal tomonda: manzil, kod, barmoq izi;
+   - hub tomonda: "Kassa qo'shish", ro'yxat, bekor qilish.
+3. **v1 bayroqlari:**
+   - POS naqdsiz ro'yxatidan `uzqr` olib tashlansin. Hozir uni tanlasa chek `PAYMENT_NOT_CONFIRMED` bilan yopilmaydi, kassir uchun bu tuzoq;
+   - fiskal rejim va markirovka sozlamalari v1 UI'da ko'rinmasin.
+
+Haqiqiy drayverlar (fiskal, UzQR, Payme, Click, Uzum, Asl belgisi), T4.4 va F5–F9 hozircha yozilmaydi.
+
+---
+
+# [claude-tekshiruv] P3 (PR #33): QABUL (T4.1, T4.3, T2.8) — ikki test sharti; T4.2 B varianti qolgan
+
+Tekshirilgan commit: `3fc7526`. Toza worktree va build. Natijalar:
+- unit + sqlite-hub + pg-cloud: **130 fayl, 897 test, hammasi yashil**;
+- keshsiz lint: yashil.
+
+## T4.1 xavfsizligi (kod bo'yicha) — yaxshi
+
+- Juftlash kodi tarmoqda yuborilmaydi. HMAC sertifikat barmoq iziga bog'langan, shuning uchun MITM sertifikati isbotni buzadi.
+- 50 bitli kod, 5 daqiqa muddat, 5 ta xato urinish. Har xato **barcha** faol kodlardan urinish oladi.
+- Terminal kalitidan faqat SHA-256 saqlanadi. Taqqoslash `timingSafeEqual` bilan. Bekor qilish darhol kuchga kiradi.
+- `x-mezon-terminal-id` faqat jarayon-maxfiy proksi sarlavhasi bilan qabul qilinadi. Tashqaridan kelgani olib tashlanadi.
+- Hub'da IP'ga asoslangan ishonch yo'q (grep bilan tekshirdim).
+- LAN boshqaruvi faqat hub kompyuteridan.
+
+Mening C2 dagi yangilash darvozam asosiy ilovaning `onRequest` hook'ida ishlaydi. LAN so'rovlari `inject` orqali o'sha ilovaga keladi, shuning uchun darvoza ularni ham yopadi.
+
+## Mustaqil mutatsiyalar
+
+| # | Mutatsiya | Natija |
+|---|---|---|
+| N1 | bekor qilingan terminal o'tadi | o'ldi |
+| N2 | proksi sarlavhasi maxfiysiz ishonchli | o'ldi |
+| N3 | xato urinish sanalmaydi | o'ldi |
+| N4 | LAN boshqaruvi terminaldan ochiq | o'ldi |
+| N5 | pin (barmoq izi) tekshirilmaydi | o'ldi |
+| N6 | terminal `hubProof` ni tekshirmaydi | **omon qoldi** |
+| N7 | `consume` dagi `used_at_ms IS NULL` guard'i olib tashlandi | **omon qoldi** |
+
+## Shartlar (merge'ni to'xtatmaydi, P3 ning keyingi commit'iga)
+
+- **S9 (N6).** Test: `pairWithLanHub` noto'g'ri `hubProof` qaytargan soxta hubni rad etsin (`LanPairingRejectedError`). Bu protokolning ikkinchi yarmi, hozir himoyasiz.
+- **S10 (N7).** Test: bitta kod bilan ikki parallel `POST /lan/pair` bo'lsa, aniq bitta terminal qo'shilishi kerak. `pair()` ichida `await` lar bor (`tlsMaterial`, `decrypt`), shuning uchun ikkalasi ham kodni ko'radi. Ularni faqat guard ajratadi.
+
+## Ma'lumot uchun
+
+- PIN qulfi va qurilma bo'yicha sekinlashtirish hub darajasida. Bitta terminalda PIN noto'g'ri terilsa, hamma kassalarni sekinlashtiradi. Juftlangan terminal egasining akkauntini 5 urinishda qulflashi ham mumkin. Pilot uchun maqbul, lekin hisobotga yozib qo'y.
+- `authenticateTerminal` har so'rovda `last_seen` ga yozadi. Ko'p kassada bu ortiqcha yozuv: daqiqasiga bir marta yozish yetadi. Shoshilinch emas.
+
+## Holat
+
+- T4.1, T4.3 va T2.8: **QABUL**.
+- T4.2: B varianti (javob berilgan) shu PR'ga commit'lar bilan qo'shilganda qayta ko'raman.
+- Merge tartibi: P1 → C2 → P2 → P3.
 # [claude-tekshiruv] P2 (PR #32): QAYTARILDI — bitta jiddiy pul xatosi (K1), bitta pul bo'shlig'i (K2)
 
 Tekshirilgan commit: `861945d`. Toza worktree, build. Natijalar:

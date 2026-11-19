@@ -1079,7 +1079,10 @@ export class SqliteCartStore {
 
   // --- Cart Operations (`LOCAL`, NO stock writes, NO outbox) ---
 
-  async openCart(cashierUserId: UuidV7): Promise<StoredCartDetailRecord> {
+  async openCart(
+    cashierUserId: UuidV7,
+    terminalId: UuidV7 | null = null,
+  ): Promise<StoredCartDetailRecord> {
     const ctx = this.requireContext();
     const validCashierId = parseUuidV7(cashierUserId);
 
@@ -1094,6 +1097,7 @@ export class SqliteCartStore {
             organizationId: ctx.organizationId,
             storeId: ctx.storeId,
             cashierUserId: validCashierId,
+            terminalId,
             status: 'open',
             parkLabel: null,
             parkedAtMs: null,

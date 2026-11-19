@@ -159,7 +159,11 @@ export type DomainErrorCode =
   | 'MARKING_CODES_INCOMPLETE'
   | 'PAYMENT_NOT_CONFIRMED'
   | 'PAYMENT_INTENT_NOT_FOUND'
-  | 'PAYMENT_INTENT_INVALID_STATE';
+  | 'PAYMENT_INTENT_INVALID_STATE'
+  | 'TERMINAL_NOT_PAIRED'
+  | 'LAN_PAIRING_REJECTED'
+  | 'LAN_LOCAL_ONLY'
+  | 'LAN_TERMINAL_NOT_FOUND';
 
 export type DomainErrorDetails = Readonly<Record<string, unknown>>;
 

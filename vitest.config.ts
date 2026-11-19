@@ -35,6 +35,7 @@ export default defineConfig({
           exclude: [
             '**/*.perf.test.ts',
             'apps/hub/src/hub-cloud-sync.integration.test.ts',
+            'apps/hub/src/hub-cloud-e2e.integration.test.ts',
             'apps/hub/src/sync-two-hubs.test.ts',
             '**/node_modules/**',
             '**/dist/**',
@@ -55,6 +56,7 @@ export default defineConfig({
             'packages/db-cloud/**/*.test.ts',
             'apps/cloud/**/*.test.ts',
             'apps/hub/src/hub-cloud-sync.integration.test.ts',
+            'apps/hub/src/hub-cloud-e2e.integration.test.ts',
             'apps/hub/src/sync-two-hubs.test.ts',
           ],
           exclude: ['**/*.perf.test.ts', '**/node_modules/**', '**/dist/**'],

@@ -37,6 +37,7 @@ import {
   SqliteCloudStore,
   createSqliteCloudStore,
   SqliteOutboxSyncStore,
+  runInRegisterScope,
 } from '@mezon/db-local';
 import {
   type Clock,
@@ -95,6 +96,15 @@ import { HubSyncPullWorker } from './sync-pull-worker.js';
 import { registerFiscalRoutes } from './fiscal-routes.js';
 import { registerAuditRoutes } from './audit-routes.js';
 import { registerMarkingRoutes } from './marking-routes.js';
+import {
+  type LanListener,
+  newLanProxySecret,
+  registerLanRoutes,
+  registerLanTrustHook,
+  terminalIdOf,
+  startLanListener,
+} from './lan-server.js';
+import { HubLanService } from './lan-service.js';
 import { registerPaymentRoutes } from './payment-routes.js';
 import { HubPaymentService } from './payment-service.js';
 import { HubMarkingService } from './marking-service.js';
@@ -200,6 +210,9 @@ export interface HubServer {
   readonly pullService: HubSyncPullService;
   readonly pullWorker: HubSyncPullWorker;
   readonly safeStorage: SafeStoragePort;
+  readonly lanService: HubLanService;
+  /** T4.1: starts the HTTPS LAN listener for paired terminals (default host 0.0.0.0). */
+  listenLan(options: { readonly host?: string; readonly port: number }): Promise<LanListener>;
   listen(): Promise<{ readonly host: typeof DEFAULT_HUB_HOST; readonly port: number }>;
   close(): Promise<void>;
 }
@@ -262,6 +275,7 @@ export async function createHubServer(options: CreateHubServerOptions): Promise<
   let shiftService: HubShiftService;
   let orderService: HubOrderService;
   let printerService: HubPrinterService;
+  let lanServiceRef: HubLanService | null = null;
   let cloudStore: SqliteCloudStore;
   let cloudService: HubCloudService;
   let app: FastifyInstance;
@@ -497,6 +511,7 @@ export async function createHubServer(options: CreateHubServerOptions): Promise<
     });
     printerService = new HubPrinterService({
       printerStore,
+      resolveTerminalPrinter: (terminalId) => lanServiceRef?.terminalPrinter(terminalId) ?? null,
       authService,
       saleStore,
       returnStore,
@@ -595,6 +610,22 @@ export async function createHubServer(options: CreateHubServerOptions): Promise<
 
     const hostState = createHostAllowlistState(securityConfig.port);
     registerHubSecurityHooks(app, securityConfig, hostState);
+    const lanProxySecret = newLanProxySecret();
+    registerLanTrustHook(app, lanProxySecret);
+    // T4.2 (variant B): the rest of the request runs as work of its cash register: the verified LAN
+    // terminal (set by the trust hook above, never from the body) or null = the hub's own register.
+    app.addHook('onRequest', (request, _reply, done) => {
+      runInRegisterScope(terminalIdOf(request), done);
+    });
+    const lanService = new HubLanService({
+      connection,
+      safeStorage,
+      getOrganizationId: () => store.getActiveRuntimeContext()?.config.organizationId ?? null,
+      nowMs: () => clock.now(),
+      nextId: () => idGen.nextId(),
+    });
+    lanServiceRef = lanService;
+    let lanListener: LanListener | null = null;
     registerHubErrorHandlers(app);
     registerHubRoutes(
       app,
@@ -658,6 +689,7 @@ export async function createHubServer(options: CreateHubServerOptions): Promise<
         ...(options.paymentQrTtlMs !== undefined ? { ttlMs: options.paymentQrTtlMs } : {}),
       }),
     );
+    registerLanRoutes(app, authService, lanService);
     registerAuditRoutes(
       app,
       authService,
@@ -737,6 +769,20 @@ export async function createHubServer(options: CreateHubServerOptions): Promise<
       pullService,
       pullWorker,
       safeStorage,
+      lanService,
+      async listenLan(lanOptions) {
+        if (lanListener !== null) return lanListener;
+        lanListener = await startLanListener({
+          mainApp: app,
+          lanService,
+          host: lanOptions.host ?? '0.0.0.0',
+          port: lanOptions.port,
+          loopbackHost: () =>
+            [...hostState.getAllowedHosts()][0] ?? `127.0.0.1:${securityConfig.port}`,
+          proxySecret: lanProxySecret,
+        });
+        return lanListener;
+      },
       async listen() {
         await app.listen({
           host: DEFAULT_HUB_HOST,
@@ -763,6 +809,7 @@ export async function createHubServer(options: CreateHubServerOptions): Promise<
           pullWorker.stop();
           fiscalWorker.stop();
           licenceService.stop();
+          if (lanListener !== null) await lanListener.close();
           await app.close();
         } finally {
           connection.close();
