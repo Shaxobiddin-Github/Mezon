@@ -8,8 +8,11 @@ import {
 } from '@mezon/contracts';
 import {
   PG_APP_ROLE_NAME,
+  CloudEventWriter,
   CloudSyncPushStore,
   CloudSyncPullStore,
+  cabinetAttributionUserCommand,
+  priceChangeCommands,
   ForeignStoreError,
   cloudSyncEvents,
   cloudOrganizations,
@@ -514,5 +517,98 @@ describePg('@mezon/hub - Hub to Cloud Sync Integration Test (R6)', () => {
       .prepare('SELECT name FROM categories WHERE id = ?')
       .get(catId) as { name: string } | undefined;
     expect(hubCat?.name).toBe('Integration Cat');
+  });
+
+  it('T2.7b: a cabinet price change (attribution user + product + price fact) reaches the hub by pull', async () => {
+    const ids = new MonotonicUuidV7Generator({
+      clock: { now: () => unixMsFromBigInt(1_700_000_100_000n) },
+      random: { nextBytes: (n: number) => new Uint8Array(n).fill(7) },
+    });
+    const writer = new CloudEventWriter(appConn.pool, syncPushStore, ids);
+    const productId = ids.nextId();
+    const cabinetUser = ids.nextId();
+    const product = {
+      id: productId,
+      organizationId: orgA,
+      categoryId: null,
+      sku: null,
+      skuSearch: null,
+      name: 'Kabinet non',
+      nameSearch: 'kabinet non',
+      unit: 'dona',
+      unlimited: true,
+      minStock: null,
+      hasVariants: false,
+      trackBatches: false,
+      salePrice: '5000',
+      mxik: null,
+      packageCode: null,
+      vatRateBp: 0,
+      deviceId: productId,
+      hlc: '',
+      createdAtMs: String(nowMs),
+      updatedAtMs: String(nowMs),
+      deletedAtMs: null,
+    };
+    const created = await writer.write({
+      organizationId: orgA,
+      nowMs,
+      commands: [
+        { entity: 'products', entityId: productId, type: 'product.created', payload: product },
+      ],
+    });
+    expect(created.results[0].status).toBe('accepted');
+    const changed = await writer.write({
+      organizationId: orgA,
+      nowMs,
+      commands: [
+        cabinetAttributionUserCommand({
+          organizationId: orgA,
+          cloudUserId: cabinetUser,
+          username: 'egasi',
+          role: 'owner',
+          nowMs,
+        }),
+        ...priceChangeCommands({
+          organizationId: orgA,
+          product,
+          newPriceTiyin: 6500n,
+          changedByUserId: cabinetUser,
+          reason: 'Kabinetdan',
+          priceChangeId: ids.nextId(),
+          nowMs,
+        }),
+      ],
+    });
+    expect(changed.results.map((r) => r.status)).toEqual(['accepted', 'accepted', 'accepted']);
+
+    for (let i = 0; i < 5; i += 1) {
+      const r = await hubServer.pullWorker.pullBatch();
+      expect(r.status).toBe('ok');
+      if (r.hasMore !== true) break;
+    }
+    const sqlite = hubServer.connection.sqlite;
+    expect(sqlite.prepare('SELECT sale_price FROM products WHERE id = ?').get(productId)).toEqual({
+      sale_price: 6500n,
+    });
+    expect(
+      sqlite
+        .prepare(
+          'SELECT old_price, new_price, changed_by_user_id, reason FROM price_changes WHERE product_id = ?',
+        )
+        .all(productId),
+    ).toEqual([
+      { old_price: 5000n, new_price: 6500n, changed_by_user_id: cabinetUser, reason: 'Kabinetdan' },
+    ]);
+    expect(
+      sqlite.prepare('SELECT is_active, full_name FROM users WHERE id = ?').get(cabinetUser),
+    ).toEqual({ is_active: 0n, full_name: 'Kabinet: egasi' });
+    // Nothing parked or in conflict on the hub.
+    expect(sqlite.prepare('SELECT count(*) AS n FROM local_sync_parked').get()).toEqual({ n: 0n });
+    expect(
+      sqlite
+        .prepare('SELECT count(*) AS n FROM local_sync_conflicts WHERE resolved_at_ms IS NULL')
+        .get(),
+    ).toEqual({ n: 0n });
   });
 });

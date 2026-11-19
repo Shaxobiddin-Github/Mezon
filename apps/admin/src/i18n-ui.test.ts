@@ -8,6 +8,7 @@ import {
   describeApiError,
   formatQty,
   formatSom,
+  parseSomToTiyin,
   paymentMethodLabel,
   tashkentDateKey,
   unitLabel,
@@ -90,5 +91,16 @@ describe('@mezon/admin - T2.7a R3 localisation', () => {
     expect(describeApiError(new AdminApiError(500, 'boom'))).toBe("Ma'lumotlarni yuklab bo'lmadi");
     setLocale('ru');
     expect(describeApiError(new Error('x'))).toBe('Не удалось загрузить данные');
+  });
+
+  it('T2.7b: a typed price in som becomes exact tiyin; anything else is refused', () => {
+    expect(parseSomToTiyin('12500')).toBe('1250000');
+    expect(parseSomToTiyin('12 500')).toBe('1250000');
+    expect(parseSomToTiyin('12500.5')).toBe('1250050');
+    expect(parseSomToTiyin('12500,05')).toBe('1250005');
+    expect(parseSomToTiyin('0')).toBe('0');
+    for (const bad of ['', '-1', '1.234', 'abc', '1e5', '12.', '.5', '99999999999999']) {
+      expect(parseSomToTiyin(bad), bad).toBeNull();
+    }
   });
 });

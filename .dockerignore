@@ -1,0 +1,11 @@
+**/node_modules
+**/dist
+**/dist-app
+**/dist-electron
+**/*.tsbuildinfo
+**/.turbo
+.git
+.mezon
+.claude
+deploy/.env
+**/*.log

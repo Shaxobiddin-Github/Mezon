@@ -1,0 +1,97 @@
+# Guzar Kassa v1 — o'rnatish yo'riqnomasi va reliz eslatmalari
+
+Bu hujjat egasi va texnik yordam uchun. Kassir uchun yo'riqnoma: [../pilot/kassir-yoriqnomasi.md](../pilot/kassir-yoriqnomasi.md).
+
+## 1. v1 da nima bor
+
+| Bo'lim              | Imkoniyat                                                                                                                                 |
+| ------------------- | ----------------------------------------------------------------------------------------------------------------------------------------- |
+| Kassa               | Savdo, skaner, chegirma, kechiktirilgan chek, qaytarish, bekor qilish, smena va naqd pul hisobi, chek printeri va pul yashigi             |
+| Ombor               | Qoldiq, kirim, partiya va muddat, inventarizatsiya, kam qolgan tovar                                                                      |
+| Mijoz va qarz       | Nasiya, to'lov, qarz daftari, ortiqcha to'lov                                                                                             |
+| Internetsiz ishlash | Internet bo'lmasa ham kassa to'liq ishlaydi; internet qaytganda ma'lumotlar o'zi sinxronlanadi                                            |
+| Bir nechta kassa    | Bir do'konda bir nechta kompyuter (LAN); har kassaning o'z smenasi, printeri va yashigi bor                                               |
+| Bulut kabineti      | Telefondan: bugungi savdo, cheklar, mijozlar, kunlik hisobot, mahsulotlar va narxni o'zgartirish, kassalar va xodimlar, yangi kassa ulash |
+| Telegram            | Egaga kunlik xulosa; mijozga qarz eslatmasi (mijoz rozilik bergandan keyin)                                                               |
+| Tarif               | Start, Business, Pro; 14 kun bepul sinov. Muddat tugasa ham savdo to'xtamaydi, faqat yangi kassa yoki do'kon qo'shib bo'lmaydi            |
+| Yangilanish         | Imzolangan avtomatik yangilanish. Kassir vaqtini tanlaydi; ochiq chek hech qachon buzilmaydi                                              |
+| Zaxira              | Har kuni avtomatik; yangilanishdan oldin ham olinadi                                                                                      |
+| Tillar              | O'zbek (lotin, kirill), rus                                                                                                               |
+
+## 2. v2 ga qoladiganlar
+
+Egasining qarori: qonuniy integratsiyalar v2 da qilinadi.
+
+| Imkoniyat                                        | v1 dagi holati                                            |
+| ------------------------------------------------ | --------------------------------------------------------- |
+| Fiskal chek (soliq operatori)                    | Chek "FISKAL EMAS" deb chiqadi                            |
+| UzQR, Payme, Click, Uzum bilan avtomatik ulanish | Naqdsiz to'lov kassada qo'lda yoziladi: usul, summa, izoh |
+| Markirovka (Asl belgisi)                         | O'chiq                                                    |
+| Android, planshet va web-kassa                   | Yo'q; ikkinchi kassa Windows kompyuter bo'ladi            |
+| Guzar Market, kafe, bron, yetkazib berish        | Keyingi bosqichlar                                        |
+
+## 3. Bulut serverini o'rnatish (bir marta, texnik yordam)
+
+**Talablar:** Linux server, Docker, domen (masalan, `api.guzar.uz`) va unga yo'naltirilgan DNS.
+
+1. Repodagi `deploy/` papkasini serverga ko'chiring.
+2. `deploy/.env` faylini yarating. Qiymatlarni o'zingiz o'ylab toping: uzun va tasodifiy bo'lsin. Bu fayl repoga **hech qachon** qo'shilmaydi.
+
+   ```
+   MEZON_POSTGRES_ADMIN_PASSWORD=...
+   MEZON_APP_DB_PASSWORD=...
+   JWT_SECRET=...              # kamida 32 belgi
+   CLOUD_DOMAIN=api.guzar.uz   # kabinet ham shu manzilda ochiladi
+   ACME_EMAIL=...
+   TELEGRAM_BOT_TOKEN=...      # @BotFather dan; kerak bo'lmasa, bo'sh qoldiring
+   TELEGRAM_WEBHOOK_SECRET=... # bot ishlatilsa
+   TELEGRAM_BOT_USERNAME=...   # bot ishlatilsa
+   ```
+
+3. Ishga tushiring:
+
+   ```
+   docker compose up -d
+   ```
+
+   Caddy HTTPS sertifikatni o'zi oladi. Kabinet `https://<CLOUD_DOMAIN>` da ochiladi, kassalar ham shu manzilga ulanadi.
+
+4. Birinchi tashkilot va ega akkauntini yarating. **Parol majburiy**, standart parol yo'q:
+
+   ```
+   docker compose exec cloud pnpm --filter @mezon/cloud org:create -- \
+     --org-name "Do'kon nomi" --store-name "Bosh do'kon" --store-code main \
+     --login ega@misol.uz --password "<kamida 10 belgili parol>"
+   ```
+
+5. Zaxira: [../../deploy/BACKUP-RESTORE.md](../../deploy/BACKUP-RESTORE.md) dagi cron qatorini qo'shing.
+6. Tarif litsenziyasi: `scripts/licence-sign.mjs` (kalit faqat egada). Litsenziya bo'lmasa, 14 kunlik sinov ishlaydi.
+
+## 4. Kassani o'rnatish (har bir do'kon)
+
+1. `Guzar-Setup-1.0.0.exe` ni kassa kompyuterida ishga tushiring.
+2. **Birinchi ochilish:** ega ismi, login va 6 xonali PIN kiritiladi. Bu kassaning birinchi egasi bo'ladi.
+3. **Bulutga ulash:**
+   1. Kabinetga kiring: "Kassalar va xodimlar" → "Yangi kassa ulash" → do'konni tanlang → "Ulanish kodini olish".
+   2. Kassada: Sozlamalar → "Bulutga ulash" → bulut manzili (`https://api.guzar.uz`) va kod.
+
+   Kod bir marta ishlatiladi va qisqa muddat amal qiladi.
+
+4. **Xodimlar:** kassada egasi kassir va menejerlarni qo'shadi (ism, login, PIN). Kabinetda ular faqat ko'rinadi.
+5. **Printer:** Sozlamalar → Printer → test chek.
+6. **Ikkinchi kassa (LAN):**
+   1. Asosiy kassada: "Kassa qo'shish" → kod va barmoq izi chiqadi.
+   2. Ikkinchi kompyuterda: "Ikkinchi kassa sifatida ulanish" → asosiy kassa manzili va kod; barmoq izi solishtiriladi.
+
+## 5. Kundalik ish va nosozliklar
+
+- Kassir yo'riqnomasi: [../pilot/kassir-yoriqnomasi.md](../pilot/kassir-yoriqnomasi.md).
+- Nosozliklar kitobi: [../pilot/nosozliklar-kitobi.md](../pilot/nosozliklar-kitobi.md).
+- Yangilash va tiklash: [../pilot/yangilash-va-tiklash.md](../pilot/yangilash-va-tiklash.md).
+- Reliz oldidan tekshiruv ro'yxati: [../pilot/reliz-royxati.md](../pilot/reliz-royxati.md).
+
+## 6. Reliz oldidan tekshirilgan
+
+- Barcha avtomatik testlar (PostgreSQL bilan), sifat tekshiruvlari va arxitektura qoidalari yashil.
+- **Dastur haqiqiy holatda ishga tushirildi** (yig'ilgan `app.asar`, 2026-11-19). Ketma-ketlik: birinchi sozlash → PIN bilan kirish → smena ochish → mahsulot → to'lov → 1-chek.
+- Kabinetdan o'zgartirilgan narx kassaga yetib borishi test bilan isbotlangan.
