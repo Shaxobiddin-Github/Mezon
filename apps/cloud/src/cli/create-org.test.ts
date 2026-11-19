@@ -39,6 +39,14 @@ describePg('@mezon/cloud - CLI org:create (C4)', () => {
     if (container) await container.stop();
   });
 
+  it('v1: refuses to create an owner without an explicit login and a strong password', async () => {
+    await expect(runCreateOrgCli([])).rejects.toThrow(/--login/);
+    await expect(runCreateOrgCli(['--login', 'a@b.uz'])).rejects.toThrow(/--password/);
+    await expect(runCreateOrgCli(['--login', 'a@b.uz', '--password', 'short'])).rejects.toThrow(
+      /at least 10/,
+    );
+  });
+
   it('provisions organization, store, and owner via CLI and enables login without leaking password', async () => {
     const rawPassword = 'CliOwnerPassword2026!';
     const login = 'cli_owner@guzar.uz';

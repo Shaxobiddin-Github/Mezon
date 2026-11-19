@@ -72,3 +72,9 @@ Kabinet UI brauzerda ko'z bilan ko'rilmagan, chunki kabinetni bulut serveri bila
 ## Tekshiruv
 
 `pnpm verify` (`MEZON_REQUIRE_PG_TESTS=1`): yashil — format, build, keshsiz lint, typecheck, `db:check`, 122 fayl / 838 test, perf 17, POS E2E, depcruise (569 modul).
+
+## QOLDI (WIP, limit tugadi)
+
+- v1: `deploy/Dockerfile` butun workspace'ni yig'adi (avval `sync`, `i18n`, `ui` yo'q edi, server yig'ilmas edi); Caddy kabinetni va API'ni bitta domenda xizmat qiladi; compose Telegram va domenni uzatadi; `org:create` endi standart parolsiz.
+- **Tekshirilmagan:** `docker build` (runner va web) qayta yugurtirilmoqda edi. Birinchi urinish tarmoq timeout'i bilan yiqildi (pnpm yuklab olish). Keyingi qadam: ikkala target'ni yig'ish, `docker compose up`, `/health/ready` va kabinet sahifasi.
+- `docs/v1/README.md` — o'rnatish yo'riqnomasi va reliz eslatmalari.

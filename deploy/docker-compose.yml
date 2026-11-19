@@ -24,6 +24,7 @@ services:
     build:
       context: ..
       dockerfile: deploy/Dockerfile
+      target: runner
     container_name: mezon-cloud-migrate
     restart: 'no'
     command: ['pnpm', '--filter', '@mezon/cloud', 'db:migrate']
@@ -39,6 +40,7 @@ services:
     build:
       context: ..
       dockerfile: deploy/Dockerfile
+      target: runner
     container_name: mezon-cloud-api
     restart: unless-stopped
     environment:
@@ -46,8 +48,12 @@ services:
       HOST: 0.0.0.0
       DATABASE_URL: postgres://mezon_app:${MEZON_APP_DB_PASSWORD}@postgres:5432/${POSTGRES_DB:-mezon_cloud}
       JWT_SECRET: ${JWT_SECRET}
-      CORS_ORIGINS: ${CORS_ORIGINS:-https://admin.guzar.uz,https://market.guzar.uz}
+      CORS_ORIGINS: ${CORS_ORIGINS:-https://${CLOUD_DOMAIN}}
       NODE_ENV: production
+      # Telegram (optional: leave TELEGRAM_BOT_TOKEN empty to keep the bot off)
+      TELEGRAM_BOT_TOKEN: ${TELEGRAM_BOT_TOKEN:-}
+      TELEGRAM_WEBHOOK_SECRET: ${TELEGRAM_WEBHOOK_SECRET:-}
+      TELEGRAM_BOT_USERNAME: ${TELEGRAM_BOT_USERNAME:-}
     depends_on:
       postgres:
         condition: service_healthy
@@ -57,14 +63,19 @@ services:
       - mezon_internal
 
   caddy:
-    image: caddy:2-alpine
+    build:
+      context: ..
+      dockerfile: deploy/Dockerfile
+      target: web
     container_name: mezon-caddy
     restart: unless-stopped
+    environment:
+      CLOUD_DOMAIN: ${CLOUD_DOMAIN:?CLOUD_DOMAIN is required}
+      ACME_EMAIL: ${ACME_EMAIL:?ACME_EMAIL is required}
     ports:
       - '80:80'
       - '443:443'
     volumes:
-      - ./Caddyfile:/etc/caddy/Caddyfile:ro
       - mezon_caddy_data:/data
       - mezon_caddy_config:/config
     depends_on:

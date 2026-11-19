@@ -1,8 +1,8 @@
 {
-	email ${ACME_EMAIL:-admin@guzar.uz}
+	email {$ACME_EMAIL}
 }
 
-${CLOUD_DOMAIN:-api.guzar.uz} {
+{$CLOUD_DOMAIN} {
 	# Security headers
 	header {
 		Strict-Transport-Security "max-age=31536000; includeSubDomains; preload"
@@ -12,10 +12,20 @@ ${CLOUD_DOMAIN:-api.guzar.uz} {
 		-Server
 	}
 
-	# Reverse proxy to Cloud Fastify API
-	reverse_proxy cloud:4000 {
-		header_up X-Real-IP {remote_host}
-		header_up X-Forwarded-For {remote_host}
-		header_up X-Forwarded-Proto {scheme}
+	# Cloud API (hubs, cabinet API, Telegram webhook, health)
+	@api path /api/* /health/*
+	handle @api {
+		reverse_proxy cloud:4000 {
+			header_up X-Real-IP {remote_host}
+			header_up X-Forwarded-For {remote_host}
+			header_up X-Forwarded-Proto {scheme}
+		}
+	}
+
+	# Business cabinet (single-page app)
+	handle {
+		root * /srv/admin
+		try_files {path} /index.html
+		file_server
 	}
 }
