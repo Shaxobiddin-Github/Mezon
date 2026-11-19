@@ -1,3 +1,41 @@
+# Qayta tekshiruv: C2 B1–B3 tuzatishlari (`00a9cc4`) — QABUL
+
+Tekshiruvchi: ishchi2. Tekshirilgan commit: `00a9cc4` (`a49c3ff` dan keyingi diff).
+
+**Xulosa.** B1, B2, B3 to'g'ri yopilgan. Bloklovchi narsa yo'q. **QABUL**. Merge sharti: C2 `main` ni (P1, #31) o'ziga oladi, bulut migratsiyasini `0008_licences` qilib qayta yaratadi va CI yashil bo'ladi. Pastda bitta kichik taklif (T1) va integratsiya eslatmalari bor.
+
+## Nimani tekshirdim
+
+O'zim yurgizdim (`00a9cc4`, to'liq build): `update-readiness.test.ts`, `licence.test.ts` (PG), `apps/desktop/src/update`: **37/37 o'tdi**. Birinchi yurishda PG konteyneri ko'tarilmadi (9 skip, infratuzilma), ikkinchisida hammasi yashil.
+
+| # | Tuzatish | Tekshiruv |
+|---|---|---|
+| B1 | Darvoza **avval** yopiladi, keyin readiness o'qiladi, zaxiradan keyin qayta o'qiladi. Ochiq chek bo'lsa yoki zaxira yiqilsa darvoza ochiladi. `update-cancel` va 15 daqiqalik avto-ochilish ham bor | Kodni o'qidim (`electron-worker.ts`, `update-gate.ts`, `update-manager.ts`). Darvoza `startsReceiptWork` chek boshlaydigan yoki o'stiradigan **barcha** yo'llarni qamraydi: `POST /carts`, `POST /carts/:id/lines\|resume\|marks`, `PATCH /carts/:id/lines/:lineId`. Boshqa yo'lni tekshirdim: `openCart`, `addLine` va `resumeCart` faqat shu route'lardan chaqiriladi. LAN terminallar ham qamrovda: P3 LAN listener so'rovni asosiy ilovaga `inject` qiladi, shuning uchun `onRequest` hook ishlaydi. Darvozadan oldin o'tib ketgan so'rovni zaxiradan keyingi qayta o'qish ushlaydi (B1b testi) |
+| B2 | `pg_advisory_xact_lock('mezon.growth:<org>')`, keyin hisob va tekshiruv, insert bilan bitta tranzaksiyada | READ COMMITTED da qulfdan keyingi `count(*)` oldingi tranzaksiyaning commit qilingan qatorini ko'radi. Natija to'g'ri: 5 parallel → `[201, 402×4]` |
+| B3 | Xesh va hajm hub to'xtagandan keyin, `spawn` dan bevosita oldin qayta tekshiriladi. Mos kelmasa fayl o'chiriladi, dastur qayta ishga tushadi | Kodni o'qidim (`main.ts`). Tekshiruv va `spawn` orasidagi oyna endi millisekundlar, undan qisqasi amalda yo'q. Manager `expected` ni o'tkazadi (test bor) |
+
+## T1 (taklif, bloklamaydi): `growthGuard` ichida pool'dan ikkinchi ulanish
+
+`growthGuard` qulfni tranzaksiya ulanishida oladi. Lekin keyin `this.getStatus()` chaqiradi va u **pool'dan** yana ikkita so'rov oladi (`listLicences`, `getOrganizationCreatedAtMs`).
+
+Bitta tashkilot uchun `max - 1` va undan ko'p parallel `pair` yoki `createStore` bo'lsa, ular pool'ni egallaydi. Hammasi shu qulfni kutadi. Qulf egasi esa pool'dan ulanish ololmaydi. `pg.Pool` da `connectionTimeoutMillis` yo'q, shuning uchun so'rovlar abadiy osilib qoladi va qulf hech qachon bo'shamaydi.
+
+Amalda kam uchraydi (standart `max = 10`). Lekin bitta egasining skripti ham shunga olib kelishi mumkin.
+
+Tuzatish oddiy, ikkalasidan biri:
+- `getStatus` ni qulfdan **oldin** chaqirish. Litsenziya holati qulfga muhtoj emas;
+- yoki uni `client` orqali o'qish.
+
+## Integratsiya (kelishilganidek, o'zimda; C2 merge bo'lgach)
+
+- P2: `readUpdateReadiness` `pending` va to'langan-ishlatilmagan QR intentlarni "ochiq chek" deb sanaydi.
+- P2: QR yaratish (`POST /payments/intents`) darvoza yopiq paytda 503. Hozir darvoza uni qamramaydi, bu P2 yo'li.
+- P3: LAN juftlash keshlangan litsenziyaning `devices` chegarasini tekshiradi.
+- P3: per-register smenalar (T4.2 B) bilan bitta qurilmada bir nechta ochiq smena bo'lishi mumkin. Tekshirdim: `readUpdateReadiness.openShifts` hamma `shifts WHERE status = 'open'` ni sanaydi, ya'ni LAN kassalar smenalari ham hisobga kiradi. O'zgartirish kerak emas.
+- Bulut migratsiyasi: P3 ham bulut migratsiyasi qo'shadi (`register_id`, hozir `0008_register_shifts`). Tartib: C2 `0008`, P3 keyin `0009` qilib qayta yaratadi (P3 dagi qoida: kim keyin merge qilsa, o'sha qayta yaratadi).
+
+---
+
 # Tekshiruv: C2 — T4.7 (obuna, litsenziya) va T4.8 (imzolangan yangilanish) — TUZATISH KERAK
 
 Tekshiruvchi: ishchi2. Branch: `claude/C2-licence-update` (`195eca7` / `4e0974d`). Toifa: chuqur.
