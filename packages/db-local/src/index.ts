@@ -602,6 +602,7 @@ export {
   listPaymentIntentsNeedingAttentionSync,
   transitionPaymentIntentSync,
 } from './payment-intent-repo.js';
+export { currentRegisterId, runInRegisterScope } from './register-scope.js';
 export {
   type LanIdentityRow,
   type LanPairingCodeRow,

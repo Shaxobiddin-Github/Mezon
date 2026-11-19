@@ -116,9 +116,8 @@ async function bootWithRegisters(
       return { status: res.status, json };
     };
     let token = '';
-    // One cashier session drives every register: per-register drawers need a sync contract
-    // change ([ishchi2-savol] in HISOBOT); this test proves stock + receipt numbering only.
-    const login = await call('POST', '/auth/login', { username: 'kassa1', pin: '582911' });
+    // T4.2 variant B: every register has its own cashier, shift and drawer.
+    const login = await call('POST', '/auth/login', { username: `kassa${i}`, pin: `58291${i}` });
     expect(login.status).toBe(200);
     token = LoginResponseSchema.parse(login.json).token;
     regs.push({ creds, token, call });
@@ -132,12 +131,13 @@ const reqId = () => `01997400-0000-7000-8000-${(++reqSeq).toString(16).padStart(
 describe('T4.2 several registers sell in parallel through the LAN hub', () => {
   it('3 registers race for 30 units: exactly 30 receipts, stock 0, receipt numbers 1..30 with no gap', async () => {
     const env = await bootWithRegisters(4201, 3, 30);
-    // One business shift for the hub (QAROR: registers share the hub shift, see HISOBOT).
-    const open = await env.regs[0].call('POST', '/shifts/open', {
-      clientRequestId: reqId(),
-      openingCash: '0',
-    });
-    expect(open.status, JSON.stringify(open.json)).toBe(201);
+    for (const r of env.regs) {
+      const open = await r.call('POST', '/shifts/open', {
+        clientRequestId: reqId(),
+        openingCash: '0',
+      });
+      expect(open.status, JSON.stringify(open.json)).toBe(201);
+    }
 
     const sellOne = async (r: Register) => {
       const cart = await r.call('POST', '/carts', {});
@@ -207,6 +207,20 @@ describe('T4.2 several registers sell in parallel through the LAN hub', () => {
     }
     const sum = sqlite.prepare('SELECT SUM(total_final) AS t FROM sales').get() as { t: bigint };
     expect(sum.t).toBe(150_000n);
+    // Each register's cash went into its OWN shift and drawer.
+    for (const [i, r] of env.regs.entries()) {
+      const mine = results[i].filter((x) => x.ok).length;
+      const cur = (await r.call('GET', '/shifts/current')).json as unknown as {
+        shift: { id: string; registerId: string | null };
+        drawerCashBalance: string;
+      };
+      expect(cur.shift.registerId).toBe(r.creds.terminalId);
+      expect(cur.drawerCashBalance).toBe(String(mine * 5000));
+      const inShift = sqlite
+        .prepare('SELECT count(*) AS n FROM sales WHERE shift_id = ?')
+        .get(cur.shift.id) as { n: bigint };
+      expect(Number(inShift.n)).toBe(mine);
+    }
   });
 
   it('a cart opened on the hub computer is attributed to no register (NULL)', async () => {
@@ -222,6 +236,170 @@ describe('T4.2 several registers sell in parallel through the LAN hub', () => {
       .prepare('SELECT terminal_id FROM local_carts WHERE id = ?')
       .get(viaLan.json.cart.id) as { terminal_id: string | null };
     expect(row2.terminal_id).toBe(env.regs[0].creds.terminalId);
+  });
+});
+
+describe('T4.2 variant B: every register has its own shift, cashier session and drawer', () => {
+  type Cur = {
+    shift: { id: string; registerId: string | null; status: string } | null;
+    drawerCashBalance: string;
+  };
+  const sell = async (r: Register, product: string) => {
+    const cart = await r.call('POST', '/carts', {});
+    if (cart.status !== 201) return cart.status;
+    await r.call('POST', `/carts/${cart.json.cart.id}/lines`, {
+      kind: 'catalog',
+      productId: product,
+      qty: '1000',
+    });
+    return (
+      await r.call('POST', `/carts/${cart.json.cart.id}/complete`, {
+        clientRequestId: reqId(),
+        expectedTotal: '5000',
+        payments: [{ method: 'cash', tenderedAmount: '5000' }],
+      })
+    ).status;
+  };
+
+  it('own shift per register; own drawer and cash moves; closing one leaves the others selling', async () => {
+    const env = await bootWithRegisters(4203, 2, 20);
+    const [r1, r2] = env.regs as [Register, Register];
+    const sqlite = env.hub.connection.sqlite;
+
+    // Register 1 opens; register 2 has no shift yet → it cannot sell.
+    expect(
+      (await r1.call('POST', '/shifts/open', { clientRequestId: reqId(), openingCash: '0' }))
+        .status,
+    ).toBe(201);
+    expect(await sell(r2, env.product)).toBe(409);
+    // A second open on the same register is refused; the other register opens its own.
+    expect(
+      (await r1.call('POST', '/shifts/open', { clientRequestId: reqId(), openingCash: '0' }))
+        .status,
+    ).toBe(409);
+    expect(
+      (await r2.call('POST', '/shifts/open', { clientRequestId: reqId(), openingCash: '10000' }))
+        .status,
+    ).toBe(201);
+    // The hub computer's own register is separate too.
+    expect((await env.local('GET', '/shifts/current', env.owner)).json<Cur>().shift).toBeNull();
+    expect(
+      (
+        await env.local('POST', '/shifts/open', env.owner, {
+          clientRequestId: reqId(),
+          openingCash: '0',
+        })
+      ).statusCode,
+    ).toBe(201);
+
+    expect(await sell(r1, env.product)).toBe(200);
+    expect(await sell(r1, env.product)).toBe(200);
+    expect(await sell(r2, env.product)).toBe(200);
+    const cur1 = (await r1.call('GET', '/shifts/current')).json as unknown as Cur;
+    const cur2 = (await r2.call('GET', '/shifts/current')).json as unknown as Cur;
+    expect(cur1.shift?.registerId).toBe(r1.creds.terminalId);
+    expect(cur2.shift?.registerId).toBe(r2.creds.terminalId);
+    expect(cur1.shift?.id).not.toBe(cur2.shift?.id);
+    expect(cur1.drawerCashBalance).toBe('10000');
+    expect(cur2.drawerCashBalance).toBe('15000');
+
+    // A cash-out on register 2 touches only register 2's drawer.
+    // (a cash-out needs a manager: the owner does it at register 2's terminal)
+    const out = await pinnedHubRequest(r2.creds.hub, {
+      method: 'POST',
+      path: `/shifts/${cur2.shift?.id}/cash-moves`,
+      headers: {
+        'x-mezon-terminal': `${r2.creds.terminalId}.${r2.creds.terminalKey}`,
+        authorization: `Bearer ${env.owner}`,
+      },
+      body: { clientRequestId: reqId(), type: 'cash_out', amount: '4000', reason: 'Inkassatsiya' },
+    });
+    expect(out.status, out.body).toBe(201);
+    expect(
+      ((await r2.call('GET', '/shifts/current')).json as unknown as Cur).drawerCashBalance,
+    ).toBe('11000');
+    expect(
+      ((await r1.call('GET', '/shifts/current')).json as unknown as Cur).drawerCashBalance,
+    ).toBe('10000');
+
+    // Every row carries its register: shifts, cashier sessions, cash moves.
+    const regOfShift = (id: string | undefined) =>
+      (
+        sqlite.prepare('SELECT register_id AS r FROM shifts WHERE id = ?').get(id) as {
+          r: string | null;
+        }
+      ).r;
+    expect(regOfShift(cur1.shift?.id)).toBe(r1.creds.terminalId);
+    const sessionRegs = sqlite
+      .prepare('SELECT DISTINCT register_id AS r FROM shift_cashier_sessions WHERE shift_id = ?')
+      .all(cur2.shift?.id) as { r: string | null }[];
+    expect(sessionRegs).toEqual([{ r: r2.creds.terminalId }]);
+    const moveRegs = sqlite
+      .prepare(
+        'SELECT DISTINCT cm.register_id AS r, s.register_id AS sr FROM cash_moves cm JOIN shifts s ON s.id = cm.shift_id',
+      )
+      .all() as { r: string | null; sr: string | null }[];
+    expect(moveRegs.length).toBeGreaterThanOrEqual(2);
+    for (const m of moveRegs) expect(m.r).toBe(m.sr);
+
+    // The register travels to the cloud in the sync payload.
+    const payloads = (
+      sqlite
+        .prepare("SELECT payload FROM local_outbox WHERE entity = 'shifts' AND entity_id = ?")
+        .all(cur1.shift?.id) as { payload: string }[]
+    ).map((p) => JSON.parse(p.payload) as { registerId?: string | null });
+    expect(payloads.length).toBeGreaterThan(0);
+    for (const p of payloads) expect(p.registerId).toBe(r1.creds.terminalId);
+
+    // Register 1 closes its shift; register 2 keeps selling, register 1 cannot.
+    const close = await r1.call('POST', `/shifts/${cur1.shift?.id}/close`, {
+      clientRequestId: reqId(),
+      countedCash: '10000',
+    });
+    expect(close.status, JSON.stringify(close.json)).toBe(200);
+    expect(await sell(r1, env.product)).toBe(409);
+    expect(await sell(r2, env.product)).toBe(200);
+    expect(((await r2.call('GET', '/shifts/current')).json as unknown as Cur).shift?.status).toBe(
+      'open',
+    );
+  });
+
+  it('the database allows one open shift per register; the hub register (NULL) counts as one', async () => {
+    const env = await bootWithRegisters(4204, 1, 5);
+    const [r1] = env.regs as [Register];
+    const sqlite = env.hub.connection.sqlite;
+    expect(
+      (await r1.call('POST', '/shifts/open', { clientRequestId: reqId(), openingCash: '0' }))
+        .status,
+    ).toBe(201);
+    expect(
+      (
+        await env.local('POST', '/shifts/open', env.owner, {
+          clientRequestId: reqId(),
+          openingCash: '0',
+        })
+      ).statusCode,
+    ).toBe(201);
+    let n = 0;
+    const cloneOpen = (where: string) => {
+      n += 1;
+      const id = `01997500-0000-7000-8000-${n.toString(16).padStart(12, '0')}`;
+      const req = `01997500-0000-7000-8000-${(1000 + n).toString(16).padStart(12, '0')}`;
+      return () =>
+        sqlite
+          .prepare(
+            `INSERT INTO shifts (id, organization_id, store_id, device_id, hlc, created_at_ms, updated_at_ms,
+               shift_no, shift_code, status, opened_by_user_id, opening_cash, opening_discrepancy,
+               opened_at_ms, open_client_request_id, open_request_hash, register_id)
+             SELECT ?, organization_id, store_id, device_id, hlc, created_at_ms, updated_at_ms,
+               shift_no + 100, shift_code || '-x', 'open', opened_by_user_id, opening_cash, 0,
+               opened_at_ms, ?, open_request_hash, register_id
+             FROM shifts WHERE ${where}`,
+          )
+          .run(id, req);
+    };
+    expect(cloneOpen('register_id IS NULL')).toThrow(/UNIQUE/);
+    expect(cloneOpen(`register_id = '${r1.creds.terminalId}'`)).toThrow(/UNIQUE/);
   });
 });
 
@@ -292,10 +470,12 @@ describe('T4.3 every register prints on its own printer and opens its own drawer
     });
     expect(fromLan.status).toBe(403);
 
-    expect(
-      (await r1.call('POST', '/shifts/open', { clientRequestId: reqId(), openingCash: '0' }))
-        .status,
-    ).toBe(201);
+    for (const r of [r1, r2, r3]) {
+      expect(
+        (await r.call('POST', '/shifts/open', { clientRequestId: reqId(), openingCash: '0' }))
+          .status,
+      ).toBe(201);
+    }
     const sellAndPrint = async (r: Register) => {
       const cart = await r.call('POST', '/carts', {});
       await r.call('POST', `/carts/${cart.json.cart.id}/lines`, {

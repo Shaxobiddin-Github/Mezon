@@ -75,6 +75,7 @@ import {
   type SqliteUnitOfWorkSession,
   runConnectionReadOnly,
 } from './uow.js';
+import { currentRegisterId } from './register-scope.js';
 import { insertFact, updateMonotone } from './writers.js';
 
 export interface ReturnRuntimeContext {
@@ -572,6 +573,7 @@ export class SqliteReturnStore {
         organizationId: ctx.organizationId,
         storeId: ctx.storeId,
         deviceId: ctx.uow.deviceId,
+        registerId: currentRegisterId(),
         actorUserId: validActorId,
       });
 
@@ -653,6 +655,7 @@ export class SqliteReturnStore {
             organizationId: ctx.organizationId,
             storeId: ctx.storeId,
             deviceId: ctx.uow.deviceId,
+            registerId: currentRegisterId(),
           },
         );
         if (moneyToTiyin(drawerBalance) < cashRefundTiyin) {
@@ -780,6 +783,7 @@ export class SqliteReturnStore {
           values: {
             shiftId: activeShift.shift.id,
             shiftCashierSessionId: activeShift.activeSession.id,
+            registerId: activeShift.shift.registerId,
             type: 'refund_cash_out',
             amountDelta: negateMoney(cashRefundAmount),
             sourceType: 'sale_void',
@@ -907,6 +911,7 @@ export class SqliteReturnStore {
         organizationId: ctx.organizationId,
         storeId: ctx.storeId,
         deviceId: ctx.uow.deviceId,
+        registerId: currentRegisterId(),
         actorUserId: validActorId,
       });
 
@@ -1197,6 +1202,7 @@ export class SqliteReturnStore {
             organizationId: ctx.organizationId,
             storeId: ctx.storeId,
             deviceId: ctx.uow.deviceId,
+            registerId: currentRegisterId(),
           },
         );
         if (moneyToTiyin(drawerBalance) < cashRefundTiyin) {
@@ -1325,6 +1331,7 @@ export class SqliteReturnStore {
           values: {
             shiftId: activeShift.shift.id,
             shiftCashierSessionId: activeShift.activeSession.id,
+            registerId: activeShift.shift.registerId,
             type: 'refund_cash_out',
             amountDelta: negateMoney(resolvedPayments.cashRefundAmount),
             sourceType: 'return',

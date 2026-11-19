@@ -36,6 +36,7 @@ import {
   SqliteCloudStore,
   createSqliteCloudStore,
   SqliteOutboxSyncStore,
+  runInRegisterScope,
 } from '@mezon/db-local';
 import {
   type Clock,
@@ -96,6 +97,7 @@ import {
   newLanProxySecret,
   registerLanRoutes,
   registerLanTrustHook,
+  terminalIdOf,
   startLanListener,
 } from './lan-server.js';
 import { HubLanService } from './lan-service.js';
@@ -587,6 +589,11 @@ export async function createHubServer(options: CreateHubServerOptions): Promise<
     registerHubSecurityHooks(app, securityConfig, hostState);
     const lanProxySecret = newLanProxySecret();
     registerLanTrustHook(app, lanProxySecret);
+    // T4.2 (variant B): the rest of the request runs as work of its cash register: the verified LAN
+    // terminal (set by the trust hook above, never from the body) or null = the hub's own register.
+    app.addHook('onRequest', (request, _reply, done) => {
+      runInRegisterScope(terminalIdOf(request), done);
+    });
     const lanService = new HubLanService({
       connection,
       safeStorage,

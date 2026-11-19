@@ -1260,6 +1260,8 @@ export const cashMoves = localSchemaRegistry.defineTable(
     ...common,
     shiftId: sqliteUuidV7('shift_id'),
     shiftCashierSessionId: sqliteUuidV7('shift_cashier_session_id'),
+    // T4.2 (variant B): the cash register; NULL = the hub's own register, else a LAN terminal id.
+    registerId: sqliteUuidV7('register_id'),
     type: text('type').notNull(),
     amountDelta: sqliteMoney('amount_delta').notNull(),
     sourceType: text('source_type').notNull(),
@@ -2207,11 +2209,19 @@ export const shifts = localSchemaRegistry.defineTable(
     openRequestHash: text('open_request_hash').notNull(),
     closeClientRequestId: sqliteUuidV7('close_client_request_id'),
     closeRequestHash: text('close_request_hash'),
+    // T4.2 (variant B): the cash register; NULL = the hub's own register, else a LAN terminal id.
+    registerId: sqliteUuidV7('register_id'),
   }),
   (self) => [
     uniqueIndex('uidx_shifts_org_device_no').on(self.organizationId, self.deviceId, self.shiftNo),
+    // One open shift per (device, register); NULL (the hub's register) counts as one register.
     uniqueIndex('uidx_shifts_one_open_per_device')
-      .on(self.organizationId, self.storeId, self.deviceId)
+      .on(
+        self.organizationId,
+        self.storeId,
+        self.deviceId,
+        sql`(CASE WHEN ${self.registerId} IS NULL THEN '' ELSE CAST(${self.registerId} AS text) END)`,
+      )
       .where(sql`${self.status} = 'open'`),
     uniqueIndex('uidx_shifts_org_open_req').on(self.organizationId, self.openClientRequestId),
     uniqueIndex('uidx_shifts_org_close_req')
@@ -2281,6 +2291,8 @@ export const shiftCashierSessions = localSchemaRegistry.defineTable(
     endedAtMs: sqliteUnixMs('ended_at_ms'),
     handoffClientRequestId: sqliteUuidV7('handoff_client_request_id'),
     handoffRequestHash: text('handoff_request_hash'),
+    // T4.2 (variant B): the cash register; NULL = the hub's own register, else a LAN terminal id.
+    registerId: sqliteUuidV7('register_id'),
   }),
   (self) => [
     uniqueIndex('uidx_shift_cashier_sessions_shift_seq').on(self.shiftId, self.sessionSeq),

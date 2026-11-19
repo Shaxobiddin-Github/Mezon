@@ -1,3 +1,4 @@
+import { randomBytes } from 'node:crypto';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -24,6 +25,7 @@ import {
   parseUuidV7,
   unixMsFromBigInt,
 } from '@mezon/domain';
+import { pairWithLanHub, pinnedHubRequest } from '@mezon/drivers/node';
 import { FixedClock, SeededRandomSource } from '@mezon/test-utils';
 import { PostgreSqlContainer, type StartedPostgreSqlContainer } from '@testcontainers/postgresql';
 import Fastify, { type FastifyInstance } from 'fastify';
@@ -416,5 +418,187 @@ describePg('T2.8 hub ↔ cloud end-to-end: both sides agree on stock, debt and r
 
   it.each(Array.from({ length: 10 }, (_, i) => 2801 + i))('run %i', async (seed) => {
     await runScenario(seed);
+  });
+  it('T4.2 variant B: a LAN register and the hub register each keep an open shift; the cloud stores both with their register', async () => {
+    const seed = 4290;
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'mezon-e2e-reg-'));
+    dirs.push(dir);
+    const hubClock = new FixedClock(cloudClock.nowMs);
+    const hub: HubServer = await createHubServer({
+      dbPath: path.join(dir, 'hub.db'),
+      port: 47881,
+      logLevel: 'silent',
+      clock: hubClock,
+      random: new SeededRandomSource(seed),
+      pinHasher: fastHasher,
+    });
+    try {
+      const call = (method: 'GET' | 'POST', url: string, token?: string, payload?: object) =>
+        hub.app.inject({
+          method,
+          url,
+          headers: token ? { host: HOST, authorization: `Bearer ${token}` } : { host: HOST },
+          ...(payload ? { payload } : {}),
+        });
+      const setup = (
+        await call('POST', '/setup', undefined, {
+          owner: { fullName: 'Egasi', username: 'owner', pin: '849201' },
+        })
+      ).json<{ organizationId: UuidV7; storeId: UuidV7; deviceId: UuidV7 }>();
+      ctx = {
+        organizationId: parseUuidV7(setup.organizationId),
+        storeId: parseUuidV7(setup.storeId),
+        deviceId: parseUuidV7(setup.deviceId),
+      };
+      const org = ctx.organizationId;
+      const now = String(cloudClock.nowMs);
+      await admin.pool.query(
+        `INSERT INTO cloud_organizations (id, organization_id, name, status, created_at_ms, updated_at_ms)
+         VALUES ($1, $1, 'E2E reg', 'active', $2, $2)`,
+        [org, now],
+      );
+      await admin.pool.query(
+        `INSERT INTO cloud_stores (id, organization_id, name, code, is_active, created_at_ms, updated_at_ms)
+         VALUES ($1, $2, 'Dokon', 'sreg', true, $3, $3)`,
+        [ctx.storeId, org, now],
+      );
+      await hub.cloudStore.saveCloudState({
+        status: 'paired',
+        cloudUrl,
+        organizationId: org,
+        organizationName: 'E2E',
+        storeId: ctx.storeId,
+        storeName: 'Dokon',
+        encryptedDeviceToken: (await hub.safeStorage.encryptString(TOKEN)).toString('base64'),
+        pairedAtMs: unixMsFromBigInt(hubClock.now()),
+        nowMs: unixMsFromBigInt(hubClock.now()),
+        idGen: new MonotonicUuidV7Generator({
+          clock: { now: () => unixMsFromBigInt(cloudClock.nowMs) },
+          random: new SeededRandomSource(seed + 1),
+        }),
+      });
+      const owner = LoginResponseSchema.parse(
+        (await call('POST', '/auth/login', undefined, { username: 'owner', pin: '849201' })).json(),
+      ).token;
+      await call('POST', '/users', owner, {
+        fullName: 'Kassir',
+        username: 'kassa',
+        role: 'cashier',
+        pin: '582914',
+      });
+      let n = 0;
+      const rid = () => `01997600-0000-7000-8000-${(++n).toString(16).padStart(12, '0')}`;
+
+      // The hub's own register opens a shift.
+      expect(
+        (await call('POST', '/shifts/open', owner, { clientRequestId: rid(), openingCash: '0' }))
+          .statusCode,
+      ).toBe(201);
+      // A LAN terminal pairs and its cashier opens the terminal's OWN shift.
+      const lan = await hub.listenLan({ host: '127.0.0.1', port: 0 });
+      const code = (await call('POST', '/lan/pairing-codes', owner)).json<{ code: string }>().code;
+      const creds = await pairWithLanHub({
+        target: { host: '127.0.0.1', port: lan.port },
+        code,
+        terminalName: 'Kassa 2',
+        nonce: randomBytes(18).toString('base64url'),
+      });
+      const term = async (method: 'POST' | 'GET', p: string, token: string, body?: unknown) => {
+        const res = await pinnedHubRequest(creds.hub, {
+          method,
+          path: p,
+          headers: {
+            'x-mezon-terminal': `${creds.terminalId}.${creds.terminalKey}`,
+            authorization: `Bearer ${token}`,
+          },
+          ...(body !== undefined ? { body } : {}),
+        });
+        return {
+          status: res.status,
+          json: JSON.parse(res.body || '{}') as Record<string, unknown>,
+        };
+      };
+      const login = await pinnedHubRequest(creds.hub, {
+        method: 'POST',
+        path: '/auth/login',
+        headers: { 'x-mezon-terminal': `${creds.terminalId}.${creds.terminalKey}` },
+        body: { username: 'kassa', pin: '582914' },
+      });
+      const cashier = LoginResponseSchema.parse(JSON.parse(login.body)).token;
+      expect(
+        (
+          await term('POST', '/shifts/open', cashier, {
+            clientRequestId: rid(),
+            openingCash: '5000',
+          })
+        ).status,
+      ).toBe(201);
+      // One cash sale on the terminal register (a cash move stamped with the register).
+      const product = ProductDetailResponseSchema.parse(
+        (
+          await call('POST', '/products', owner, { name: 'Non', unit: 'dona', salePrice: '5000' })
+        ).json(),
+      ).product.id;
+      const cart = (await term('POST', '/carts', cashier, {})).json as { cart: { id: string } };
+      await term('POST', `/carts/${cart.cart.id}/lines`, cashier, {
+        kind: 'catalog',
+        productId: product,
+        qty: '1000',
+      });
+      const sale = await term('POST', `/carts/${cart.cart.id}/complete`, cashier, {
+        clientRequestId: rid(),
+        expectedTotal: '5000',
+        payments: [{ method: 'cash', tenderedAmount: '5000' }],
+      });
+      expect(sale.status, JSON.stringify(sale.json)).toBe(200);
+
+      for (let i = 0; i < 50; i++) {
+        const p = await hub.pushWorker.pushBatch();
+        if (p.status === 'idle' || (p.status === 'ok' && p.pushed === 0)) break;
+        if (p.status !== 'ok') throw new Error(`push ${p.status}`);
+      }
+      const notAcked = hub.connection.sqlite
+        .prepare("SELECT count(*) AS n FROM local_outbox WHERE status <> 'acked'")
+        .get() as { n: bigint };
+      expect(Number(notAcked.n)).toBe(0);
+
+      // The cloud holds BOTH open shifts of the one hub device, each with its register.
+      const shifts = (
+        await admin.pool.query<{ register_id: string | null; id: string }>(
+          `SELECT id, register_id FROM shifts WHERE organization_id = $1 AND status = 'open'
+            ORDER BY register_id NULLS FIRST`,
+          [org],
+        )
+      ).rows;
+      expect(shifts.map((s) => s.register_id)).toEqual([null, creds.terminalId]);
+      const moves = (
+        await admin.pool.query<{ register_id: string | null }>(
+          'SELECT register_id FROM cash_moves WHERE organization_id = $1 AND shift_id = $2',
+          [org, shifts[1].id],
+        )
+      ).rows;
+      expect(moves.length).toBeGreaterThan(0);
+      for (const m of moves) expect(m.register_id).toBe(creds.terminalId);
+      const sessions = (
+        await admin.pool.query<{ register_id: string | null }>(
+          'SELECT register_id FROM shift_cashier_sessions WHERE shift_id = $1',
+          [shifts[1].id],
+        )
+      ).rows;
+      expect(sessions).toEqual([{ register_id: creds.terminalId }]);
+      // The cloud index: a second open shift on the hub register (NULL) is refused.
+      await expect(
+        admin.pool.query(
+          `INSERT INTO shifts SELECT (jsonb_populate_record(NULL::shifts,
+             to_jsonb(x) || jsonb_build_object('id', $2::text, 'shift_no', x.shift_no + 100,
+               'open_client_request_id', $3::text))).*
+           FROM shifts x WHERE x.id = $1`,
+          [shifts[0].id, rid(), rid()],
+        ),
+      ).rejects.toThrow(/uidx_shifts_one_open_per_device/);
+    } finally {
+      ctx = null;
+      await hub.close();
+    }
   });
 });

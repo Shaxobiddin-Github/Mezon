@@ -277,6 +277,7 @@ describe('@mezon/db-local - T1.7 Customer Profile, Ledger, FIFO, D1-D4 & Benchma
             organizationId: env.organizationId,
             storeId: env.storeId,
             deviceId: env.deviceId,
+            registerId: null,
           }),
         ),
       ).toBe(100_000n);
@@ -853,6 +854,7 @@ describe('@mezon/db-local - T1.7 Customer Profile, Ledger, FIFO, D1-D4 & Benchma
               organizationId: env.organizationId,
               storeId: env.storeId,
               deviceId: env.deviceId,
+              registerId: null,
             }),
           ),
         ).toBe(expectedDrawerCash);

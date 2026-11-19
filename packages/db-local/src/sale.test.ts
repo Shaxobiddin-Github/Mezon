@@ -1369,6 +1369,7 @@ describe('@mezon/db-local - T1.4 completeSale atomic TX, receipts, stock policy,
           organizationId: env.organizationId,
           storeId: env.storeId,
           deviceId: env.deviceId,
+          registerId: null,
         }),
       ).toBe(moneyFromTiyin(76_000n));
       expect(
@@ -1376,6 +1377,7 @@ describe('@mezon/db-local - T1.4 completeSale atomic TX, receipts, stock policy,
           organizationId: env.organizationId,
           storeId: env.storeId,
           deviceId: deviceB,
+          registerId: null,
         }),
       ).toBe(moneyFromTiyin(50_000n));
       expect(

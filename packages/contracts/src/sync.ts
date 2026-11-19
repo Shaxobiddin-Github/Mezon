@@ -491,6 +491,7 @@ export const CashMovesPayloadSchema = z
     createdAtMs: UnixMsPayloadSchema,
     shiftId: UuidV7Schema.nullable().optional(),
     shiftCashierSessionId: UuidV7Schema.nullable().optional(),
+    registerId: UuidV7Schema.nullable().optional(),
     type: z.string(),
     amountDelta: MoneyPayloadSchema,
     sourceType: z.string(),
@@ -806,6 +807,7 @@ export const ShiftsPayloadSchema = z
     openRequestHash: z.string(),
     closeClientRequestId: UuidV7Schema.nullable().optional(),
     closeRequestHash: z.string().nullable().optional(),
+    registerId: UuidV7Schema.nullable().optional(),
   })
   .strict();
 
@@ -835,6 +837,7 @@ export const ShiftCashierSessionsPayloadSchema = z
     endedAtMs: UnixMsPayloadSchema.nullable().optional(),
     handoffClientRequestId: UuidV7Schema.nullable().optional(),
     handoffRequestHash: z.string().nullable().optional(),
+    registerId: UuidV7Schema.nullable().optional(),
   })
   .strict();
 

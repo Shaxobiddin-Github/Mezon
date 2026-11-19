@@ -38,21 +38,23 @@ Holat: **HISOBOT**. Tekshiruv kutilyapti. O'zim merge qilmayman.
 | Vazifa | Natija | Isbot |
 |---|---|---|
 | T4.1 LAN hub | tayyor | haqiqiy HTTPS + pin. Juftlanmagan, soxta yoki bekor qilingan terminal → 401 (route'ga yetmaydi). MITM sertifikati so'rovni umuman olmaydi. Kod bir martalik, muddatli, 5 xatoda yonadi. L1–L10 o'ldi |
-| T4.2 ko'p kassa | **qisman** | 3 terminal 30 dona uchun poyga: aniq 30 chek, zaxira 0, chek raqamlari 1..30 bo'shliqsiz; savdo kassaga bog'langan. Har kassaning o'z smenasi va yashigi: **[ishchi2-savol]** (pastda) |
+| T4.2 ko'p kassa | tayyor (variant B) | 3 terminal 30 dona uchun poyga: aniq 30 chek, zaxira 0, chek raqamlari 1..30 bo'shliqsiz. **Har kassaning o'z smenasi, kassir sessiyasi va yashigi** (`register_id`): yashik qoldig'i kassa bo'yicha, naqd harakat faqat o'z yashigiga, bitta kassa yopilsa boshqalari sotaveradi. Bulut ikkala ochiq smenani o'z kassasi bilan saqlaydi (PG E2E). B-M1…B-M6 o'ldi |
 | T4.3 printer | tayyor | har kassa o'z printeri va yashigi; printersiz kassa begona printerga chiqarmaydi; P1–P4, M1 o'ldi |
 | T2.8 yakuniy test | tayyor | hub SQLite + bulut PostgreSQL (RLS app roli), 10 seed, 10/10 (3 marta ketma-ket: 30/30). Oxirida qoldiq, qarz, tushum va qaytarishlar ikki tomonda teng. E1–E3 o'ldi, nazorat mutatsiyasi tirik qoldi |
 
-**Depcruise qoidasi kengaytirildi.** `packages/drivers/src/node` ga `crypto`, `tls`, `https` ruxsat etildi. Faqat T4.1 uchun: sertifikat yasash va pinned TLS mijozi. `pnpm verify` (`MEZON_REQUIRE_PG_TESTS=1`) yashil.
+**Depcruise qoidasi kengaytirildi.** `packages/drivers/src/node` ga `crypto`, `tls`, `https` ruxsat etildi. Faqat T4.1 uchun: sertifikat yasash va pinned TLS mijozi.
+
+`pnpm verify` (`MEZON_REQUIRE_PG_TESTS=1`, T4.2 B bilan): **yashil**: 131 fayl, 1067 test (22 tasi `sync-push.test.ts`: birinchi yurishda PG konteyneri 60 s da ko'tarilmadi, alohida qayta yurgizildi, 22/22); perf 17; E2E 1; lint, depcruise, db:check.
 
 ## Qolgan ishlar (P3)
 
-1. **T4.2 kassa smenasi/yashigi** — [ishchi2-savol] javobiga bog'liq (B varianti taklif).
-2. **C2 merge bo'lgach:**
+1. **C2 merge bo'lgach:**
    - LAN juftlash keshdagi imzolangan litsenziyaning `devices` chegarasini tekshiradi (faqat o'sish to'xtaydi);
    - `readUpdateReadiness` to'langan va ishlatilmagan / `pending` QR'ni (P2) ochiq chek deb sanaydi.
 
    Ikkalasi C2 tekshiruvida ham yozilgan.
-3. **POS ilovasida LAN ulanish ekrani** (kod kiritish, barmoq izini ko'rsatish) — T4.4 (C2, web-kassa) bilan birga. Hozir faqat API va `pairWithLanHub` mijoz kodi bor.
+   - bulut migratsiyasi `0008_register_shifts` → `0009` qilib qayta yaratiladi (C2 `0008_licences` dan keyin).
+2. **POS ilovasida LAN ulanish ekrani** (kod kiritish, barmoq izini ko'rsatish) — T4.4 (C2, web-kassa) bilan birga. Hozir faqat API va `pairWithLanHub` mijoz kodi bor.
 
 ## T4.1 — LAN hub, juftlangan terminallar, pinned TLS
 
@@ -120,12 +122,48 @@ Hub bitta qurilma. Shuning uchun 3 terminal bitta smena va bitta yashikni bo'lis
 | **B (taklif)** | `shifts`, `shift_cashier_sessions`, `cash_moves` ga `register_id` (NULL = hub); noyoblik `(device, register)` bo'yicha | O'rtacha. Ikkala migratsiya, kontrakt, proyeksiya; eski ma'lumot NULL bilan mos |
 | C | Smena umumiy, faqat sessiya terminal bo'yicha | B ga yaqin, lekin smena yopilishi hamma terminalni birga yopadi |
 
-**QAROR (javobsiz, vaqtincha).** Javob kelguncha sinxron jadvallarga tegmayman. Hozir quyidagilar qilindi:
-- savat va savdo terminalga bog'landi (`local_carts.terminal_id`, LOCAL);
-- `GET /lan/terminals/sales` — kassa bo'yicha tushum;
-- mezon testi (3 terminal, 30 dona uchun poyga): zaxira 0, chek raqamlari 1..30 bo'shliqsiz.
+**Javob: Variant B** (nazoratchi, `72583b9`). Bajarildi.
 
-Javob B bo'lsa, alohida commit'lar bilan shu paketda qilaman.
+### T4.2 variant B — har kassaning o'z smenasi va yashigi (bajarildi)
+
+**Ma'lumot.** `shifts`, `shift_cashier_sessions`, `cash_moves` ga `register_id` qo'shildi. `NULL` = hub kompyuterining o'z kassasi, aks holda LAN terminal id. Ikkala tomonda:
+- hub: `0025_register_shifts`;
+- bulut: `0008_register_shifts` (C2 dan keyin `0009` bo'ladi).
+
+Kontrakt: payload'larda `registerId` ixtiyoriy va nullable, ya'ni eski hub va eski hodisalar o'zgarishsiz qabul qilinadi. `ShiftDto` da `registerId`.
+
+**Noyoblik.** `uidx_shifts_one_open_per_device` endi `(org, store, device, (CASE WHEN register_id IS NULL THEN '' ELSE CAST(register_id AS text) END))` bo'yicha, `status = 'open'`. Nom va qisman shart saqlangan, shuning uchun `shift-migrations.ts` tekshiruvi o'zgarmadi.
+
+Oddiy `register_id` emas, ifoda ishlatilgan. Sabab: NULL'lar bir-biridan farqli hisoblanadi. Shunda hub kassasida ikkita ochiq smena DB darajasida ruxsat etilib qolardi (B-M2 mutatsiyasi buni isbotlaydi). `coalesce` ishlatilmadi: drizzle-kit SQLite indeks ifodasidagi vergulni buzadi. `CAST` esa PG'da uuid/text turlarini moslashtiradi.
+
+**Kassa qayerdan olinadi.** So'rov kontekstidan, hech qachon body'dan emas.
+- Hub `onRequest` hook'ida so'rovni `runInRegisterScope(terminalIdOf(request))` ichida yurgizadi. Terminal id'ni P3 trust hook'i tekshirgan.
+- `db-local` `AsyncLocalStorage` (`register-scope.ts`) dan o'qiydi. U yerda allaqachon UoW konteksti uchun ishlatiladi.
+- Smena helper'lari (`getActiveShiftSessionSync`, `requireOpenShiftSessionSync`, `getActiveShiftDrawerBalanceSync`) `registerId` ni **majburiy** parametr qilib oladi. Shu tufayli `tsc` har chaqiruvchini topdi: savdo, qaytarish, buyurtma, mijoz va yetkazib beruvchi to'lovlari, smena amallari.
+- Sessiya va naqd harakatlari `register_id` ni o'z smenasidan oladi.
+- Do'kon bo'yicha naqd qoldiq har ochiq `(device, register)` yashigini qo'shadi.
+
+**Testlar.**
+
+| Test | Nima isbotlanadi |
+|---|---|
+| `multi-register.test.ts` (5) | 3 kassa poygasi: har kassaning o'z kassiri va smenasi bor, sotgani o'z smenasiga tushadi, yashik qoldig'i `5000 × o'zi sotgani`. Smenasiz kassa sota olmaydi (409). Bitta kassada ikkinchi ochish 409. Hub kassasi alohida. Bir kassada naqd chiqarish faqat o'z yashigiga ta'sir qiladi. `register_id` smena, sessiya va naqd harakatda bir xil. Outbox payload'da `registerId` bor. Bitta kassa yopilsa boshqasi sotaveradi. DB darajasida bitta kassada ikkinchi ochiq smena `UNIQUE` bilan rad etiladi, hub kassasi (`NULL`) uchun ham |
+| `hub-cloud-e2e…` (PG) | LAN kassa va hub kassasi bittadan ochiq smena ochadi, terminalda naqd savdo bo'ladi, push qilinadi. Bulutda ikkala ochiq smena bitta qurilmada, `register_id` lari `[null, terminal]`. Naqd harakat va sessiya terminal kassasi bilan saqlangan. Bulut indeksi hub kassasida ikkinchi ochiq smenani rad etadi |
+
+**Mutatsiyalar: 6/6 o'ldi.**
+
+| # | Mutatsiya | Natija |
+|---|---|---|
+| B-M1 | ochiq smena qidiruvi kassani e'tiborsiz qoldiradi | o'ldi |
+| B-M2 | indeks oddiy `register_id` bo'yicha (NULL bitta kassa emas) | o'ldi |
+| B-M3 | `openShift` kassani yozmaydi | o'ldi |
+| B-M4 | so'rov kassa kontekstiga kiritilmaydi | o'ldi |
+| B-M5 | savdo naqd harakati kassasiz yoziladi | o'ldi |
+| B-M6 | `GET /shifts/current` doim hub kassasini ko'rsatadi | o'ldi |
+
+**Migratsiyalar qayta yaratildi.** P2 `0023` qayta yaratilgani uchun P3 ning lokal `0024–0026` lari bitta `0024_lan_terminals` qilib qayta yaratildi. SQL bayonotlari bir xil, faqat `printer_json` `CREATE TABLE` ichiga o'tdi.
+
+**Egasiga savol (fiskal, T3.0 bilan).** Qonunga ko'ra har kassada o'z fiskal moduli (yoki virtual kassa) bo'lishi kerakmi? Hozir fiskal navbat smena bo'yicha ishlaydi va bitta drayver ishlatadi (Fake). Har kassaga alohida fiskal drayver kerak bo'lsa, bu T3.0 hujjatidan keyin qilinadi.
 
 ## T4.3 — terminal printeri va yashik (bajarildi)
 
