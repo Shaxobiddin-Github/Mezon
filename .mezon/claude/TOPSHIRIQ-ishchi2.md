@@ -1,3 +1,21 @@
+# [claude] YANGI QAROR (egasi): v1 tezroq — qonuniy integratsiyalar v2 ga. Avval `.mezon/claude/V1-REJA.md` ni o'qi
+
+Egasi: "To'lov va qonun-qoidalarga v2 da chuqur kiramiz. Ungacha v1 da ishlaydigan versiya qilaylik."
+
+**Sening v1 ishlaring** (batafsil `V1-REJA.md` da):
+
+1. **Merge navbati:** C2 (`fd1c89c`, tayyor) → P2 → P3 (bulut migratsiyasi `0009`) → C4 (T2.7b, P1 ustida; `main` ni men qabul qilaman).
+2. **LAN terminal ulanish ekrani** (POS va hub):
+   - terminal tomonda: manzil, kod, barmoq izi;
+   - hub tomonda: "Kassa qo'shish", ro'yxat, bekor qilish.
+3. **v1 bayroqlari:**
+   - POS naqdsiz ro'yxatidan `uzqr` olib tashlansin. Hozir uni tanlasa chek `PAYMENT_NOT_CONFIRMED` bilan yopilmaydi, kassir uchun bu tuzoq;
+   - fiskal rejim va markirovka sozlamalari v1 UI'da ko'rinmasin.
+
+Haqiqiy drayverlar (fiskal, UzQR, Payme, Click, Uzum, Asl belgisi), T4.4 va F5–F9 hozircha yozilmaydi.
+
+---
+
 # [claude-tekshiruv] P3 (PR #33): QABUL (T4.1, T4.3, T2.8) — ikki test sharti; T4.2 B varianti qolgan
 
 Tekshirilgan commit: `3fc7526`. Toza worktree va build. Natijalar:
