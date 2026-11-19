@@ -1,4 +1,5 @@
 import { randomBytes } from 'node:crypto';
+import { networkInterfaces } from 'node:os';
 import { DomainError, type UuidV7, parseUuidV7 } from '@mezon/domain';
 import Fastify, { type FastifyInstance, type FastifyRequest, type HTTPMethods } from 'fastify';
 import { z } from 'zod';
@@ -43,7 +44,7 @@ const PairBody = z.strictObject({
   proof: z.string().regex(/^[0-9a-f]{64}$/),
 });
 
-const FORWARD_METHODS: HTTPMethods[] = ['GET', 'POST', 'PUT', 'PATCH', 'DELETE'];
+const FORWARD_METHODS: HTTPMethods[] = ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'];
 const HOP_BY_HOP = new Set(['connection', 'content-length', 'transfer-encoding', 'keep-alive']);
 
 const errorBody = (code: string, message: string) => ({ error: { code, message } });
@@ -163,11 +164,31 @@ const PeriodQuery = z.strictObject({
   toMs: z.string().regex(/^[0-9]{1,16}$/),
 });
 
+/** IPv4 addresses of this computer that a terminal can type in (no loopback, no link-local). */
+export function lanIpv4Addresses(): string[] {
+  const out: string[] = [];
+  for (const list of Object.values(networkInterfaces())) {
+    for (const a of list ?? []) {
+      if (a.family === 'IPv4' && !a.internal && !a.address.startsWith('169.254.')) {
+        out.push(a.address);
+      }
+    }
+  }
+  return out;
+}
+
+/** The desktop hub's on-demand LAN listener (absent in tests that start it themselves). */
+export interface LanListenerControl {
+  ensureListening(): Promise<number>;
+  listeningPort(): number | null;
+}
+
 /** Owner/manager LAN management; only from the hub machine itself, never from a LAN terminal. */
 export function registerLanRoutes(
   app: FastifyInstance,
   authService: HubAuthService,
   lanService: HubLanService,
+  listener?: LanListenerControl,
 ): void {
   const authorize = async (request: FastifyRequest) => {
     if (terminalIdOf(request) !== null) {
@@ -180,12 +201,29 @@ export function registerLanRoutes(
 
   app.get('/lan/status', async (request) => {
     await authorize(request);
-    return lanService.status();
+    return {
+      ...(await lanService.status()),
+      port: listener?.listeningPort() ?? null,
+      addresses: lanIpv4Addresses(),
+    };
   });
 
   app.post('/lan/pairing-codes', async (request, reply) => {
     const session = await authorize(request);
-    return reply.code(201).send(await lanService.createPairingCode(session.user.id));
+    // A code is useless if terminals cannot reach the hub: open the listener first.
+    let port: number | null = null;
+    if (listener !== undefined) {
+      try {
+        port = await listener.ensureListening();
+      } catch (err) {
+        throw new DomainError(
+          'LAN_LISTENER_FAILED',
+          `LAN port could not be opened: ${err instanceof Error ? err.message : String(err)}`,
+        );
+      }
+    }
+    const code = await lanService.createPairingCode(session.user.id);
+    return reply.code(201).send({ ...code, port, addresses: lanIpv4Addresses() });
   });
 
   app.get('/lan/terminals', async (request) => {

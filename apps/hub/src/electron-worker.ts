@@ -1,8 +1,12 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { createRotatingHubLogStream } from './logger.js';
+import { AesGcmSafeStorageAdapter } from './safe-storage-port.js';
 import { createHubServer, type CreateHubServerOptions, type HubServer } from './server.js';
 import { readUpdateReadiness, type UpdateReadiness } from './update-readiness.js';
+
+/** v1: fixed LAN port; a terminal stores `<hub IP>:47821` at pairing. */
+export const DEFAULT_LAN_PORT = 47821;
 
 export interface HubWorkerStartMessage {
   readonly type: 'start';
@@ -12,6 +16,11 @@ export interface HubWorkerStartMessage {
   readonly allowedOrigins: readonly string[];
   readonly maxLogBytes?: number;
   readonly maxLogFiles?: number;
+  /**
+   * Base64 32-byte key for secrets at rest (cloud token, LAN key). Desktop keeps it across restarts
+   * (OS-wrapped in userData); without it a random per-process key is used (tests only).
+   */
+  readonly dataKeyB64?: string;
 }
 
 export interface HubWorkerShutdownMessage {
@@ -107,6 +116,16 @@ function parseStartMessage(raw: unknown): HubWorkerStartMessage | null {
       : undefined;
   const maxLogBytes = typeof record['maxLogBytes'] === 'number' ? record['maxLogBytes'] : undefined;
   const maxLogFiles = typeof record['maxLogFiles'] === 'number' ? record['maxLogFiles'] : undefined;
+  let dataKeyB64: string | undefined;
+  if (record['dataKeyB64'] !== undefined) {
+    if (
+      typeof record['dataKeyB64'] !== 'string' ||
+      Buffer.from(record['dataKeyB64'], 'base64').length !== 32
+    ) {
+      throw new Error('Hub worker start message has an invalid dataKeyB64');
+    }
+    dataKeyB64 = record['dataKeyB64'];
+  }
 
   return {
     type: 'start',
@@ -116,6 +135,7 @@ function parseStartMessage(raw: unknown): HubWorkerStartMessage | null {
     allowedOrigins,
     maxLogBytes,
     maxLogFiles,
+    ...(dataKeyB64 !== undefined ? { dataKeyB64 } : {}),
   };
 }
 
@@ -167,6 +187,10 @@ export function attachHubWorkerController(deps: HubWorkerControllerDeps) {
       port: portToTry,
       allowedOrigins: start.allowedOrigins,
       logStream,
+      lanPort: DEFAULT_LAN_PORT,
+      ...(start.dataKeyB64 !== undefined
+        ? { safeStorage: new AesGcmSafeStorageAdapter(Buffer.from(start.dataKeyB64, 'base64')) }
+        : {}),
     });
     try {
       const bound = await hub.listen();

@@ -22,6 +22,30 @@ export interface UpdateBridgeState {
 }
 
 export type UpdateChoice = NonNullable<UpdateBridgeState['schedule']>;
+/** v1 LAN terminal mode, as the desktop main process reports it (never the terminal key). */
+export type TerminalInfo =
+  | { readonly mode: 'hub' }
+  | {
+      readonly mode: 'terminal';
+      readonly terminalName: string;
+      readonly hubHost: string;
+      readonly hubPort: number;
+      readonly fingerprint256: string;
+      readonly pairedAtMs: number;
+    };
+
+export type TerminalPairResult =
+  | { readonly ok: true; readonly fingerprint256: string }
+  | {
+      readonly ok: false;
+      readonly code:
+        | 'INVALID_INPUT'
+        | 'ALREADY_TERMINAL'
+        | 'LOCAL_DATA_EXISTS'
+        | 'LOCAL_HUB_NOT_READY'
+        | 'PAIRING_REJECTED'
+        | 'HUB_UNREACHABLE';
+    };
 
 export interface MezonBridge {
   getHubState(): Promise<HubBridgeState>;
@@ -31,6 +55,22 @@ export interface MezonBridge {
   scheduleUpdate?(choice: UpdateChoice): Promise<boolean>;
   cancelUpdate?(): Promise<void>;
   onUpdateState?(listener: (state: UpdateBridgeState) => void): () => void;
+  /** Desktop only (absent in the browser dev build). */
+  getTerminalInfo?(): Promise<TerminalInfo>;
+  pairAsTerminal?(input: {
+    host: string;
+    port: number;
+    code: string;
+    terminalName: string;
+  }): Promise<TerminalPairResult>;
+  leaveTerminal?(): Promise<{ readonly ok: boolean }>;
+  relaunchApp?(): Promise<void>;
+}
+
+/** Fingerprint shown in groups of 4 so two screens can be compared by eye. */
+export function formatFingerprint(fp: string): string {
+  const hex = fp.replace(/[^0-9A-Fa-f]/g, '').toUpperCase();
+  return (hex.match(/.{1,4}/g) ?? []).join(' ');
 }
 
 export interface HealthPayload {

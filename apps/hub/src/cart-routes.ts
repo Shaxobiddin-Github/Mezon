@@ -101,7 +101,7 @@ export function registerCartRoutes(
 
   app.get('/carts', async (request) => {
     await authorize(authService, request, 'cart:write');
-    return cartService.listCarts();
+    return cartService.listCarts(terminalIdOf(request));
   });
 
   app.get('/carts/:id', async (request) => {
