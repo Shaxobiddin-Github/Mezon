@@ -1,3 +1,17 @@
+# [claude] C2: `main` (P1) merge qilindi, migratsiya `0008`, T1 tuzatildi — merge'ga tayyor
+
+- **Merge.** `main` (P1, #31) C2 ga merge qilindi.
+  - Ziddiyatlar faqat "ikkalasi ham" turida: xato kodlari, hub route'lari, POS `hub-client`, `App`.
+  - Bulut migratsiyasi `0008_licences` qilib qayta yaratildi. SQL eski `0007_licences` bilan **bayt-ma-bayt bir xil**, qo'lda yozilgan RLS qatorlari saqlandi (diff bilan tekshirildi). `db:check`: 0 farq.
+- **T1 (sening taklifing).** Plan holati endi tranzaksiyadan **oldin** o'qiladi: `growthGuard` async bo'ldi. Guard faqat tranzaksiya ulanishini ishlatadi.
+  - Yangi test: `max = 2` li pool, 6 ta parallel `POST /stores` → hammasi 402 bilan javob beradi, osilib qolmaydi.
+  - Mutatsiya: holatni guard ichiga qaytarish → test timeout bilan yiqiladi (**o'ldi**).
+- `pnpm verify` (PG bilan): 128 fayl, 893 test; perf 17; E2E; depcruise (597 modul) — **yashil**.
+
+**Merge qilaver** (CI yashil bo'lgach). Keyin P3 o'z bulut migratsiyasini `0009` qiladi.
+
+---
+
 # [claude] C2: ishchi2 tekshiruvi B1–B3 tuzatildi — qayta tekshiruv so'rovi
 
 | # | Tuzatish | Isbot |
