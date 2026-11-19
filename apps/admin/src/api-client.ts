@@ -3,6 +3,7 @@ import type {
   AdminCustomersQueryDto,
   AdminCustomersResponseDto,
   AdminDashboardResponseDto,
+  AdminProductsResponseDto,
   AdminReceiptDetailResponseDto,
   AdminReceiptsQueryDto,
   AdminReceiptsResponseDto,
@@ -193,12 +194,50 @@ export class AdminApiClient {
     await this.request<unknown>('/api/v1/admin/telegram/link', { method: 'DELETE' });
   }
 
+  async getProducts(params?: {
+    search?: string;
+    cursor?: string;
+    limit?: number;
+  }): Promise<AdminProductsResponseDto> {
+    const query = new URLSearchParams();
+    if (params?.search) query.set('search', params.search);
+    if (params?.cursor) query.set('cursor', params.cursor);
+    if (params?.limit) query.set('limit', params.limit.toString());
+    const qs = query.toString() ? `?${query.toString()}` : '';
+    return this.request<AdminProductsResponseDto>(`/api/v1/admin/products${qs}`);
+  }
+
+  /** T2.7b: new sale price (tiyin) — reaches every kassa by sync. */
+  async changeProductPrice(
+    productId: string,
+    body: { newPrice: string; reason?: string },
+  ): Promise<{ changed: boolean; oldPrice: string | null; newPrice: string }> {
+    return this.request(`/api/v1/admin/products/${encodeURIComponent(productId)}/price`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    });
+  }
+
+  async getPriceChanges(productId: string): Promise<{ changes: PriceChange[] }> {
+    return this.request(`/api/v1/admin/products/${encodeURIComponent(productId)}/price-changes`);
+  }
+
   async createCustomerTelegramLink(customerId: string): Promise<TelegramLink> {
     return this.request<TelegramLink>(
       `/api/v1/admin/customers/${encodeURIComponent(customerId)}/telegram-link`,
       { method: 'POST' },
     );
   }
+}
+
+export interface PriceChange {
+  readonly id: string;
+  readonly oldPrice: string | null;
+  readonly newPrice: string;
+  readonly changedByName: string | null;
+  readonly reason: string | null;
+  readonly createdAtMs: string;
 }
 
 export interface TelegramStatus {

@@ -31,6 +31,8 @@ import {
   AdminReadStore,
   CloudTelegramStore,
   CloudAuthStore,
+  CloudCabinetStore,
+  CloudEventWriter,
   CloudDeviceStore,
   type CloudParkedEventRecord,
   CloudSyncParkedStore,
@@ -42,11 +44,13 @@ import {
   type VerifiedDeviceContext,
   assertNonSuperuserNonBypassRls,
 } from '@mezon/db-cloud';
-import { registerAdminRoutes } from './admin-routes.js';
+import { createRequireAdminAuth, registerAdminRoutes } from './admin-routes.js';
 import { isTelegramEnabled } from './config.js';
 import { TelegramBotService } from './telegram/bot-service.js';
 import { TelegramScheduler } from './telegram/scheduler.js';
 import { registerTelegramRoutes } from './telegram-routes.js';
+import { CloudCabinetService } from './cabinet-service.js';
+import { registerCabinetRoutes } from './cabinet-routes.js';
 import {
   MIN_CLIENT_VERSION,
   SyncPushRequestSchema,
@@ -951,6 +955,18 @@ export async function buildCloudServer(options: BuildServerOptions): Promise<Fas
     authStore,
     adminStore,
     clock,
+  });
+  // T2.7b: cabinet writes go through the cloud event writer (ordinary sync events).
+  const cabinetStore = new CloudCabinetStore(conn.pool);
+  registerCabinetRoutes(app, {
+    requireAdminAuth: createRequireAdminAuth(jwtService),
+    store: cabinetStore,
+    service: new CloudCabinetService({
+      store: cabinetStore,
+      writer: new CloudEventWriter(conn.pool, syncPushStore, idGen),
+      idGen,
+      clock,
+    }),
   });
   // T2.6: parked push events of the calling hub's store (device token). View, retry, acknowledge.
   const toParkedDto = (r: CloudParkedEventRecord): CloudParkedEventDto => ({

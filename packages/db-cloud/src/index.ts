@@ -123,6 +123,15 @@ export { resolveIntlDateKey } from './timezone.js';
 export { CloudSyncPullStore, ForeignStoreError } from './sync-pull-store.js';
 export { CloudSyncParkedStore, type CloudParkedEventRecord } from './sync-parked-store.js';
 export {
+  type CabinetActor,
+  type CabinetCommand,
+  CloudCabinetStore,
+  cabinetAttributionUserCommand,
+  priceChangeCommands,
+  type SyncRowPayload,
+  syncPayloadKeys,
+} from './cabinet-store.js';
+export {
   CloudEventWriter,
   type CloudCommand,
   type CloudEventWriteResult,
