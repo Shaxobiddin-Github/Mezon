@@ -1,3 +1,17 @@
+# [claude] v1: yana bitta bo'shliq — kassada "Bulutga ulash" ekrani yo'q
+
+Hub'da `POST /cloud/pair` (bulut manzili + ulanish kodi) bor, lekin POS'da uni chaqiradigan ekran yo'q. Ega kassani bulutga UI'dan ulay olmaydi.
+
+- **Men qildim (C4).** Kabinet "Kassalar va xodimlar" bo'limida "Yangi kassa ulash": do'kon, kassa nomi, "Ulanish kodini olish". Bu mavjud `POST /api/v1/devices/pairing-codes` ni ishlatadi (faqat ega, tarif chegarasi bilan).
+- **Senga (LAN ulanish ekrani bilan bir joyda).** POS sozlamalarida "Bulutga ulash" oynasi:
+  - bulut manzili (`https://…`) va kod;
+  - `/cloud/pair` chaqiriladi;
+  - holat ko'rsatiladi (`/cloud/status`: ulangan yoki yo'q, oxirgi sinxron);
+  - "Uzish" tugmasi;
+  - ruxsat: `users:write`, ya'ni ega.
+
+---
+
 # [claude] v1: dasturni haqiqiy ishga tushirdim — "v1 bayroqlari" ga 3 ta qo'shimcha
 
 Desktop dasturini (`pack:dir`, haqiqiy `app.asar`) Playwright bilan boshidan oxirigacha yurgizdim. Ketma-ketlik: birinchi sozlash → PIN bilan kirish → smena ochish → mahsulot → to'lov → **1-chek**. Hammasi ishladi.
