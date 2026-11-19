@@ -961,6 +961,8 @@ export async function buildCloudServer(options: BuildServerOptions): Promise<Fas
   registerCabinetRoutes(app, {
     requireAdminAuth: createRequireAdminAuth(jwtService),
     store: cabinetStore,
+    deviceStore,
+    clock,
     service: new CloudCabinetService({
       store: cabinetStore,
       writer: new CloudEventWriter(conn.pool, syncPushStore, idGen),

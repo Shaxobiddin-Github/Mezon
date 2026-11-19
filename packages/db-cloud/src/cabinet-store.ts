@@ -95,6 +95,88 @@ export class CloudCabinetStore {
     });
   }
 
+  /** Kassa devices of the organization (the cloud's own virtual device is not a kassa). */
+  async listDevices(organizationId: UuidV7): Promise<
+    {
+      id: string;
+      name: string;
+      storeName: string | null;
+      platform: string;
+      appVersion: string;
+      status: string;
+      lastSeenAtMs: string;
+    }[]
+  > {
+    return withPgTenantContext(this.pool, organizationId, async (_tx, client) => {
+      const res = await client.query<{
+        id: string;
+        name: string;
+        store_name: string | null;
+        platform: string;
+        app_version: string;
+        status: string;
+        last_seen_at_ms: string;
+      }>(
+        `SELECT d.id, d.name, s.name AS store_name, d.platform, d.app_version, d.status,
+                d.last_seen_at_ms::text AS last_seen_at_ms
+           FROM cloud_devices d
+           LEFT JOIN cloud_stores s ON s.organization_id = d.organization_id AND s.id::text = d.store_id
+          WHERE d.organization_id = $1 AND d.status <> 'system'
+          ORDER BY d.status = 'active' DESC, d.last_seen_at_ms DESC, d.id`,
+        [organizationId],
+      );
+      return res.rows.map((r) => ({
+        id: r.id,
+        name: r.name,
+        storeName: r.store_name,
+        platform: r.platform,
+        appVersion: r.app_version,
+        status: r.status,
+        lastSeenAtMs: r.last_seen_at_ms,
+      }));
+    });
+  }
+
+  /** Is this device row the cloud's virtual device (never revocable from the cabinet)? */
+  async isSystemDevice(organizationId: UuidV7, id: UuidV7): Promise<boolean> {
+    return withPgTenantContext(this.pool, organizationId, async (_tx, client) => {
+      const res = await client.query<{ status: string }>(
+        'SELECT status FROM cloud_devices WHERE organization_id = $1 AND id = $2',
+        [organizationId, id],
+      );
+      return res.rows[0]?.status === 'system';
+    });
+  }
+
+  /** Staff as the kassas know them (synced `users`), without cabinet attribution rows. */
+  async listStaff(
+    organizationId: UuidV7,
+  ): Promise<
+    { id: string; username: string; fullName: string; role: string; isActive: boolean }[]
+  > {
+    return withPgTenantContext(this.pool, organizationId, async (_tx, client) => {
+      const res = await client.query<{
+        id: string;
+        username: string;
+        full_name: string;
+        role: string;
+        is_active: boolean;
+      }>(
+        `SELECT id, username, full_name, role, is_active FROM users
+          WHERE organization_id = $1 AND deleted_at_ms IS NULL AND username NOT LIKE 'kabinet-%'
+          ORDER BY is_active DESC, role, full_name, id`,
+        [organizationId],
+      );
+      return res.rows.map((r) => ({
+        id: r.id,
+        username: r.username,
+        fullName: r.full_name,
+        role: r.role,
+        isActive: r.is_active,
+      }));
+    });
+  }
+
   /** Price history of a product (newest first), with who changed it. */
   async listPriceChanges(
     organizationId: UuidV7,

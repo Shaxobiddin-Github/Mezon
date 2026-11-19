@@ -219,6 +219,21 @@ export class AdminApiClient {
     });
   }
 
+  async getDevices(): Promise<{ devices: CabinetDevice[] }> {
+    return this.request('/api/v1/admin/devices');
+  }
+
+  /** Owner only (the server refuses a manager). */
+  async revokeDevice(id: string): Promise<void> {
+    await this.request(`/api/v1/admin/devices/${encodeURIComponent(id)}/revoke`, {
+      method: 'POST',
+    });
+  }
+
+  async getStaff(): Promise<{ staff: CabinetStaff[] }> {
+    return this.request('/api/v1/admin/staff');
+  }
+
   async getPriceChanges(productId: string): Promise<{ changes: PriceChange[] }> {
     return this.request(`/api/v1/admin/products/${encodeURIComponent(productId)}/price-changes`);
   }
@@ -229,6 +244,24 @@ export class AdminApiClient {
       { method: 'POST' },
     );
   }
+}
+
+export interface CabinetDevice {
+  readonly id: string;
+  readonly name: string;
+  readonly storeName: string | null;
+  readonly platform: string;
+  readonly appVersion: string;
+  readonly status: string;
+  readonly lastSeenAtMs: string;
+}
+
+export interface CabinetStaff {
+  readonly id: string;
+  readonly username: string;
+  readonly fullName: string;
+  readonly role: string;
+  readonly isActive: boolean;
 }
 
 export interface PriceChange {

@@ -342,4 +342,63 @@ describePg('@mezon/cloud - T2.7b cabinet writes (price) through the event writer
     );
     expect(pb.sale_price).toBe('1000000');
   });
+
+  it('devices: list without the cloud virtual device; only the owner revokes; another org cannot', async () => {
+    const kassa = idGen.nextId();
+    const storeRow = await q<{ id: string }>(
+      'SELECT id FROM cloud_stores WHERE organization_id = $1 LIMIT 1',
+      [orgA],
+    );
+    await withPgTenantContext(adminConn.pool, orgA, async (_tx, c) => {
+      await c.query(
+        `INSERT INTO cloud_devices (id, organization_id, store_id, device_id, name, platform, app_version, status, last_seen_at_ms, created_at_ms, updated_at_ms)
+         VALUES ($1, $2, $3, $4, 'Kassa 1', 'windows', '1.0.0', 'active', $5, $5, $5)`,
+        [kassa, orgA, storeRow[0].id, idGen.nextId(), String(nowMs)],
+      );
+    });
+    const auth = async (login: string) => ({
+      authorization: `Bearer ${await token(login)}`,
+    });
+    const list = await server.inject({
+      method: 'GET',
+      url: '/api/v1/admin/devices',
+      headers: await auth('kab_a@guzar.uz'),
+    });
+    const devices = (JSON.parse(list.payload) as { devices: { id: string; status: string }[] })
+      .devices;
+    expect(devices.map((d) => d.id)).toEqual([kassa]); // the 'system' device is not listed
+    const system = await q<{ id: string }>(
+      `SELECT id FROM cloud_devices WHERE organization_id = $1 AND status = 'system'`,
+      [orgA],
+    );
+    expect(system).toHaveLength(1);
+    const revoke = async (login: string, id: string) =>
+      server.inject({
+        method: 'POST',
+        url: `/api/v1/admin/devices/${id}/revoke`,
+        headers: await auth(login),
+      });
+    expect((await revoke('kab_a@guzar.uz', system[0].id)).statusCode).toBe(404);
+    expect((await revoke('kab_b@guzar.uz', kassa)).statusCode).toBe(404);
+    expect((await revoke('kab_a@guzar.uz', kassa)).statusCode).toBe(200);
+    const [after] = await q<{ status: string }>('SELECT status FROM cloud_devices WHERE id = $1', [
+      kassa,
+    ]);
+    expect(after.status).toBe('revoked');
+    const [sys] = await q<{ status: string }>('SELECT status FROM cloud_devices WHERE id = $1', [
+      system[0].id,
+    ]);
+    expect(sys.status).toBe('system');
+  });
+
+  it('staff: synced kassa users without cabinet attribution rows', async () => {
+    const res = await server.inject({
+      method: 'GET',
+      url: '/api/v1/admin/staff',
+      headers: { authorization: `Bearer ${await token('kab_a@guzar.uz')}` },
+    });
+    const staff = (JSON.parse(res.payload) as { staff: { username: string; isActive: boolean }[] })
+      .staff;
+    expect(staff.map((u) => u.username)).toEqual(['ega_hub']);
+  });
 });
