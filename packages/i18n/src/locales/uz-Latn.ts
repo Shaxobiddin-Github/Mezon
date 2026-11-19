@@ -1,6 +1,6 @@
 export const UZ_LATN_MESSAGES = {
   // Shell & Common
-  'app.title': 'Mezon Kassa',
+  'app.title': 'Guzar Kassa',
   'app.subtitle': 'Oflayn kassa terminali',
   'app.theme.light': 'Kunduzgi mavzu',
   'app.theme.dark': 'Tungi mavzu',
@@ -173,7 +173,7 @@ export const UZ_LATN_MESSAGES = {
   'payment.acceptNewTotalBtn': 'Yangi summani qabul qilish',
 
   // Receipt View
-  'receipt.nonFiscalBanner': 'SINOV — FISKAL EMAS',
+  'receipt.nonFiscalBanner': 'FISKAL EMAS',
   'receipt.title': 'Savdo cheki',
   'receipt.code': 'Chek raqami',
   'receipt.receiptNo': 'Tartib №',

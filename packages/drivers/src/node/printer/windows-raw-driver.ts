@@ -126,7 +126,7 @@ export class WindowsRawPrinterDriver implements PrinterDriver {
     this.platform = options.platform ?? process.platform;
   }
 
-  public sendRaw(bytes: Uint8Array, jobTitle = 'Mezon Kassa Receipt'): Promise<PrintSendResult> {
+  public sendRaw(bytes: Uint8Array, jobTitle = 'Guzar Kassa Receipt'): Promise<PrintSendResult> {
     if (this.printerName.length === 0) {
       return Promise.resolve({
         ok: false,

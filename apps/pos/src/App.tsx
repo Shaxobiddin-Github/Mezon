@@ -1,4 +1,4 @@
-import { useEffect, useCallback, useRef } from 'react';
+import { useEffect, useCallback, useRef, useState } from 'react';
 import type { UuidV7 } from '@mezon/domain';
 import { LOCALE_LABELS, SUPPORTED_LOCALES, isLocale, t } from '@mezon/i18n';
 import { stepMilliQuantity } from '@mezon/ui';
@@ -69,6 +69,8 @@ export function App() {
   const locale = usePosStore((s) => s.locale);
   const setLocale = usePosStore((s) => s.setLocale);
   const user = usePosStore((s) => s.user);
+  // v1: fiscal mode is off by default; its screens are shown only when it is on.
+  const [fiscalModeEnabled, setFiscalModeEnabled] = useState(false);
   const clearSession = usePosStore((s) => s.clearSession);
   const setLoginOptions = usePosStore((s) => s.setLoginOptions);
   const currentShift = usePosStore((s) => s.currentShift);
@@ -573,6 +575,20 @@ export function App() {
     }
   }, [api, setCustomerList, setActiveModal, handleError]);
 
+  useEffect(() => {
+    if (screen !== 'pos') return undefined;
+    let cancelled = false;
+    api
+      .getFiscalStatus()
+      .then((st) => {
+        if (!cancelled) setFiscalModeEnabled(st.modeEnabled);
+      })
+      .catch(() => undefined);
+    return () => {
+      cancelled = true;
+    };
+  }, [api, screen]);
+
   return (
     // key={locale}: a language switch re-renders every screen with the new dictionary
     <div className="pos-shell" data-testid="pos-shell" key={locale}>
@@ -680,7 +696,7 @@ export function App() {
                   {t('catalog.openButton')}
                 </button>
               )}
-              {(user?.role === 'owner' || user?.role === 'manager') && (
+              {fiscalModeEnabled && (user?.role === 'owner' || user?.role === 'manager') && (
                 <button
                   type="button"
                   className="pos-btn"

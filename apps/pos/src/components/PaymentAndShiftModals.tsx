@@ -16,9 +16,12 @@ import { generateBrowserUuidV7 } from '../utils/browser-uuid.js';
 
 type NonCashMethod = 'card' | 'uzqr' | 'payme' | 'click' | 'uzum' | 'social_card' | 'other';
 
-const NON_CASH_METHODS: readonly NonCashMethod[] = [
+/**
+ * v1: non-cash payments are recorded by hand. UzQR is not offered: since T3.6 a UzQR payment closes a
+ * receipt only with a provider-confirmed QR, and the QR screen comes with the real driver (v2).
+ */
+export const NON_CASH_METHODS: readonly NonCashMethod[] = [
   'card',
-  'uzqr',
   'payme',
   'click',
   'uzum',

@@ -115,13 +115,19 @@ const FISCAL_MARK_TEXT: Readonly<Record<ReceiptFiscalBlock['mark'], string>> = {
 };
 
 /** Top banner lines: legacy test banner (no fiscal block) or test banner + fiscal mark. */
+/** v1 (fiscal mode off): every paper document says it is not fiscal. */
+const NON_FISCAL_LINE = '*** FISKAL EMAS ***';
+/** A test fiscal driver: the receipt additionally says it is a test (§3.3). */
+const TEST_DRIVER_LINE = '*** SINOV — FISKAL EMAS ***';
+
 function fiscalHeaderLines(
   fiscal: ReceiptFiscalBlock | undefined,
   width: 32 | 48,
   norm: (s: string) => string,
 ): StyledLine[] {
-  const test = { text: centerLine(norm('*** SINOV — FISKAL EMAS ***'), width), bold: true };
-  if (fiscal === undefined) return [test];
+  const test = { text: centerLine(norm(TEST_DRIVER_LINE), width), bold: true };
+  // v1: fiscal mode off = a real, non-fiscal receipt (not a "test"); "SINOV" only for a test driver.
+  if (fiscal === undefined) return [{ text: centerLine(norm(NON_FISCAL_LINE), width), bold: true }];
   const out: StyledLine[] = fiscal.testBanner ? [test] : [];
   out.push({ text: centerLine(norm(FISCAL_MARK_TEXT[fiscal.mark]), width), bold: true });
   return out;
@@ -153,7 +159,8 @@ function fiscalFooterLines(
   norm: (s: string) => string,
 ): StyledLine[] {
   if (fiscal !== undefined && !fiscal.testBanner) return [];
-  return [{ text: centerLine(norm('*** SINOV — FISKAL EMAS ***'), width), bold: true }];
+  const line = fiscal === undefined ? NON_FISCAL_LINE : TEST_DRIVER_LINE;
+  return [{ text: centerLine(norm(line), width), bold: true }];
 }
 
 function buildSaleReceiptLines(
@@ -447,7 +454,7 @@ function buildShiftCloseLines(
   const norm = (s: string) => normalizeTextForEncoding(s, encoding);
   const out: StyledLine[] = [];
 
-  out.push({ text: centerLine(norm('*** SINOV — FISKAL EMAS ***'), width), bold: true });
+  out.push({ text: centerLine(norm(NON_FISCAL_LINE), width), bold: true });
   out.push({ text: centerLine(norm('=== SMENA YOPILISH HISOBOTI ==='), width), bold: true });
   if (doc.isReprint || doc.copyNumber > 1) {
     out.push({
@@ -595,7 +602,7 @@ function buildShiftCloseLines(
   }
 
   out.push({ text: repeatDivider('=', width) });
-  out.push({ text: centerLine(norm('*** SINOV — FISKAL EMAS ***'), width), bold: true });
+  out.push({ text: centerLine(norm(NON_FISCAL_LINE), width), bold: true });
 
   return out;
 }
@@ -608,7 +615,7 @@ function buildTestPrintLines(
   const norm = (s: string) => normalizeTextForEncoding(s, encoding);
   const out: StyledLine[] = [];
 
-  out.push({ text: centerLine(norm('*** SINOV — FISKAL EMAS ***'), width), bold: true });
+  out.push({ text: centerLine(norm(NON_FISCAL_LINE), width), bold: true });
   out.push({ text: centerLine(norm('=== PRINTER SINOV CHEKI ==='), width), bold: true });
   for (const titleLine of wrapTextLines(norm(doc.headerTitle || 'GUZAR KASSA'), width)) {
     out.push({ text: centerLine(titleLine, width) });
@@ -647,7 +654,7 @@ function buildTestPrintLines(
     out.push({ text: wrapped });
   }
   out.push({ text: repeatDivider('=', width) });
-  out.push({ text: centerLine(norm('*** SINOV — FISKAL EMAS ***'), width), bold: true });
+  out.push({ text: centerLine(norm(NON_FISCAL_LINE), width), bold: true });
 
   return out;
 }

@@ -115,7 +115,7 @@ describe('@mezon/drivers - ESC/POS Encoder, Codepages (translit/cp866/cp1251), 5
     openCashDrawer: true,
   };
 
-  it('encodes 80mm (48 chars) and 58mm (32 chars) sale receipts with exact width, SINOV banner, and cash drawer pulse', () => {
+  it('encodes 80mm (48 chars) and 58mm (32 chars) sale receipts with exact width, the non-fiscal banner (v1: no SINOV word), and cash drawer pulse', () => {
     const out80 = encodeEscPosDocument({
       document: sampleSaleDoc,
       paperWidthMm: 80,
@@ -125,7 +125,8 @@ describe('@mezon/drivers - ESC/POS Encoder, Codepages (translit/cp866/cp1251), 5
     for (const line of out80.textPreview.split('\n')) {
       expect(line.length).toBeLessThanOrEqual(48);
     }
-    expect(out80.textPreview).toContain('*** SINOV - FISKAL EMAS ***');
+    expect(out80.textPreview).toContain('*** FISKAL EMAS ***');
+    expect(out80.textPreview).not.toContain('SINOV');
     expect(out80.textPreview).not.toContain('NUSXA');
     expect(out80.textPreview).toContain("Qo'qon holvasi (sutli) [Tez savdo]");
     expect(out80.textPreview).toContain("JAMI TO'LOV:");
