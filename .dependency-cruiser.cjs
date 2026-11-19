@@ -157,7 +157,7 @@ module.exports = {
       },
       to: {
         pathNot:
-          '^(apps/hub/src/|packages/(domain|contracts|db-local|drivers|sync|rules)/|node_modules/(\\.pnpm/)?(fastify|pino|@node-rs/argon2|@node-rs\\+argon2|zod|exceljs)@|(node:)?(crypto|fs|path|stream)$)',
+          '^(apps/hub/src/|packages/(domain|contracts|db-local|drivers|sync|rules)/|node_modules/(\\.pnpm/)?(fastify|pino|@node-rs/argon2|@node-rs\\+argon2|zod|exceljs)@|(node:)?(crypto|fs|os|path|stream)$)',
       },
     },
     {
@@ -171,7 +171,7 @@ module.exports = {
       },
       to: {
         pathNot:
-          '^(apps/desktop/src/|packages/(domain|contracts|drivers)/|electron$|node_modules/(\\.pnpm/)?(electron|pino|koffi)@|(node:)?(events|fs|fs/promises|os|path)$)',
+          '^(apps/desktop/src/|packages/(domain|contracts|drivers)/|electron$|node_modules/(\\.pnpm/)?(electron|pino|koffi)@|(node:)?(events|fs|fs/promises|os|path|crypto|http|https)$)',
       },
     },
     {

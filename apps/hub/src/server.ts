@@ -148,6 +148,12 @@ export interface CreateHubServerOptions {
    * driver whose ledger lives next to the database so it survives restarts.
    */
   readonly fiscalDriver?: FiscalDriver;
+  /**
+   * v1 (T4.1 in the desktop app): fixed port of the HTTPS LAN listener. When set, the listener
+   * starts on demand: when the owner creates a terminal pairing code, and at `listen()` if paired
+   * terminals exist. Left unset (tests), the listener starts only through `listenLan`.
+   */
+  readonly lanPort?: number;
   /** T3.7 marking operator port; default: the Fake (no real operator until T3.0). */
   readonly markingDriver?: MarkingDriver;
   /** T3.6 QR payment provider port; default: the Fake (no real provider until T3.0). */
@@ -603,6 +609,33 @@ export async function createHubServer(options: CreateHubServerOptions): Promise<
     });
     lanServiceRef = lanService;
     let lanListener: LanListener | null = null;
+    let lanStarting: Promise<LanListener> | null = null;
+    const startLan = (lanOptions: {
+      readonly host?: string;
+      readonly port: number;
+    }): Promise<LanListener> => {
+      if (lanListener !== null) return Promise.resolve(lanListener);
+      lanStarting ??= startLanListener({
+        mainApp: app,
+        lanService,
+        host: lanOptions.host ?? '0.0.0.0',
+        port: lanOptions.port,
+        loopbackHost: () =>
+          [...hostState.getAllowedHosts()][0] ?? `127.0.0.1:${securityConfig.port}`,
+        proxySecret: lanProxySecret,
+      }).then(
+        (l) => {
+          lanListener = l;
+          return l;
+        },
+        (err: unknown) => {
+          lanStarting = null; // e.g. port busy: the next pairing-code request retries
+          throw err;
+        },
+      );
+      return lanStarting;
+    };
+    const lanPort = options.lanPort;
     registerHubErrorHandlers(app);
     registerHubRoutes(
       app,
@@ -663,7 +696,17 @@ export async function createHubServer(options: CreateHubServerOptions): Promise<
         ...(options.paymentQrTtlMs !== undefined ? { ttlMs: options.paymentQrTtlMs } : {}),
       }),
     );
-    registerLanRoutes(app, authService, lanService);
+    registerLanRoutes(
+      app,
+      authService,
+      lanService,
+      lanPort === undefined
+        ? undefined
+        : {
+            ensureListening: async () => (await startLan({ port: lanPort })).port,
+            listeningPort: () => lanListener?.port ?? null,
+          },
+    );
     registerAuditRoutes(
       app,
       authService,
@@ -743,19 +786,7 @@ export async function createHubServer(options: CreateHubServerOptions): Promise<
       pullWorker,
       safeStorage,
       lanService,
-      async listenLan(lanOptions) {
-        if (lanListener !== null) return lanListener;
-        lanListener = await startLanListener({
-          mainApp: app,
-          lanService,
-          host: lanOptions.host ?? '0.0.0.0',
-          port: lanOptions.port,
-          loopbackHost: () =>
-            [...hostState.getAllowedHosts()][0] ?? `127.0.0.1:${securityConfig.port}`,
-          proxySecret: lanProxySecret,
-        });
-        return lanListener;
-      },
+      listenLan: startLan,
       async listen() {
         await app.listen({
           host: DEFAULT_HUB_HOST,
@@ -770,6 +801,15 @@ export async function createHubServer(options: CreateHubServerOptions): Promise<
         pushWorker.start();
         pullWorker.start();
         fiscalWorker.start();
+        if (lanPort !== undefined && lanService.hasActiveTerminals()) {
+          // Paired terminals must reach the hub after a restart; a busy port must not stop the hub.
+          await startLan({ port: lanPort }).catch((err: unknown) => {
+            logger.error(
+              { err: err instanceof Error ? err.message : String(err), port: lanPort },
+              'hub_lan_listener_start_failed',
+            );
+          });
+        }
         return {
           host: DEFAULT_HUB_HOST,
           port: boundPort ?? securityConfig.port,

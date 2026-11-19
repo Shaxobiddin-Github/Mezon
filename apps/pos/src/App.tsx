@@ -18,6 +18,12 @@ import { CatalogScreen } from './components/CatalogScreen.js';
 import { FiscalOfflineBanner, FiscalUnsettledModal } from './components/FiscalPanels.js';
 import { SyncConflictsModal } from './components/SyncConflictsModal.js';
 import {
+  ConnectionsModal,
+  TerminalModeSection,
+  TerminalPairForm,
+} from './components/ConnectionsPanels.js';
+import type { TerminalInfo } from './bridge.js';
+import {
   ShortcutsModal,
   QuickSaleModal,
   EditQtyModal,
@@ -71,6 +77,14 @@ export function App() {
   const user = usePosStore((s) => s.user);
   // v1: fiscal mode is off by default; its screens are shown only when it is on.
   const [fiscalModeEnabled, setFiscalModeEnabled] = useState(false);
+  // v1 LAN: is this computer the main register (hub) or a second register (terminal)?
+  const [terminalInfo, setTerminalInfo] = useState<TerminalInfo>({ mode: 'hub' });
+  const [showTerminalPair, setShowTerminalPair] = useState(false);
+  useEffect(() => {
+    const bridge = window.mezonBridge;
+    if (bridge?.getTerminalInfo === undefined) return;
+    bridge.getTerminalInfo().then(setTerminalInfo, () => undefined);
+  }, []);
   const clearSession = usePosStore((s) => s.clearSession);
   const setLoginOptions = usePosStore((s) => s.setLoginOptions);
   const currentShift = usePosStore((s) => s.currentShift);
@@ -120,6 +134,14 @@ export function App() {
               code: codeStr,
             }),
           );
+          return;
+        }
+        if (
+          err.code === 'LAN_HUB_UNREACHABLE' ||
+          err.code === 'LAN_PIN_MISMATCH' ||
+          err.code === 'TERMINAL_NOT_PAIRED'
+        ) {
+          setErrorBanner(t(`error.${err.code}`));
           return;
         }
         setErrorBanner(`${err.code}: ${err.message}`);
@@ -710,6 +732,16 @@ export function App() {
                 <button
                   type="button"
                   className="pos-btn"
+                  data-testid="topbar-connections-btn"
+                  onClick={() => setActiveModal('connections')}
+                >
+                  {t('connections.openButton')}
+                </button>
+              )}
+              {(user?.role === 'owner' || user?.role === 'manager') && (
+                <button
+                  type="button"
+                  className="pos-btn"
                   data-testid="topbar-sync-conflicts-btn"
                   onClick={() => setActiveModal('sync_conflicts')}
                 >
@@ -760,7 +792,24 @@ export function App() {
         </div>
       )}
 
-      {screen === 'setup' && (
+      {screen === 'setup' && showTerminalPair && (
+        <TerminalPairForm onCancel={() => setShowTerminalPair(false)} />
+      )}
+
+      {screen === 'setup' && !showTerminalPair && window.mezonBridge?.pairAsTerminal && (
+        <div className="pos-auth-container">
+          <button
+            type="button"
+            className="pos-btn"
+            data-testid="setup-join-as-terminal-btn"
+            onClick={() => setShowTerminalPair(true)}
+          >
+            {t('terminal.pair.open')}
+          </button>
+        </div>
+      )}
+
+      {screen === 'setup' && !showTerminalPair && (
         <SetupScreen
           api={api}
           onSetupCompleted={async () => {
@@ -794,6 +843,12 @@ export function App() {
         />
       )}
 
+      {screen === 'login' && terminalInfo.mode === 'terminal' && (
+        <div className="pos-auth-container">
+          <TerminalModeSection info={terminalInfo} />
+        </div>
+      )}
+
       {screen === 'open_shift' && (
         <OpenShiftScreen
           api={api}
@@ -824,6 +879,17 @@ export function App() {
         (user?.role === 'owner' || user?.role === 'manager') && (
           <FiscalUnsettledModal
             api={api}
+            onClose={() => setActiveModal('none')}
+            onError={handleError}
+          />
+        )}
+      {activeModal === 'connections' &&
+        user !== null &&
+        (user.role === 'owner' || user.role === 'manager') && (
+          <ConnectionsModal
+            api={api}
+            role={user.role}
+            terminalInfo={terminalInfo}
             onClose={() => setActiveModal('none')}
             onError={handleError}
           />

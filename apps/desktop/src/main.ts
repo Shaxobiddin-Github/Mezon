@@ -1,3 +1,4 @@
+import { randomBytes } from 'node:crypto';
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import {
@@ -10,6 +11,8 @@ import {
   session,
   utilityProcess,
 } from 'electron';
+import { LanPairingRejectedError, pairWithLanHub } from '@mezon/drivers/node';
+import { loadOrCreateDataKey } from './data-key.js';
 import { createDesktopLogger } from './desktop-logger.js';
 import { HubSupervisor, type HubBridgeState } from './hub-supervisor.js';
 import {
@@ -25,6 +28,15 @@ import {
   isAllowedNavigationUrl,
   resolveAppProtocolFilePath,
 } from './security-policy.js';
+import {
+  type TerminalConfig,
+  deleteTerminalConfig,
+  isValidLanHost,
+  loadTerminalConfig,
+  saveTerminalConfig,
+  terminalInfoOf,
+} from './terminal/terminal-config.js';
+import { type TerminalProxy, startTerminalProxy } from './terminal/terminal-proxy.js';
 
 // Redirect userData to persistent local path BEFORE single-instance lock & Chromium profile init.
 const dataDir = createProcessDesktopDataDir(app.isPackaged);
@@ -63,6 +75,10 @@ desktopLog.logger.info(
 
 let mainWindow: BrowserWindow | null = null;
 let supervisor: HubSupervisor | null = null;
+/** v1 LAN terminal mode: no local hub; the POS reaches the main register through this proxy. */
+let terminalConfig: TerminalConfig | null = null;
+let terminalProxy: TerminalProxy | null = null;
+const terminalConfigPath = path.join(layoutPaths.userDataDir, 'terminal.json');
 let currentHubBaseUrl: string | null = null;
 let hubShutdownCompleted = false;
 let shutdownInProgress: Promise<void> | null = null;
@@ -87,6 +103,9 @@ async function performCleanShutdown(reason: string): Promise<void> {
     desktopLog.logger.info({ reason }, 'desktop_clean_shutdown_started');
     if (supervisor !== null) {
       await supervisor.shutdown();
+    }
+    if (terminalProxy !== null) {
+      await terminalProxy.close();
     }
     hubShutdownCompleted = true;
     desktopLog.logger.info({ reason }, 'desktop_clean_shutdown_finished');
@@ -249,6 +268,9 @@ if (singleInstanceLockAcquired) {
       });
 
       ipcMain.handle('mezon:get-hub-state', (): HubBridgeState => {
+        if (terminalProxy !== null) {
+          return { baseUrl: terminalProxy.baseUrl, restartCount: 0, status: 'ready' };
+        }
         return (
           supervisor?.getState() ?? {
             baseUrl: currentHubBaseUrl,
@@ -256,6 +278,81 @@ if (singleInstanceLockAcquired) {
             status: 'starting',
           }
         );
+      });
+
+      // v1 LAN terminal: pairing, info and leaving. The terminal key never reaches the renderer.
+      ipcMain.handle('mezon:terminal-info', () =>
+        terminalConfig === null ? { mode: 'hub' } : terminalInfoOf(terminalConfig),
+      );
+      ipcMain.handle('mezon:terminal-pair', async (_event, raw: unknown) => {
+        const input = (typeof raw === 'object' && raw !== null ? raw : {}) as Record<
+          string,
+          unknown
+        >;
+        const host = typeof input['host'] === 'string' ? input['host'].trim() : '';
+        const port = input['port'];
+        const code = typeof input['code'] === 'string' ? input['code'].trim() : '';
+        const name = typeof input['terminalName'] === 'string' ? input['terminalName'].trim() : '';
+        if (
+          !isValidLanHost(host) ||
+          typeof port !== 'number' ||
+          !Number.isInteger(port) ||
+          port < 1 ||
+          port > 65535 ||
+          !/^[0-9A-Za-z -]{10,16}$/.test(code) ||
+          name.length < 1 ||
+          name.length > 60
+        ) {
+          return { ok: false, code: 'INVALID_INPUT' };
+        }
+        if (terminalConfig !== null || currentHubBaseUrl === null) {
+          return { ok: false, code: 'ALREADY_TERMINAL' };
+        }
+        // Only a fresh install may become a terminal: its own data would be orphaned otherwise.
+        try {
+          const health = (await (await fetch(`${currentHubBaseUrl}/health`)).json()) as {
+            needsSetup?: unknown;
+          };
+          if (health.needsSetup !== true) return { ok: false, code: 'LOCAL_DATA_EXISTS' };
+        } catch {
+          return { ok: false, code: 'LOCAL_HUB_NOT_READY' };
+        }
+        try {
+          const creds = await pairWithLanHub({
+            target: { host, port },
+            code,
+            terminalName: name,
+            nonce: randomBytes(18).toString('base64url'),
+          });
+          const config: TerminalConfig = {
+            terminalId: creds.terminalId,
+            terminalKey: creds.terminalKey,
+            terminalName: name,
+            hub: creds.hub,
+            pairedAtMs: Date.now(),
+          };
+          saveTerminalConfig(terminalConfigPath, config, safeStorage);
+          desktopLog.logger.info({ host, port }, 'desktop_terminal_paired');
+          return { ok: true, fingerprint256: creds.hub.fingerprint256 };
+        } catch (error) {
+          const rejected = error instanceof LanPairingRejectedError;
+          desktopLog.logger.warn(
+            { host, port, error: error instanceof Error ? error.message : String(error) },
+            'desktop_terminal_pair_failed',
+          );
+          return { ok: false, code: rejected ? 'PAIRING_REJECTED' : 'HUB_UNREACHABLE' };
+        }
+      });
+      ipcMain.handle('mezon:terminal-leave', () => {
+        if (terminalConfig === null) return { ok: false };
+        deleteTerminalConfig(terminalConfigPath);
+        desktopLog.logger.info('desktop_terminal_left');
+        return { ok: true };
+      });
+      ipcMain.handle('mezon:relaunch', () => {
+        // Mode changes (paired / left) take effect on a clean restart.
+        app.relaunch();
+        app.quit();
       });
 
       // D4: safeStorage IPC handlers for secure token storage
@@ -281,10 +378,43 @@ if (singleInstanceLockAcquired) {
         resolveInitialHubReady = resolve;
       });
 
+      terminalConfig = loadTerminalConfig(terminalConfigPath, safeStorage);
+      if (terminalConfig !== null) {
+        terminalProxy = await startTerminalProxy({
+          hub: terminalConfig.hub,
+          terminalId: terminalConfig.terminalId,
+          terminalKey: terminalConfig.terminalKey,
+          onError: (code, message) => {
+            desktopLog.logger.warn({ code, message }, 'desktop_terminal_proxy_error');
+          },
+        });
+        currentHubBaseUrl = terminalProxy.baseUrl;
+        desktopLog.logger.info(
+          { hubHost: terminalConfig.hub.host, hubPort: terminalConfig.hub.port },
+          'desktop_terminal_mode',
+        );
+        mainWindow = createMainWindow();
+        await mainWindow.loadURL(APP_HOME_URL);
+        if (process.env['MEZON_E2E'] !== '1') {
+          mainWindow.show();
+        }
+        return;
+      }
+
+      // Secrets in the hub DB must stay readable after a restart: one persistent, OS-wrapped key.
+      const dataKeyB64 = loadOrCreateDataKey({
+        filePath: path.join(layoutPaths.userDataDir, 'hub-data-key.json'),
+        cipher: safeStorage,
+        onUnwrapped: () => {
+          desktopLog.logger.warn('desktop_data_key_not_os_wrapped');
+        },
+      });
+
       supervisor = new HubSupervisor({
         dbPath: layoutPaths.dbPath,
         logDir: layoutPaths.logDir,
         allowedOrigins: ['app://mezon'],
+        dataKeyB64,
         workerPath: assets.hubWorkerPath,
         logger: desktopLog.logger,
         forkWorker: (workerPath, args) => {

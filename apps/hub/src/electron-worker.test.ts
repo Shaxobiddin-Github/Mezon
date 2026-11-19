@@ -4,10 +4,13 @@ import os from 'node:os';
 import path from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
 import {
+  DEFAULT_LAN_PORT,
   attachHubWorkerController,
   type HubWorkerOutgoingMessage,
   type HubWorkerPortLike,
 } from './electron-worker.js';
+import { AesGcmSafeStorageAdapter } from './safe-storage-port.js';
+import { type CreateHubServerOptions, createHubServer } from './server.js';
 
 const tempDirs: string[] = [];
 
@@ -136,6 +139,56 @@ describe('attachHubWorkerController', () => {
       expect(combinedLogs).not.toContain('"1234"');
     } finally {
       await controller.shutdown();
+    }
+  });
+
+  it('passes the persistent data key to the hub (secrets readable after restart) and rejects a bad one', async () => {
+    const dir = createTempDir();
+    const key = Buffer.alloc(32, 7);
+    const seen: CreateHubServerOptions[] = [];
+    const port = new FakeWorkerPort();
+    const controller = attachHubWorkerController({
+      port,
+      exitProcess: () => undefined,
+      createServer: (options) => {
+        seen.push(options);
+        return createHubServer(options);
+      },
+    });
+    try {
+      port.deliver({
+        type: 'start',
+        dbPath: path.join(dir, 'data', 'mezon.db'),
+        logDir: path.join(dir, 'logs'),
+        allowedOrigins: ['app://mezon'],
+        dataKeyB64: key.toString('base64'),
+      });
+      await expect.poll(() => port.sent.length, { timeout: 5000 }).toBeGreaterThanOrEqual(1);
+      expect(port.sent[0]).toMatchObject({ type: 'ready' });
+      const storage = seen[0]?.safeStorage;
+      expect(storage).toBeDefined();
+      // Something encrypted by an earlier process with the same key decrypts now.
+      const earlier = await new AesGcmSafeStorageAdapter(key).encryptString('device-token');
+      await expect(storage?.decryptString(earlier)).resolves.toBe('device-token');
+      expect(seen[0]?.lanPort).toBe(DEFAULT_LAN_PORT);
+    } finally {
+      await controller.shutdown();
+    }
+
+    const bad = new FakeWorkerPort();
+    const badController = attachHubWorkerController({ port: bad, exitProcess: () => undefined });
+    try {
+      bad.deliver({
+        type: 'start',
+        dbPath: path.join(dir, 'data2', 'mezon.db'),
+        logDir: path.join(dir, 'logs2'),
+        allowedOrigins: ['app://mezon'],
+        dataKeyB64: 'c2hvcnQ=',
+      });
+      await expect.poll(() => bad.sent.length, { timeout: 5000 }).toBeGreaterThanOrEqual(1);
+      expect(bad.sent[0]).toMatchObject({ type: 'error' });
+    } finally {
+      await badController.shutdown();
     }
   });
 

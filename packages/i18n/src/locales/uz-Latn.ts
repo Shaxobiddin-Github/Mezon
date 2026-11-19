@@ -485,6 +485,73 @@ export const UZ_LATN_MESSAGES = {
   'error.FISCAL_BLOCKED': 'Savdo fiskal holat sababli bloklandi.',
   'error.FISCALIZED_SALE_CANNOT_VOID':
     'Fiskallashgan (yoki yuborilgan) chekni bekor qilib boʻlmaydi — qaytarish qiling.',
+  // v1 connections: cloud pairing and LAN registers
+  'connections.openButton': 'Ulanishlar',
+  'connections.title': 'Ulanishlar: bulut va kassalar',
+  'cloud.title': 'Bulut kabineti',
+  'cloud.status.unpaired': 'Bulutga ulanmagan',
+  'cloud.status.paired': 'Bulutga ulangan',
+  'cloud.status.revoked': 'Bulut bu kassani uzgan',
+  'cloud.lastSync': 'oxirgi sinxron: {time}',
+  'cloud.hint':
+    'Kabinetda: "Kassalar va xodimlar" → "Yangi kassa ulash" → "Ulanish kodini olish". Kodni shu yerga kiriting.',
+  'cloud.url': 'Bulut manzili',
+  'cloud.code': 'Ulanish kodi (8 belgi)',
+  'cloud.pair': 'Bulutga ulash',
+  'cloud.paired': 'Ulandi: {org}, {store}',
+  'cloud.unpair': 'Bulutdan uzish',
+  'cloud.unpairConfirm': 'Kassa bulutdan uziladi, sinxron toʻxtaydi. Davom etasizmi?',
+  'lan.title': 'Doʻkondagi boshqa kassalar (LAN)',
+  'lan.hint':
+    'Ikkinchi kompyuterni shu kassaga ulash: kod oling va uni ikkinchi kompyuterdagi "Ikkinchi kassa sifatida ulanish" oynasiga kiriting.',
+  'lan.addRegister': 'Kassa qoʻshish',
+  'lan.codeLabel': 'Ulanish kodi:',
+  'lan.codeExpires': 'amal qiladi: {time} gacha',
+  'lan.addressLabel': 'Shu kassa manzili:',
+  'lan.noAddress': 'tarmoq topilmadi (kompyuter tarmoqqa ulanganini tekshiring)',
+  'lan.fingerprintLabel': 'Barmoq izi (ikkinchi kassada chiqadigani bilan bir xil boʻlishi kerak):',
+  'lan.firewallHint': 'Windows ruxsat soʻrasa, "Ruxsat berish" ni bosing (xususiy tarmoq).',
+  'lan.colName': 'Kassa',
+  'lan.colStatus': 'Holat',
+  'lan.colLastSeen': 'Oxirgi aloqa',
+  'lan.empty': 'Hali ulangan kassa yoʻq',
+  'lan.status.active': 'Faol',
+  'lan.status.revoked': 'Bekor qilingan',
+  'lan.revoke': 'Bekor qilish',
+  'lan.revokeConfirm': '"{name}" kassasi bekor qilinadi va darhol ishlamay qoladi. Davom etasizmi?',
+  'terminal.pair.open': 'Ikkinchi kassa sifatida ulanish',
+  'terminal.pair.title': 'Ikkinchi kassa sifatida ulanish',
+  'terminal.pair.hint':
+    'Asosiy kassada: "Ulanishlar" → "Kassa qoʻshish". U yerda chiqqan manzil va kodni kiriting.',
+  'terminal.pair.host': 'Asosiy kassa manzili (IP)',
+  'terminal.pair.port': 'Port',
+  'terminal.pair.code': 'Ulanish kodi',
+  'terminal.pair.name': 'Bu kassa nomi',
+  'terminal.pair.submit': 'Ulanish',
+  'terminal.pair.back': 'Orqaga',
+  'terminal.pair.doneTitle': 'Ulandi',
+  'terminal.pair.compareFingerprint': 'Barmoq izini asosiy kassadagi bilan solishtiring:',
+  'terminal.pair.restartHint': 'Dastur qayta ishga tushadi va asosiy kassa bilan ishlaydi.',
+  'terminal.pair.error.INVALID_INPUT': 'Manzil, port, kod yoki nom notoʻgʻri.',
+  'terminal.pair.error.ALREADY_TERMINAL': 'Bu kompyuter allaqachon ikkinchi kassa.',
+  'terminal.pair.error.LOCAL_DATA_EXISTS':
+    'Bu kassada maʼlumot bor. Faqat yangi oʻrnatilgan dastur ikkinchi kassa boʻla oladi.',
+  'terminal.pair.error.LOCAL_HUB_NOT_READY':
+    'Dastur hali tayyor emas. Birozdan keyin qayta urinib koʻring.',
+  'terminal.pair.error.PAIRING_REJECTED':
+    'Kod notoʻgʻri yoki muddati oʻtgan. Asosiy kassada yangi kod oling.',
+  'terminal.pair.error.HUB_UNREACHABLE':
+    'Asosiy kassaga ulanib boʻlmadi. Manzil, port va tarmoqni tekshiring.',
+  'terminal.restart': 'Qayta ishga tushirish',
+  'terminal.modeTitle': 'Ikkinchi kassa',
+  'terminal.connectedTo': '"{name}" asosiy kassaga ulangan: {host}',
+  'terminal.leave': 'Asosiy kassadan uzish',
+  'terminal.leaveConfirm':
+    'Bu kompyuter asosiy kassadan uziladi va dastur qayta ishga tushadi. Davom etasizmi?',
+  'error.LAN_HUB_UNREACHABLE':
+    'Asosiy kassa bilan aloqa yoʻq. Asosiy kompyuter yoqilganini va tarmoqni tekshiring.',
+  'error.LAN_PIN_MISMATCH': 'Asosiy kassa sertifikati oʻzgargan. Bu kassani qaytadan ulang.',
+  'error.TERMINAL_NOT_PAIRED': 'Bu kassa asosiy kassada bekor qilingan. Qaytadan ulang.',
 } as const;
 
 export type I18nKey = keyof typeof UZ_LATN_MESSAGES;

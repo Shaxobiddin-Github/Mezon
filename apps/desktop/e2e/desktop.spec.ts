@@ -236,7 +236,14 @@ test('Playwright unfused Electron against identical app.asar: app://mezon, CSP, 
       hasRequire: false,
       hasIpcRenderer: false,
       cspInlineExecuted: false,
-      bridgeKeys: ['getHubState', 'onHubState'],
+      bridgeKeys: [
+        'getHubState',
+        'getTerminalInfo',
+        'leaveTerminal',
+        'onHubState',
+        'pairAsTerminal',
+        'relaunchApp',
+      ],
     });
 
     // External window.open must stay blocked.

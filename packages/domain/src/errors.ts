@@ -159,7 +159,8 @@ export type DomainErrorCode =
   | 'TERMINAL_NOT_PAIRED'
   | 'LAN_PAIRING_REJECTED'
   | 'LAN_LOCAL_ONLY'
-  | 'LAN_TERMINAL_NOT_FOUND';
+  | 'LAN_TERMINAL_NOT_FOUND'
+  | 'LAN_LISTENER_FAILED';
 
 export type DomainErrorDetails = Readonly<Record<string, unknown>>;
 

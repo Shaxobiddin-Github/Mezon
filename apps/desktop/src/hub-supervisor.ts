@@ -34,6 +34,8 @@ export interface HubSupervisorDeps {
   readonly dbPath: string;
   readonly logDir: string;
   readonly allowedOrigins: readonly string[];
+  /** Persistent key for the hub's secrets at rest (see data-key.ts). */
+  readonly dataKeyB64?: string;
   readonly workerPath: string;
   readonly forkWorker: (workerPath: string, args: readonly string[]) => HubChildProcessLike;
   readonly onStateChange: (
@@ -287,6 +289,7 @@ export class HubSupervisor {
       logDir: this.deps.logDir,
       preferredPort: previousPort,
       allowedOrigins: this.deps.allowedOrigins,
+      ...(this.deps.dataKeyB64 !== undefined ? { dataKeyB64: this.deps.dataKeyB64 } : {}),
       maxLogBytes: this.deps.maxLogBytes,
       maxLogFiles: this.deps.maxLogFiles,
     });
