@@ -73,8 +73,16 @@ Kabinet UI brauzerda ko'z bilan ko'rilmagan, chunki kabinetni bulut serveri bila
 
 `pnpm verify` (`MEZON_REQUIRE_PG_TESTS=1`): yashil — format, build, keshsiz lint, typecheck, `db:check`, 122 fayl / 838 test, perf 17, POS E2E, depcruise (569 modul).
 
-## QOLDI (WIP, limit tugadi)
+## v1 deploy (shu branch'da)
 
-- v1: `deploy/Dockerfile` butun workspace'ni yig'adi (avval `sync`, `i18n`, `ui` yo'q edi, server yig'ilmas edi); Caddy kabinetni va API'ni bitta domenda xizmat qiladi; compose Telegram va domenni uzatadi; `org:create` endi standart parolsiz.
-- **Tekshirilmagan:** `docker build` (runner va web) qayta yugurtirilmoqda edi. Birinchi urinish tarmoq timeout'i bilan yiqildi (pnpm yuklab olish). Keyingi qadam: ikkala target'ni yig'ish, `docker compose up`, `/health/ready` va kabinet sahifasi.
-- `docs/v1/README.md` — o'rnatish yo'riqnomasi va reliz eslatmalari.
+- **`deploy/Dockerfile`.** Butun workspace'ni nusxalaydi. Avval `sync`, `i18n` va `ui` paketlari yo'q edi, shuning uchun bulut yig'ilmas edi. Endi faqat `@mezon/cloud` va `@mezon/admin` (bog'liqliklari bilan) yig'iladi. pnpm qayta yuklab olinmaydi (`npm_config_manage_package_manager_versions=false`).
+- **`web` target.** Caddy kabinetni (SPA) va API'ni **bitta domenda** xizmat qiladi. Kabinet API'ni nisbiy manzil bilan chaqiradi, refresh cookie `SameSite=Strict`.
+- **`docker-compose`.**
+  - `cloud` va `migrate` → `runner`; `caddy` → `web`;
+  - `CLOUD_DOMAIN` va `ACME_EMAIL` majburiy;
+  - Telegram o'zgaruvchilari uzatiladi;
+  - `CORS_ORIGINS` sukut bo'yicha `https://<CLOUD_DOMAIN>`.
+- **`org:create`.** Endi standart login va parol yo'q: `--login` va kamida 10 belgili `--password` majburiy (test bor). Repo ochiq bo'lgani uchun standart parol hammaga ma'lum bo'lardi.
+- **Yangi CI workflow `deploy-images.yml`.** Ikkala image yig'iladi, kabinet image ichida ekani tekshiriladi, `postgres` + `migrate` + `cloud` ko'tarilib, `/health/ready` kutiladi.
+  - **Lokal tekshirib bo'lmadi:** bu kompyuterda registry'dan yuklab olish ~34 KB/s, `pnpm install` 15 daqiqalik timeout'ga yetdi. Shuning uchun tekshiruv CI'ga qo'yildi. PR ochilganda ishlaydi.
+- **`docs/v1/README.md`.** O'rnatish yo'riqnomasi va reliz eslatmalari.

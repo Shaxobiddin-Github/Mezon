@@ -6,6 +6,8 @@ FROM node:24-alpine AS builder
 WORKDIR /app
 
 RUN corepack enable && corepack prepare pnpm@12.18.0 --activate
+# corepack already provides the pinned pnpm: do not let pnpm download its own binary again.
+ENV npm_config_manage_package_manager_versions=false
 
 COPY . .
 
@@ -18,6 +20,7 @@ FROM node:24-alpine AS runner
 WORKDIR /app
 
 RUN corepack enable && corepack prepare pnpm@12.18.0 --activate
+ENV npm_config_manage_package_manager_versions=false
 
 ENV NODE_ENV=production
 ENV PORT=4000
