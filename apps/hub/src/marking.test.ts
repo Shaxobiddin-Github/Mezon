@@ -282,4 +282,52 @@ describe('T3.7 marking codes at the cash register', () => {
       await env.hub.close();
     }
   });
+  it('P2-K3: a code sold by another register while the operator check runs is refused and leaves NO mark behind', async () => {
+    const env = await boot(7307);
+    try {
+      const real = env.driver.check.bind(env.driver);
+      for (const [label, withExisting, serial] of [
+        ['existing line', true, 'R1'],
+        ['new line', false, 'R2'],
+      ] as const) {
+        const slow = await newCart(env);
+        if (withExisting) expect((await scan(env, slow, code('R0'))).statusCode).toBe(201);
+        let release!: () => void;
+        const gate = new Promise<void>((r) => (release = r));
+        let gated = false;
+        env.driver.check = async (req) => {
+          const res = await real(req);
+          if (!gated && req.serial === serial) {
+            gated = true;
+            await gate; // the operator answers slowly...
+          }
+          return res;
+        };
+        const slowScan = scan(env, slow, code(serial));
+        await new Promise((r) => setTimeout(r, 20));
+        // ...meanwhile another register scans and sells the same code.
+        const fast = await newCart(env);
+        expect((await scan(env, fast, code(serial))).statusCode, label).toBe(201);
+        expect((await complete(env, fast, '10000')).statusCode, label).toBe(200);
+        release();
+        const res = await slowScan;
+        expect(res.statusCode, label).toBe(409);
+        expect(errCode(res), label).toBe('MARKING_CODE_ALREADY_SOLD');
+        expect(
+          env.count('SELECT count(*) AS n FROM local_cart_marks WHERE cart_id = ?', slow),
+          label,
+        ).toBe(withExisting ? 1 : 0);
+        const lines = (await env.call('GET', `/carts/${slow}`)).json<{
+          cart: { lines: CartLine[] };
+        }>().cart.lines;
+        expect(
+          lines.map((l) => l.qty),
+          label,
+        ).toEqual(withExisting ? ['1000'] : []);
+        env.driver.check = real;
+      }
+    } finally {
+      await env.hub.close();
+    }
+  });
 });

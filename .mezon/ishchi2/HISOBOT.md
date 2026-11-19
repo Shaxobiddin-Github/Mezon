@@ -1,3 +1,36 @@
+# [ishchi2] P2 tuzatishlar: K1, K2, K3 va S8 — qayta tekshiruv so'rovi
+
+Nazoratchi tekshiruvi (`0e0150f`, QAYTARILDI) bo'yicha. `main` (P1 squash, #31) branch'ga merge qilindi; daraxt `ac7b3a7` bilan bir xil. PR #32 base'i endi `main`.
+
+| # | Tuzatish | Isbot |
+|---|---|---|
+| K1 | Pul qaytarishda avval lokal da'vo, keyin provayder. Yangi holat `refunding`: `paid \| amount_mismatch → refunding` bitta himoyalangan UPDATE (`consumed_by_sale_id IS NULL`). Chek faqat `status='paid'` ni oladi, shuning uchun `refunding` QR chekni yopmaydi. Provayder javobi: `refunded` → `refunded`; aniq rad → oldingi holatga qaytadi; oflayn yoki timeout → `refunding` da qoladi | Nazoratchining isbot testi `apps/hub/src/payment-k1-race.test.ts` ga ko'chirildi, endi o'tadi. Yana 3 test: provayder ishlayotgan paytda chek rad etiladi, rad etilsa QR qaytadi; javob yo'qolsa `refresh` provayder holatidan yakunlaydi; oflayn bo'lsa `refunding` da qoladi |
+| K1 (qo'shimcha) | Taklifdan bitta farq: provayder hali "paid" desa, `refresh` intentni `paid` ga **qaytarmaydi**. Sabab: so'rovimiz yo'lda bo'lishi mumkin, qaytarsak K1 qayta ochiladi (MK2 mutatsiyasi buni isbotlaydi). `refunding` faqat provayder "refunded" desa yopiladi. Aks holda menejer qaytarishni qayta yuboradi. `PaymentDriver.refund` kontrakti: bitta reference bo'yicha **idempotent** (takror so'rov pulni ikki marta qaytarmaydi, yana `refunded` beradi). Fake shunday qilindi | Javob yo'qolgan va oflayn testlari |
+| K2 | Yangi holat `amount_mismatch`. Provayder boshqa summa olsa: holat, `received_amount` va `payment.amount_mismatch` audit yozuvi bitta tranzaksiyada. Chekni hech qachon yopmaydi. Menejer uchun `GET /payments/attention` (`payments:confirm`; kassir 403): `amount_mismatch` va `refunding` intentlar. Qaytarish **haqiqatda olingan** summa bilan, `payment.refunded` audit menejer nomidan. Fake: `pay(ref, amount)` | `amount_mismatch` testi: audit bir marta, chek rad, ro'yxatda ko'rinadi, 9000 qaytariladi |
+| K3 | `insertCartMarkSync`: "sotilganmi" tekshiruvi va INSERT bitta SQLite tranzaksiyasida. Rad etilsa qator qolmaydi | Test: operator tekshiruvi sekin, shu paytda boshqa kassa shu kodni sotadi. Ikki yo'l ham: mavjud qator (`qty` 1000 qoladi, 1 mark) va yangi qator (qator ham, mark ham yo'q) |
+| S8 | Pull konfliktini retry qilganda hodisa park bo'lsa, konflikt ochiq qoladi va `applied=false` | `sync-conflicts.test.ts`: ota-qatorsiz (mavjud bo'lmagan mijoz) hodisa. Konflikt ochiq, xato "Still waiting…", park qatori bor, ma'lumot o'zgarmagan. Sening R4 mutatsiyang (`if (parked)` o'chirilgan) endi **o'ldi** |
+
+**Migratsiya.** Lokal `0023_payment_intents` qayta yaratildi (P2 hali chiqmagan, shuning uchun alohida jadval-qayta-qurish migratsiyasi kerak emas): `received_amount`, holatlar ro'yxati, `chk_payment_intents_paid_at` (`refunding` va `amount_mismatch` ham `paid_at_ms` bilan). Diff faqat shu.
+
+**Mutatsiyalar: 8/8 o'ldi** (va R4).
+
+| # | Mutatsiya | Natija |
+|---|---|---|
+| MK1 | provayderdan oldin lokal da'vo yo'q | o'ldi |
+| MK2 | provayder "paid" desa `refunding` qayta ochiladi | o'ldi |
+| MK3 | summa farqi e'tiborsiz | o'ldi |
+| MK4 | chek `refunding` intentni ham oladi | o'ldi |
+| MK5 | aniq rad etilganda holat tiklanmaydi | o'ldi |
+| MK6 | mark avval INSERT, keyin tekshiruv, tranzaksiyasiz (eski kod) | o'ldi |
+| MK7 | `payment.amount_mismatch` audit yozilmaydi | o'ldi |
+| MK8 | qaytarish olingan summa bilan emas, QR summasi bilan | o'ldi |
+
+**Ochiq qoldi (POS UI yo'q).** POS'da hozircha to'lov ekrani yo'q. K2 "menejerga ko'rinsin" API darajasida qilindi (`/payments/attention`). Ekran T4.4 bilan.
+
+`pnpm verify` (PG bilan): VERIFY_RESULT
+
+---
+
 # Hisobot: P2 — T3.8 audit xesh zanjiri, T3.7 markirovka (Fake), T3.6 UzQR to'lov yadrosi (Fake)
 
 Branch: `ishchi2/P2-payments`. U P1 (PR #31) ustidan ochilgan. P1 merge bo'lgach, base `main` bo'ladi va `main` shu branch'ga merge qilinadi.

@@ -4,7 +4,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { LoginResponseSchema, ProductDetailResponseSchema } from '@mezon/contracts';
 import type { PinHasher } from '@mezon/domain';
-import { FakePaymentDriver } from '@mezon/drivers';
+import { FakePaymentDriver, PaymentUnavailableError } from '@mezon/drivers';
 import { FixedClock, SeededRandomSource } from '@mezon/test-utils';
 import { afterEach, describe, expect, it } from 'vitest';
 import { type HubServer, createHubServer } from './index.js';
@@ -306,6 +306,159 @@ describe('T3.6 UzQR: a receipt never closes without a confirmed QR payment', () 
       env.driver.setOnline(true);
       env.driver.pay(qr.providerRef);
       expect((await refresh(env, qr.id)).status).toBe('paid');
+    } finally {
+      await env.hub.close();
+    }
+  });
+});
+
+describe('P2-K1/K2: refunds are claimed before the provider; a wrong sum is never lost', () => {
+  const lateRefundable = async (env: Env) => {
+    const qr = await createQr(env, '10000');
+    await env.call(env.cashier, 'POST', `/payments/intents/${qr.id}/cancel`);
+    env.driver.pay(qr.providerRef);
+    expect((await refresh(env, qr.id)).status).toBe('paid');
+    return qr;
+  };
+  const refund = (env: Env, id: string) =>
+    env.call(env.manager, 'POST', `/payments/intents/${id}/refund`);
+  const audit = (env: Env, type: string) =>
+    env.hub.connection.sqlite
+      .prepare(
+        'SELECT entity_id, actor_user_id, details_json FROM local_audit_log WHERE event_type = ?',
+      )
+      .all(type) as { entity_id: string; actor_user_id: string | null; details_json: string }[];
+  const details = (row: { details_json: string }) =>
+    Object.fromEntries(JSON.parse(row.details_json) as [string, unknown][]);
+
+  it('while the provider handles the refund, a sale cannot use the QR; a provider refusal gives it back', async () => {
+    const env = await boot(8611);
+    try {
+      const qr = await lateRefundable(env);
+      const realRefund = env.driver.refund.bind(env.driver);
+      let release!: () => void;
+      const gate = new Promise<void>((r) => (release = r));
+      env.driver.refund = async () => {
+        await gate;
+        return { state: 'failed', reason: 'bank says no' };
+      };
+      const pending = refund(env, qr.id);
+      await new Promise((r) => setTimeout(r, 20));
+      // The provider still says "paid" (our request is in flight): that must not reopen the QR.
+      expect((await refresh(env, qr.id)).status).toBe('refunding');
+      const sale = await payByQr(env, await cartOf(env), qr.providerRef);
+      expect(code(sale)).toBe('PAYMENT_NOT_CONFIRMED');
+      release();
+      const refused = await pending;
+      expect(refused.statusCode).toBe(409);
+      env.driver.refund = realRefund;
+      // Refused by the provider → the money is still ours, the QR is usable again.
+      const after = await refresh(env, qr.id);
+      expect(after.status).toBe('paid');
+      expect(after.paidLate).toBe(true);
+      expect((await payByQr(env, await cartOf(env), qr.providerRef)).statusCode).toBe(200);
+      expect(audit(env, 'payment.refunded')).toHaveLength(0);
+    } finally {
+      await env.hub.close();
+    }
+  });
+
+  it('refund answer lost (provider returned the money, we never heard): stays refunding, refresh settles it from the provider', async () => {
+    const env = await boot(8612);
+    try {
+      const qr = await lateRefundable(env);
+      const realRefund = env.driver.refund.bind(env.driver);
+      env.driver.refund = async (ref, amount) => {
+        await realRefund(ref, amount);
+        throw new PaymentUnavailableError('timeout');
+      };
+      const lost = await refund(env, qr.id);
+      expect(lost.statusCode).toBe(502);
+      env.driver.refund = realRefund;
+      env.driver.setOnline(false);
+      expect((await refresh(env, qr.id)).status).toBe('refunding'); // no answer → no guess
+      expect(code(await payByQr(env, await cartOf(env), qr.providerRef))).toBe(
+        'PAYMENT_NOT_CONFIRMED',
+      );
+      expect(
+        (await env.call(env.manager, 'GET', '/payments/attention'))
+          .json<{ intents: Intent[] }>()
+          .intents.map((i) => i.status),
+      ).toEqual(['refunding']);
+      env.driver.setOnline(true);
+      expect((await refresh(env, qr.id)).status).toBe('refunded');
+      const rows = audit(env, 'payment.refunded');
+      expect(rows).toHaveLength(1);
+      expect(rows[0].actor_user_id).toBeNull();
+      expect(details(rows[0])).toMatchObject({ settledBy: 'provider_status' });
+    } finally {
+      await env.hub.close();
+    }
+  });
+
+  it('provider offline before the refund happened: stays refunding (even when the provider says paid); the manager retries it once', async () => {
+    const env = await boot(8613);
+    try {
+      const qr = await lateRefundable(env);
+      env.driver.setOnline(false);
+      expect((await refund(env, qr.id)).statusCode).toBe(502);
+      expect((await refresh(env, qr.id)).status).toBe('refunding');
+      env.driver.setOnline(true);
+      expect((await refresh(env, qr.id)).status).toBe('refunding');
+      expect(env.driver.stateOf(qr.providerRef)).toBe('paid');
+      expect(code(await payByQr(env, await cartOf(env), qr.providerRef))).toBe(
+        'PAYMENT_NOT_CONFIRMED',
+      );
+      // The manager retries: the refund goes through, once, with the manager as the audited actor.
+      const ok = await refund(env, qr.id);
+      expect(ok.statusCode, ok.body).toBe(200);
+      expect(env.driver.stateOf(qr.providerRef)).toBe('refunded');
+      const rows = audit(env, 'payment.refunded');
+      expect(rows).toHaveLength(1);
+      expect(rows[0].actor_user_id).not.toBeNull();
+      // A second retry is the same refund: no double money, no second audit row.
+      expect(code(await refund(env, qr.id))).toBe('PAYMENT_INTENT_INVALID_STATE');
+      expect(audit(env, 'payment.refunded')).toHaveLength(1);
+    } finally {
+      await env.hub.close();
+    }
+  });
+
+  it('a different sum than the QR asked: amount_mismatch, audited, shown to the manager, never closes a receipt, refunded in full', async () => {
+    const env = await boot(8614);
+    try {
+      const qr = await createQr(env, '10000');
+      env.driver.pay(qr.providerRef, 9000n);
+      const seen = await refresh(env, qr.id);
+      expect(seen.status).toBe('amount_mismatch');
+      expect((seen as Intent & { receivedAmount: string }).receivedAmount).toBe('9000');
+      expect((await refresh(env, qr.id)).status).toBe('amount_mismatch'); // stable, no duplicate audit
+      const rows = audit(env, 'payment.amount_mismatch');
+      expect(rows).toHaveLength(1);
+      expect(details(rows[0])).toMatchObject({
+        expected: '10000',
+        received: '9000',
+      });
+      // The receipt's sum matches the QR, but the money taken does not: refused.
+      expect(code(await payByQr(env, await cartOf(env), qr.providerRef))).toBe(
+        'PAYMENT_NOT_CONFIRMED',
+      );
+      expect((await env.call(env.cashier, 'GET', '/payments/attention')).statusCode).toBe(403);
+      const list = (await env.call(env.manager, 'GET', '/payments/attention')).json<{
+        intents: Intent[];
+      }>().intents;
+      expect(list.map((i) => [i.id, i.status])).toEqual([[qr.id, 'amount_mismatch']]);
+      const back = await refund(env, qr.id);
+      expect(back.statusCode, back.body).toBe(200);
+      expect(back.json<{ intent: Intent }>().intent.status).toBe('refunded');
+      expect(env.driver.stateOf(qr.providerRef)).toBe('refunded'); // the 9000 actually taken
+      expect(details(audit(env, 'payment.refunded')[0])).toMatchObject({
+        amount: '9000',
+      });
+      expect(
+        (await env.call(env.manager, 'GET', '/payments/attention')).json<{ intents: Intent[] }>()
+          .intents,
+      ).toEqual([]);
     } finally {
       await env.hub.close();
     }

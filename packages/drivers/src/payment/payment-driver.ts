@@ -19,6 +19,8 @@ export interface CreateQrResult {
 export type PaymentStatusResult =
   | { readonly state: 'pending' }
   | { readonly state: 'paid'; readonly amountTiyin: bigint }
+  /** The provider returned the money (our refund, possibly one whose answer we never got). */
+  | { readonly state: 'refunded'; readonly amountTiyin: bigint }
   | { readonly state: 'failed'; readonly reason: string }
   | { readonly state: 'expired' };
 
@@ -38,6 +40,10 @@ export interface PaymentDriver {
   readonly isTestDriver: boolean;
   createQr(request: CreateQrRequest): Promise<CreateQrResult>;
   status(providerRef: string): Promise<PaymentStatusResult>;
+  /**
+   * Full refund of one payment. MUST be idempotent per reference: repeating it (after a lost
+   * answer) returns `refunded` again and never returns money twice; `failed` means a clear refusal.
+   */
   refund(providerRef: string, amountTiyin: bigint): Promise<PaymentRefundResult>;
 }
 
@@ -62,9 +68,13 @@ export class FakePaymentDriver implements PaymentDriver {
     this.online = online;
   }
 
-  pay(providerRef: string): void {
+  /** The customer pays; `amountTiyin` simulates a wallet that charged a different sum. */
+  pay(providerRef: string, amountTiyin?: bigint): void {
     const p = this.byRef.get(providerRef);
-    if (p && p.state === 'pending') p.state = 'paid';
+    if (p && p.state === 'pending') {
+      p.state = 'paid';
+      if (amountTiyin !== undefined) p.amountTiyin = amountTiyin;
+    }
   }
 
   fail(providerRef: string): void {
@@ -95,8 +105,9 @@ export class FakePaymentDriver implements PaymentDriver {
     if (!this.online) return Promise.reject(new PaymentUnavailableError());
     const p = this.byRef.get(providerRef);
     if (!p) return Promise.resolve({ state: 'failed', reason: 'unknown reference' });
-    if (p.state === 'paid' || p.state === 'refunded') {
-      return Promise.resolve({ state: 'paid', amountTiyin: p.amountTiyin });
+    if (p.state === 'paid') return Promise.resolve({ state: 'paid', amountTiyin: p.amountTiyin });
+    if (p.state === 'refunded') {
+      return Promise.resolve({ state: 'refunded', amountTiyin: p.amountTiyin });
     }
     if (p.state === 'failed') return Promise.resolve({ state: 'failed', reason: 'declined' });
     return Promise.resolve({ state: 'pending' });
@@ -105,6 +116,9 @@ export class FakePaymentDriver implements PaymentDriver {
   refund(providerRef: string, amountTiyin: bigint): Promise<PaymentRefundResult> {
     if (!this.online) return Promise.reject(new PaymentUnavailableError());
     const p = this.byRef.get(providerRef);
+    if (p && p.state === 'refunded' && p.amountTiyin === amountTiyin) {
+      return Promise.resolve({ state: 'refunded' }); // the same refund, repeated
+    }
     if (!p || p.state !== 'paid' || p.amountTiyin !== amountTiyin) {
       return Promise.resolve({ state: 'failed', reason: 'not refundable' });
     }

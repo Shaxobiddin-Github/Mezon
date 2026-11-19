@@ -3353,6 +3353,8 @@ export const paymentIntents = localSchemaRegistry.defineTable(
     confirmNote: text('confirm_note'),
     consumedBySaleId: sqliteUuidV7('consumed_by_sale_id').references(() => sales.id),
     refundedAtMs: sqliteUnixMs('refunded_at_ms'),
+    // What the provider actually received (P2-K2); equals `amount` unless the status is amount_mismatch.
+    receivedAmount: sqliteMoney('received_amount'),
   }),
   (self) => [
     uniqueIndex('uidx_payment_intents_provider_ref').on(self.organizationId, self.providerRef),
@@ -3364,12 +3366,16 @@ export const paymentIntents = localSchemaRegistry.defineTable(
     check('chk_payment_intents_kind', sql`${self.kind} IN ('dynamic', 'static')`),
     check(
       'chk_payment_intents_status',
-      sql`${self.status} IN ('pending', 'paid', 'expired', 'cancelled', 'failed', 'refunded')`,
+      sql`${self.status} IN ('pending', 'paid', 'expired', 'cancelled', 'failed', 'refunding', 'refunded', 'amount_mismatch')`,
     ),
     check('chk_payment_intents_amount', sql`${self.amount} > 0`),
     check(
+      'chk_payment_intents_received',
+      sql`${self.receivedAmount} IS NULL OR ${self.receivedAmount} > 0`,
+    ),
+    check(
       'chk_payment_intents_paid_at',
-      sql`(${self.status} IN ('paid', 'refunded')) = (${self.paidAtMs} IS NOT NULL)`,
+      sql`(${self.status} IN ('paid', 'refunding', 'refunded', 'amount_mismatch')) = (${self.paidAtMs} IS NOT NULL)`,
     ),
     check(
       'chk_payment_intents_consumed_paid',

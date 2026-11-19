@@ -599,5 +599,6 @@ export {
   consumeUzqrPaymentInTxSync,
   getPaymentIntentSync,
   insertPaymentIntentSync,
+  listPaymentIntentsNeedingAttentionSync,
   transitionPaymentIntentSync,
 } from './payment-intent-repo.js';

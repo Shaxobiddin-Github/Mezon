@@ -72,6 +72,20 @@ export function insertCartMarkSync(
     readonly nowMs: UnixMs;
   },
 ): void {
+  // P2-K3: check and insert in ONE transaction. A code sold by another terminal while the operator
+  // check was running is refused here, and the refusal leaves no row behind.
+  sqlite.transaction(() => {
+    if (findActiveMarkSync(sqlite, m.organizationId, m.codeKey) === 'sale') {
+      throw new DomainError('MARKING_CODE_ALREADY_SOLD', 'This marking code was already sold');
+    }
+    insertCartMarkRowSync(sqlite, m);
+  })();
+}
+
+function insertCartMarkRowSync(
+  sqlite: SqliteLike,
+  m: Parameters<typeof insertCartMarkSync>[1],
+): void {
   try {
     sqlite
       .prepare(
@@ -99,9 +113,6 @@ export function insertCartMarkSync(
       throw new DomainError('MARKING_CODE_DUPLICATE', 'This marking code is already in a cart');
     }
     throw err;
-  }
-  if (findActiveMarkSync(sqlite, m.organizationId, m.codeKey) === 'sale') {
-    throw new DomainError('MARKING_CODE_ALREADY_SOLD', 'This marking code was already sold');
   }
 }
 
