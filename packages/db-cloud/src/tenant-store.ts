@@ -8,6 +8,9 @@ import {
 import { eq } from 'drizzle-orm';
 import type pg from 'pg';
 import { withPgTenantContext } from './connection.js';
+
+/** T4.7: a plan-limit check run first inside the insert transaction (gets that client). */
+export type GrowthGuard = (client: pg.PoolClient) => Promise<void>;
 import { cloudOrganizations, cloudStores, cloudUsers } from './schema/tables.js';
 
 export interface CreateOrganizationParams {
@@ -163,6 +166,8 @@ export class CloudTenantStore {
     readonly name: string;
     readonly code: string;
     readonly nowMs: UnixMs;
+    /** T4.7: runs first INSIDE the insert transaction (plan limit under the growth lock). */
+    readonly growthGuard?: GrowthGuard;
   }): Promise<{
     id: UuidV7;
     organizationId: UuidV7;
@@ -172,7 +177,8 @@ export class CloudTenantStore {
     createdAtMs: bigint;
     updatedAtMs: bigint;
   }> {
-    return withPgTenantContext(this.pool, params.organizationId, async (tx) => {
+    return withPgTenantContext(this.pool, params.organizationId, async (tx, client) => {
+      if (params.growthGuard) await params.growthGuard(client);
       const existing = await tx
         .select({ id: cloudStores.id })
         .from(cloudStores)

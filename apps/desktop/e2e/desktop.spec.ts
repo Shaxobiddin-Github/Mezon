@@ -236,7 +236,15 @@ test('Playwright unfused Electron against identical app.asar: app://mezon, CSP, 
       hasRequire: false,
       hasIpcRenderer: false,
       cspInlineExecuted: false,
-      bridgeKeys: ['getHubState', 'onHubState'],
+      // T4.8 added the update bridge (state, schedule, cancel); nothing else is exposed.
+      bridgeKeys: [
+        'cancelUpdate',
+        'getHubState',
+        'getUpdateState',
+        'onHubState',
+        'onUpdateState',
+        'scheduleUpdate',
+      ],
     });
 
     // External window.open must stay blocked.

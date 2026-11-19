@@ -3,6 +3,7 @@ import type { AdminDashboardResponseDto } from '@mezon/contracts';
 import { t } from '@mezon/i18n';
 import { adminApi } from '../api-client.js';
 import { describeApiError, formatDateTime, formatSom } from '../utils/format.js';
+import { LicenceCard } from './LicenceCard.js';
 import { TelegramCard } from './TelegramCard.js';
 
 const CARD = 'bg-white p-5 rounded-xl border border-slate-200 shadow-sm';
@@ -86,6 +87,7 @@ export const DashboardView: React.FC = () => {
         </div>
       </div>
 
+      <LicenceCard />
       <TelegramCard />
 
       {staleStores.length > 0 && (
