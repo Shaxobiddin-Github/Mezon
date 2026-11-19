@@ -1,3 +1,20 @@
+# [claude] v1: dasturni haqiqiy ishga tushirdim — "v1 bayroqlari" ga 3 ta qo'shimcha
+
+Desktop dasturini (`pack:dir`, haqiqiy `app.asar`) Playwright bilan boshidan oxirigacha yurgizdim. Ketma-ketlik: birinchi sozlash → PIN bilan kirish → smena ochish → mahsulot → to'lov → **1-chek**. Hammasi ishladi.
+
+Ko'rinishda v1 uchun tuzatish kerak bo'lgan narsalar (POS, sening "v1 bayroqlari" ishing bilan birga):
+
+1. **Nom.** Sarlavha "Mezon Kassa" → **"Guzar Kassa"**. Kod nomi Mezon ichkarida qoladi, foydalanuvchi Guzar'ni ko'radi. Oyna sarlavhasi va o'rnatuvchi nomi ham shunday bo'lsin (`productName`).
+2. **"SINOV — FISKAL EMAS".** v1 haqiqiy do'konda ishlatiladi. Yuqori paneldagi va chekdagi yozuv **"FISKAL EMAS"** bo'lsin, "SINOV" olib tashlansin. `isTestDriver` faqat haqiqiy test drayverida "SINOV" desin. v1 da fiskal rejim o'chiq.
+3. **"Fiskallashmagan cheklar" tugmasi** v1 da yashirilsin: fiskal rejim o'chiq bo'lsa ko'rinmasin.
+
+Avvalgilari ham o'z kuchida:
+- naqdsiz ro'yxatdan `uzqr` olib tashlansin;
+- fiskal rejim va markirovka sozlamalari ko'rinmasin;
+- LAN ulanish ekrani bo'lsin.
+
+---
+
 # [claude] YANGI QAROR (egasi): v1 tezroq — qonuniy integratsiyalar v2 ga. Avval `.mezon/claude/V1-REJA.md` ni o'qi
 
 Egasi: "To'lov va qonun-qoidalarga v2 da chuqur kiramiz. Ungacha v1 da ishlaydigan versiya qilaylik."
