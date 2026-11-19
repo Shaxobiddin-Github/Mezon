@@ -287,6 +287,52 @@ describePg('@mezon/cloud - T4.7 licences, plan limits and invoices', () => {
     expect((await status()).usage.devices).toBe(2);
   });
 
+  it('T1: many parallel growth requests on a tiny pool never hang (the guard needs no 2nd connection)', async () => {
+    const appUri = new URL(container.getConnectionUri());
+    appUri.username = PG_APP_ROLE_NAME;
+    appUri.password = process.env.MEZON_APP_DB_PASSWORD ?? '';
+    const tiny = createCloudPgPool({ connectionString: appUri.toString(), max: 2 });
+    const secret = 'licence-tiny-pool-jwt-secret-at-least-32-chars';
+    const small = await buildCloudServer({
+      config: loadCloudConfig({
+        NODE_ENV: 'test',
+        PORT: '3000',
+        HOST: '127.0.0.1',
+        DATABASE_URL: appUri.toString(),
+        JWT_SECRET: secret,
+        CORS_ORIGINS: 'http://localhost:5173',
+      }),
+      conn: tiny,
+      jwtService: new CloudJwtService(secret),
+      authStore: new CloudAuthStore(tiny.pool),
+      clock: { nowMs: () => nowMs },
+      trustedLicenceKeys: KEYS,
+    });
+    try {
+      const login = await small.inject({
+        method: 'POST',
+        url: '/api/v1/auth/login',
+        payload: { login: 'lic_owner@guzar.uz', password },
+      });
+      const token = (JSON.parse(login.payload) as { accessToken: string }).accessToken;
+      const results = await Promise.all(
+        Array.from({ length: 6 }, (_, i) =>
+          small.inject({
+            method: 'POST',
+            url: '/api/v1/stores',
+            headers: { authorization: `Bearer ${token}` },
+            payload: { name: `Tiny ${i}`, code: `tiny${i}` },
+          }),
+        ),
+      );
+      // Start plan, already above its store limit: every request answers (402), none hangs.
+      expect(results.map((r) => r.statusCode)).toEqual([402, 402, 402, 402, 402, 402]);
+    } finally {
+      await small.close();
+      await tiny.pool.end();
+    }
+  }, 30_000);
+
   it('the CLI refuses a tampered or untrusted licence; a tampered row in the DB is ignored', async () => {
     const env = signed({
       licenceId: idGen.nextId(),

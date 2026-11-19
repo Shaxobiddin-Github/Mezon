@@ -1606,3 +1606,100 @@ export const SYNC_FOREIGN_REFERENCES: Readonly<Record<string, readonly ForeignKe
   ],
   organization_tax_profiles: [{ payloadKey: 'updatedByUserId', targetEntity: 'users' }],
 };
+
+// --- T2.6: sync conflicts (hub view & resolve; no manual data editing) ---
+
+export const SYNC_CONFLICT_ACTIONS = ['retry', 'acknowledge'] as const;
+export const SYNC_CONFLICT_ORIGINS = ['push', 'pull', 'projection'] as const;
+
+export const SyncConflictDtoSchema = z.strictObject({
+  id: UuidV7Schema,
+  origin: z.enum(SYNC_CONFLICT_ORIGINS),
+  storeId: UuidV7Schema.nullable(),
+  eventId: UuidV7Schema,
+  entity: z.string(),
+  entityId: UuidV7Schema,
+  reason: z.string(),
+  error: z.string().nullable(),
+  /** Which actions this conflict allows (`acknowledge` always while open). */
+  allowedActions: z.array(z.enum(SYNC_CONFLICT_ACTIONS)),
+  createdAtMs: BigIntStringSchema,
+  resolvedAtMs: BigIntStringSchema.nullable(),
+  resolution: z.enum(['retried', 'acknowledged', 'auto']).nullable(),
+  resolvedByUserId: UuidV7Schema.nullable(),
+  resolutionNote: z.string().nullable(),
+});
+export type SyncConflictDto = z.infer<typeof SyncConflictDtoSchema>;
+
+export const SyncConflictListQuerySchema = z.strictObject({
+  status: z.enum(['open', 'resolved']).default('open'),
+});
+
+export const SyncConflictListResponseSchema = z.strictObject({
+  conflicts: z.array(SyncConflictDtoSchema),
+});
+export type SyncConflictListResponseDto = z.infer<typeof SyncConflictListResponseSchema>;
+
+/** Strict: there is deliberately no field to edit data — only retry or acknowledge. */
+export const ResolveSyncConflictRequestSchema = z.strictObject({
+  action: z.enum(SYNC_CONFLICT_ACTIONS),
+  note: z.string().trim().max(500).optional(),
+});
+export type ResolveSyncConflictRequestDto = z.infer<typeof ResolveSyncConflictRequestSchema>;
+
+export const ResolveSyncConflictResponseSchema = z.strictObject({
+  conflict: SyncConflictDtoSchema,
+  applied: z.boolean(),
+});
+export type ResolveSyncConflictResponseDto = z.infer<typeof ResolveSyncConflictResponseSchema>;
+
+export const SyncParkedDtoSchema = z.strictObject({
+  id: UuidV7Schema,
+  eventId: UuidV7Schema,
+  entity: z.string(),
+  entityId: UuidV7Schema,
+  missingRefEntity: z.string(),
+  missingRefId: z.string(),
+  attempts: z.number().int(),
+  createdAtMs: BigIntStringSchema,
+});
+export const SyncParkedListResponseSchema = z.strictObject({
+  parked: z.array(SyncParkedDtoSchema),
+});
+export type SyncParkedListResponseDto = z.infer<typeof SyncParkedListResponseSchema>;
+
+// --- T2.6: cloud-side parked push events (device token; hub proxies them to the POS) ---
+
+export const CloudParkedEventDtoSchema = z.strictObject({
+  id: UuidV7Schema,
+  eventId: UuidV7Schema,
+  entity: z.string(),
+  entityId: UuidV7Schema,
+  missingRefEntity: z.string(),
+  missingRefId: z.string(),
+  attempts: z.number().int(),
+  status: z.enum(['parked', 'conflict', 'resolved']),
+  resolution: z.enum(['retried', 'acknowledged']).nullable(),
+  resolvedByUserId: UuidV7Schema.nullable(),
+  resolvedAtMs: BigIntStringSchema.nullable(),
+  resolutionNote: z.string().nullable(),
+  createdAtMs: BigIntStringSchema,
+});
+export type CloudParkedEventDto = z.infer<typeof CloudParkedEventDtoSchema>;
+
+export const CloudParkedListResponseSchema = z.strictObject({
+  parked: z.array(CloudParkedEventDtoSchema),
+});
+export type CloudParkedListResponseDto = z.infer<typeof CloudParkedListResponseSchema>;
+
+/** Strict: retry or acknowledge only; `userId` is the hub user who decided (audit). */
+export const CloudResolveParkedRequestSchema = z.strictObject({
+  action: z.enum(SYNC_CONFLICT_ACTIONS),
+  userId: UuidV7Schema,
+  note: z.string().trim().max(500).optional(),
+});
+export type CloudResolveParkedRequestDto = z.infer<typeof CloudResolveParkedRequestSchema>;
+
+export const CloudResolveParkedResponseSchema = z.strictObject({
+  parked: CloudParkedEventDtoSchema,
+});

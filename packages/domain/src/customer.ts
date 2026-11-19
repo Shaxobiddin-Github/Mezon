@@ -316,7 +316,10 @@ export function computeNextCustomerBalance(params: {
   const cur = moneyToTiyin(params.currentBalance);
   const delta = moneyToTiyin(params.delta);
 
-  if (cur < 0n || !isSignedInt64Money(cur) || !isSignedInt64Money(delta)) {
+  // P1/S6: a balance may already be NEGATIVE (a real overpayment that arrived by sync from two
+  // stores). That is the customer's credit, not corrupt data: local operations keep working. Only
+  // a NEGATIVE delta may never create or deepen it (`OVERPAYMENT_NOT_ALLOWED` is unchanged).
+  if (!isSignedInt64Money(cur) || !isSignedInt64Money(delta)) {
     throw new DomainError('VALIDATION_ERROR', 'Customer ledger balance or delta out of bounds');
   }
 
@@ -433,8 +436,8 @@ export function computeNextCustomerBalance(params: {
     }
   }
 
-  // Final D1 non-negative invariant guard shared by all ledger write paths
-  if (next < 0n) {
+  // Final D1 guard shared by all ledger write paths: a reduction never makes the balance negative.
+  if (next < 0n && delta < 0n) {
     throw new DomainError(
       'OVERPAYMENT_NOT_ALLOWED',
       'Customer debt balance cannot become negative',
@@ -459,7 +462,9 @@ export function assertCreditLimitForSale(params: {
   if (newDebt <= 0n || params.creditLimit === null) {
     return;
   }
-  const cur = moneyToTiyin(params.currentBalance);
+  // P1/S6: an overpayment (negative balance) counts as zero debt, never as extra credit limit.
+  const rawCur = moneyToTiyin(params.currentBalance);
+  const cur = rawCur < 0n ? 0n : rawCur;
   const limit = moneyToTiyin(params.creditLimit);
   if (cur + newDebt > limit && !params.creditOverrideAuthorized) {
     throw new DomainError(

@@ -32,7 +32,7 @@ import {
   validatePositiveStockQuantity,
   validateStockMoveDirection,
 } from '@mezon/domain';
-import { and, asc, desc, eq, inArray, isNull, sql } from 'drizzle-orm';
+import { type Column, and, asc, desc, eq, inArray, isNull, sql } from 'drizzle-orm';
 import type { LocalSqliteConnection } from './connection.js';
 import {
   batches,
@@ -1397,6 +1397,9 @@ function formatConflictDetail(conflict: ReplayStockConflict): string {
  * `local_stock_conflicts`) cleanly from authoritative FACT `stock_moves` + `batches` ordered
  * deterministically by `(hlc ASC, id ASC)` (`S2`, never emits outbox events, never fails on CHECKs).
  */
+/** T2.6: above this many touched products a pull batch recomputes the whole store at once. */
+export const STOCK_PARTIAL_RECOMPUTE_MAX_PRODUCTS = 500;
+
 export function executeStockProjectionsRebuildSync(
   _sqlite: LocalSqliteConnection['sqlite'],
   db: LocalSqliteConnection['db'],
@@ -1405,11 +1408,30 @@ export function executeStockProjectionsRebuildSync(
     readonly storeId: UuidV7;
     readonly nextId: () => UuidV7;
     readonly nowUnixMs: () => UnixMs;
+    /**
+     * T2.6: recompute only the pools of these products (all their variants). Omitted = every pool of
+     * the store (full rebuild). Both paths run this same replay, so a partial result equals the full
+     * one for the touched pools; pools are independent (replay state is keyed by product+variant).
+     */
+    readonly productIds?: readonly UuidV7[];
   },
 ): RebuildStockProjectionsResult {
   const organizationId = parseUuidV7(scope.organizationId);
   const storeId = parseUuidV7(scope.storeId);
   const nowMs = scope.nowUnixMs();
+  const onlyProducts =
+    scope.productIds === undefined
+      ? null
+      : [...new Set(scope.productIds.map((p) => parseUuidV7(p)))];
+  if (onlyProducts !== null && onlyProducts.length === 0) {
+    return { balancesRebuilt: 0, batchesRebuilt: 0, movesReplayed: 0, conflictsDetected: 0 };
+  }
+  if (onlyProducts !== null && onlyProducts.length > STOCK_PARTIAL_RECOMPUTE_MAX_PRODUCTS) {
+    // A huge touched set: one full pass is cheaper than many IN-lists, and the result is the same.
+    return executeStockProjectionsRebuildSync(_sqlite, db, { ...scope, productIds: undefined });
+  }
+  const productFilter = (col: Column) =>
+    onlyProducts === null ? undefined : inArray(col, onlyProducts);
 
   const prodRows = db
     .select({
@@ -1417,7 +1439,7 @@ export function executeStockProjectionsRebuildSync(
       trackBatches: products.trackBatches,
     })
     .from(products)
-    .where(eq(products.organizationId, organizationId))
+    .where(and(eq(products.organizationId, organizationId), productFilter(products.id)))
     .all();
 
   const trackBatchesByProduct = new Map<UuidV7, boolean>();
@@ -1428,7 +1450,13 @@ export function executeStockProjectionsRebuildSync(
   const moveRows = db
     .select()
     .from(stockMoves)
-    .where(and(eq(stockMoves.organizationId, organizationId), eq(stockMoves.storeId, storeId)))
+    .where(
+      and(
+        eq(stockMoves.organizationId, organizationId),
+        eq(stockMoves.storeId, storeId),
+        productFilter(stockMoves.productId),
+      ),
+    )
     .orderBy(asc(stockMoves.hlc), asc(stockMoves.id))
     .all();
 
@@ -1443,6 +1471,7 @@ export function executeStockProjectionsRebuildSync(
         eq(goodsReceivingLines.organizationId, organizationId),
         eq(goodsReceivingLines.storeId, storeId),
         eq(goodsReceivingLines.costUnknown, true),
+        productFilter(goodsReceivingLines.productId),
       ),
     )
     .all();
@@ -1455,6 +1484,7 @@ export function executeStockProjectionsRebuildSync(
       and(
         eq(receivingCostConfirmations.organizationId, organizationId),
         eq(receivingCostConfirmations.storeId, storeId),
+        productFilter(receivingCostConfirmations.productId),
       ),
     )
     .orderBy(asc(receivingCostConfirmations.hlc), asc(receivingCostConfirmations.id))
@@ -1574,6 +1604,7 @@ export function executeStockProjectionsRebuildSync(
       and(
         eq(localBatchBalances.organizationId, organizationId),
         eq(localBatchBalances.storeId, storeId),
+        productFilter(localBatchBalances.productId),
       ),
     )
     .run();
@@ -1582,6 +1613,7 @@ export function executeStockProjectionsRebuildSync(
       and(
         eq(localStockBalances.organizationId, organizationId),
         eq(localStockBalances.storeId, storeId),
+        productFilter(localStockBalances.productId),
       ),
     )
     .run();
@@ -1590,6 +1622,7 @@ export function executeStockProjectionsRebuildSync(
       and(
         eq(localStockConflicts.organizationId, organizationId),
         eq(localStockConflicts.storeId, storeId),
+        productFilter(localStockConflicts.productId),
       ),
     )
     .run();

@@ -146,7 +146,11 @@ export type DomainErrorCode =
   | 'LICENCE_INVALID'
   | 'LICENCE_KEY_UNTRUSTED'
   | 'LICENCE_SIGNATURE_INVALID'
-  | 'PLAN_LIMIT_REACHED';
+  | 'PLAN_LIMIT_REACHED'
+  | 'SYNC_CONFLICT_NOT_FOUND'
+  | 'SYNC_CONFLICT_ALREADY_RESOLVED'
+  | 'SYNC_CONFLICT_ACTION_NOT_ALLOWED'
+  | 'CLOUD_NOT_PAIRED';
 
 export type DomainErrorDetails = Readonly<Record<string, unknown>>;
 

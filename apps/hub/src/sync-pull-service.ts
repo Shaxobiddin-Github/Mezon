@@ -14,10 +14,18 @@ import {
   buildSqliteForeignReferencesMap,
   type SqliteForeignKeyRef,
   type LocalSqliteConnection,
-  executeCustomerBalancesRebuildSync,
-  executeSupplierBalancesRebuildSync,
   executeStockProjectionsRebuildSync,
+  recomputeCustomerBalancesForIdsSync,
+  recomputeSupplierBalancesForIdsSync,
 } from '@mezon/db-local';
+import { ProjectionTouchSet, collectTouchedProjectionKeys } from './sync-projection-keys.js';
+
+/** P1/S6 conflict reasons raised by the pull itself (view / acknowledge only). */
+export const PROJECTION_FAILED = 'PROJECTION_FAILED';
+export const CUSTOMER_OVERPAID = 'CUSTOMER_OVERPAID';
+const STOCK_PROJECTION = 'local_stock_balances';
+const CUSTOMER_PROJECTION = 'local_customer_balances';
+const SUPPLIER_PROJECTION = 'local_supplier_balances';
 
 export class PermanentSyncError extends Error {
   constructor(
@@ -137,9 +145,7 @@ export class HubSyncPullService {
     let skippedEchoCount = 0;
     let parkedCount = 0;
     let conflictCount = 0;
-    let hasCustomerLedger = false;
-    let hasSupplierLedger = false;
-    let hasStockEvents = false;
+    const touch = new ProjectionTouchSet();
 
     const executeTx = this.sqlite.transaction(() => {
       // T1: Set in_sync = 1 in main schema table
@@ -238,6 +244,7 @@ export class HubSyncPullService {
               }
             }
 
+            const appliedBefore = appliedCount;
             // 7. Apply to table by class:
             if (tableMeta.tableClass === 'FACT') {
               const existingFact = this.sqlite
@@ -313,12 +320,8 @@ export class HubSyncPullService {
               }
             }
 
-            if (event.entity === 'customer_ledger') {
-              hasCustomerLedger = true;
-            } else if (event.entity === 'supplier_ledger') {
-              hasSupplierLedger = true;
-            } else if (event.entity === 'stock_moves' || event.entity === 'batches') {
-              hasStockEvents = true;
+            if (appliedCount > appliedBefore) {
+              collectTouchedProjectionKeys(touch, event.entity, event.entityId, payloadData);
             }
 
             this.sqlite.exec(`RELEASE SAVEPOINT ${spName}`);
@@ -337,34 +340,14 @@ export class HubSyncPullService {
           }
         }
 
-        // 8. Update projections for applied ledger or stock events using authoritative rebuild logic (X3)
-        if (hasCustomerLedger) {
-          executeCustomerBalancesRebuildSync(
-            this.sqlite,
-            this.connection.db,
-            params.context.organizationId,
-            params.nowMs,
-          );
-        }
-        if (hasSupplierLedger) {
-          executeSupplierBalancesRebuildSync(
-            this.sqlite,
-            this.connection.db,
-            params.context.organizationId,
-            params.nowMs,
-          );
-        }
-        if (hasStockEvents) {
-          executeStockProjectionsRebuildSync(this.sqlite, this.connection.db, {
-            organizationId: params.context.organizationId,
-            storeId: params.context.storeId,
-            nextId: () => this.idGen.nextId(),
-            nowUnixMs: () => params.nowMs,
-          });
-        }
+        // 8. Retry parked events FIRST: a dependency that arrived in this batch lets them apply now,
+        // and their projection keys must be part of this batch's recompute (T2.6).
+        this.retryParkedEvents(params.nowMs, touch);
 
-        // 9. Retry parked events
-        this.retryParkedEvents(params.nowMs);
+        // 9. T2.6: recompute only the projection rows the applied events touched — the same code
+        // path as the full rebuild, so the partial result equals a full rebuild. P1/S6: a projection
+        // error never fails the batch (it would be retried forever and freeze the pull).
+        this.recomputeProjectionsSafely(touch, params.context, params.nowMs);
 
         // 10. Atomically update cursors inside the same transaction
         for (const [storeId, lastPos] of Object.entries(params.nextCursors)) {
@@ -413,6 +396,203 @@ export class HubSyncPullService {
       conflictCount,
       nextCursors: formattedNextCursors,
     };
+  }
+
+  /**
+   * P1/S6: every projection key is recomputed in its own SAVEPOINT. A failure (a CHECK, a bug, a
+   * constraint added later) rolls back only that key and is recorded as a `PROJECTION_FAILED`
+   * conflict naming the key; the batch, its events and the cursors still commit, so the pull keeps
+   * moving. Keys of open `PROJECTION_FAILED` conflicts are retried on every batch, and the conflict
+   * is closed by the first successful recompute.
+   */
+  private recomputeProjectionsSafely(
+    touch: ProjectionTouchSet,
+    context: { readonly organizationId: UuidV7; readonly storeId: UuidV7 },
+    nowMs: UnixMs,
+  ): void {
+    const open = this.sqlite
+      .prepare(
+        `SELECT entity, entity_id FROM local_sync_conflicts
+          WHERE organization_id = ? AND reason = ? AND resolved_at_ms IS NULL`,
+      )
+      .all(context.organizationId, PROJECTION_FAILED) as { entity: string; entity_id: string }[];
+    for (const row of open) {
+      const id = parseUuidV7(row.entity_id);
+      if (row.entity === STOCK_PROJECTION) touch.productIds.add(id);
+      else if (row.entity === CUSTOMER_PROJECTION) touch.customerIds.add(id);
+      else if (row.entity === SUPPLIER_PROJECTION) touch.supplierIds.add(id);
+    }
+    const nextId = () => this.idGen.nextId();
+    const products = [...touch.productIds];
+    const stockFor = (productIds: readonly UuidV7[]) =>
+      executeStockProjectionsRebuildSync(this.sqlite, this.connection.db, {
+        organizationId: context.organizationId,
+        storeId: context.storeId,
+        nextId,
+        nowUnixMs: () => nowMs,
+        productIds,
+      });
+    // Many products: one pass is cheaper; only when it fails do we isolate product by product.
+    const together =
+      products.length > 1 && this.tryProjection('sp_proj_stock_all', () => stockFor(products));
+    for (const productId of products) {
+      this.runProjectionKey(STOCK_PROJECTION, productId, context, nowMs, () =>
+        together ? undefined : stockFor([productId]),
+      );
+    }
+    for (const customerId of touch.customerIds) {
+      this.runProjectionKey(CUSTOMER_PROJECTION, customerId, context, nowMs, () => {
+        recomputeCustomerBalancesForIdsSync(this.sqlite, this.connection.db, {
+          organizationId: context.organizationId,
+          customerIds: [customerId],
+          nowMs,
+          nextId,
+        });
+        this.noteCustomerOverpaid(customerId, context, nowMs);
+      });
+    }
+    for (const supplierId of touch.supplierIds) {
+      this.runProjectionKey(SUPPLIER_PROJECTION, supplierId, context, nowMs, () =>
+        recomputeSupplierBalancesForIdsSync(this.sqlite, this.connection.db, {
+          organizationId: context.organizationId,
+          supplierIds: [supplierId],
+          nowMs,
+          nextId,
+        }),
+      );
+    }
+  }
+
+  private tryProjection(savepoint: string, run: () => unknown): boolean {
+    this.sqlite.exec(`SAVEPOINT ${savepoint}`);
+    try {
+      run();
+      this.sqlite.exec(`RELEASE SAVEPOINT ${savepoint}`);
+      return true;
+    } catch {
+      this.sqlite.exec(`ROLLBACK TO SAVEPOINT ${savepoint}`);
+      this.sqlite.exec(`RELEASE SAVEPOINT ${savepoint}`);
+      return false;
+    }
+  }
+
+  private runProjectionKey(
+    projection: string,
+    key: UuidV7,
+    context: { readonly organizationId: UuidV7; readonly storeId: UuidV7 },
+    nowMs: UnixMs,
+    run: () => unknown,
+  ): void {
+    this.sqlite.exec('SAVEPOINT sp_proj_key');
+    let error: string | null = null;
+    try {
+      run();
+      this.sqlite.exec('RELEASE SAVEPOINT sp_proj_key');
+    } catch (err) {
+      this.sqlite.exec('ROLLBACK TO SAVEPOINT sp_proj_key');
+      this.sqlite.exec('RELEASE SAVEPOINT sp_proj_key');
+      error = err instanceof Error ? err.message : String(err);
+    }
+    if (error === null) {
+      this.resolveOpenConflict(PROJECTION_FAILED, projection, key, nowMs);
+    } else {
+      this.upsertOpenConflict(PROJECTION_FAILED, projection, key, context, nowMs, error, {
+        projection,
+        key,
+      });
+    }
+  }
+
+  /** S6: a negative customer balance is a real overpayment, visible as a view-only conflict. */
+  private noteCustomerOverpaid(
+    customerId: UuidV7,
+    context: { readonly organizationId: UuidV7; readonly storeId: UuidV7 },
+    nowMs: UnixMs,
+  ): void {
+    const row = this.sqlite
+      .prepare('SELECT balance FROM local_customer_balances WHERE customer_id = ?')
+      .get(customerId) as { balance: number | bigint } | undefined;
+    const balance = row === undefined ? 0n : BigInt(row.balance);
+    const acknowledged = this.sqlite
+      .prepare(
+        `SELECT payload FROM local_sync_conflicts
+          WHERE reason = ? AND entity = 'customers' AND entity_id = ? AND resolution = 'acknowledged'
+          ORDER BY resolved_at_ms DESC LIMIT 1`,
+      )
+      .get(CUSTOMER_OVERPAID, customerId) as { payload: string } | undefined;
+    const sameAsAcknowledged =
+      acknowledged !== undefined &&
+      (JSON.parse(acknowledged.payload) as { overpaidTiyin?: string }).overpaidTiyin ===
+        (-balance).toString();
+    if (balance < 0n && !sameAsAcknowledged) {
+      this.upsertOpenConflict(
+        CUSTOMER_OVERPAID,
+        'customers',
+        customerId,
+        context,
+        nowMs,
+        `Customer overpaid by ${(-balance).toString()} tiyin (the customer's credit)`,
+        { overpaidTiyin: (-balance).toString() },
+      );
+    } else if (balance >= 0n) {
+      this.resolveOpenConflict(CUSTOMER_OVERPAID, 'customers', customerId, nowMs);
+    }
+  }
+
+  private upsertOpenConflict(
+    reason: string,
+    entity: string,
+    entityId: UuidV7,
+    context: { readonly organizationId: UuidV7; readonly storeId: UuidV7 },
+    nowMs: UnixMs,
+    error: string,
+    payload: Record<string, string>,
+  ): void {
+    const open = this.sqlite
+      .prepare(
+        `SELECT id FROM local_sync_conflicts
+          WHERE organization_id = ? AND reason = ? AND entity = ? AND entity_id = ?
+            AND resolved_at_ms IS NULL LIMIT 1`,
+      )
+      .get(context.organizationId, reason, entity, entityId) as { id: string } | undefined;
+    if (open) {
+      this.sqlite
+        .prepare(
+          'UPDATE local_sync_conflicts SET error = ?, payload = ?, updated_at_ms = ? WHERE id = ?',
+        )
+        .run(error, JSON.stringify(payload), nowMs, open.id);
+      return;
+    }
+    const id = this.idGen.nextId();
+    this.sqlite
+      .prepare(
+        `INSERT INTO local_sync_conflicts (
+           id, organization_id, store_id, event_id, entity, entity_id,
+           reason, error, payload, created_at_ms, updated_at_ms
+         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      )
+      .run(
+        id,
+        context.organizationId,
+        context.storeId,
+        id,
+        entity,
+        entityId,
+        reason,
+        error,
+        JSON.stringify(payload),
+        nowMs,
+        nowMs,
+      );
+  }
+
+  private resolveOpenConflict(reason: string, entity: string, entityId: UuidV7, nowMs: UnixMs) {
+    this.sqlite
+      .prepare(
+        `UPDATE local_sync_conflicts SET resolved_at_ms = ?, resolution = 'auto', updated_at_ms = ?
+          WHERE reason = ? AND entity = ? AND entity_id = ? AND resolved_at_ms IS NULL`,
+      )
+      .run(nowMs, nowMs, reason, entity, entityId);
   }
 
   private clampLocalRowHlc(event: SyncedEventDto, nowMs: UnixMs): void {
@@ -475,10 +655,16 @@ export class HubSyncPullService {
       .prepare(
         `INSERT INTO local_sync_conflicts (
            id, organization_id, store_id, event_id, entity, entity_id,
-           reason, error, payload, created_at_ms, updated_at_ms
-         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+           reason, error, payload, event_json, created_at_ms, updated_at_ms
+         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
          ON CONFLICT(id) DO UPDATE SET
+           reason = EXCLUDED.reason,
            error = EXCLUDED.error,
+           event_json = EXCLUDED.event_json,
+           resolved_at_ms = NULL,
+           resolution = NULL,
+           resolved_by_user_id = NULL,
+           resolution_note = NULL,
            updated_at_ms = EXCLUDED.updated_at_ms`,
       )
       .run(
@@ -491,9 +677,78 @@ export class HubSyncPullService {
         reason,
         errorMsg,
         payloadStr,
+        JSON.stringify(event, (_k, v: unknown) => (typeof v === 'bigint' ? v.toString() : v)),
         nowMs,
         nowMs,
       );
+  }
+
+  /**
+   * T2.6 "retry" of a pulled event that ended in a conflict: re-applies the stored envelope through
+   * the normal pull path (same validation, same rules). The conflict is closed as `retried` first;
+   * if the event fails again, `recordConflict` re-opens it with the new error, and if it parks again
+   * it is re-opened here. Returns whether the event is now applied.
+   */
+  retryConflictEvent(params: {
+    readonly conflictId: UuidV7;
+    readonly userId: UuidV7;
+    readonly note: string | null;
+    readonly context: {
+      readonly organizationId: UuidV7;
+      readonly storeId: UuidV7;
+      readonly deviceId: UuidV7;
+    };
+    readonly nowMs: UnixMs;
+  }): boolean {
+    const row = this.sqlite
+      .prepare('SELECT event_json FROM local_sync_conflicts WHERE id = ?')
+      .get(params.conflictId) as { event_json: string | null } | undefined;
+    if (!row?.event_json) return false;
+    const event = JSON.parse(row.event_json) as SyncedEventDto;
+    return this.sqlite.transaction(() => {
+      this.sqlite
+        .prepare(
+          `UPDATE local_sync_conflicts
+              SET resolved_at_ms = ?, resolution = 'retried', resolved_by_user_id = ?,
+                  resolution_note = ?, updated_at_ms = ?
+            WHERE id = ?`,
+        )
+        .run(params.nowMs, params.userId, params.note, params.nowMs, params.conflictId);
+      this.applySyncPullBatch({
+        context: params.context,
+        events: [event],
+        nextCursors: {},
+        nowMs: params.nowMs,
+      });
+      const parked =
+        this.sqlite
+          .prepare('SELECT 1 FROM local_sync_parked WHERE event_id = ?')
+          .get(event.eventId) !== undefined;
+      if (parked) {
+        this.sqlite
+          .prepare(
+            `UPDATE local_sync_conflicts
+                SET resolved_at_ms = NULL, resolution = NULL, resolved_by_user_id = NULL,
+                    resolution_note = NULL, error = 'Still waiting for a referenced row', updated_at_ms = ?
+              WHERE id = ?`,
+          )
+          .run(params.nowMs, params.conflictId);
+      }
+      const after = this.sqlite
+        .prepare('SELECT resolved_at_ms FROM local_sync_conflicts WHERE id = ?')
+        .get(params.conflictId) as { resolved_at_ms: number | bigint | null };
+      return after.resolved_at_ms !== null;
+    })();
+  }
+
+  /** T2.6 "retry" of a projection key: recomputes every open PROJECTION_FAILED key now. */
+  recomputeOpenProjectionConflicts(params: {
+    readonly context: { readonly organizationId: UuidV7; readonly storeId: UuidV7 };
+    readonly nowMs: UnixMs;
+  }): void {
+    this.sqlite.transaction(() => {
+      this.recomputeProjectionsSafely(new ProjectionTouchSet(), params.context, params.nowMs);
+    })();
   }
 
   private compareFactContent(
@@ -664,7 +919,7 @@ export class HubSyncPullService {
     this.sqlite.prepare(sqlStr).run(...values);
   }
 
-  private retryParkedEvents(nowMs: UnixMs): void {
+  private retryParkedEvents(nowMs: UnixMs, touch: ProjectionTouchSet): void {
     const parked = this.sqlite
       .prepare('SELECT * FROM local_sync_parked ORDER BY attempts ASC, created_at_ms ASC LIMIT 50')
       .all() as Array<{
@@ -720,6 +975,7 @@ export class HubSyncPullService {
           };
 
           this.insertLocalRow(tableMeta, payloadObj, pseudoEvent, nowMs);
+          collectTouchedProjectionKeys(touch, row.entity, row.entity_id, payloadObj);
         }
 
         this.sqlite.prepare('DELETE FROM local_sync_parked WHERE id = ?').run(row.id);

@@ -89,6 +89,10 @@ import { PRODUCTION_TRUSTED_LICENCE_KEYS, type TrustedLicenceKey } from '@mezon/
 import { HubSyncPullService } from './sync-pull-service.js';
 import { HubSyncPullWorker } from './sync-pull-worker.js';
 import { registerFiscalRoutes } from './fiscal-routes.js';
+import { registerSyncConflictRoutes } from './sync-conflicts-routes.js';
+import { HubSyncConflictService } from './sync-conflicts-service.js';
+import { HubCloudParkedService } from './sync-cloud-parked.js';
+import { HubSyncBootstrap } from './sync-bootstrap.js';
 import { HubFiscalService } from './fiscal-service.js';
 import { HubFiscalWorker, type HubFiscalWorkerOptions } from './fiscal-worker.js';
 
@@ -324,7 +328,12 @@ export async function createHubServer(options: CreateHubServerOptions): Promise<
       getRuntimeContext: () => {
         const ctx = store.getActiveRuntimeContext();
         return ctx
-          ? { uow: ctx.uow, organizationId: ctx.config.organizationId, storeId: ctx.config.storeId }
+          ? {
+              uow: ctx.uow,
+              organizationId: ctx.config.organizationId,
+              storeId: ctx.config.storeId,
+              deviceId: ctx.config.deviceId,
+            }
           : null;
       },
     });
@@ -598,6 +607,33 @@ export async function createHubServer(options: CreateHubServerOptions): Promise<
     registerLicenceRoutes(app, authService, licenceService);
     const updateGate = new HubUpdateGate();
     registerUpdateGate(app, updateGate);
+    registerSyncConflictRoutes(
+      app,
+      authService,
+      new HubSyncConflictService({
+        connection,
+        pullService,
+        getContext: () => {
+          const ctx = store.getActiveRuntimeContext();
+          return ctx
+            ? {
+                organizationId: ctx.config.organizationId,
+                storeId: ctx.config.storeId,
+                deviceId: ctx.config.deviceId,
+              }
+            : null;
+        },
+        nowMs: () => clock.now(),
+      }),
+      new HubCloudParkedService({
+        connection,
+        cloudStore,
+        safeStorage,
+        nowMs: () => clock.now(),
+        fetchFn: options.cloudFetchFn,
+      }),
+      new HubSyncBootstrap({ connection, pullWorker, nowMs: () => clock.now() }),
+    );
     options.registerExtraTestRoutes?.(app);
 
     let boundPort: number | null = securityConfig.port > 0 ? securityConfig.port : null;

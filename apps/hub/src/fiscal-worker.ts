@@ -208,7 +208,7 @@ export class HubFiscalWorker {
         docId: sent.id,
         saleId: sent.saleId,
         returnId: sent.returnId,
-        shiftId: sent.shiftId,
+        shiftId: this.opts.store.shiftIdOfDocSync(sent),
       });
     } catch (err) {
       return this.onDriverError(sent, err);

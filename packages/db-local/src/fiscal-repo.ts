@@ -43,6 +43,8 @@ export interface StoredFiscalDocRecord {
   readonly id: UuidV7;
   readonly organizationId: UuidV7;
   readonly storeId: UuidV7;
+  /** Hub that created the document. Only that hub ever submits it to the operator. */
+  readonly deviceId: UuidV7;
   readonly docKind: FiscalDocKind;
   readonly saleId: UuidV7 | null;
   readonly returnId: UuidV7 | null;
@@ -75,6 +77,7 @@ function toRecord(row: FiscalDocRow): StoredFiscalDocRecord {
     id: row.id,
     organizationId: row.organizationId,
     storeId: row.storeId,
+    deviceId: row.deviceId,
     docKind: row.docKind as FiscalDocKind,
     saleId: row.saleId,
     returnId: row.returnId,
@@ -358,6 +361,11 @@ export interface FiscalRuntimeContext {
   readonly uow: SqliteUnitOfWork;
   readonly organizationId: UuidV7;
   readonly storeId: UuidV7;
+  /**
+   * This hub's device. P1 rule: a fiscal document is submitted ONLY by the hub that created it;
+   * documents of another hub (arrived by pull) are view-only here, so nothing is fiscalized twice.
+   */
+  readonly deviceId: UuidV7;
 }
 
 export interface FiscalDocListItem extends StoredFiscalDocRecord {
@@ -438,6 +446,7 @@ export class SqliteFiscalStore {
       .where(
         and(
           eq(fiscalDocs.organizationId, c.organizationId),
+          eq(fiscalDocs.deviceId, c.deviceId),
           inArray(fiscalDocs.status, ['pending', 'sent', 'failed']),
           sql`(${fiscalDocs.lastErrorCode} IS NULL OR ${fiscalDocs.lastErrorCode} <> ${FISCAL_PARKED_SHIFT_NOT_OPENED})`,
         ),
@@ -457,6 +466,7 @@ export class SqliteFiscalStore {
       .where(
         and(
           eq(fiscalDocs.organizationId, c.organizationId),
+          eq(fiscalDocs.deviceId, c.deviceId),
           inArray(fiscalDocs.status, ['pending', 'sent', 'failed']),
           sql`(${fiscalDocs.lastErrorCode} IS NULL OR ${fiscalDocs.lastErrorCode} <> ${FISCAL_PARKED_SHIFT_NOT_OPENED})`,
         ),
@@ -635,7 +645,14 @@ export class SqliteFiscalStore {
         details: { status: doc.status },
       });
     }
-    const { uow } = this.requireCtx();
+    const { uow, deviceId } = this.requireCtx();
+    if (doc.deviceId !== deviceId) {
+      throw new DomainError(
+        'FISCAL_DOC_INVALID_STATE',
+        'Only the hub that created a fiscal document may submit it',
+        { details: { status: doc.status, reason: 'FOREIGN_DEVICE' } },
+      );
+    }
     return uow.execute((session) => {
       const w = updateMonotone(session, fiscalDocs, {
         id: doc.id,

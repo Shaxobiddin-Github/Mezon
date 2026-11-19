@@ -18,6 +18,7 @@ import { CatalogScreen } from './components/CatalogScreen.js';
 import { FiscalOfflineBanner, FiscalUnsettledModal } from './components/FiscalPanels.js';
 import { LicenceBanner } from './components/LicenceBanner.js';
 import { UpdateBanner } from './components/UpdateBanner.js';
+import { SyncConflictsModal } from './components/SyncConflictsModal.js';
 import {
   ShortcutsModal,
   QuickSaleModal,
@@ -691,6 +692,16 @@ export function App() {
                   {t('fiscal.unsettled.openButton')}
                 </button>
               )}
+              {(user?.role === 'owner' || user?.role === 'manager') && (
+                <button
+                  type="button"
+                  className="pos-btn"
+                  data-testid="topbar-sync-conflicts-btn"
+                  onClick={() => setActiveModal('sync_conflicts')}
+                >
+                  {t('sync.conflicts.openButton')}
+                </button>
+              )}
               <button
                 type="button"
                 className="pos-btn"
@@ -805,6 +816,13 @@ export function App() {
             onError={handleError}
           />
         )}
+      {activeModal === 'sync_conflicts' && (user?.role === 'owner' || user?.role === 'manager') && (
+        <SyncConflictsModal
+          api={api}
+          onClose={() => setActiveModal('none')}
+          onError={handleError}
+        />
+      )}
       {activeModal === 'diagnostics' && (user?.role === 'owner' || user?.role === 'manager') && (
         <div className="pos-modal-backdrop" data-testid="diagnostics-modal">
           <div className="pos-modal" style={{ maxWidth: '520px' }}>

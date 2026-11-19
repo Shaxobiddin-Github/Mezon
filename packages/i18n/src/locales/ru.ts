@@ -150,6 +150,7 @@ export const RU_MESSAGES: Readonly<Record<I18nKey, string>> = {
   'customer.selectBtn': 'Выбрать',
   'customer.clearBtn': 'Убрать клиента',
   'customer.balance': 'Текущий долг: {amount}',
+  'customer.overpaid': 'Переплата: {amount} (в пользу клиента)',
 
   // Payment Modal
   'payment.title': 'Оплата и завершение продажи',
@@ -463,6 +464,27 @@ export const RU_MESSAGES: Readonly<Record<I18nKey, string>> = {
   'fiscal.kind.refund': 'Возврат',
   'fiscal.kind.shift_open': 'Открытие смены',
   'fiscal.kind.shift_close': 'Закрытие смены (Z)',
+
+  // T2.6 Sync conflicts (manager screen)
+  'sync.conflicts.openButton': 'Конфликты синхронизации',
+  'sync.conflicts.title': 'Конфликты синхронизации',
+  'sync.conflicts.empty': 'Открытых конфликтов нет.',
+  'sync.conflicts.colWhen': 'Время',
+  'sync.conflicts.colReason': 'Причина',
+  'sync.conflicts.colEntity': 'Запись',
+  'sync.conflicts.colError': 'Подробности',
+  'sync.conflicts.retry': 'Повторить',
+  'sync.conflicts.acknowledge': 'Изучено',
+  'sync.conflicts.notePlaceholder': 'Комментарий (необязательно)',
+  'sync.conflicts.retryFailed': 'Повтор не помог, конфликт остаётся открытым.',
+  'sync.conflicts.noEdit': 'Ручное редактирование данных невозможно: только повтор или «изучено».',
+  'sync.reason.CUSTOMER_OVERPAID': 'Клиент переплатил (в пользу клиента)',
+  'sync.reason.PROJECTION_FAILED': 'Не удалось пересчитать остаток или баланс',
+  'sync.reason.FACT_CONTENT_HASH_MISMATCH': 'Одна запись пришла с разным содержимым',
+  'sync.reason.DEPENDENCY_UNRESOLVED': 'Связанная запись не пришла',
+  'sync.reason.other': 'Отклонено облаком или другой кассой',
+  'sync.cloudParked.title': 'Ожидают связанную запись в облаке',
+  'sync.cloudParked.waitingFor': 'Ожидается: {entity}',
   'error.FISCAL_BLOCKED': 'Продажа заблокирована из-за фискального статуса.',
   'error.FISCALIZED_SALE_CANNOT_VOID':
     'Фискализированный (или отправленный) чек нельзя аннулировать — оформите возврат.',

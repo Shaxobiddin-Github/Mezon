@@ -29,11 +29,26 @@ Gemini `TOPSHIRIQ.md` ni o'zgartirmaydi, Claude `HISOBOT.md` ni o'zgartirmaydi. 
 - Merge'da `.mezon/` fayllari `main`ga tushadi, bu normal holat.
 - GEMINI.md 15-bo'limidagi egasi qarorlari egasida qoladi. Bunday qaror kerak bo'lsa, hisobotda so'ra va to'xta.
 
-## Ikki bajaruvchi (2026-11-16 dan)
+## Ikki ishchi (2026-11-17 dan, egasi qarori)
 
-| Yo'lak | Bajaruvchi | Branch | Topshiriq | Hisobot |
-|---|---|---|---|---|
-| A: F2 sinxronlash, keyin F4 | Gemini | `gemini/...` | `.mezon/claude/TOPSHIRIQ.md` | `.mezon/gemini/HISOBOT.md` |
-| B: F3 (hujjatsiz qismlar), keyin F5 | ishchi2 (Claude Code) | `ishchi2/...` | `.mezon/claude/TOPSHIRIQ-ishchi2.md` | `.mezon/ishchi2/HISOBOT.md` |
+Gemini loyihadan chiqarildi. Ikki ishchi bor: **Claude** (nazoratchi, o'zi ham paket bajaradi) va **ishchi2** (Claude Code). Ish **katta paketlarda** bo'ladi: har paket uchun bitta reja, bitta branch va bitta PR. Ishchilar bir-birining PR'ini tekshiradi.
 
-Ikkinchi ishchining to'liq yo'riqnomasi `.mezon/ISHCHI2.md` da. Har bajaruvchi faqat o'z fayllariga yozadi. Umumiy fayllardagi (sxema registri, migratsiyalar) to'qnashuvlarni merge'dan oldin rebase bilan hal qiladi. Merge tartibini nazoratchi belgilaydi.
+| Paket | Bajaruvchi | Ichida | Branch | Topshiriq | Hisobot |
+|---|---|---|---|---|---|
+| P1 | ishchi2 | T2.6, T2.5, bulut buyruq yozuvchi porti, fiskal test qarzi va `device_id` qoidasi | `ishchi2/...` | `.mezon/claude/TOPSHIRIQ-ishchi2.md` | `.mezon/ishchi2/HISOBOT.md` |
+| P2 | ishchi2 | T3.6 UzQR va to'lov (Fake), T3.7 markirovka (Fake), T3.8 audit xesh zanjiri | `ishchi2/...` | shu | shu |
+| P3 | ishchi2 | T4.1 LAN hub, T4.2 ko'p kassa, T4.3 terminal printeri, T2.8 yakuniy integratsiya | `ishchi2/...` | shu | shu |
+| C1 | Claude | T2.7b kabinetdan yozish, T2.8 Telegram bot, T3.9 pilot hujjatlari | `claude/...` | — | `.mezon/claude/HISOBOT.md` |
+| C2 | Claude | T4.4 Android va web-kassa, T4.7 obuna, T4.8 imzolangan yangilanish | `claude/...` | — | shu |
+| C3 | Claude | F5: T5.1–T5.4, T5.6 | `claude/...` | — | shu |
+
+**O'zaro tekshiruv:**
+- Tekshiruv so'rovi `TOPSHIRIQ-ishchi2.md` dagi `## Tekshiruv so'rovi: PR #N` bo'limi orqali keladi.
+- ishchi2 xulosasi `.mezon/ishchi2/TEKSHIRUV.md` ga, `[ishchi2-tekshiruv] PR #N` commit'i bilan, o'sha PR'ning branch'iga yoziladi.
+- Natija: `QABUL`, `SHARTLI QABUL` yoki `QAYTA ISHLASH`.
+- Merge faqat tekshiruvchining QABULi va yashil CI'dan keyin bo'ladi.
+
+**Qoidalar:**
+- `main` faqat **merge** bilan yangilanadi, rebase qilinmaydi.
+- Migratsiya raqamlari to'qnashsa, kim keyin merge bo'lsa, `main` ni merge qilib raqamni o'sha qayta yaratadi.
+- `TOPSHIRIQ.md` va `gemini/HISOBOT.md` endi ishlatilmaydi, tarix uchun qoldirilgan.

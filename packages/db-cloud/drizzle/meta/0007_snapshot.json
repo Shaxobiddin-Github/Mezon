@@ -1,5 +1,5 @@
 {
-  "id": "1b076d2a-8d8d-4801-82f5-d1a99969a163",
+  "id": "d998f6d7-7ab7-4501-9f52-71fda9a48038",
   "prevId": "7d4c145a-0b21-4a6e-a7cc-0ed99b7c629e",
   "version": "7",
   "dialect": "postgresql",
@@ -381,8 +381,8 @@
       "checkConstraints": {},
       "isRLSEnabled": true
     },
-    "public.cloud_licences": {
-      "name": "cloud_licences",
+    "public.cloud_hlc_state": {
+      "name": "cloud_hlc_state",
       "schema": "",
       "columns": {
         "id": {
@@ -409,55 +409,37 @@
           "primaryKey": false,
           "notNull": true
         },
-        "licence_id": {
-          "name": "licence_id",
-          "type": "text",
+        "device_id": {
+          "name": "device_id",
+          "type": "uuid",
           "primaryKey": false,
           "notNull": true
         },
-        "plan": {
-          "name": "plan",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "envelope_json": {
-          "name": "envelope_json",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "valid_from_ms": {
-          "name": "valid_from_ms",
+        "physical_ms": {
+          "name": "physical_ms",
           "type": "bigint",
           "primaryKey": false,
           "notNull": true
         },
-        "valid_until_ms": {
-          "name": "valid_until_ms",
-          "type": "bigint",
+        "logical": {
+          "name": "logical",
+          "type": "integer",
           "primaryKey": false,
           "notNull": true
         },
-        "revoked_at_ms": {
-          "name": "revoked_at_ms",
+        "last_device_seq": {
+          "name": "last_device_seq",
           "type": "bigint",
           "primaryKey": false,
-          "notNull": false
+          "notNull": true
         }
       },
       "indexes": {
-        "uidx_cloud_licences_licence": {
-          "name": "uidx_cloud_licences_licence",
+        "uidx_cloud_hlc_state_org": {
+          "name": "uidx_cloud_hlc_state_org",
           "columns": [
             {
               "expression": "organization_id",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            },
-            {
-              "expression": "licence_id",
               "isExpression": false,
               "asc": true,
               "nulls": "last"
@@ -467,35 +449,14 @@
           "concurrently": false,
           "method": "btree",
           "with": {}
-        },
-        "idx_cloud_licences_org_until": {
-          "name": "idx_cloud_licences_org_until",
-          "columns": [
-            {
-              "expression": "organization_id",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            },
-            {
-              "expression": "valid_until_ms",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            }
-          ],
-          "isUnique": false,
-          "concurrently": false,
-          "method": "btree",
-          "with": {}
         }
       },
       "foreignKeys": {},
       "compositePrimaryKeys": {},
       "uniqueConstraints": {},
       "policies": {
-        "cloud_licences_tenant_isolation": {
-          "name": "cloud_licences_tenant_isolation",
+        "cloud_hlc_state_tenant_isolation": {
+          "name": "cloud_hlc_state_tenant_isolation",
           "as": "PERMISSIVE",
           "for": "ALL",
           "to": ["mezon_app"],
@@ -504,13 +465,9 @@
         }
       },
       "checkConstraints": {
-        "chk_cloud_licences_plan": {
-          "name": "chk_cloud_licences_plan",
-          "value": "\"cloud_licences\".\"plan\" IN ('start', 'business', 'pro')"
-        },
-        "chk_cloud_licences_range": {
-          "name": "chk_cloud_licences_range",
-          "value": "\"cloud_licences\".\"valid_until_ms\" > \"cloud_licences\".\"valid_from_ms\""
+        "chk_cloud_hlc_state_logical": {
+          "name": "chk_cloud_hlc_state_logical",
+          "value": "\"cloud_hlc_state\".\"logical\" >= 0 AND \"cloud_hlc_state\".\"logical\" <= 65535"
         }
       },
       "isRLSEnabled": true
@@ -664,125 +621,6 @@
         }
       },
       "checkConstraints": {},
-      "isRLSEnabled": true
-    },
-    "public.cloud_platform_invoices": {
-      "name": "cloud_platform_invoices",
-      "schema": "",
-      "columns": {
-        "id": {
-          "name": "id",
-          "type": "uuid",
-          "primaryKey": true,
-          "notNull": true
-        },
-        "organization_id": {
-          "name": "organization_id",
-          "type": "uuid",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "created_at_ms": {
-          "name": "created_at_ms",
-          "type": "bigint",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "updated_at_ms": {
-          "name": "updated_at_ms",
-          "type": "bigint",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "period": {
-          "name": "period",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "plan": {
-          "name": "plan",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "amount_tiyin": {
-          "name": "amount_tiyin",
-          "type": "bigint",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "status": {
-          "name": "status",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "paid_at_ms": {
-          "name": "paid_at_ms",
-          "type": "bigint",
-          "primaryKey": false,
-          "notNull": false
-        }
-      },
-      "indexes": {
-        "uidx_cloud_platform_invoices_period": {
-          "name": "uidx_cloud_platform_invoices_period",
-          "columns": [
-            {
-              "expression": "organization_id",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            },
-            {
-              "expression": "period",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            }
-          ],
-          "isUnique": true,
-          "concurrently": false,
-          "method": "btree",
-          "with": {}
-        }
-      },
-      "foreignKeys": {},
-      "compositePrimaryKeys": {},
-      "uniqueConstraints": {},
-      "policies": {
-        "cloud_platform_invoices_tenant_isolation": {
-          "name": "cloud_platform_invoices_tenant_isolation",
-          "as": "PERMISSIVE",
-          "for": "ALL",
-          "to": ["mezon_app"],
-          "using": "\"organization_id\" = mezon_current_organization_id()",
-          "withCheck": "\"organization_id\" = mezon_current_organization_id()"
-        }
-      },
-      "checkConstraints": {
-        "chk_cloud_platform_invoices_period": {
-          "name": "chk_cloud_platform_invoices_period",
-          "value": "\"cloud_platform_invoices\".\"period\" ~ '^[0-9]{4}-(0[1-9]|1[0-2])$'"
-        },
-        "chk_cloud_platform_invoices_plan": {
-          "name": "chk_cloud_platform_invoices_plan",
-          "value": "\"cloud_platform_invoices\".\"plan\" IN ('start', 'business', 'pro')"
-        },
-        "chk_cloud_platform_invoices_amount": {
-          "name": "chk_cloud_platform_invoices_amount",
-          "value": "\"cloud_platform_invoices\".\"amount_tiyin\" >= 0"
-        },
-        "chk_cloud_platform_invoices_status": {
-          "name": "chk_cloud_platform_invoices_status",
-          "value": "\"cloud_platform_invoices\".\"status\" IN ('issued', 'paid', 'void')"
-        },
-        "chk_cloud_platform_invoices_paid": {
-          "name": "chk_cloud_platform_invoices_paid",
-          "value": "(\"cloud_platform_invoices\".\"status\" = 'paid') = (\"cloud_platform_invoices\".\"paid_at_ms\" IS NOT NULL)"
-        }
-      },
       "isRLSEnabled": true
     },
     "public.cloud_refresh_tokens": {
@@ -1361,6 +1199,30 @@
           "primaryKey": false,
           "notNull": true,
           "default": "'parked'"
+        },
+        "resolution": {
+          "name": "resolution",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "resolved_by_user_id": {
+          "name": "resolved_by_user_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "resolved_at_ms": {
+          "name": "resolved_at_ms",
+          "type": "bigint",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "resolution_note": {
+          "name": "resolution_note",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
         }
       },
       "indexes": {
@@ -1426,7 +1288,12 @@
           "withCheck": "\"organization_id\" = mezon_current_organization_id()"
         }
       },
-      "checkConstraints": {},
+      "checkConstraints": {
+        "chk_cloud_sync_parked_resolution": {
+          "name": "chk_cloud_sync_parked_resolution",
+          "value": "\"cloud_sync_parked\".\"resolution\" IS NULL OR \"cloud_sync_parked\".\"resolution\" IN ('retried', 'acknowledged')"
+        }
+      },
       "isRLSEnabled": true
     },
     "public.cloud_telegram_deliveries": {

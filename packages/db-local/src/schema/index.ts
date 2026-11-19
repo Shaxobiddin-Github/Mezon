@@ -1661,7 +1661,6 @@ export const localCustomerBalances = localSchemaRegistry.defineTable(
       self.earliestOpenDueAtMs,
       self.customerId,
     ),
-    check('chk_local_customer_balances_nonneg', sql`${self.balance} >= 0`),
     check('chk_local_customer_balances_accrued_nonneg', sql`${self.totalDebtAccrued} >= 0`),
     check('chk_local_customer_balances_settled_nonneg', sql`${self.totalSettled} >= 0`),
   ],
@@ -2991,10 +2990,35 @@ export const localSyncConflicts = localSchemaRegistry.defineTable(
     error: text('error'),
     payload: text('payload').notNull(),
     resolvedAtMs: sqliteUnixMs('resolved_at_ms'),
+    /** T2.6: the full pulled event envelope, so a `retry` re-applies exactly what arrived. */
+    eventJson: text('event_json'),
+    /** T2.6 audit: how the conflict was closed (`auto` = the cause went away by itself). */
+    resolution: text('resolution'),
+    resolvedByUserId: sqliteUuidV7('resolved_by_user_id'),
+    resolutionNote: text('resolution_note'),
   }),
   (self) => [
     index('idx_local_sync_conflicts_event').on(self.eventId),
     index('idx_local_sync_conflicts_created').on(self.organizationId, self.createdAtMs),
+    index('idx_local_sync_conflicts_open').on(
+      self.organizationId,
+      self.reason,
+      self.entity,
+      self.entityId,
+      self.resolvedAtMs,
+    ),
+    check(
+      'chk_local_sync_conflicts_resolution',
+      sql`${self.resolution} IS NULL OR ${self.resolution} IN ('retried', 'acknowledged', 'auto')`,
+    ),
+    check(
+      'chk_local_sync_conflicts_resolved_pair',
+      sql`(${self.resolvedAtMs} IS NULL) = (${self.resolution} IS NULL)`,
+    ),
+    check(
+      'chk_local_sync_conflicts_note_len',
+      sql`${self.resolutionNote} IS NULL OR length(${self.resolutionNote}) <= 500`,
+    ),
   ],
 );
 
@@ -3051,7 +3075,12 @@ export const localSyncApplyState = localSchemaRegistry.defineTable(
   (common) => ({
     ...common,
     inSync: sqliteInt('in_sync').notNull().default(0),
+    /** T2.5: initial load from the cloud: none, in_progress (resumable), done. */
+    bootstrapState: text('bootstrap_state').notNull().default('none'),
+    bootstrapPages: sqliteInt('bootstrap_pages').notNull().default(0),
   }),
+  // No CHECK on the T2.5 columns: adding one would make SQLite rebuild this table, which the
+  // sales closed-shift trigger references. The values are written only by HubSyncBootstrap.
   (self) => [check('chk_local_sync_apply_state_in_sync', sql`${self.inSync} IN (0, 1)`)],
 );
 

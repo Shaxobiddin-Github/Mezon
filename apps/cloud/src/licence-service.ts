@@ -79,12 +79,15 @@ export class CloudLicenceService {
    * transaction that inserts the store / device. It takes the organization's growth lock first, so
    * two parallel requests are serialized and the second one counts the first one's row.
    */
-  growthGuard(organizationId: UuidV7, kind: LimitKind, nowMs: UnixMs): GrowthGuard {
+  async growthGuard(organizationId: UuidV7, kind: LimitKind, nowMs: UnixMs): Promise<GrowthGuard> {
+    // The plan status is read BEFORE the insert transaction (ishchi2 T1): the guard itself uses only
+    // the transaction's own connection, so parallel requests can never exhaust the pool while one
+    // of them holds the growth lock. The status changes only when a licence is imported.
+    const status = await this.getStatus(organizationId, nowMs);
     return async (client) => {
       await client.query('SELECT pg_advisory_xact_lock(hashtext($1))', [
         `mezon.growth:${organizationId}`,
       ]);
-      const status = await this.getStatus(organizationId, nowMs);
       const res = await client.query<{ n: string }>(
         kind === 'stores'
           ? `SELECT count(*) AS n FROM cloud_stores WHERE organization_id = $1 AND is_active = true`

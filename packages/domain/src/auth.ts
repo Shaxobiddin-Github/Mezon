@@ -45,7 +45,9 @@ export type HubPermission =
   | 'rules:import'
   | 'fiscal:read'
   | 'fiscal:retry'
-  | 'fiscal:mode';
+  | 'fiscal:mode'
+  | 'sync:read'
+  | 'sync:resolve';
 
 const ROLE_PERMISSION_TABLE: Readonly<Record<UserRole, ReadonlySet<HubPermission>>> = {
   owner: new Set<HubPermission>([
@@ -91,6 +93,8 @@ const ROLE_PERMISSION_TABLE: Readonly<Record<UserRole, ReadonlySet<HubPermission
     'fiscal:read',
     'fiscal:retry',
     'fiscal:mode',
+    'sync:read',
+    'sync:resolve',
   ]),
   manager: new Set<HubPermission>([
     'auth:self',
@@ -131,6 +135,8 @@ const ROLE_PERMISSION_TABLE: Readonly<Record<UserRole, ReadonlySet<HubPermission
     'rules:import',
     'fiscal:read',
     'fiscal:retry',
+    'sync:read',
+    'sync:resolve',
   ]),
   cashier: new Set<HubPermission>([
     'auth:self',
