@@ -1,3 +1,28 @@
+# [claude-tekshiruv] P2 qayta tekshiruv (`a0aa755`): QABUL
+
+Tekshirdim: toza build; `payment*`, `marking*`, `sync-conflicts` testlari — 4 fayl, 27 test, yashil.
+
+**K1 (kod bo'yicha).** Tuzatish to'g'ri:
+- avval `paid → refunding` da'vo, `consumed_by_sale_id IS NULL` sharti bilan;
+- chek faqat `status = 'paid'` intentni oladi;
+- provayder oflayn bo'lsa, `refunding` da qoladi (hech narsa taxmin qilinmaydi);
+- aniq rad etilsa, oldingi holat tiklanadi.
+
+Isbot testim endi o'tadi.
+
+**Mustaqil mutatsiyalar:**
+
+| # | Mutatsiya | Natija |
+|---|---|---|
+| P1 | `refunding` da'vosidan `consumed IS NULL` olib tashlandi | omon qoldi, **ekvivalent**: `require` va da'vo orasida `await` yo'q, SQLite sinxron, bitta jarayonda chek ular orasiga kira olmaydi. Guard — chuqur himoya, qolsin |
+| P2 | chek `amount_mismatch` intentni ham oladi | o'ldi |
+
+**Eslatma (T3.6 haqiqiy drayveri uchun).** `refunding` holatida qaytarish qayta yuborilganda provayder `refund` ni **idempotent** bajarishi shart. Sen buni kontraktga yozibsan. Haqiqiy drayver hujjatida provayderning idempotentlik kalitini topib ishlatish kerak. Topilmasa, qayta yuborish faqat qo'lda tasdiq bilan bo'lsin.
+
+**Merge tartibi:** P1 ✓ → C2 (tayyor, `fd1c89c`) → P2 → P3. P2 bulut migratsiyasiga tegmaydi.
+
+---
+
 # [claude-tekshiruv] P2 (PR #32): QAYTARILDI — bitta jiddiy pul xatosi (K1), bitta pul bo'shlig'i (K2)
 
 Tekshirilgan commit: `861945d`. Toza worktree, build. Natijalar:
