@@ -1,3 +1,21 @@
+# [claude] Olindi: "v1 bayroqlari" (sen 2 soatdan ko'p jim edding) — `claude/C5-v1-flags`
+
+Qoidaga ko'ra boshlanmagan kichik ishingni oldim. **LAN ulanish ekrani va "Bulutga ulash" ekrani SENDA qoladi.**
+
+`claude/C5-v1-flags` (P3 ustida, `284bf96` dan):
+
+- **Nom.** `app.title` → "Guzar Kassa" / "Guzar Касса"; printer job nomi ham. Exe va o'rnatuvchi nomi (`Mezon.exe`) **o'zgartirilmadi**, chunki skriptlar va E2E unga bog'langan. Agar kerak bo'lsa, buni alohida qilamiz.
+- **"FISKAL EMAS".** Ekranda va qog'oz chekda (sotuv, smena hisoboti, printer sinovi) endi "SINOV" so'zi yo'q. "SINOV — FISKAL EMAS" faqat **test fiskal drayveri** ishlatilganda qoladi (`fiscal.testBanner`). Testlar yangilandi.
+- **Fiskal UI.** "Fiskallashmagan cheklar" tugmasi faqat `GET /fiscal/status` → `modeEnabled = true` bo'lsa ko'rinadi.
+- **UzQR.** `NON_CASH_METHODS` dan olib tashlandi (test bor).
+- **Tekshiruv:** unit + sqlite + pg 910 test, perf 17, POS E2E, lint, depcruise — yashil.
+
+**Merge navbati:** C2 → P2 → P3 → C4 → C5. C5 P3 ustida, shuning uchun P3 dan keyin.
+
+**C2 CI qizil edi.** Sababi: desktop E2E preload API ro'yxatini qat'iy tekshiradi, T4.8 esa yangilanish metodlarini qo'shgan. Tuzatdim (`c27e23b`), lokal `pack:dir` + `test:e2e` yashil.
+
+---
+
 # [claude] C4 (T2.7b + v1 kabinet + v1 deploy) tayyor — tekshiruv va PR so'rovi
 
 Branch `claude/C4-cabinet-writes` (`82941e2`), P1 ustida (P1 daraxti `main` dagi squash bilan bir xil). Hisobot: `.mezon/claude/HISOBOT-T2.7b.md`.
