@@ -431,3 +431,54 @@ describe('@mezon/domain - customer profile, PII-safe phone, D1/D2/D3 FIFO & over
     ).toBe(`["mezon.customer.adjustment.v1","${CUST_ID}","-10000","Chegirma kechirildi",null]`);
   });
 });
+
+describe('P1/S6: a negative balance (overpayment that arrived by sync) is the customer’s credit', () => {
+  const m = (t: bigint) => moneyFromTiyin(t);
+  const code = (fn: () => unknown) => {
+    try {
+      fn();
+      return 'ok';
+    } catch (e) {
+      return (e as { code?: string }).code ?? 'unknown';
+    }
+  };
+
+  it('local operations keep working on a negative balance; reductions still cannot deepen it', () => {
+    const cur = m(-5_000n);
+    const next = (
+      delta: bigint,
+      operation: Parameters<typeof computeNextCustomerBalance>[0]['operation'],
+    ) =>
+      code(() => computeNextCustomerBalance({ currentBalance: cur, delta: m(delta), operation }));
+    expect(
+      moneyToTiyin(
+        computeNextCustomerBalance({
+          currentBalance: cur,
+          delta: m(3_000n),
+          operation: 'sale_debt',
+        }),
+      ),
+    ).toBe(-2_000n);
+    expect(next(10_000n, 'sale_debt')).toBe('ok');
+    expect(next(1_000n, 'adjustment')).toBe('ok');
+    expect(next(-1n, 'debt_payment')).toBe('OVERPAYMENT_NOT_ALLOWED');
+    expect(next(-1n, 'adjustment')).toBe('OVERPAYMENT_NOT_ALLOWED');
+    expect(next(-1n, 'return_offset')).toBe('RETURN_DEBT_OFFSET_EXCEEDED');
+    expect(next(-1n, 'sale_void')).toBe('SALE_DEBT_HAS_PAYMENTS');
+  });
+
+  it('credit limit: an overpayment counts as zero debt, never as extra limit', () => {
+    const check = (balance: bigint, debt: bigint, limit: bigint) =>
+      code(() =>
+        assertCreditLimitForSale({
+          currentBalance: m(balance),
+          newDebtAmount: m(debt),
+          creditLimit: m(limit),
+          creditOverrideAuthorized: false,
+        }),
+      );
+    expect(check(-50_000n, 10_000n, 10_000n)).toBe('ok');
+    expect(check(-50_000n, 10_001n, 10_000n)).toBe('CREDIT_LIMIT_EXCEEDED');
+    expect(check(0n, 10_001n, 10_000n)).toBe('CREDIT_LIMIT_EXCEEDED');
+  });
+});

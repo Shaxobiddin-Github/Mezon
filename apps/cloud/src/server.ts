@@ -23,12 +23,17 @@ import {
   SyncPullQuerySchema,
   parseAndValidateSyncCursors,
   type SyncPullResponseDto,
+  type CloudParkedEventDto,
+  type CloudParkedListResponseDto,
+  CloudResolveParkedRequestSchema,
 } from '@mezon/contracts';
 import {
   AdminReadStore,
   CloudTelegramStore,
   CloudAuthStore,
   CloudDeviceStore,
+  type CloudParkedEventRecord,
+  CloudSyncParkedStore,
   CloudSyncPushStore,
   CloudSyncPullStore,
   ForeignStoreError,
@@ -89,6 +94,7 @@ export interface BuildServerOptions {
   /** T2.8: injected in tests (FakeTelegramClient); production builds HttpTelegramClient. */
   readonly telegramClient?: TelegramClient;
   readonly syncPullStore?: CloudSyncPullStore;
+  readonly syncParkedStore?: CloudSyncParkedStore;
   readonly idGen?: { nextId(): UuidV7 };
   readonly clock?: { nowMs(): UnixMs };
 }
@@ -129,6 +135,7 @@ export async function buildCloudServer(options: BuildServerOptions): Promise<Fas
   const syncPushStore = options.syncPushStore ?? new CloudSyncPushStore(conn.pool);
   const adminStore = options.adminStore ?? new AdminReadStore({ pool: conn.pool });
   const syncPullStore = options.syncPullStore ?? new CloudSyncPullStore(conn.pool);
+  const syncParkedStore = options.syncParkedStore ?? new CloudSyncParkedStore(conn.pool);
   const defaultIdGen: IdGenerator = new MonotonicUuidV7Generator({
     clock: { now: () => unixMsFromBigInt(BigInt(Date.now())) },
     random: { nextBytes: (n: number) => randomBytes(n) },
@@ -945,6 +952,83 @@ export async function buildCloudServer(options: BuildServerOptions): Promise<Fas
     adminStore,
     clock,
   });
+  // T2.6: parked push events of the calling hub's store (device token). View, retry, acknowledge.
+  const toParkedDto = (r: CloudParkedEventRecord): CloudParkedEventDto => ({
+    id: parseUuidV7(r.id),
+    eventId: parseUuidV7(r.eventId),
+    entity: r.entity,
+    entityId: parseUuidV7(r.entityId),
+    missingRefEntity: r.missingRefEntity,
+    missingRefId: r.missingRefId,
+    attempts: r.attempts,
+    status: r.status,
+    resolution: r.resolution,
+    resolvedByUserId: r.resolvedByUserId === null ? null : parseUuidV7(r.resolvedByUserId),
+    resolvedAtMs: r.resolvedAtMs,
+    resolutionNote: r.resolutionNote,
+    createdAtMs: r.createdAtMs,
+  });
+
+  app.get('/api/v1/sync/parked', async (req, reply) => {
+    let authResult: { device: VerifiedDeviceContext; token: string };
+    try {
+      authResult = await requireDeviceAuth(req, reply);
+    } catch {
+      return;
+    }
+    const rows = await syncParkedStore.listForDevice(authResult.device);
+    const body: CloudParkedListResponseDto = { parked: rows.map(toParkedDto) };
+    return reply.code(200).send(body);
+  });
+
+  app.post<{ Params: { id: string } }>('/api/v1/sync/parked/:id/resolve', async (req, reply) => {
+    let authResult: { device: VerifiedDeviceContext; token: string };
+    try {
+      authResult = await requireDeviceAuth(req, reply);
+    } catch {
+      return;
+    }
+    const parsed = CloudResolveParkedRequestSchema.safeParse(req.body);
+    let id: UuidV7;
+    try {
+      id = parseUuidV7(req.params.id);
+    } catch {
+      return reply.code(400).send({ error: 'Validation Error', message: 'Invalid id' });
+    }
+    if (!parsed.success) {
+      return reply.code(400).send({ error: 'Validation Error', details: parsed.error.flatten() });
+    }
+    try {
+      const row = await syncParkedStore.resolve({
+        device: authResult.device,
+        id,
+        action: parsed.data.action,
+        userId: parseUuidV7(parsed.data.userId),
+        note: parsed.data.note && parsed.data.note.length > 0 ? parsed.data.note : null,
+        nowMs: clock.nowMs(),
+      });
+      req.log.info(
+        {
+          event: 'sync.parked_resolved',
+          parkedId: row.id,
+          action: parsed.data.action,
+          deviceId: authResult.device.deviceId,
+          userId: parsed.data.userId,
+        },
+        'Cloud parked event resolved',
+      );
+      return reply.code(200).send({ parked: toParkedDto(row) });
+    } catch (err) {
+      if (err instanceof DomainError && err.code === 'SYNC_CONFLICT_NOT_FOUND') {
+        return reply.code(404).send({ error: 'Not Found', code: err.code, message: err.message });
+      }
+      if (err instanceof DomainError && err.code === 'SYNC_CONFLICT_ALREADY_RESOLVED') {
+        return reply.code(409).send({ error: 'Conflict', code: err.code, message: err.message });
+      }
+      throw err;
+    }
+  });
+
   // GET /api/v1/sync/pull (Hub sync pull engine - T2.4)
   app.get<{ Querystring: { cursors?: string; limit?: string } }>(
     '/api/v1/sync/pull',

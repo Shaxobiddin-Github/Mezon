@@ -144,6 +144,7 @@ export const UZ_LATN_MESSAGES = {
   'customer.selectBtn': 'Tanlash',
   'customer.clearBtn': 'Mijozni bekor qilish',
   'customer.balance': 'Joriy qarz: {amount}',
+  'customer.overpaid': 'Ortiqcha toʻlov: {amount} (mijoz haqqi)',
 
   // Payment Modal
   'payment.title': "To'lov va savdoni yakunlash",
@@ -459,6 +460,28 @@ export const UZ_LATN_MESSAGES = {
   'fiscal.kind.refund': 'Qaytarish',
   'fiscal.kind.shift_open': 'Smena ochish',
   'fiscal.kind.shift_close': 'Smena yopish (Z)',
+
+  // T2.6 Sync conflicts (manager screen)
+  'sync.conflicts.openButton': 'Sinxron konfliktlar',
+  'sync.conflicts.title': 'Sinxron konfliktlar',
+  'sync.conflicts.empty': 'Ochiq konflikt yoʻq.',
+  'sync.conflicts.colWhen': 'Vaqt',
+  'sync.conflicts.colReason': 'Sabab',
+  'sync.conflicts.colEntity': 'Yozuv',
+  'sync.conflicts.colError': 'Tafsilot',
+  'sync.conflicts.retry': 'Qayta urinish',
+  'sync.conflicts.acknowledge': 'Oʻrganildi',
+  'sync.conflicts.notePlaceholder': 'Izoh (ixtiyoriy)',
+  'sync.conflicts.retryFailed': 'Qayta urinish yordam bermadi, konflikt ochiq qoldi.',
+  'sync.conflicts.noEdit':
+    'Maʼlumotni qoʻlda tahrirlash mumkin emas: faqat qayta urinish yoki oʻrganildi.',
+  'sync.reason.CUSTOMER_OVERPAID': 'Mijoz ortiqcha toʻlagan (mijoz haqqi)',
+  'sync.reason.PROJECTION_FAILED': 'Qoldiq yoki balansni hisoblab boʻlmadi',
+  'sync.reason.FACT_CONTENT_HASH_MISMATCH': 'Bir xil yozuv turli mazmun bilan keldi',
+  'sync.reason.DEPENDENCY_UNRESOLVED': 'Bogʻliq yozuv kelmadi',
+  'sync.reason.other': 'Bulut yoki boshqa kassa rad etdi',
+  'sync.cloudParked.title': 'Bulutda bogʻliq yozuvni kutayotganlar',
+  'sync.cloudParked.waitingFor': 'Kutilmoqda: {entity}',
   'error.FISCAL_BLOCKED': 'Savdo fiskal holat sababli bloklandi.',
   'error.FISCALIZED_SALE_CANNOT_VOID':
     'Fiskallashgan (yoki yuborilgan) chekni bekor qilib boʻlmaydi — qaytarish qiling.',

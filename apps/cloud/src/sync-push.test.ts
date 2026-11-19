@@ -3,11 +3,15 @@ import type {
   SyncEventEnvelopeDto,
   SyncPushRequestDto,
   SyncPushResponseDto,
+  CloudParkedEventDto,
+  CloudParkedListResponseDto,
 } from '@mezon/contracts';
 import {
   PG_APP_ROLE_NAME,
   CloudAuthStore,
   CloudDeviceStore,
+  CloudEventWriter,
+  cloudSchemaRegistry,
   CloudSyncPushStore,
   CloudTenantStore,
   categories,
@@ -20,7 +24,8 @@ import {
   users,
   organizationTaxProfiles,
 } from '@mezon/db-cloud';
-import { parseUuidV7, serializeHlc, unixMsFromBigInt } from '@mezon/domain';
+import { parseHlc, parseUuidV7, serializeHlc, unixMsFromBigInt } from '@mezon/domain';
+import { createHash } from 'node:crypto';
 import { DeterministicUuidV7Generator } from '@mezon/test-utils';
 import * as argon2 from '@node-rs/argon2';
 import { PostgreSqlContainer, type StartedPostgreSqlContainer } from '@testcontainers/postgresql';
@@ -533,6 +538,450 @@ describePg('@mezon/cloud - Sync Push Engine (T2.3 & P1-P5)', () => {
     // Positions must be adjacent (diff = 1)
     const diff = p1 > p2 ? p1 - p2 : p2 - p1;
     expect(diff).toBe(1n);
+  });
+
+  // --------------------------------------------------------------------------
+  // T2.6b: cloud event writer (port for the cabinet, T2.7b)
+  // --------------------------------------------------------------------------
+  describe('T2.6b CloudEventWriter', () => {
+    const writer = () =>
+      new CloudEventWriter(appConn.pool, new CloudSyncPushStore(appConn.pool), idGen);
+
+    it('writes an org event through the push path into the organization stream; the virtual device has no usable token', async () => {
+      const catId = idGen.nextId();
+      const res = await writer().write({
+        organizationId: orgA,
+        nowMs,
+        commands: [
+          {
+            entity: 'categories',
+            entityId: catId,
+            type: 'categories.created',
+            payload: makeCategoryPayload(catId, 'Kabinetdan'),
+          },
+        ],
+      });
+      expect(res.results.map((r) => r.status)).toEqual(['accepted']);
+      const ev = await adminConn.pool.query<{
+        store_id: string;
+        device_id: string;
+        position: string;
+      }>(
+        'SELECT store_id, device_id, position::text AS position FROM cloud_sync_events WHERE id = $1',
+        [res.results[0].eventId],
+      );
+      expect(ev.rows[0].store_id).toBe(orgA); // organization stream key
+      const dev = await adminConn.pool.query<{ status: string; device_id: string }>(
+        'SELECT status, device_id FROM cloud_devices WHERE organization_id = $1 AND device_id = $2',
+        [orgA, ev.rows[0].device_id],
+      );
+      expect(dev.rows[0].status).toBe('system');
+      const cat = await adminConn.pool.query<{ name: string; device_id: string }>(
+        'SELECT name, device_id FROM categories WHERE id = $1',
+        [catId],
+      );
+      expect(cat.rows[0]).toEqual({ name: 'Kabinetdan', device_id: ev.rows[0].device_id });
+
+      // A token forged for the virtual device is refused by device auth.
+      const secret = 'forged-virtual-device-secret';
+      await adminConn.pool.query(
+        `INSERT INTO cloud_device_tokens (id, organization_id, created_at_ms, updated_at_ms, device_id, token_hash, expires_at_ms)
+         VALUES ($1, $2, $3, $3, $4, $5, $6)`,
+        [
+          idGen.nextId(),
+          orgA,
+          nowMs.toString(),
+          ev.rows[0].device_id,
+          createHash('sha256').update(secret).digest('hex'),
+          (BigInt(nowMs) + 86_400_000n).toString(),
+        ],
+      );
+      const forged = `${orgA}.${ev.rows[0].device_id}.${secret}`;
+      for (const [method, url] of [
+        ['GET', '/api/v1/sync/pull'],
+        ['GET', '/api/v1/sync/parked'],
+      ] as const) {
+        const r = await server.inject({
+          method,
+          url,
+          headers: { authorization: `Bearer ${forged}` },
+        });
+        expect([401, 403], `${url} ${r.body}`).toContain(r.statusCode);
+      }
+    });
+
+    it('HLC: two changes in one millisecond get logical 0 then 1; a row HLC from a hub clock ahead is overtaken', async () => {
+      const a = idGen.nextId();
+      const b = idGen.nextId();
+      const later = unixMsFromBigInt(BigInt(nowMs) + 10_000n);
+      const res = await writer().write({
+        organizationId: orgA,
+        nowMs: later,
+        commands: [a, b].map((id) => ({
+          entity: 'categories',
+          entityId: id,
+          type: 'categories.created',
+          payload: makeCategoryPayload(id, `Bir ms ${id.slice(-4)}`),
+        })),
+      });
+      const [h1, h2] = res.results.map((r) => parseHlc(r.hlc!));
+      expect(h1.physicalMs).toBe(h2.physicalMs);
+      expect(h2.logical).toBe(h1.logical + 1);
+
+      // Hub A writes the category with a clock 2 minutes ahead (inside the skew window).
+      const ahead = serializeHlc({
+        physicalMs: unixMsFromBigInt(BigInt(later) + 120_000n),
+        logical: 7,
+        nodeId: deviceA,
+      });
+      const push = await server.inject({
+        method: 'POST',
+        url: '/api/v1/sync/push',
+        headers: { authorization: `Bearer ${deviceTokenA}` },
+        payload: {
+          clientVersion: '1.0.0',
+          storeId: storeA,
+          deviceId: deviceA,
+          events: [
+            {
+              eventId: idGen.nextId(),
+              organizationId: orgA,
+              storeId: storeA,
+              deviceId: deviceA,
+              deviceSeq: '9601',
+              hlc: ahead,
+              type: 'categories.updated',
+              entity: 'categories',
+              entityId: a,
+              entityClass: 'ATTR',
+              schemaVersion: 1,
+              payload: { ...makeCategoryPayload(a, 'Hubdan'), hlc: ahead },
+            },
+          ],
+        },
+      });
+      expect(push.json<SyncPushResponseDto>().results[0].status).toBe('accepted');
+      const after = await writer().write({
+        organizationId: orgA,
+        nowMs: later,
+        commands: [
+          {
+            entity: 'categories',
+            entityId: a,
+            type: 'categories.updated',
+            payload: makeCategoryPayload(a, 'Kabinet yutadi'),
+          },
+        ],
+      });
+      expect(after.results[0].status).toBe('accepted');
+      const h3 = parseHlc(after.results[0].hlc!);
+      const rowAhead = parseHlc(ahead);
+      expect(
+        BigInt(h3.physicalMs) > BigInt(rowAhead.physicalMs) ||
+          (h3.physicalMs === rowAhead.physicalMs && h3.logical > rowAhead.logical),
+      ).toBe(true);
+      const cat = await adminConn.pool.query<{ name: string }>(
+        'SELECT name FROM categories WHERE id = $1',
+        [a],
+      );
+      expect(cat.rows[0].name).toBe('Kabinet yutadi');
+    });
+
+    it('store tables are refused; invalid payloads fail exactly like a hub push (same validation path)', async () => {
+      const moveId = idGen.nextId();
+      const store = await writer().write({
+        organizationId: orgA,
+        nowMs,
+        commands: [
+          {
+            entity: 'stock_moves',
+            entityId: moveId,
+            type: 'stock_moves.created',
+            payload: { id: moveId },
+          },
+        ],
+      });
+      expect(store.results[0]).toMatchObject({ status: 'rejected', reason: 'VALIDATION_ERROR' });
+      expect(store.results[0].error).toContain('ORG_STREAM_STORE_ENTITY');
+      const n = await adminConn.pool.query('SELECT 1 FROM cloud_sync_events WHERE entity_id = $1', [
+        moveId,
+      ]);
+      expect(n.rowCount).toBe(0);
+
+      const bad = idGen.nextId();
+      const badPayload = { ...makeCategoryPayload(bad, 'Yomon'), pinHash: 'x' };
+      const viaWriter = await writer().write({
+        organizationId: orgA,
+        nowMs,
+        commands: [
+          { entity: 'categories', entityId: bad, type: 'categories.created', payload: badPayload },
+        ],
+      });
+      const viaPush = await server.inject({
+        method: 'POST',
+        url: '/api/v1/sync/push',
+        headers: { authorization: `Bearer ${deviceTokenA}` },
+        payload: {
+          clientVersion: '1.0.0',
+          storeId: storeA,
+          deviceId: deviceA,
+          events: [
+            {
+              eventId: idGen.nextId(),
+              organizationId: orgA,
+              storeId: storeA,
+              deviceId: deviceA,
+              deviceSeq: '9602',
+              hlc: '001700000000000:00000:018bcfe5-6800-7000-8000-000000000111',
+              type: 'categories.created',
+              entity: 'categories',
+              entityId: bad,
+              entityClass: 'ATTR',
+              schemaVersion: 1,
+              payload: badPayload,
+            },
+          ],
+        },
+      });
+      const pushed = viaPush.json<SyncPushResponseDto>().results[0];
+      expect(viaWriter.results[0].status).toBe('rejected');
+      expect(viaWriter.results[0].reason).toBe(pushed.reason);
+      expect(pushed.status).toBe('rejected');
+    });
+
+    it('a hub pulls the organization stream with the organization id as a cursor key', async () => {
+      const first = await server.inject({
+        method: 'GET',
+        url: '/api/v1/sync/pull?limit=500',
+        headers: { authorization: `Bearer ${deviceTokenA}` },
+      });
+      expect(first.statusCode, first.body).toBe(200);
+      const body = first.json<{
+        events: { storeId: string }[];
+        nextCursors: Record<string, string>;
+      }>();
+      expect(body.events.some((e) => e.storeId === orgA)).toBe(true);
+      expect(body.nextCursors[orgA]).toBeDefined();
+      const cursors = Object.entries(body.nextCursors)
+        .map(([s, p]) => `${s}:${p}`)
+        .join(',');
+      const second = await server.inject({
+        method: 'GET',
+        url: `/api/v1/sync/pull?limit=500&cursors=${encodeURIComponent(cursors)}`,
+        headers: { authorization: `Bearer ${deviceTokenA}` },
+      });
+      expect(second.statusCode, second.body).toBe(200);
+      expect(
+        second.json<{ events: { storeId: string }[] }>().events.filter((e) => e.storeId === orgA),
+      ).toEqual([]);
+    });
+  });
+
+  // --------------------------------------------------------------------------
+  // T2.5: tenant filter for EVERY synced table, generated from the registry (a new table is covered
+  // automatically). Rule (T2.4 pullScope): another organization never; another store of the same
+  // organization only for organization tables (tenantScope or pullScope 'organization').
+  // --------------------------------------------------------------------------
+  it('T2.5: pull tenant filter holds for every synced table of the registry', async () => {
+    const otherStoreSameOrg = idGen.nextId();
+    const synced = cloudSchemaRegistry.all().filter((m) => m.tableClass !== 'LOCAL');
+    expect(synced.length).toBeGreaterThan(30);
+    const maxPos = async (org: string, store: string) =>
+      BigInt(
+        (
+          await adminConn.pool.query<{ m: string | null }>(
+            'SELECT max(position)::text AS m FROM cloud_sync_events WHERE organization_id = $1 AND store_id = $2',
+            [org, store],
+          )
+        ).rows[0].m ?? '0',
+      );
+    const streams: [string, string, bigint][] = [
+      [orgA, storeA, await maxPos(orgA, storeA)],
+      [orgA, otherStoreSameOrg, 0n],
+      [orgB, storeB, await maxPos(orgB, storeB)],
+    ];
+    const expected = new Set<string>();
+    const forbidden = new Set<string>();
+    for (const meta of synced) {
+      for (const s of streams) {
+        const [org, store] = s;
+        s[2] += 1n;
+        const entityId = idGen.nextId();
+        await adminConn.pool.query(
+          `INSERT INTO cloud_sync_events (id, organization_id, store_id, device_id, hlc, created_at_ms, device_seq, type, entity, entity_id, class, schema_version, payload, position, hlc_adjusted, received_at_ms)
+           VALUES ($1, $2, $3, $4, '001700000000000:00000:018bcfe5-6800-7000-8000-000000000111', $5, 1, $6, $7, $8, $9, 1, '{}', $10, false, $5)`,
+          [
+            idGen.nextId(),
+            org,
+            store,
+            deviceA,
+            nowMs.toString(),
+            `${meta.tableName}.created`,
+            meta.tableName,
+            entityId,
+            meta.tableClass,
+            s[2].toString(),
+          ],
+        );
+        const orgWide = meta.tenantScope === 'organization' || meta.pullScope === 'organization';
+        const visible = org === orgA && (store === storeA || orgWide);
+        (visible ? expected : forbidden).add(`${meta.tableName}:${entityId}`);
+      }
+    }
+
+    // Keep the position counters in step with the rows inserted above (later pushes allocate from them).
+    for (const [org, store, pos] of streams) {
+      await adminConn.pool.query(
+        `INSERT INTO cloud_store_sync_positions (id, organization_id, created_at_ms, updated_at_ms, store_id, last_position)
+         VALUES ($1, $2, $3, $3, $4, $5)
+         ON CONFLICT (organization_id, store_id) DO UPDATE SET last_position = EXCLUDED.last_position`,
+        [idGen.nextId(), org, nowMs.toString(), store, pos.toString()],
+      );
+    }
+    const seen = new Set<string>();
+    let cursors = '';
+    for (let page = 0; page < 200; page += 1) {
+      const res = await server.inject({
+        method: 'GET',
+        url: `/api/v1/sync/pull?limit=500${cursors ? `&cursors=${encodeURIComponent(cursors)}` : ''}`,
+        headers: { authorization: `Bearer ${deviceTokenA}` },
+      });
+      expect(res.statusCode, res.body).toBe(200);
+      const body = res.json<{
+        events: { entity: string; entityId: string; organizationId: string }[];
+        nextCursors: Record<string, string>;
+        hasMore: boolean;
+      }>();
+      for (const e of body.events) {
+        expect(e.organizationId).toBe(orgA);
+        seen.add(`${e.entity}:${e.entityId}`);
+      }
+      cursors = Object.entries(body.nextCursors)
+        .map(([s, p]) => `${s}:${p}`)
+        .join(',');
+      if (!body.hasMore) break;
+    }
+    for (const k of expected) expect(seen.has(k), `missing ${k}`).toBe(true);
+    for (const k of forbidden) expect(seen.has(k), `leaked ${k}`).toBe(false);
+  });
+
+  // --------------------------------------------------------------------------
+  // T2.6: parked push events are visible to the hub that pushed them, and can be retried
+  // (attempt window reset) or acknowledged (audited) — never edited, never seen by another tenant.
+  // --------------------------------------------------------------------------
+  it('T2.6: GET /sync/parked + resolve (retry resets attempts, acknowledge closes); tenant isolated; strict body', async () => {
+    const parentCatId = idGen.nextId();
+    const childProdId = idGen.nextId();
+    const childEventId = idGen.nextId();
+    const hubUser = idGen.nextId();
+    const push = await server.inject({
+      method: 'POST',
+      url: '/api/v1/sync/push',
+      headers: { authorization: `Bearer ${deviceTokenA}` },
+      payload: {
+        clientVersion: '1.0.0',
+        storeId: storeA,
+        deviceId: deviceA,
+        events: [
+          {
+            eventId: childEventId,
+            organizationId: orgA,
+            storeId: storeA,
+            deviceId: deviceA,
+            deviceSeq: '9401',
+            hlc: '001700000000000:00000:018bcfe5-6800-7000-8000-000000000111',
+            type: 'products.created',
+            entity: 'products',
+            entityId: childProdId,
+            entityClass: 'ATTR',
+            schemaVersion: 1,
+            payload: makeProductPayload(childProdId, parentCatId, 'Parked child'),
+          },
+        ],
+      },
+    });
+    expect(push.json<SyncPushResponseDto>().results[0].status).toBe('retry');
+
+    const list = async (token: string) =>
+      server.inject({
+        method: 'GET',
+        url: '/api/v1/sync/parked',
+        headers: { authorization: `Bearer ${token}` },
+      });
+    const listA = await list(deviceTokenA);
+    expect(listA.statusCode).toBe(200);
+    const mine = listA
+      .json<CloudParkedListResponseDto>()
+      .parked.find((p) => p.eventId === childEventId)!;
+    expect(mine).toMatchObject({
+      entity: 'products',
+      missingRefEntity: 'categories',
+      missingRefId: parentCatId,
+      status: 'parked',
+      resolution: null,
+    });
+    // Another tenant's hub sees nothing of it and cannot resolve it.
+    expect(
+      (await list(deviceTokenB)).json<CloudParkedListResponseDto>().parked.map((p) => p.eventId),
+    ).not.toContain(childEventId);
+    const resolve = (token: string, id: string, payload: Record<string, unknown>) =>
+      server.inject({
+        method: 'POST',
+        url: `/api/v1/sync/parked/${id}/resolve`,
+        headers: { authorization: `Bearer ${token}` },
+        payload,
+      });
+    expect(
+      (await resolve(deviceTokenB, mine.id, { action: 'acknowledge', userId: hubUser })).statusCode,
+    ).toBe(404);
+    expect((await list('not-a-token')).statusCode).toBe(401);
+    // Strict body: no field to edit the parked payload.
+    expect(
+      (
+        await resolve(deviceTokenA, mine.id, {
+          action: 'retry',
+          userId: hubUser,
+          eventPayload: '{}',
+        })
+      ).statusCode,
+    ).toBe(400);
+
+    await adminConn.db
+      .update(cloudSyncParked)
+      .set({ attempts: 19 })
+      .where(
+        and(eq(cloudSyncParked.organizationId, orgA), eq(cloudSyncParked.eventId, childEventId)),
+      );
+    const retried = await resolve(deviceTokenA, mine.id, {
+      action: 'retry',
+      userId: hubUser,
+      note: 'Kategoriya keyin keladi',
+    });
+    expect(retried.statusCode, retried.body).toBe(200);
+    expect(retried.json<{ parked: CloudParkedEventDto }>().parked).toMatchObject({
+      attempts: 0,
+      status: 'parked',
+      resolution: 'retried',
+      resolvedByUserId: hubUser,
+      resolutionNote: 'Kategoriya keyin keladi',
+    });
+
+    const acked = await resolve(deviceTokenA, mine.id, { action: 'acknowledge', userId: hubUser });
+    expect(acked.statusCode).toBe(200);
+    expect(acked.json<{ parked: CloudParkedEventDto }>().parked).toMatchObject({
+      status: 'resolved',
+      resolution: 'acknowledged',
+    });
+    expect(
+      (await list(deviceTokenA)).json<CloudParkedListResponseDto>().parked.map((p) => p.eventId),
+    ).not.toContain(childEventId);
+    const again = await resolve(deviceTokenA, mine.id, { action: 'retry', userId: hubUser });
+    expect(again.statusCode).toBe(409);
+    const missing = await resolve(deviceTokenA, idGen.nextId(), {
+      action: 'acknowledge',
+      userId: hubUser,
+    });
+    expect(missing.statusCode).toBe(404);
   });
 
   // --------------------------------------------------------------------------

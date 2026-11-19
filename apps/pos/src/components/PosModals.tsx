@@ -8,6 +8,7 @@ import {
 } from '@mezon/ui';
 import { type FormEvent, useState } from 'react';
 import type { HubApiClient } from '../api/hub-client.js';
+import { customerBalanceLabel } from '../utils/customer-balance.js';
 import { usePosStore } from '../store/pos-store.js';
 
 const UNITS: readonly ProductUnit[] = ['dona', 'kg', 'g', 'litr', 'metr', 'm2', 'qadoq'];
@@ -664,11 +665,7 @@ export function CustomerModal({
                 <strong>{cust.fullName}</strong>{' '}
                 {cust.phoneNormalized ? `(${cust.phoneNormalized})` : ''}
               </span>
-              <span>
-                {t('customer.balance', {
-                  amount: `${formatTiyinToSom(cust.balance)} ${t('common.currency')}`,
-                })}
-              </span>
+              <span>{customerBalanceLabel(cust.balance)}</span>
             </button>
           ))}
         </div>

@@ -442,7 +442,7 @@ describe('@mezon/db-local - Schema foundation, registry, pragmas, and bigint saf
       const migCountRow = conn.sqlite
         .prepare('SELECT COUNT(*) as cnt FROM __drizzle_migrations')
         .get() as { cnt: bigint };
-      expect(migCountRow.cnt).toBe(20n);
+      expect(migCountRow.cnt).toBe(21n);
     } finally {
       conn.close();
     }

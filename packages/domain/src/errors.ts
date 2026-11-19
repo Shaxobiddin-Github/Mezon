@@ -142,7 +142,11 @@ export type DomainErrorCode =
   | 'FISCAL_BLOCKED'
   | 'FISCAL_MODE_PRECONDITION_FAILED'
   | 'FISCAL_DOC_NOT_FOUND'
-  | 'FISCAL_DOC_INVALID_STATE';
+  | 'FISCAL_DOC_INVALID_STATE'
+  | 'SYNC_CONFLICT_NOT_FOUND'
+  | 'SYNC_CONFLICT_ALREADY_RESOLVED'
+  | 'SYNC_CONFLICT_ACTION_NOT_ALLOWED'
+  | 'CLOUD_NOT_PAIRED';
 
 export type DomainErrorDetails = Readonly<Record<string, unknown>>;
 

@@ -39,6 +39,20 @@ const fastHasher: PinHasher = {
 const hdr = (token?: string): Record<string, string> =>
   token ? { host: HOST_HEADER, authorization: `Bearer ${token}` } : { host: HOST_HEADER };
 
+/**
+ * P1: every driver of a test is checked after the test — the fake operator refuses a receipt for a
+ * shift that is not open / already closed, so ANY queue-order bug fails every test it touches.
+ */
+const driversInTest: FakeFiscalDriver[] = [];
+afterEach(() => {
+  const drivers = driversInTest.splice(0);
+  for (const d of drivers) {
+    expect(d.shiftOrderViolations(), 'fake operator refused a receipt: shift order broken').toEqual(
+      [],
+    );
+  }
+});
+
 afterEach(() => {
   while (tempDirs.length > 0) {
     fs.rmSync(tempDirs.pop()!, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 });
@@ -112,6 +126,7 @@ async function boot(
   }
   const clock = new FixedClock(NOW);
   const driver = opts.driver ?? new FakeFiscalDriver();
+  if (!driversInTest.includes(driver)) driversInTest.push(driver);
   const hub = await createHubServer({
     dbPath: p,
     port: TEST_PORT,
@@ -1051,6 +1066,198 @@ describe('T3.3 queue order details', () => {
       ]);
     } finally {
       await env.hub.close();
+    }
+  });
+});
+
+describe('P1 a fiscal document is submitted ONLY by the hub that created it', () => {
+  it('a document of another hub (arrived by pull) is view-only: never submitted, retry refused', async () => {
+    const env = await boot(4901);
+    try {
+      const pid = await product(env);
+      await openShift(env);
+      const own = await sellOk(env, pid);
+      // A second sale with fiscal mode off has no document; we then give it one "from another
+      // hub" exactly as the pull path does (a raw INSERT carrying the creator's device_id).
+      setFiscalModeSql(env.hub, false);
+      const foreignSale = await sellOk(env, pid);
+      const failedSale = await sellOk(env, pid);
+      setFiscalModeSql(env.hub, true);
+      const foreignDevice = '01993300-0000-7000-8000-0000000f0e1d';
+      const ownDocId = (await saleFiscal(env, own.id)).doc!.id;
+      const cols =
+        'organization_id, store_id, hlc, created_at_ms, updated_at_ms, doc_kind, return_id, shift_id, depends_on_doc_id, attempts, next_check_at_ms, driver_id, offline_deadline_ms';
+      const copy = env.hub.connection.sqlite.prepare(
+        `INSERT INTO fiscal_docs (id, device_id, sale_id, idempotency_key, status, ${cols})
+         SELECT ?, ?, ?, ?, ?, ${cols} FROM fiscal_docs WHERE id = ?`,
+      );
+      copy.run(env.n(), foreignDevice, foreignSale.id, foreignSale.id, 'pending', ownDocId);
+      const failedDocId = env.n();
+      copy.run(failedDocId, foreignDevice, failedSale.id, failedSale.id, 'failed', ownDocId);
+
+      for (let i = 0; i < 3; i += 1) await tick(env);
+
+      expect((await saleFiscal(env, own.id)).doc?.status).toBe('confirmed');
+      expect(env.driver.submitCount(own.id)).toBe(1);
+      expect(env.driver.submitCount(foreignSale.id)).toBe(0);
+      expect(env.driver.submitCount(failedSale.id)).toBe(0);
+      expect(env.driver.ledgerKeys()).not.toContain(foreignSale.id);
+      expect((await saleFiscal(env, foreignSale.id)).doc?.status).toBe('pending');
+
+      const retry = await env.hub.app.inject({
+        method: 'POST',
+        url: `/fiscal/docs/${failedDocId}/retry`,
+        headers: hdr(env.manager),
+      });
+      expect(retry.statusCode).toBe(409);
+      expect(errCode(retry)).toBe('FISCAL_DOC_INVALID_STATE');
+      await tick(env);
+      expect(env.driver.submitCount(failedSale.id)).toBe(0);
+    } finally {
+      await env.hub.close();
+    }
+  });
+});
+
+describe('P1 random driver schedules: the operator never sees a broken shift order', () => {
+  /** Deterministic PRNG (mulberry32) so every failing seed is reproducible. */
+  const prng = (seed: number) => {
+    let a = seed >>> 0;
+    return () => {
+      a = (a + 0x6d2b79f5) >>> 0;
+      let t = a;
+      t = Math.imul(t ^ (t >>> 15), t | 1);
+      t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
+      return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+    };
+  };
+  const SUBMIT_MODES = [
+    'ok',
+    'ok',
+    'ok',
+    'offline',
+    'offline',
+    'timeout',
+    'throw-after-accept',
+  ] as const;
+
+  // Short, random clock steps (shorter than the backoff) are what lets a later document become due
+  // while an earlier one still waits — exactly where a missing gate would reorder the operator.
+  it.each(Array.from({ length: 16 }, (_, i) => 7001 + i))(
+    'seed %i: shifts, sales and refunds under random failures drain in a valid operator order',
+    async (seed) => {
+      const rnd = prng(seed);
+      const pick = <T>(xs: readonly T[]): T => xs[Math.floor(rnd() * xs.length)];
+      const env = await boot(seed);
+      try {
+        const pid = await product(env);
+        let shiftId: string | null = null;
+        let drawer = 0n;
+        const sales: { id: string; lines: readonly { id: string }[] }[] = [];
+        const step = async () => {
+          if (rnd() < 0.6) {
+            env.driver.setSubmitMode(pick(SUBMIT_MODES));
+            env.driver.setStatusMode(rnd() < 0.8 ? 'ok' : 'offline');
+            env.clock.advance(BigInt(Math.floor(rnd() * 4000)));
+            await env.hub.fiscalWorker.runOnce();
+          }
+        };
+        for (let op = 0; op < 18; op += 1) {
+          if (shiftId === null) {
+            shiftId = await openShift(env, false, drawer.toString());
+          } else {
+            const r = rnd();
+            if (r < 0.5) {
+              sales.push(await sellOk(env, pid));
+              drawer += 100_000n;
+            } else if (r < 0.7 && sales.length > 0) {
+              await returnSale(env, sales.splice(Math.floor(rnd() * sales.length), 1)[0]);
+              drawer -= 100_000n;
+            } else if (r < 0.85) {
+              const close = await env.hub.app.inject({
+                method: 'POST',
+                url: `/shifts/${shiftId}/close`,
+                headers: hdr(env.cashier),
+                payload: { clientRequestId: env.n(), countedCash: drawer.toString() },
+              });
+              expect(close.statusCode, close.body).toBe(200);
+              shiftId = null;
+            }
+          }
+          await step();
+        }
+        // Drain: the network comes back for good.
+        env.driver.setSubmitMode('ok');
+        env.driver.setStatusMode('ok');
+        for (let i = 0; i < 40; i += 1) await tick(env);
+        const notConfirmed = env.hub.connection.sqlite
+          .prepare("SELECT doc_kind, status FROM fiscal_docs WHERE status <> 'confirmed'")
+          .all();
+        expect(notConfirmed).toEqual([]);
+        for (const k of env.driver.ledgerKeys()) expect(env.driver.submitCount(k), k).toBe(1);
+        expect(env.driver.shiftOrderViolations()).toEqual([]);
+      } finally {
+        await env.hub.close();
+      }
+    },
+  );
+});
+
+describe('T2.5 restore from a local backup keeps the device identity; fiscal resumes', () => {
+  it('a SENT document in the backup is resumed by status() after the restore: one submit, same device_id', async () => {
+    const env = await boot(4951);
+    let reopened: Env | null = null;
+    try {
+      const pid = await product(env);
+      const shiftId = await openShift(env);
+      const sale = await sellOk(env, pid);
+      env.driver.queueSubmitModes('throw-after-accept'); // the operator has it, the reply is lost
+      await env.hub.fiscalWorker.runOnce();
+      expect((await saleFiscal(env, sale.id)).doc?.status).toBe('sent');
+      expect(env.driver.submitCount(sale.id)).toBe(1);
+      const deviceBefore = one<{ d: string }>(
+        env,
+        'SELECT device_id AS d FROM local_device_state',
+      ).d;
+
+      const backup = await env.hub.app.inject({
+        method: 'POST',
+        url: '/backups/create',
+        headers: hdr(env.owner),
+        payload: { reason: 'T2.5 restore test' },
+      });
+      expect(backup.statusCode, backup.body).toBe(201);
+      const backupId = backup.json<{ backup: { id: string } }>().backup.id;
+      const close = await env.hub.app.inject({
+        method: 'POST',
+        url: `/shifts/${shiftId}/close`,
+        headers: hdr(env.cashier),
+        payload: { clientRequestId: env.n(), countedCash: '100000' },
+      });
+      expect(close.statusCode, close.body).toBe(200);
+      const staged = await env.hub.app.inject({
+        method: 'POST',
+        url: `/backups/${backupId}/restore`,
+        headers: hdr(env.owner),
+        payload: { reason: 'T2.5 restore test' },
+      });
+      expect(staged.statusCode, staged.body).toBe(200);
+      await env.hub.close();
+
+      // Restart: the staged restore runs before the hub opens its connections.
+      reopened = await boot(4952, { dbPath: env.dbPath, setup: false, driver: env.driver });
+      expect(one<{ d: string }>(reopened, 'SELECT device_id AS d FROM local_device_state').d).toBe(
+        deviceBefore,
+      );
+      expect((await saleFiscal(reopened, sale.id)).doc?.status).toBe('sent');
+      reopened.clock.advance(60_000n);
+      await reopened.hub.fiscalWorker.runOnce();
+      const after = (await saleFiscal(reopened, sale.id)).doc;
+      expect(after?.status).toBe('confirmed');
+      expect(env.driver.submitCount(sale.id)).toBe(1);
+    } finally {
+      if (reopened) await reopened.hub.close();
+      else await env.hub.close().catch(() => undefined);
     }
   });
 });

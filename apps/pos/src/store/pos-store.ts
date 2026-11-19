@@ -54,7 +54,8 @@ export type PosModal =
   | 'edit_qty'
   | 'diagnostics'
   | 'catalog'
-  | 'fiscal_unsettled';
+  | 'fiscal_unsettled'
+  | 'sync_conflicts';
 
 export interface InsufficientStockLineDetail {
   readonly cartLineId: string;

@@ -1,5 +1,5 @@
 import { sql } from 'drizzle-orm';
-import { index, text, uniqueIndex } from 'drizzle-orm/pg-core';
+import { check, index, text, uniqueIndex } from 'drizzle-orm/pg-core';
 import { pgBigint, pgBoolean, pgInt, pgUnixMs, pgUuidV7 } from '../columns.js';
 import { cloudSchemaRegistry } from './registry-instance.js';
 
@@ -86,13 +86,48 @@ export const cloudSyncParked = cloudSchemaRegistry.defineTable(
     attempts: pgInt('attempts').notNull().default(1),
     eventPayload: text('event_payload').notNull(),
     status: text('status').notNull().default('parked'), // 'parked' | 'resolved' | 'conflict'
+    /** T2.6 audit: `retried` (attempts reset) or `acknowledged`; who (hub user) and when. */
+    resolution: text('resolution'),
+    resolvedByUserId: pgUuidV7('resolved_by_user_id'),
+    resolvedAtMs: pgUnixMs('resolved_at_ms'),
+    resolutionNote: text('resolution_note'),
   }),
   (self) => [
     uniqueIndex('uidx_cloud_sync_parked_event').on(self.organizationId, self.eventId),
+    check(
+      'chk_cloud_sync_parked_resolution',
+      sql`${self.resolution} IS NULL OR ${self.resolution} IN ('retried', 'acknowledged')`,
+    ),
     index('idx_cloud_sync_parked_missing_ref').on(
       self.organizationId,
       self.missingRefEntity,
       self.missingRefId,
     ),
+  ],
+);
+
+/**
+ * T2.6b: the cloud's own HLC clock and device sequence per organization (`LOCAL`). The cloud writes
+ * cabinet commands (price, staff, settings) as sync events from a VIRTUAL device of the organization
+ * (`device_id`; status `system`, it never gets a token). Allocation runs under
+ * `pg_advisory_xact_lock(hashtext('org_hlc:' || organization_id))`, so two changes in the same
+ * millisecond get logical counters 0, 1, … and the order is total.
+ */
+export const cloudHlcState = cloudSchemaRegistry.defineTable(
+  {
+    name: 'cloud_hlc_state',
+    tableClass: 'LOCAL',
+    tenantScope: 'organization',
+  },
+  (common) => ({
+    ...common,
+    deviceId: pgUuidV7('device_id').notNull(),
+    physicalMs: pgBigint('physical_ms').notNull(),
+    logical: pgInt('logical').notNull(),
+    lastDeviceSeq: pgBigint('last_device_seq').notNull(),
+  }),
+  (self) => [
+    uniqueIndex('uidx_cloud_hlc_state_org').on(self.organizationId),
+    check('chk_cloud_hlc_state_logical', sql`${self.logical} >= 0 AND ${self.logical} <= 65535`),
   ],
 );

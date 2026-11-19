@@ -29,8 +29,10 @@ export class CloudSyncPullStore {
       async (tx: NodePgDatabase) => {
         // 1. T5: Validate storeIds in cursors belong to the authenticated organization
         const passedStoreIds = Object.keys(params.cursors);
-        if (passedStoreIds.length > 0) {
-          const storeUuids = passedStoreIds.map((s) => parseUuidV7(s));
+        // T2.6b: the organization stream (cloud-written events) uses the organization id as its key.
+        const realStoreIds = passedStoreIds.filter((s) => s !== params.context.organizationId);
+        if (realStoreIds.length > 0) {
+          const storeUuids = realStoreIds.map((s) => parseUuidV7(s));
           const foundStores = await tx
             .select({ id: cloudStores.id })
             .from(cloudStores)
@@ -41,7 +43,7 @@ export class CloudSyncPullStore {
               ),
             );
           const foundSet = new Set(foundStores.map((s: { id: string }) => s.id));
-          for (const storeId of passedStoreIds) {
+          for (const storeId of realStoreIds) {
             if (!foundSet.has(storeId)) {
               throw new ForeignStoreError(storeId);
             }
