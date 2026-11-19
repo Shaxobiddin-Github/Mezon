@@ -303,6 +303,14 @@ export const RU_MESSAGES: Readonly<Record<I18nKey, string>> = {
   'admin.nav.products': 'Товары',
   'admin.nav.devices': 'Кассы и сотрудники',
   'admin.devices.title': 'Кассы',
+  'admin.devices.addTitle': 'Подключить новую кассу',
+  'admin.devices.addHelp':
+    'Получите код и введите его на новой кассе в окне «Подключить к облаку». Код одноразовый.',
+  'admin.devices.store': 'Магазин',
+  'admin.devices.kassaName': 'Название кассы',
+  'admin.devices.defaultName': 'Касса',
+  'admin.devices.getCode': 'Получить код подключения',
+  'admin.devices.code': 'Код: {code} (действует до {until})',
   'admin.devices.subtitle':
     'Кассы, подключённые к облаку. Отключите потерянную или украденную кассу.',
   'admin.devices.empty': 'Нет подключённых касс',

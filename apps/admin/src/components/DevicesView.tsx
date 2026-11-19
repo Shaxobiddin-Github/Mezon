@@ -16,13 +16,24 @@ export const DevicesView: React.FC = () => {
   const [staff, setStaff] = useState<CabinetStaff[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [busyId, setBusyId] = useState<string | null>(null);
+  const [stores, setStores] = useState<{ id: string; name: string }[]>([]);
+  const [storeId, setStoreId] = useState('');
+  const [kassaName, setKassaName] = useState('');
+  const [pairing, setPairing] = useState<{ code: string; expiresAtMs: number } | null>(null);
 
   const load = async () => {
     setError(null);
     try {
-      const [d, s] = await Promise.all([adminApi.getDevices(), adminApi.getStaff()]);
+      const [d, s, st] = await Promise.all([
+        adminApi.getDevices(),
+        adminApi.getStaff(),
+        adminApi.getStores(),
+      ]);
       setDevices(d.devices);
       setStaff(s.staff);
+      const active = st.stores.filter((x) => x.isActive);
+      setStores(active);
+      setStoreId((cur) => cur || active[0]?.id || '');
     } catch (err) {
       setError(describeApiError(err));
     }
@@ -31,6 +42,20 @@ export const DevicesView: React.FC = () => {
   useEffect(() => {
     void load();
   }, []);
+
+  const newCode = async () => {
+    setError(null);
+    setPairing(null);
+    try {
+      const res = await adminApi.createPairingCode({
+        storeId,
+        name: kassaName.trim() || t('admin.devices.defaultName'),
+      });
+      setPairing({ code: res.code, expiresAtMs: res.expiresAtMs });
+    } catch (err) {
+      setError(describeApiError(err));
+    }
+  };
 
   const revoke = async (d: CabinetDevice) => {
     if (!window.confirm(t('admin.devices.confirmRevoke', { name: d.name }))) return;
@@ -52,6 +77,51 @@ export const DevicesView: React.FC = () => {
         <p className="text-sm text-slate-500">{t('admin.devices.subtitle')}</p>
       </div>
       {error && <p className="text-sm text-red-600">{error}</p>}
+      <div className="bg-white rounded-lg border border-slate-200 p-4 space-y-3">
+        <p className="font-semibold text-slate-900">{t('admin.devices.addTitle')}</p>
+        <p className="text-xs text-slate-500">{t('admin.devices.addHelp')}</p>
+        <div className="flex flex-wrap items-end gap-2">
+          <label className="text-xs text-slate-600">
+            {t('admin.devices.store')}
+            <select
+              className="block mt-1 rounded border border-slate-300 px-2 py-1 text-sm"
+              value={storeId}
+              onChange={(e) => setStoreId(e.target.value)}
+            >
+              {stores.map((s) => (
+                <option key={s.id} value={s.id}>
+                  {s.name}
+                </option>
+              ))}
+            </select>
+          </label>
+          <label className="text-xs text-slate-600">
+            {t('admin.devices.kassaName')}
+            <input
+              className="block mt-1 w-48 rounded border border-slate-300 px-2 py-1 text-sm"
+              maxLength={60}
+              value={kassaName}
+              onChange={(e) => setKassaName(e.target.value)}
+            />
+          </label>
+          <button
+            type="button"
+            disabled={!storeId}
+            onClick={() => void newCode()}
+            className="rounded bg-indigo-600 px-3 py-1.5 text-sm font-semibold text-white disabled:opacity-50"
+          >
+            {t('admin.devices.getCode')}
+          </button>
+        </div>
+        {pairing && (
+          <p className="text-sm text-slate-900" data-testid="pairing-code">
+            {t('admin.devices.code', {
+              code: pairing.code,
+              until: formatDateTime(String(pairing.expiresAtMs)),
+            })}
+          </p>
+        )}
+      </div>
       <div className="bg-white rounded-lg border border-slate-200 divide-y divide-slate-100">
         {devices.length === 0 && (
           <p className="p-4 text-sm text-slate-400">{t('admin.devices.empty')}</p>

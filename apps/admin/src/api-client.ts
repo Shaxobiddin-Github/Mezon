@@ -230,6 +230,22 @@ export class AdminApiClient {
     });
   }
 
+  async getStores(): Promise<{ stores: { id: string; name: string; isActive: boolean }[] }> {
+    return this.request('/api/v1/stores');
+  }
+
+  /** One-time code a new kassa types to connect to the cloud (owner only, plan limits apply). */
+  async createPairingCode(body: {
+    storeId: string;
+    name: string;
+  }): Promise<{ code: string; expiresAtMs: number; storeName: string }> {
+    return this.request('/api/v1/devices/pairing-codes', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    });
+  }
+
   async getStaff(): Promise<{ staff: CabinetStaff[] }> {
     return this.request('/api/v1/admin/staff');
   }

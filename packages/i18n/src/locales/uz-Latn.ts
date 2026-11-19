@@ -298,6 +298,14 @@ export const UZ_LATN_MESSAGES = {
   'admin.nav.products': 'Mahsulotlar',
   'admin.nav.devices': 'Kassalar va xodimlar',
   'admin.devices.title': 'Kassalar',
+  'admin.devices.addTitle': 'Yangi kassa ulash',
+  'admin.devices.addHelp':
+    'Kod oling va uni yangi kassaning "Bulutga ulash" oynasiga kiriting. Kod bir marta ishlatiladi.',
+  'admin.devices.store': "Do'kon",
+  'admin.devices.kassaName': 'Kassa nomi',
+  'admin.devices.defaultName': 'Kassa',
+  'admin.devices.getCode': 'Ulanish kodini olish',
+  'admin.devices.code': 'Kod: {code} (amal qiladi: {until} gacha)',
   'admin.devices.subtitle':
     "Bulutga ulangan kassalar. Yo'qolgan yoki o'g'irlangan kassani bekor qiling.",
   'admin.devices.empty': "Ulangan kassa yo'q",
