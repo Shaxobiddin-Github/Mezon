@@ -102,3 +102,21 @@ export {
   type FakeFiscalStatusMode,
   type FakeFiscalSubmitMode,
 } from './fiscal/fake-driver.js';
+
+export {
+  FakeMarkingDriver,
+  type MarkingCheckRequest,
+  type MarkingCheckResult,
+  type MarkingDriver,
+  MarkingUnavailableError,
+} from './marking/marking-driver.js';
+
+export {
+  type CreateQrRequest,
+  type CreateQrResult,
+  FakePaymentDriver,
+  type PaymentDriver,
+  type PaymentRefundResult,
+  type PaymentStatusResult,
+  PaymentUnavailableError,
+} from './payment/payment-driver.js';

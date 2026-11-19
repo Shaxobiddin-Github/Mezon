@@ -27,6 +27,7 @@ import {
   vatRateFromBasisPoints,
 } from '@mezon/domain';
 import { and, asc, desc, eq, gte, inArray, isNull, lt, ne, or, sql } from 'drizzle-orm';
+import { appendAuditInTxSync } from './audit-log.js';
 import type { LocalSqliteConnection } from './connection.js';
 import {
   categories,
@@ -1202,6 +1203,20 @@ export class SqliteCatalogStore {
           },
           eventType: 'price_change.recorded',
           schemaVersion: 1,
+        });
+        appendAuditInTxSync(session.internalGetSqlite(), {
+          organizationId,
+          eventType: 'price.changed',
+          actorUserId,
+          entity: 'products',
+          entityId: targetId,
+          details: {
+            oldPrice: String(existing.salePrice),
+            newPrice: String(nextSalePrice),
+            reason,
+          },
+          nowMs: session.nowUnixMs(),
+          nextId: () => session.nextId(),
         });
       }
 

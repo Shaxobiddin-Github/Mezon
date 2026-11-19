@@ -15,6 +15,7 @@ import {
   validateFullName,
 } from '@mezon/domain';
 import { and, asc, eq, isNull, ne } from 'drizzle-orm';
+import { appendAuditInTxSync } from './audit-log.js';
 import type { LocalSqliteConnection } from './connection.js';
 import {
   localDeviceAuthState,
@@ -661,15 +662,37 @@ export class SqliteHubAuthStore {
 
     return uow.execute((session) => {
       const check = this.runPinVerificationSync(session, config, input);
+      // T3.8: every login attempt is audited in the same transaction (no PIN, only who / outcome).
+      const auditLogin = (
+        eventType: 'auth.login' | 'auth.login_failed',
+        outcome: string,
+        userId: UuidV7 | null,
+      ) =>
+        appendAuditInTxSync(session.internalGetSqlite(), {
+          organizationId: config.organizationId,
+          eventType,
+          actorUserId: userId,
+          entity: 'users',
+          entityId: userId ?? (input.selector.kind === 'userId' ? input.selector.userId : null),
+          details: {
+            outcome,
+            username: input.selector.kind === 'username' ? input.selector.username : null,
+          },
+          nowMs: session.nowUnixMs(),
+          nextId: () => session.nextId(),
+        });
       if (check.kind === 'rate_limited') {
+        auditLogin('auth.login_failed', 'rate_limited', null);
         return Promise.resolve<CommitLoginOutcomeResult>({
           kind: 'rate_limited',
           retryAfterSeconds: check.retryAfterSeconds,
         });
       }
       if (check.kind === 'invalid_credentials') {
+        auditLogin('auth.login_failed', 'invalid_credentials', null);
         return Promise.resolve<CommitLoginOutcomeResult>({ kind: 'invalid_credentials' });
       }
+      auditLogin('auth.login', 'ok', check.user.id);
 
       const sessionId = session.nextId();
       const expiresAtMs = unixMsFromBigInt(check.commitNowMs + this.sessionTtlMs);
@@ -843,6 +866,8 @@ export class SqliteHubAuthStore {
     readonly username: string;
     readonly role: UserRole;
     readonly pinHash: string;
+    /** T3.8: who made the change (audit). */
+    readonly actorUserId?: UuidV7 | null;
   }): Promise<StoredUserRecord> {
     const { uow, config } = this.requireReady();
     const cleanName = validateFullName(input.fullName);
@@ -890,6 +915,17 @@ export class SqliteHubAuthStore {
           })
           .run();
 
+        appendAuditInTxSync(session.internalGetSqlite(), {
+          organizationId: config.organizationId,
+          eventType: 'user.created',
+          actorUserId: input.actorUserId ?? null,
+          entity: 'users',
+          entityId: writeRes.entityId,
+          details: { role: input.role, username: cleanUsername },
+          nowMs: session.nowUnixMs(),
+          nextId: () => session.nextId(),
+        });
+
         return Promise.resolve(toStoredUser(writeRes.row));
       } catch (err) {
         if (isSqliteUniqueConstraintError(err)) {
@@ -908,6 +944,8 @@ export class SqliteHubAuthStore {
     readonly fullName?: string;
     readonly role?: UserRole;
     readonly isActive?: boolean;
+    /** T3.8: who made the change (audit). */
+    readonly actorUserId?: UuidV7 | null;
   }): Promise<StoredUserRecord> {
     const { uow, config } = this.requireReady();
     const validId = parseUuidV7(input.userId);
@@ -955,6 +993,22 @@ export class SqliteHubAuthStore {
           .where(and(eq(localSessions.userId, existing.id), isNull(localSessions.revokedAtMs)))
           .run();
       }
+
+      appendAuditInTxSync(session.internalGetSqlite(), {
+        organizationId: config.organizationId,
+        eventType: 'user.updated',
+        actorUserId: input.actorUserId ?? null,
+        entity: 'users',
+        entityId: existing.id,
+        details: {
+          roleFrom: existing.role,
+          roleTo: nextRole,
+          active: nextIsActive,
+          nameChanged: input.fullName !== undefined,
+        },
+        nowMs: session.nowUnixMs(),
+        nextId: () => session.nextId(),
+      });
 
       return Promise.resolve(toStoredUser(updRes.row));
     });

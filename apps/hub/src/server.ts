@@ -49,6 +49,10 @@ import {
 import {
   CryptoRandomSource,
   FakeFiscalDriver,
+  FakeMarkingDriver,
+  FakePaymentDriver,
+  type PaymentDriver,
+  type MarkingDriver,
   type FiscalDriver,
   SystemClock,
   type DiscoveredWindowsPrinter,
@@ -89,6 +93,11 @@ import { PRODUCTION_TRUSTED_LICENCE_KEYS, type TrustedLicenceKey } from '@mezon/
 import { HubSyncPullService } from './sync-pull-service.js';
 import { HubSyncPullWorker } from './sync-pull-worker.js';
 import { registerFiscalRoutes } from './fiscal-routes.js';
+import { registerAuditRoutes } from './audit-routes.js';
+import { registerMarkingRoutes } from './marking-routes.js';
+import { registerPaymentRoutes } from './payment-routes.js';
+import { HubPaymentService } from './payment-service.js';
+import { HubMarkingService } from './marking-service.js';
 import { registerSyncConflictRoutes } from './sync-conflicts-routes.js';
 import { HubSyncConflictService } from './sync-conflicts-service.js';
 import { HubCloudParkedService } from './sync-cloud-parked.js';
@@ -135,6 +144,12 @@ export interface CreateHubServerOptions {
    * driver whose ledger lives next to the database so it survives restarts.
    */
   readonly fiscalDriver?: FiscalDriver;
+  /** T3.7 marking operator port; default: the Fake (no real operator until T3.0). */
+  readonly markingDriver?: MarkingDriver;
+  /** T3.6 QR payment provider port; default: the Fake (no real provider until T3.0). */
+  readonly paymentDriver?: PaymentDriver;
+  /** T3.6 QR lifetime override (tests). */
+  readonly paymentQrTtlMs?: bigint;
   /** TEST ONLY: fiscal worker timing / seams. */
   readonly fiscalWorkerOptions?: Pick<
     HubFiscalWorkerOptions,
@@ -607,6 +622,48 @@ export async function createHubServer(options: CreateHubServerOptions): Promise<
     registerLicenceRoutes(app, authService, licenceService);
     const updateGate = new HubUpdateGate();
     registerUpdateGate(app, updateGate);
+    registerMarkingRoutes(
+      app,
+      authService,
+      new HubMarkingService({
+        connection,
+        cartStore,
+        catalogStore,
+        driver: options.markingDriver ?? new FakeMarkingDriver(),
+        getContext: () => {
+          const ctx = store.getActiveRuntimeContext();
+          return ctx
+            ? { organizationId: ctx.config.organizationId, storeId: ctx.config.storeId }
+            : null;
+        },
+        nowMs: () => clock.now(),
+        nextId: () => idGen.nextId(),
+      }),
+      cartService,
+    );
+    registerPaymentRoutes(
+      app,
+      authService,
+      new HubPaymentService({
+        connection,
+        driver: options.paymentDriver ?? new FakePaymentDriver(),
+        getContext: () => {
+          const ctx = store.getActiveRuntimeContext();
+          return ctx
+            ? { organizationId: ctx.config.organizationId, storeId: ctx.config.storeId }
+            : null;
+        },
+        nowMs: () => clock.now(),
+        nextId: () => idGen.nextId(),
+        ...(options.paymentQrTtlMs !== undefined ? { ttlMs: options.paymentQrTtlMs } : {}),
+      }),
+    );
+    registerAuditRoutes(
+      app,
+      authService,
+      connection,
+      () => store.getActiveRuntimeContext()?.config.organizationId ?? null,
+    );
     registerSyncConflictRoutes(
       app,
       authService,

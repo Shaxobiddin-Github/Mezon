@@ -285,23 +285,32 @@ export class HubAuthService {
     };
   }
 
-  async createUser(input: CreateUserRequestDto): Promise<UserResponseDto> {
+  async createUser(
+    input: CreateUserRequestDto,
+    actorUserId: UuidV7 | null = null,
+  ): Promise<UserResponseDto> {
     const pinHash = await this.pinHasher.hash(input.pin);
     const created = await this.store.createUser({
       fullName: input.fullName,
       username: input.username,
       role: input.role,
       pinHash,
+      actorUserId,
     });
     return { user: toUserSummaryDto(created) };
   }
 
-  async updateUser(userId: UuidV7, input: UpdateUserRequestDto): Promise<UserResponseDto> {
+  async updateUser(
+    userId: UuidV7,
+    input: UpdateUserRequestDto,
+    actorUserId: UuidV7 | null = null,
+  ): Promise<UserResponseDto> {
     const updated = await this.store.updateUser({
       userId,
       fullName: input.fullName,
       role: input.role,
       isActive: input.isActive,
+      actorUserId,
     });
     return { user: toUserSummaryDto(updated) };
   }

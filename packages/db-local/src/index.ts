@@ -167,6 +167,10 @@ export {
   localCloudState,
   organizationTaxProfiles,
   localSyncConflicts,
+  localAuditLog,
+  localCartMarks,
+  localSaleMarks,
+  paymentIntents,
   localRulePackages,
   localSyncApplyState,
   localSyncCursors,
@@ -207,6 +211,19 @@ export { buildShiftTriggersSql, assertShiftMigrationsComplete } from './shift-mi
 
 export { buildOrderTriggersSql, assertOrderMigrationsComplete } from './order-migrations.js';
 export { buildFiscalDocsTriggersSql, assertFiscalMigrationsComplete } from './fiscal-migrations.js';
+export {
+  AUDIT_EVENT_TYPES,
+  AUDIT_GENESIS_HASH,
+  type AuditEventType,
+  type AuditEntryInput,
+  type AuditVerifyResult,
+  appendAuditInTxSync,
+  assertAuditMigrationsComplete,
+  buildAuditLogTriggersSql,
+  canonicalAuditDetails,
+  computeAuditHash,
+  verifyAuditChainSync,
+} from './audit-log.js';
 
 export {
   type HubConfigSnapshot,
@@ -566,3 +583,22 @@ export {
   type InsertFiscalDocInput,
   type StoredFiscalDocRecord,
 } from './fiscal-repo.js';
+export {
+  type CartMarkRow,
+  consumeCartMarksForSaleLineInTxSync,
+  findActiveMarkSync,
+  insertCartMarkSync,
+  isMarkedMxik,
+  listCartMarksSync,
+  readMarkingPrefixesSync,
+  releaseSaleMarksInTxSync,
+} from './marking-repo.js';
+export {
+  type PaymentIntentRecord,
+  type PaymentIntentStatus,
+  consumeUzqrPaymentInTxSync,
+  getPaymentIntentSync,
+  insertPaymentIntentSync,
+  listPaymentIntentsNeedingAttentionSync,
+  transitionPaymentIntentSync,
+} from './payment-intent-repo.js';

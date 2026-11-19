@@ -377,6 +377,65 @@ describe('T2.6 sync conflicts API (view, retry, acknowledge — never edit)', ()
     }
   });
 
+  it('S8: a pulled event whose retry now parks (its parent row is missing) keeps the conflict open and reports applied=false', async () => {
+    const env = await boot(4106);
+    try {
+      const payment = env.outboxEvent(
+        "entity = 'customer_ledger' AND json_extract(payload, '$.entryType') = 'debt_payment'",
+      );
+      const orphan = env.clone(payment, {
+        customerId: '01993400-0000-7000-8000-0000000c0de0', // no such customer on this hub
+      });
+      const json = JSON.stringify(orphan, (_k, v: unknown) =>
+        typeof v === 'bigint' ? v.toString() : v,
+      );
+      env.hub.connection.sqlite
+        .prepare(
+          `INSERT INTO local_sync_conflicts (id, organization_id, store_id, event_id, entity, entity_id, reason, error, payload, event_json, created_at_ms, updated_at_ms)
+           VALUES (?, ?, ?, ?, ?, ?, 'VALIDATION_ERROR', 'X', '{}', ?, ?, ?)`,
+        )
+        .run(
+          env.n(),
+          orphan.organizationId,
+          orphan.storeId,
+          orphan.eventId,
+          orphan.entity,
+          orphan.entityId,
+          json,
+          T0,
+          T0,
+        );
+      const c = SyncConflictListResponseSchema.parse(
+        (await list(env, env.manager)).json(),
+      ).conflicts.find((x) => x.eventId === orphan.eventId)!;
+      expect(c).toMatchObject({ origin: 'pull', allowedActions: ['retry', 'acknowledge'] });
+      const before = dataHash(env);
+      const r = ResolveSyncConflictResponseSchema.parse(
+        (await resolve(env, env.manager, c.id, { action: 'retry', note: 'qayta' })).json(),
+      );
+      expect(r.applied).toBe(false);
+      expect(r.conflict.resolvedAtMs).toBeNull();
+      expect(r.conflict.resolution).toBeNull();
+      expect(r.conflict.error).toBe('Still waiting for a referenced row');
+      expect(
+        Number(
+          env.one<{ n: number | bigint }>(
+            'SELECT count(*) AS n FROM local_sync_parked WHERE event_id = ?',
+            orphan.eventId,
+          ).n,
+        ),
+      ).toBe(1);
+      expect(
+        SyncConflictListResponseSchema.parse((await list(env, env.manager)).json()).conflicts.some(
+          (x) => x.id === c.id,
+        ),
+      ).toBe(true);
+      expect(dataHash(env)).toBe(before);
+    } finally {
+      await env.hub.close();
+    }
+  });
+
   it('a rejected push: retry puts the SAME event id back in the outbox queue', async () => {
     const env = await boot(4104);
     try {
