@@ -1,3 +1,47 @@
+# [claude-tekshiruv] P3 (PR #33): QABUL (T4.1, T4.3, T2.8) — ikki test sharti; T4.2 B varianti qolgan
+
+Tekshirilgan commit: `3fc7526`. Toza worktree va build. Natijalar:
+- unit + sqlite-hub + pg-cloud: **130 fayl, 897 test, hammasi yashil**;
+- keshsiz lint: yashil.
+
+## T4.1 xavfsizligi (kod bo'yicha) — yaxshi
+
+- Juftlash kodi tarmoqda yuborilmaydi. HMAC sertifikat barmoq iziga bog'langan, shuning uchun MITM sertifikati isbotni buzadi.
+- 50 bitli kod, 5 daqiqa muddat, 5 ta xato urinish. Har xato **barcha** faol kodlardan urinish oladi.
+- Terminal kalitidan faqat SHA-256 saqlanadi. Taqqoslash `timingSafeEqual` bilan. Bekor qilish darhol kuchga kiradi.
+- `x-mezon-terminal-id` faqat jarayon-maxfiy proksi sarlavhasi bilan qabul qilinadi. Tashqaridan kelgani olib tashlanadi.
+- Hub'da IP'ga asoslangan ishonch yo'q (grep bilan tekshirdim).
+- LAN boshqaruvi faqat hub kompyuteridan.
+
+Mening C2 dagi yangilash darvozam asosiy ilovaning `onRequest` hook'ida ishlaydi. LAN so'rovlari `inject` orqali o'sha ilovaga keladi, shuning uchun darvoza ularni ham yopadi.
+
+## Mustaqil mutatsiyalar
+
+| # | Mutatsiya | Natija |
+|---|---|---|
+| N1 | bekor qilingan terminal o'tadi | o'ldi |
+| N2 | proksi sarlavhasi maxfiysiz ishonchli | o'ldi |
+| N3 | xato urinish sanalmaydi | o'ldi |
+| N4 | LAN boshqaruvi terminaldan ochiq | o'ldi |
+| N5 | pin (barmoq izi) tekshirilmaydi | o'ldi |
+| N6 | terminal `hubProof` ni tekshirmaydi | **omon qoldi** |
+| N7 | `consume` dagi `used_at_ms IS NULL` guard'i olib tashlandi | **omon qoldi** |
+
+## Shartlar (merge'ni to'xtatmaydi, P3 ning keyingi commit'iga)
+
+- **S9 (N6).** Test: `pairWithLanHub` noto'g'ri `hubProof` qaytargan soxta hubni rad etsin (`LanPairingRejectedError`). Bu protokolning ikkinchi yarmi, hozir himoyasiz.
+- **S10 (N7).** Test: bitta kod bilan ikki parallel `POST /lan/pair` bo'lsa, aniq bitta terminal qo'shilishi kerak. `pair()` ichida `await` lar bor (`tlsMaterial`, `decrypt`), shuning uchun ikkalasi ham kodni ko'radi. Ularni faqat guard ajratadi.
+
+## Ma'lumot uchun
+
+- PIN qulfi va qurilma bo'yicha sekinlashtirish hub darajasida. Bitta terminalda PIN noto'g'ri terilsa, hamma kassalarni sekinlashtiradi. Juftlangan terminal egasining akkauntini 5 urinishda qulflashi ham mumkin. Pilot uchun maqbul, lekin hisobotga yozib qo'y.
+- `authenticateTerminal` har so'rovda `last_seen` ga yozadi. Ko'p kassada bu ortiqcha yozuv: daqiqasiga bir marta yozish yetadi. Shoshilinch emas.
+
+## Holat
+
+- T4.1, T4.3 va T2.8: **QABUL**.
+- T4.2: B varianti (javob berilgan) shu PR'ga commit'lar bilan qo'shilganda qayta ko'raman.
+- Merge tartibi: P1 → C2 → P2 → P3.
 # [claude-tekshiruv] P2 (PR #32): QAYTARILDI — bitta jiddiy pul xatosi (K1), bitta pul bo'shlig'i (K2)
 
 Tekshirilgan commit: `861945d`. Toza worktree, build. Natijalar:
