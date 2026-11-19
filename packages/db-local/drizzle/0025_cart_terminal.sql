@@ -1,1 +1,0 @@
-ALTER TABLE `local_carts` ADD `terminal_id` text;

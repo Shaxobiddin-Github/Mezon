@@ -19,6 +19,7 @@ const ConfirmBody = z.strictObject({ note: z.string().trim().min(3).max(300) });
  * - POST /payments/intents/:id/cancel   the customer pays another way (cashier)
  * - POST /payments/intents/:id/confirm  static QR, by hand (manager / owner, `payments:confirm`)
  * - POST /payments/intents/:id/refund   a paid, unused QR (manager / owner, `payments:confirm`)
+ * - GET  /payments/attention            wrong-sum payments and open refunds (manager / owner)
  */
 export function registerPaymentRoutes(
   app: FastifyInstance,
@@ -40,6 +41,11 @@ export function registerPaymentRoutes(
       kind: body.kind,
     });
     return reply.code(201).send({ intent });
+  });
+
+  app.get('/payments/attention', async (request) => {
+    await authorize(request, 'payments:confirm');
+    return { intents: service.needingAttention() };
   });
 
   app.get('/payments/intents/:id', async (request) => {
@@ -64,7 +70,7 @@ export function registerPaymentRoutes(
   app.post('/payments/intents/:id/refund', async (request) => {
     const session = await authorize(request, 'payments:confirm');
     const { id } = IdParams.parse(request.params);
-    const intent = await service.refund(parseUuidV7(id));
+    const intent = await service.refund(parseUuidV7(id), session.user.id);
     request.log.info(
       { event: 'payment.refunded', intentId: intent.id, userId: session.user.id },
       'QR payment refunded',

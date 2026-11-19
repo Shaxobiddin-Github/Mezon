@@ -47,6 +47,7 @@ CREATE TABLE `local_lan_terminals` (
 	`paired_by_user_id` text NOT NULL,
 	`revoked_at_ms` integer,
 	`last_seen_at_ms` integer,
+	`printer_json` text,
 	CONSTRAINT "chk_local_lan_terminals_created_at_ms_int" CHECK(typeof("local_lan_terminals"."created_at_ms") = 'integer'),
 	CONSTRAINT "chk_local_lan_terminals_updated_at_ms_int" CHECK(typeof("local_lan_terminals"."updated_at_ms") = 'integer'),
 	CONSTRAINT "chk_local_lan_terminals_paired_at_ms_int" CHECK(typeof("local_lan_terminals"."paired_at_ms") = 'integer'),
@@ -57,4 +58,5 @@ CREATE TABLE `local_lan_terminals` (
 	CONSTRAINT "chk_local_lan_terminals_name" CHECK(length(trim("local_lan_terminals"."name")) BETWEEN 1 AND 60)
 );
 --> statement-breakpoint
-CREATE UNIQUE INDEX `uidx_local_lan_terminals_key` ON `local_lan_terminals` (`key_hash`);
+CREATE UNIQUE INDEX `uidx_local_lan_terminals_key` ON `local_lan_terminals` (`key_hash`);--> statement-breakpoint
+ALTER TABLE `local_carts` ADD `terminal_id` text;

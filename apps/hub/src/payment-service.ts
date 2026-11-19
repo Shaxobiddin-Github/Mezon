@@ -4,10 +4,15 @@ import {
   appendAuditInTxSync,
   getPaymentIntentSync,
   insertPaymentIntentSync,
+  listPaymentIntentsNeedingAttentionSync,
   transitionPaymentIntentSync,
 } from '@mezon/db-local';
 import { DomainError, type UnixMs, type UuidV7 } from '@mezon/domain';
-import { type PaymentDriver, PaymentUnavailableError } from '@mezon/drivers';
+import {
+  type PaymentDriver,
+  type PaymentStatusResult,
+  PaymentUnavailableError,
+} from '@mezon/drivers';
 
 export interface PaymentContext {
   readonly organizationId: UuidV7;
@@ -24,6 +29,8 @@ export interface PaymentIntentDto {
   readonly expiresAtMs: string;
   readonly paidLate: boolean;
   readonly consumedBySaleId: string | null;
+  /** What the provider actually took (differs from `amount` only for `amount_mismatch`). */
+  readonly receivedAmount: string | null;
   readonly isTestDriver: boolean;
 }
 
@@ -72,6 +79,7 @@ export class HubPaymentService {
       expiresAtMs: r.expiresAtMs.toString(),
       paidLate: r.paidLate,
       consumedBySaleId: r.consumedBySaleId,
+      receivedAmount: r.receivedAmountTiyin?.toString() ?? null,
       isTestDriver: this.o.driver.isTestDriver,
     };
   }
@@ -133,24 +141,14 @@ export class HubPaymentService {
   async refresh(id: UuidV7): Promise<PaymentIntentDto> {
     let r = this.require(id);
     const nowMs = this.o.nowMs();
-    if (r.kind === 'dynamic' && ['pending', 'expired', 'cancelled'].includes(r.status)) {
+    if (
+      r.kind === 'dynamic' &&
+      ['pending', 'expired', 'cancelled', 'refunding'].includes(r.status)
+    ) {
       try {
         const st = await this.o.driver.status(r.providerRef);
-        if (st.state === 'paid' && st.amountTiyin === r.amountTiyin) {
-          if (
-            !transitionPaymentIntentSync(this.sqlite, { id, from: ['pending'], to: 'paid', nowMs })
-          ) {
-            transitionPaymentIntentSync(this.sqlite, {
-              id,
-              from: ['expired', 'cancelled'],
-              to: 'paid',
-              nowMs,
-              paidLate: true,
-            });
-          }
-        } else if (st.state === 'failed') {
-          transitionPaymentIntentSync(this.sqlite, { id, from: ['pending'], to: 'failed', nowMs });
-        }
+        if (r.status === 'refunding') this.settleRefunding(r, st, nowMs);
+        else this.applyProviderStatus(r, st, nowMs);
       } catch (err) {
         if (!(err instanceof PaymentUnavailableError)) throw err;
       }
@@ -161,6 +159,118 @@ export class HubPaymentService {
       r = this.require(id);
     }
     return this.dto(r);
+  }
+
+  private applyProviderStatus(
+    r: PaymentIntentRecord,
+    st: PaymentStatusResult,
+    nowMs: UnixMs,
+  ): void {
+    const id = r.id;
+    if (st.state === 'paid' && st.amountTiyin === r.amountTiyin) {
+      if (
+        !transitionPaymentIntentSync(this.sqlite, {
+          id,
+          from: ['pending'],
+          to: 'paid',
+          nowMs,
+          receivedAmountTiyin: st.amountTiyin,
+        })
+      ) {
+        transitionPaymentIntentSync(this.sqlite, {
+          id,
+          from: ['expired', 'cancelled'],
+          to: 'paid',
+          nowMs,
+          paidLate: true,
+          receivedAmountTiyin: st.amountTiyin,
+        });
+      }
+    } else if (st.state === 'paid') {
+      // P2-K2: money was taken, but not the sum on the QR. It never closes a receipt; a manager sees
+      // it (GET /payments/intents/attention) and refunds it. Status + audit row in one transaction.
+      this.sqlite.transaction(() => {
+        const moved = transitionPaymentIntentSync(this.sqlite, {
+          id,
+          from: ['pending', 'expired', 'cancelled'],
+          to: 'amount_mismatch',
+          nowMs,
+          paidLate: r.status !== 'pending',
+          receivedAmountTiyin: st.amountTiyin,
+        });
+        if (moved) {
+          appendAuditInTxSync(this.sqlite, {
+            organizationId: r.organizationId,
+            eventType: 'payment.amount_mismatch',
+            actorUserId: null,
+            entity: 'payment_intents',
+            entityId: id,
+            details: {
+              expected: r.amountTiyin.toString(),
+              received: st.amountTiyin.toString(),
+              providerRef: r.providerRef,
+            },
+            nowMs,
+            nextId: this.o.nextId,
+          });
+        }
+      })();
+    } else if (st.state === 'failed') {
+      transitionPaymentIntentSync(this.sqlite, { id, from: ['pending'], to: 'failed', nowMs });
+    }
+  }
+
+  /** The status a `refunding` intent returns to when the provider clearly refuses the refund. */
+  private beforeRefund(r: PaymentIntentRecord): 'paid' | 'amount_mismatch' {
+    return r.receivedAmountTiyin !== null && r.receivedAmountTiyin !== r.amountTiyin
+      ? 'amount_mismatch'
+      : 'paid';
+  }
+
+  /** `refunding → refunded` plus its audit row, in one transaction (only the first caller writes). */
+  private finishRefund(
+    r: PaymentIntentRecord,
+    nowMs: UnixMs,
+    actorUserId: UuidV7 | null,
+    settledBy: 'refund_answer' | 'provider_status',
+  ): void {
+    this.sqlite.transaction(() => {
+      if (
+        transitionPaymentIntentSync(this.sqlite, {
+          id: r.id,
+          from: ['refunding'],
+          to: 'refunded',
+          nowMs,
+        })
+      ) {
+        appendAuditInTxSync(this.sqlite, {
+          organizationId: r.organizationId,
+          eventType: 'payment.refunded',
+          actorUserId,
+          entity: 'payment_intents',
+          entityId: r.id,
+          details: { amount: (r.receivedAmountTiyin ?? r.amountTiyin).toString(), settledBy },
+          nowMs,
+          nextId: this.o.nextId,
+        });
+      }
+    })();
+  }
+
+  /**
+   * P2-K1: an open refund is closed only when the provider reports the money returned. A provider
+   * still saying "paid" does NOT reopen the QR: our refund request may still be on its way. The
+   * manager retries the refund instead (the driver contract makes a refund idempotent per reference).
+   */
+  private settleRefunding(r: PaymentIntentRecord, st: PaymentStatusResult, nowMs: UnixMs): void {
+    if (st.state === 'refunded') this.finishRefund(r, nowMs, null, 'provider_status');
+  }
+
+  /** Manager view (P2-K2): wrong-sum payments and refunds whose outcome is still open. */
+  needingAttention(): PaymentIntentDto[] {
+    return listPaymentIntentsNeedingAttentionSync(this.sqlite, this.ctx().organizationId).map((r) =>
+      this.dto(r),
+    );
   }
 
   cancel(id: UuidV7): PaymentIntentDto {
@@ -200,6 +310,7 @@ export class HubPaymentService {
         paidLate: r.status === 'expired',
         confirmedByUserId: userId,
         confirmNote: note,
+        receivedAmountTiyin: r.amountTiyin,
       });
       if (moved) {
         appendAuditInTxSync(this.sqlite, {
@@ -220,45 +331,68 @@ export class HubPaymentService {
     return this.dto(this.require(id));
   }
 
-  /** A paid intent no sale used (late confirmation, changed payment method): money goes back. */
-  async refund(id: UuidV7): Promise<PaymentIntentDto> {
+  /**
+   * A paid (or wrong-sum) intent no sale used: money goes back. P2-K1 order: claim locally FIRST
+   * (`paid → refunding`, guarded by `consumed_by_sale_id IS NULL`), so a sale can no longer use the
+   * QR, THEN ask the provider. Its answer decides: refunded → `refunded`; a clear refusal → back;
+   * no answer (offline, timeout) → stays `refunding` (shown to the manager). Calling this again on a
+   * `refunding` intent retries the same refund; the provider treats it as the same refund.
+   */
+  async refund(id: UuidV7, userId: UuidV7): Promise<PaymentIntentDto> {
     const r = this.require(id);
-    if (r.status !== 'paid' || r.consumedBySaleId !== null) {
+    if (
+      r.consumedBySaleId !== null ||
+      !['paid', 'amount_mismatch', 'refunding'].includes(r.status)
+    ) {
       throw new DomainError(
         'PAYMENT_INTENT_INVALID_STATE',
         'Only a paid, unused QR payment can be refunded',
       );
     }
+    const restoreTo = r.status === 'refunding' ? this.beforeRefund(r) : r.status;
+    if (
+      r.status !== 'refunding' &&
+      !transitionPaymentIntentSync(this.sqlite, {
+        id,
+        from: [r.status],
+        to: 'refunding',
+        nowMs: this.o.nowMs(),
+      })
+    ) {
+      throw new DomainError(
+        'PAYMENT_INTENT_INVALID_STATE',
+        'The payment was used by a sale or refunded meanwhile',
+      );
+    }
     if (r.kind === 'dynamic') {
       let res;
       try {
-        res = await this.o.driver.refund(r.providerRef, r.amountTiyin);
+        res = await this.o.driver.refund(r.providerRef, r.receivedAmountTiyin ?? r.amountTiyin);
       } catch (err) {
+        // The money's fate is unknown: keep `refunding` (no sale can use it).
         if (err instanceof PaymentUnavailableError) {
-          throw new DomainError('NETWORK_ERROR', 'Payment provider unavailable');
+          throw new DomainError(
+            'NETWORK_ERROR',
+            'Payment provider unavailable; the refund stays open until the provider answers',
+          );
         }
         throw err;
       }
       if (res.state !== 'refunded') {
+        // A clear refusal: the money is still ours, the QR is usable again.
+        transitionPaymentIntentSync(this.sqlite, {
+          id,
+          from: ['refunding'],
+          to: restoreTo,
+          nowMs: this.o.nowMs(),
+        });
         throw new DomainError(
           'PAYMENT_INTENT_INVALID_STATE',
           `Provider refused the refund: ${res.reason}`,
         );
       }
     }
-    if (
-      !transitionPaymentIntentSync(this.sqlite, {
-        id,
-        from: ['paid'],
-        to: 'refunded',
-        nowMs: this.o.nowMs(),
-      })
-    ) {
-      throw new DomainError(
-        'PAYMENT_INTENT_INVALID_STATE',
-        'The payment was used by a sale meanwhile',
-      );
-    }
+    this.finishRefund(r, this.o.nowMs(), userId, 'refund_answer');
     return this.dto(this.require(id));
   }
 }

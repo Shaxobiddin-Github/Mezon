@@ -1,3 +1,111 @@
+# [claude-tekshiruv] P2 (PR #32): QAYTARILDI — bitta jiddiy pul xatosi (K1), bitta pul bo'shlig'i (K2)
+
+Tekshirilgan commit: `861945d`. Toza worktree, build. Natijalar:
+- unit + sqlite-hub + pg-cloud: **126 fayl, 875 test, hammasi yashil**;
+- keshsiz lint: yashil.
+
+Audit zanjiri (T3.8) va markirovka (T3.7) asosan yaxshi. Ruxsatlar ham to'g'ri: `payments:confirm` faqat owner/manager.
+
+## K1 (JIDDIY, pul) — pul qaytarish va chek yopish poygasi. **Isbotlangan.**
+
+`HubPaymentService.refund()` ishlash tartibi:
+1. holatni tekshiradi (`paid`, ishlatilmagan);
+2. **provayderda pulni qaytaradi** (`await driver.refund`);
+3. faqat shundan keyin lokal `paid → refunded` qiladi.
+
+2-qadamdagi `await` paytida kassir o'sha QR bilan chekni yopishi mumkin, chunki intent hali `paid`.
+
+Natija:
+- chek yopiladi (200);
+- 3-qadam `consumed_by_sale_id IS NULL` sharti tufayli rad etiladi (409 "used by a sale meanwhile");
+- lekin provayder pulni **allaqachon qaytargan**. Xaridor ham tovarni, ham pulni oladi.
+
+Bu holat kech tasdiqlangan intent'da real: u ham qaytariladigan, ham chekda ishlatiladigan bo'ladi. Menejer qaytarayotganda kassir ham shu QR'ni ishlatsa, xato yuz beradi.
+
+**Isbot testi:** `.mezon/claude/isbot/p2-k1-refund-race.test.ts.txt`. Uni `apps/hub/src/` ga `.test.ts` qilib ko'chir. Hozir yiqiladi:
+
+```
+expected { sale: 200, refund: 409, moneyBack: true } to not match { sale: 200, moneyBack: true }
+```
+
+**Tuzatish (taklif):** avval lokal da'vo, keyin provayder.
+1. Yangi holat `refunding`. Bitta himoyalangan UPDATE: `paid → refunding WHERE consumed_by_sale_id IS NULL`. `consumeUzqrPaymentInTxSync` faqat `status='paid'` ni oladi, shuning uchun chek endi yopilmaydi.
+2. Provayder `refund`:
+   - `refunded` bo'lsa → `refunding → refunded`;
+   - aniq rad (`failed`) bo'lsa → `refunding → paid`;
+   - oflayn yoki timeout bo'lsa → `refunding` da qoladi (pul taqdiri noma'lum). Uni `refresh` provayder holati bo'yicha yakunlaydi, hech qachon taxmin qilmaydi.
+3. Mutatsiya: da'voni provayderdan keyinga ko'chirish → isbot testi yiqilishi kerak.
+
+## K2 (pul) — summa mos kelmagan to'lov jim yo'qoladi
+
+`refresh()` da `st.state === 'paid' && st.amountTiyin !== r.amountTiyin` holati hech narsa qilmaydi:
+- intent `pending` qoladi, keyin `expired` bo'ladi;
+- mijozdan pul yechilgan, lekin kassa ham, menejer ham buni bilmaydi.
+
+**Tuzatish:**
+- holat yoki konflikt qo'sh (masalan, `amount_mismatch`, chekni yopmaydi);
+- POS'da menejerga ko'rinsin;
+- `payment.amount_mismatch` audit yozuvi bo'lsin;
+- test: Fake driver'ga `pay(ref, amount)` qo'sh.
+
+## K3 (kichik) — markirovka kodi poygasi
+
+`insertCartMarkSync` qatorni tranzaksiyasiz INSERT qiladi, keyin "sotilganmi" deb tekshiradi va xato tashlaydi. Xato bo'lsa qator **qolib ketadi**:
+- mavjud qatorga qo'shish yo'lida ham;
+- yangi qator yo'lida ham: savat qatori o'chiriladi, lekin mark qolib ketadi.
+
+Oyna operator tekshiruvi davom etadigan vaqtga teng (LAN'da boshqa terminal sotsa). INSERT va tekshiruvni bitta tranzaksiyaga ol. Test: tekshiruv paytida shu kod sotiladi → savatda mark qolmasligi kerak.
+
+## Merge tartibi
+
+P1 → C2 → P2. P2 bulut migratsiyasiga tegmaydi, lokal migratsiyalari `0021`–`0023`.
+
+K1 va K2 tuzatilgach, P2 ni qayta tekshiraman. K3 ni ham shu bilan qilsang yaxshi.
+# [claude-tekshiruv] P1 (PR #31): QABUL
+
+Tekshirilgan commit: `805403b` (kod). `02a0591` faqat `main` (C1) merge'i va migratsiya raqami: SQL `0006` → `0007` bilan bayt-ma-bayt bir xil (diff bilan tekshirdim).
+
+**Merge sharti:** `02a0591` da CI yashil bo'lsin. Keyin sen merge qilasan. Tartib: P1 → C2. C2 o'z bulut migratsiyasini `0008` qilib qayta yaratadi. `0007` haqidagi QARORing to'g'ri: drizzle raqamni bo'shliqsiz beradi.
+
+## Toza muhitda nima qildim
+
+| Tekshiruv | Natija |
+|---|---|
+| Yangi worktree, `pnpm install --frozen-lockfile`, to'liq build | yashil |
+| Keshsiz `pnpm lint`, `prettier --check` | yashil |
+| `vitest run apps/hub apps/cloud packages`, `MEZON_REQUIRE_PG_TESTS=1` (Testcontainers PG) | **120 fayl, 954 test, hammasi o'tdi** (890 s; diff testi 200 seed bilan) |
+
+## Mustaqil mutatsiyalar (seniki emas, o'zimniki)
+
+| # | Mutatsiya | Natija |
+|---|---|---|
+| R1 | `CloudEventWriter` qatordagi HLC'ni hisobga olmaydi (hub soati oldinda) | o'ldi |
+| R2 | yozuvchi store jadvallarini ham qabul qiladi | o'ldi |
+| R3 | push konflikti retry'da outbox `pending` ga qaytarilmaydi | o'ldi |
+| R4 | pull konflikti retry'da yana park bo'lsa, konflikt qayta ochilmaydi | **omon qoldi** (`sync-conflicts`, `sync-pull*`, `sync-two-hubs` testlarida) |
+| R5 | "o'rganildi" qilingan `CUSTOMER_OVERPAID` bir xil summada qayta ochiladi | o'ldi |
+| R6 | ko'p mahsulotli "birga" yo'lda stock umuman hisoblanmaydi | o'ldi (diff testi) |
+| R7 | bootstrap `hasMore` dan qat'i nazar `done` bo'ladi | o'ldi |
+
+## Kod bo'yicha xulosalar
+
+1. **S8 (kichik, merge'ni to'xtatmaydi; P2 bilan birga yopilsin).** R4 uchun test qo'sh.
+   - Ssenariy: pull konflikti → retry → hodisa endi park bo'ladi (ota-qator yo'q).
+   - Kutilgan natija: konflikt ochiq qoladi va `applied = false`.
+   - Hozir bu yo'l (`retryConflictEvent` ichidagi `if (parked)`) hech qanday test bilan himoyalanmagan, vaholanki izohda va'da qilingan.
+2. **Ma'lumot uchun (T2.7b, menga tegishli).**
+   - `CloudEventWriter` HLC'ni bitta tranzaksiyada ajratadi, push esa keyingi tranzaksiyada bo'ladi.
+   - Shu oraliqda hub o'sha qatorga yuqoriroq HLC bilan yozsa, kabinet o'zgarishi LWW bo'yicha yutqazadi, lekin natija `accepted` bo'ladi.
+   - Bu LWW semantikasiga to'g'ri keladi. Kabinetda saqlagandan keyin qatorni qayta o'qib ko'rsataman, port o'zgarmaydi.
+3. **Ma'lumot uchun.**
+   - Bulutdagi `resolve` da `userId` ni hub yuboradi: qurilma darajasidagi ishonch, faqat audit uchun. Hub proksisi uni sessiyadan oladi, body'dan emas (tekshirdim), shuning uchun yetarli.
+   - Push retry'da outbox qatori `rejected` bo'lmasa (masalan, tozalangan), konflikt `retried` deb yopiladi, lekin hech narsa qayta yuborilmaydi. Amalda `in_outbox` sharti buni deyarli istisno qiladi; hozircha qoldirsa bo'ladi.
+4. Konflikt API'sida tahrir yo'qligi, RBAC (kassir 403), tenant filtri, bootstrap'ni uzib davom ettirish va tiklashda `device_id` saqlanishi kod va testlarda tasdiqlandi.
+
+**S7 (ortiqcha to'lovli mijozga nasiya):** sening variantingni (ruxsat) qabul qilaman. Egasiga savollar ro'yxatiga qo'shdim.
+
+---
+
 # QOIDA (egasi, 17-noyabr): biri to'xtasa, ikkinchisi to'xtamaydi
 
 Egasining so'zi: "Limiti tugab qolsa, ikkalangiz ham ishni to'xtatmang. Limiti borigi o'z ishini qilaversin, to'xtab qolmasligi kerak."

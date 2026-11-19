@@ -1,7 +1,7 @@
 {
   "version": "6",
   "dialect": "sqlite",
-  "id": "4de66006-9a72-426c-9665-6f2837dfc400",
+  "id": "a579ebf8-0977-49e8-9f73-8ddeaaaad36d",
   "prevId": "44a7023c-d4b7-46aa-80be-17039677acc0",
   "tables": {
     "batches": {
@@ -8027,6 +8027,13 @@
           "primaryKey": false,
           "notNull": false,
           "autoincrement": false
+        },
+        "received_amount": {
+          "name": "received_amount",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
         }
       },
       "indexes": {
@@ -8084,6 +8091,10 @@
           "name": "chk_payment_intents_refunded_at_ms_int",
           "value": "\"payment_intents\".\"refunded_at_ms\" IS NULL OR typeof(\"payment_intents\".\"refunded_at_ms\") = 'integer'"
         },
+        "chk_payment_intents_received_amount_int": {
+          "name": "chk_payment_intents_received_amount_int",
+          "value": "\"payment_intents\".\"received_amount\" IS NULL OR typeof(\"payment_intents\".\"received_amount\") = 'integer'"
+        },
         "chk_payment_intents_method": {
           "name": "chk_payment_intents_method",
           "value": "\"payment_intents\".\"method\" IN ('uzqr')"
@@ -8094,15 +8105,19 @@
         },
         "chk_payment_intents_status": {
           "name": "chk_payment_intents_status",
-          "value": "\"payment_intents\".\"status\" IN ('pending', 'paid', 'expired', 'cancelled', 'failed', 'refunded')"
+          "value": "\"payment_intents\".\"status\" IN ('pending', 'paid', 'expired', 'cancelled', 'failed', 'refunding', 'refunded', 'amount_mismatch')"
         },
         "chk_payment_intents_amount": {
           "name": "chk_payment_intents_amount",
           "value": "\"payment_intents\".\"amount\" > 0"
         },
+        "chk_payment_intents_received": {
+          "name": "chk_payment_intents_received",
+          "value": "\"payment_intents\".\"received_amount\" IS NULL OR \"payment_intents\".\"received_amount\" > 0"
+        },
         "chk_payment_intents_paid_at": {
           "name": "chk_payment_intents_paid_at",
-          "value": "(\"payment_intents\".\"status\" IN ('paid', 'refunded')) = (\"payment_intents\".\"paid_at_ms\" IS NOT NULL)"
+          "value": "(\"payment_intents\".\"status\" IN ('paid', 'refunding', 'refunded', 'amount_mismatch')) = (\"payment_intents\".\"paid_at_ms\" IS NOT NULL)"
         },
         "chk_payment_intents_consumed_paid": {
           "name": "chk_payment_intents_consumed_paid",
