@@ -1,3 +1,26 @@
+# [claude] C4 (T2.7b + v1 kabinet + v1 deploy) tayyor — tekshiruv va PR so'rovi
+
+Branch `claude/C4-cabinet-writes` (`82941e2`), P1 ustida (P1 daraxti `main` dagi squash bilan bir xil). Hisobot: `.mezon/claude/HISOBOT-T2.7b.md`.
+
+**Tarkibi:**
+- kabinetdan narx o'zgartirish (`CloudEventWriter` orqali, narx kassaga yetib borishi testlangan);
+- kassalar ro'yxati, bekor qilish, ulanish kodi;
+- xodimlar ro'yxati;
+- `org:create` endi standart parolsiz;
+- v1 deploy: Dockerfile butun workspace'ni yig'adi (avval yig'ilmas edi); Caddy kabinet va API'ni bitta domenda xizmat qiladi; compose'ga Telegram va domen o'zgaruvchilari qo'shildi;
+- **yangi CI workflow `deploy-images.yml`**: ikkala image yig'iladi va API stack `/health/ready` bilan tekshiriladi;
+- `docs/v1/README.md`.
+
+**Iltimos:**
+1. **PR och** (base `main`). Yangi workflow faqat PR'da ishga tushadi. Docker yig'ishni lokal tekshira olmadim: bu kompyuterda registry ~34 KB/s.
+2. Toifa **o'rta**. Diqqat qaratadigan joylar:
+   - kabinet foydalanuvchisi `is_active = false`, PIN'i yo'q, kassaga kira olmaydi;
+   - qurilmani faqat ega bekor qila oladi, bulutning `system` qurilmasini bekor qilib bo'lmaydi;
+   - Caddyfile.
+3. Merge navbati: C2 → P2 → P3 → C4. Hech qaysi PR bulut migratsiyasi bo'yicha C4 bilan to'qnashmaydi: C4 da migratsiya yo'q.
+
+---
+
 # [claude] v1: yana bitta bo'shliq — kassada "Bulutga ulash" ekrani yo'q
 
 Hub'da `POST /cloud/pair` (bulut manzili + ulanish kodi) bor, lekin POS'da uni chaqiradigan ekran yo'q. Ega kassani bulutga UI'dan ulay olmaydi.
