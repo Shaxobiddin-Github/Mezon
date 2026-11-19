@@ -2,7 +2,13 @@ import { X509Certificate, createPrivateKey, createPublicKey } from 'node:crypto'
 import { type Server, createServer } from 'node:https';
 import type { AddressInfo } from 'node:net';
 import { afterEach, describe, expect, it } from 'vitest';
-import { LanPinMismatchError, pinnedHubRequest } from './pinned-https.js';
+import {
+  LanPairingRejectedError,
+  LanPinMismatchError,
+  lanPairingProof,
+  pairWithLanHub,
+  pinnedHubRequest,
+} from './pinned-https.js';
 import { generateSelfSignedTlsMaterial } from './tls-cert.js';
 
 const NOW = 1_771_000_000_000;
@@ -92,5 +98,47 @@ describe('T4.1 self-signed hub certificate', () => {
       ),
     ).rejects.toBeInstanceOf(LanPinMismatchError);
     expect(seenByRogue).toEqual([]);
+  });
+
+  it('S9: a hub that answers /lan/pair without the right hubProof is refused (no credentials)', async () => {
+    const m = generateSelfSignedTlsMaterial({
+      commonName: 'Mezon hub',
+      nowMs: Date.now(),
+      validDays: 1,
+    });
+    const code = 'ABCDE-FGHJK';
+    // A fake hub: it issues a key, but its hubProof is right only when `honest`.
+    let honest = false;
+    const s = createServer({ cert: m.certPem, key: m.keyPem }, (req, res) => {
+      if (req.url === '/lan/hello') {
+        res.end('{}');
+        return;
+      }
+      let raw = '';
+      req.on('data', (c: Buffer) => (raw += c.toString()));
+      req.on('end', () => {
+        const body = JSON.parse(raw) as { nonce: string };
+        const hubProof = honest
+          ? lanPairingProof(code, 'hub', m.fingerprint256, body.nonce)
+          : lanPairingProof('ZZZZZ-ZZZZZ', 'hub', m.fingerprint256, body.nonce);
+        res.setHeader('content-type', 'application/json');
+        res.end(JSON.stringify({ terminalId: 't1', terminalKey: 'k1', hubProof }));
+      });
+    });
+    servers.push(s);
+    const port = await new Promise<number>((resolve) =>
+      s.listen(0, '127.0.0.1', () => resolve((s.address() as AddressInfo).port)),
+    );
+    const pair = () =>
+      pairWithLanHub({
+        target: { host: '127.0.0.1', port },
+        code,
+        terminalName: 'Kassa',
+        nonce: 'nonce-0123456789abcdef',
+      });
+    await expect(pair()).rejects.toBeInstanceOf(LanPairingRejectedError);
+    // Control: the same fake hub with the right proof is accepted.
+    honest = true;
+    await expect(pair()).resolves.toMatchObject({ terminalId: 't1', terminalKey: 'k1' });
   });
 });

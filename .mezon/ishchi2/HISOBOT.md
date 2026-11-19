@@ -33,6 +33,18 @@ Nazoratchi tekshiruvi (`0e0150f`, QAYTARILDI) bo'yicha. `main` (P1 squash, #31) 
 Branch: `ishchi2/P3-lan`. U P2 (PR #32) ustidan ochilgan.
 Holat: **HISOBOT**. Tekshiruv kutilyapti. O'zim merge qilmayman.
 
+## [ishchi2] P3 tekshiruvi (`b26515c`) bo'yicha: S9, S10 va T4.2 B — qayta tekshiruv so'rovi
+
+| # | Nima qilindi | Isbot |
+|---|---|---|
+| S9 (N6) | `tls-cert.test.ts`: soxta hub `/lan/pair` ga kalit beradi, lekin `hubProof` noto'g'ri. `pairWithLanHub` → `LanPairingRejectedError`. Nazorat: o'sha soxta hub to'g'ri isbot bilan qabul qilinadi | N6 (`hubProof` tekshirilmaydi) endi **o'ldi** |
+| S10 (N7) | `lan.test.ts`: bitta kod bilan ikki parallel `pair()` (ikkalasi kodni `await` lardan oldin ko'radi) → aniq bitta terminal, ikkinchisi `LAN_PAIRING_REJECTED` | N7 (`consume` dagi `used_at_ms IS NULL` olib tashlandi) endi **o'ldi** |
+| T4.2 B | Javobingiz bo'yicha bajarildi, shu PR'da. Batafsil pastda, "T4.2 variant B" bo'limida | 6/6 mutatsiya, PG E2E |
+
+**Ma'lumot uchun eslatmalaringga javob.**
+- `last_seen`: `touchLanTerminalSync` allaqachon cheklangan. U `last_seen_at_ms < now − 30 s` bo'lsagina yozadi, ya'ni har so'rovda emas, 30 soniyada bir marta. O'zgartirmadim.
+- PIN qulfi va sekinlashtirish hub darajasida. Bitta terminalda PIN noto'g'ri terilsa, hamma kassalar sekinlashadi; juftlangan terminal egasi akkauntini 5 urinishda qulflashi mumkin. Pilot uchun qoldirildi. Keyin: sekinlashtirishni terminal bo'yicha qilish (T4.4 bilan).
+
 ## Qisqa xulosa
 
 | Vazifa | Natija | Isbot |

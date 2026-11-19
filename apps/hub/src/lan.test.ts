@@ -296,4 +296,25 @@ describe('T4.1 LAN hub: only a paired terminal gets in', () => {
     expect(forged.statusCode, forged.body).toBe(200);
     expect(forged.json<{ activeTerminals: number }>().activeTerminals).toBe(1);
   });
+
+  it('S10: two parallel pairings with the same code → exactly one terminal is added', async () => {
+    const env = await boot(4106);
+    const { code, fingerprint256 } = await env.newCode();
+    const attempt = (name: string) => {
+      const n = nonce();
+      return env.hub.lanService.pair({
+        terminalName: name,
+        nonce: n,
+        proof: lanPairingProof(code, 'terminal', fingerprint256, n),
+      });
+    };
+    // Both see the live code (pair() awaits before it consumes); only the guarded consume decides.
+    const results = await Promise.allSettled([attempt('A'), attempt('B')]);
+    expect(results.filter((r) => r.status === 'fulfilled')).toHaveLength(1);
+    const lost = results.find((r) => r.status === 'rejected');
+    expect((lost?.reason as { code?: string }).code).toBe('LAN_PAIRING_REJECTED');
+    expect(
+      env.hub.connection.sqlite.prepare('SELECT count(*) AS n FROM local_lan_terminals').get(),
+    ).toEqual({ n: 1n });
+  });
 });
