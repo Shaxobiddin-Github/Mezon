@@ -281,6 +281,8 @@ export interface LicenceInfo {
     readonly amountTiyin: string;
     readonly status: 'issued' | 'paid' | 'void';
   }[];
+}
+
 export interface CabinetDevice {
   readonly id: string;
   readonly name: string;

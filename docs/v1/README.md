@@ -69,19 +69,21 @@ Egasining qarori: qonuniy integratsiyalar v2 da qilinadi.
 
 ## 4. Kassani o'rnatish (har bir do'kon)
 
-1. `Guzar-Setup-1.0.0.exe` ni kassa kompyuterida ishga tushiring.
+1. `Guzar-Setup-1.0.0-x64.exe` ni kassa kompyuterida ishga tushiring.
 2. **Birinchi ochilish:** ega ismi, login va 6 xonali PIN kiritiladi. Bu kassaning birinchi egasi bo'ladi.
 3. **Bulutga ulash:**
    1. Kabinetga kiring: "Kassalar va xodimlar" → "Yangi kassa ulash" → do'konni tanlang → "Ulanish kodini olish".
-   2. Kassada: Sozlamalar → "Bulutga ulash" → bulut manzili (`https://api.guzar.uz`) va kod.
+   2. Kassada (ega bo'lib kiring): yuqoridagi "Ulanishlar" → "Bulut kabineti" → bulut manzili (`https://api.guzar.uz`) va kod → "Bulutga ulash".
 
    Kod bir marta ishlatiladi va qisqa muddat amal qiladi.
 
 4. **Xodimlar:** kassada egasi kassir va menejerlarni qo'shadi (ism, login, PIN). Kabinetda ular faqat ko'rinadi.
 5. **Printer:** Sozlamalar → Printer → test chek.
 6. **Ikkinchi kassa (LAN):**
-   1. Asosiy kassada: "Kassa qo'shish" → kod va barmoq izi chiqadi.
-   2. Ikkinchi kompyuterda: "Ikkinchi kassa sifatida ulanish" → asosiy kassa manzili va kod; barmoq izi solishtiriladi.
+   1. Asosiy kassada: "Ulanishlar" → "Kassa qo'shish". Kod (5 daqiqa amal qiladi), kompyuter manzili (masalan `192.168.1.10:47821`) va barmoq izi chiqadi. Windows ruxsat so'rasa, "Ruxsat berish" (xususiy tarmoq).
+   2. Ikkinchi kompyuterga dasturni o'rnating. Birinchi ekranda "Ikkinchi kassa sifatida ulanish" → manzil, port, kod va kassa nomi. Chiqqan barmoq izi asosiy kassadagi bilan bir xil bo'lishi kerak. "Qayta ishga tushirish" dan keyin ikkinchi kassa asosiy kassaning foydalanuvchilari bilan ishlaydi; har kassada o'z smenasi va pul yashigi.
+   3. Kassani bekor qilish: asosiy kassada "Ulanishlar" → ro'yxatda "Bekor qilish". Ikkinchi kompyuterni qayta ulash uchun uning kirish ekranida "Asosiy kassadan uzish".
+   4. v1 da ikkinchi kassa avtomatik yangilanmaydi: yangi versiya o'rnatuvchi bilan qo'lda o'rnatiladi.
 
 ## 5. Kundalik ish va nosozliklar
 

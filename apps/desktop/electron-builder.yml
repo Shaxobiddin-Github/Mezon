@@ -24,7 +24,7 @@ win:
     - target: nsis
       arch:
         - x64
-  artifactName: Mezon-Setup-${version}-${arch}.${ext}
+  artifactName: Guzar-Setup-${version}-${arch}.${ext}
   signAndEditExecutable: false
 nsis:
   oneClick: false
