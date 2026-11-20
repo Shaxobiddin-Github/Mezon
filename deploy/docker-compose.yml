@@ -9,11 +9,18 @@ services:
       POSTGRES_PASSWORD: ${MEZON_POSTGRES_ADMIN_PASSWORD}
       MEZON_APP_DB_PASSWORD: ${MEZON_APP_DB_PASSWORD}
     volumes:
-      - mezon_pgdata:/var/lib/postgresql/data
+      # PostgreSQL 18 images keep data in /var/lib/postgresql/18/docker and refuse to start with a
+      # volume on the old /var/lib/postgresql/data path: mount the parent directory.
+      - mezon_pgdata:/var/lib/postgresql
       - ./init-db:/docker-entrypoint-initdb.d:ro
     healthcheck:
       test:
-        ['CMD-SHELL', 'pg_isready -U ${POSTGRES_USER:-mezon_admin} -d ${POSTGRES_DB:-mezon_cloud}']
+        # -h 127.0.0.1: the first-start init server listens on the socket only, so the check stays
+        # unhealthy until the real server is up (otherwise migrate can hit the init restart).
+        [
+          'CMD-SHELL',
+          'pg_isready -h 127.0.0.1 -U ${POSTGRES_USER:-mezon_admin} -d ${POSTGRES_DB:-mezon_cloud}',
+        ]
       interval: 5s
       timeout: 5s
       retries: 5

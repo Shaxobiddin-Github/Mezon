@@ -56,7 +56,11 @@ jobs:
           CLOUD_DOMAIN: localhost
           ACME_EMAIL: ci@example.invalid
         run: |
-          docker compose up -d postgres migrate cloud
+          if ! docker compose up -d postgres migrate cloud; then
+            docker compose logs postgres migrate cloud
+            docker compose down -v
+            exit 1
+          fi
           for i in $(seq 1 60); do
             if docker compose exec -T cloud wget -q -O - http://127.0.0.1:4000/health/ready | grep -q '"ok"'; then
               echo "cloud ready"; docker compose down -v; exit 0
