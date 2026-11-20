@@ -55,6 +55,9 @@ export function parseTelegramLinkCode(code: string): { organizationId: UuidV7; s
   return { organizationId: parseUuidV7(uuid), secret: m[2] };
 }
 
+/** A transiently failed Telegram delivery is retried once, not earlier than this. */
+export const TELEGRAM_RETRY_AFTER_MS = 15n * 60_000n;
+
 export class CloudTelegramStore {
   constructor(
     private readonly pool: pg.Pool,
@@ -377,6 +380,8 @@ export class CloudTelegramStore {
     readonly kind: TelegramDeliveryKind;
     readonly periodKey: string;
     readonly nowMs: UnixMs;
+    /** A transient failure older than this is claimed once more (second and last attempt). */
+    readonly retryAfterMs?: bigint;
   }): Promise<string | null> {
     return withPgTenantContext(this.pool, params.organizationId, async (_tx, client) => {
       const id = this.idGen.nextId();
@@ -394,7 +399,27 @@ export class CloudTelegramStore {
           params.periodKey,
         ],
       );
-      return (res.rowCount ?? 0) > 0 ? id : null;
+      if ((res.rowCount ?? 0) > 0) return id;
+      // Owner decision (2026-11-20): one retry of a transient failure, never of a blocked chat.
+      // The guarded UPDATE is the claim, so two cloud instances still send at most once more.
+      const retry = await client.query<{ id: string }>(
+        `UPDATE cloud_telegram_deliveries
+            SET status = 'claimed', attempts = attempts + 1, updated_at_ms = $5
+          WHERE organization_id = $1 AND link_id = $2 AND kind = $3 AND period_key = $4
+            AND status = 'failed' AND attempts < 2
+            AND last_error IS DISTINCT FROM 'chatUnavailable'
+            AND updated_at_ms <= $6
+          RETURNING id`,
+        [
+          params.organizationId,
+          params.linkId,
+          params.kind,
+          params.periodKey,
+          String(params.nowMs),
+          String(BigInt(params.nowMs) - (params.retryAfterMs ?? TELEGRAM_RETRY_AFTER_MS)),
+        ],
+      );
+      return retry.rows[0]?.id ?? null;
     });
   }
 

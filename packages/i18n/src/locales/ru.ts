@@ -337,6 +337,7 @@ export const RU_MESSAGES: Readonly<Record<I18nKey, string>> = {
   'admin.products.save': 'Сохранить',
   'admin.products.cancel': 'Отмена',
   'admin.products.invalidPrice': 'Введите цену правильно, например 12500',
+  'admin.products.confirmFree': 'Цена 0 сум: товар будет продаваться бесплатно. Подтверждаете?',
   'admin.products.saved': 'Сохранено. Кассы получат новую цену при следующей синхронизации.',
   'admin.products.unchanged': 'Цена не изменилась',
   'admin.products.history': 'История цен',

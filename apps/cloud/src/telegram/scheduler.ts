@@ -67,8 +67,8 @@ export function localParts(
  * - after `reminderHour` each consenting customer with debt gets a reminder at most once per
  *   ISO week.
  * A delivery is claimed in the database BEFORE sending (at most once, even with two cloud
- * instances or a restart). A blocked chat revokes its binding; a transient failure keeps the
- * claim as `failed` (no retry storm; the next period sends again).
+ * instances or a restart). A blocked chat revokes its binding. A transient failure is retried ONCE
+ * on a tick at least 15 minutes later (owner decision, 2026-11-20); after that it stays `failed`.
  */
 export class TelegramScheduler {
   private timer: ReturnType<typeof setInterval> | null = null;
