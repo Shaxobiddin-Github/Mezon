@@ -40,6 +40,7 @@ import {
   sha256File,
   startInstallerDetached,
 } from './update/update-node-ports.js';
+import {
   type TerminalConfig,
   deleteTerminalConfig,
   isValidLanHost,
