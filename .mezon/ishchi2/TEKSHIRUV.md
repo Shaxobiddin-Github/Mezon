@@ -1,3 +1,42 @@
+# Tekshiruv: C4 — T2.7b kabinet yozuvlari, v1 deploy — QABUL
+
+Tekshiruvchi: ishchi2. Branch: `claude/C4-cabinet-writes` (`82941e2`). Toifa: o'rta.
+
+**Xulosa.** Kod to'g'ri. **QABUL, bitta test sharti bilan (S-C4)**. Merge sharti: S-C4 testi va yashil CI, shu jumladan yangi `deploy-images.yml`. Pastda 3 ta kichik taklif.
+
+## Nima tekshirdim
+
+| Joy | Natija |
+|---|---|
+| Kabinet foydalanuvchisi | `getActor` faqat `status = 'active'` va owner/manager rolini qaytaradi. Har yozuvda bazadan qayta o'qiladi; bloklangan menejer rad etiladi (test bor). Atribusiya qatori `is_active = false`, PIN yo'q, `kabinet-…` username bilan yaratiladi: kassaga kira olmaydi. Hub'da "bitta owner" cheklovi yo'q (tekshirdim), shuning uchun nofaol owner qatori sinxronda to'qnashmaydi |
+| Narx | Faqat `CloudEventWriter` orqali, ya'ni hub push bilan bir xil validatsiya. Kabinet bulut jadvaliga to'g'ridan-to'g'ri yozmaydi. Narx bigint tiyinda, `0..10^12` oralig'ida. Variantli mahsulot rad etiladi. Bir xil narx hech narsa yozmaydi |
+| Qurilmani bekor qilish | Faqat owner (menejer 403). `system` qurilma 404, ro'yxatda ham yo'q. Boshqa tashkilot RLS va tenant konteksti bilan to'silgan (test bor) |
+| Caddyfile | Bitta domen: `/api/*` va `/health/*` API'ga, qolgani SPA. `X-Forwarded-For` mijozdan olinmaydi (`{remote_host}`). HSTS, nosniff, `X-Frame-Options: DENY` bor |
+| `deploy-images.yml` | Ikkala image yig'iladi, admin `index.html` image ichida tekshiriladi, API stack haqiqiy PG bilan `/health/ready` ga yetadi. CI'dagi parollar soxta qiymatlar, sir emas |
+| `org:create` | Endi standart parolsiz: test bor |
+
+Testlar: o'zim yurgizdim, PG bilan. `cabinet.test.ts`, `create-org.test.ts`, `hub-cloud-sync.integration.test.ts`, `apps/admin`: **20/20**.
+
+## Mustaqil mutatsiyalar
+
+| # | Mutatsiya | Natija |
+|---|---|---|
+| C4-M1 | menejer ham qurilmani bekor qila oladi (`role !== 'owner'` tekshiruvi olib tashlandi) | **omon qoldi** |
+| C4-M2 | bloklangan foydalanuvchi ham yoza oladi | o'ldi |
+| C4-M3 | `system` qurilmani bekor qilish mumkin | o'ldi |
+
+## S-C4 (merge sharti): faol menejer qurilmani bekor qila olmasligini tekshiruvchi test
+
+"Faqat owner bekor qiladi" qoidasi (diqqat qaratishni so'ragan joying) hozir hech qaysi test bilan himoyalanmagan. Sabab: `kab_mgr` oldingi testda bloklanadi, qurilma testida esa menejer bilan urinish umuman yo'q. Agar bo'lganida ham, 403 rol tekshiruvidan emas, `getActor = null` dan kelgan bo'lardi.
+
+Kerakli test: **faol** menejer `POST /api/v1/admin/devices/:id/revoke` → 403, qurilma `active` qoladi. Bu C4-M1 ni o'ldirishi kerak. Fayl seniki, shuning uchun men tegmadim.
+
+## Takliflar (bloklamaydi)
+
+1. **CSP.** Kabinet SPA uchun `Content-Security-Policy` sarlavhasi yo'q. Kabinet ega akkaunti bilan ishlaydi, shuning uchun XSS qarshi qatlam foydali. Masalan: `default-src 'self'; frame-ancestors 'none'; object-src 'none'`.
+2. **`kabinet-%` filtri.** `listStaff` username'i `kabinet-` bilan boshlanadigan **haqiqiy** xodimni ham yashiradi. Taklif: hub'da bu prefiksni band qilish yoki filtrni atribusiya belgisiga o'tkazish (masalan, `is_active = false` va PIN yo'q). Kichik.
+3. **Narx 0.** Ruxsat etilgan. Agar hub'da 0 narx "bepul" degani bo'lsa, bu to'g'ri. Aks holda kabinetda tasdiq so'rash kerak. Egasiga savol.
+
 # Qayta tekshiruv: C2 B1–B3 tuzatishlari (`00a9cc4`) — QABUL
 
 Tekshiruvchi: ishchi2. Tekshirilgan commit: `00a9cc4` (`a49c3ff` dan keyingi diff).
