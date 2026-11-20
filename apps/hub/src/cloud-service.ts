@@ -5,6 +5,7 @@ import {
 } from '@mezon/contracts';
 import { type SqliteCloudStore } from '@mezon/db-local';
 import { type Clock, DomainError, type IdGenerator, type UuidV7, parseUuidV7 } from '@mezon/domain';
+import { HUB_APP_VERSION } from './version.js';
 import type { SafeStoragePort } from './safe-storage-port.js';
 
 export interface HubCloudServiceOptions {
@@ -65,7 +66,7 @@ export class HubCloudService {
       code: normalizedCode,
       deviceId,
       platform,
-      appVersion: '0.1.0',
+      appVersion: HUB_APP_VERSION,
     };
 
     let response: Response;

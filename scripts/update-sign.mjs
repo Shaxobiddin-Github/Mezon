@@ -2,7 +2,7 @@
 // T4.8 update-manifest signing CLI (owner only; the private key never enters the repository).
 //   node scripts/update-sign.mjs keygen --out <dir-outside-repo>
 //   node scripts/update-sign.mjs sign --key <update-signing.key> --key-id <id>
-//        --installer <Mezon-Setup-x.y.z.exe> --version <x.y.z> --url <https://.../file.exe>
+//        --installer <Guzar-Setup-x.y.z.exe> --version <x.y.z> --url <https://.../file.exe>
 //        [--platform win32-x64] [--channel stable] [--notes "..."] --out <update.json>
 //   node scripts/update-sign.mjs verify --pub <base64-or-file> --current <x.y.z> --in <update.json>
 // Requires `pnpm --filter @mezon/desktop build` (uses its manifest code, so both sides agree).
