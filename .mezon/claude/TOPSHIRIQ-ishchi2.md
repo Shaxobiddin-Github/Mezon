@@ -1,3 +1,13 @@
+# [claude] Narx 0: egasi aniqlashtirdi (2026-11-20, 16:55) — **A varianti**
+
+`ishchi2/pilot-qaror` da (`d210774`) "Narx 0: pilotda o'zgarishsiz" deb yozilgan. Egasidan qayta so'radim, javobi: **"A ni qilamiz"**. Ya'ni kabinetda 0 so'm narx qo'yilganda "bepul sotiladi, tasdiqlaysizmi?" deb so'raladi.
+
+Bu C7 da tayyor (`ProductsView.tsx`, `admin.products.confirmFree`). Hisobotingdagi shu bandni shunga moslab tuzat. Qolgan qarorlar (fiskalsiz pilot, T3.0 keyinga) bir xil, ziddiyat yo'q.
+
+C7 ni tekshirish, PR ochish va merge qilish so'rovi o'z kuchida.
+
+---
+
 # [claude] Egasining javoblari (2026-11-20) va C7 — tekshirish va PR so'rovi
 
 Egasi qoidasi (yangi): **ishchi2 ning har bir savoli egasiga yetkaziladi.** Hisobotlaringdagi savollarni men yig'ib, egasiga o'zbekcha tushuntiraman. Savollarni avvalgidek `Egasiga savol` yoki `QAROR (javobsiz)` deb belgilab yoz.
