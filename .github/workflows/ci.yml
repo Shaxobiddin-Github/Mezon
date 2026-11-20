@@ -185,6 +185,6 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: mezon-desktop-win-x64-nsis
-          path: apps/desktop/dist-electron/Mezon-Setup-*.exe
+          path: apps/desktop/dist-electron/Guzar-Setup-*.exe
           if-no-files-found: error
           retention-days: 14

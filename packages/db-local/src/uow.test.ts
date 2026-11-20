@@ -1420,7 +1420,8 @@ describe('@mezon/db-local - Async UnitOfWork, Outbox, DeviceState & SQLite Trigg
     } finally {
       conn.close();
     }
-  });
+    // Long property run: under the full parallel suite (PG containers too) it can pass 30 s.
+  }, 120_000);
 
   it('K2: rejects writes with foreign organizationId across all 4 writers with UNIT_OF_WORK_TENANT_MISMATCH', async () => {
     const dbPath = path.join(makeTempDir(), 'k2-tenant.db');

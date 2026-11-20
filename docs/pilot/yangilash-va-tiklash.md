@@ -54,8 +54,8 @@ Bu ikki qiymat yozilmaguncha avtomatik yangilanish **o'chiq** turadi.
 
    ```
    node scripts/update-sign.mjs sign --key D:\mezon-kalitlar\update-signing.key --key-id ega-2026 ^
-     --installer Mezon-Setup-1.3.0.exe --version 1.3.0 ^
-     --url https://.../mezon/Mezon-Setup-1.3.0.exe --notes "Tuzatishlar" --out update.json
+     --installer Guzar-Setup-1.3.0.exe --version 1.3.0 ^
+     --url https://.../mezon/Guzar-Setup-1.3.0.exe --notes "Tuzatishlar" --out update.json
    ```
 
 3. Imzoni tekshiring:
@@ -64,7 +64,7 @@ Bu ikki qiymat yozilmaguncha avtomatik yangilanish **o'chiq** turadi.
    node scripts/update-sign.mjs verify --pub D:\mezon-kalitlar\update-signing.pub.b64 --current 1.2.0 --in update.json
    ```
 
-4. Avval `Mezon-Setup-1.3.0.exe` ni, keyin `update.json` ni HTTPS manzilga yuklang. Tartib muhim: manifest faylidan oldin chiqmasligi kerak.
+4. Avval `Guzar-Setup-1.3.0.exe` ni, keyin `update.json` ni HTTPS manzilga yuklang. Tartib muhim: manifest faylidan oldin chiqmasligi kerak.
 5. Kassalar har 6 soatda manifestni tekshiradi va yangi versiyani yuklab oladi.
 
 ### Himoya nimadan iborat
