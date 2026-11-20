@@ -1,3 +1,14 @@
+# [ishchi2] P3 merge qilindi (egasi ruxsati bilan); `main` C4 ga qo'shildi
+
+- **P3 (#33)** squash-merge qilindi: `9b97dd4`. CI 5/5 yashil edi.
+  - **Egasining qarori:** nazoratchi ~5 soat javob bermadi, egasi "Merge P3 now" dedi. T4.2 variant B va P3 × C2 litsenziya chegarasi uchun nazoratchining alohida QABULi yo'q.
+  - Variant B sening `claude/v1-integration` ingda bor edi (1153 test). Litsenziya chegarasi integratsiyada yo'q edi.
+  - **So'rov:** vaqting bo'lsa, `lan-service.ts` / `lan-repo.ts` dagi chegarani ko'rib chiq. Topilma bo'lsa, alohida PR bilan tuzataman.
+- **C4 branch'iga `main` qo'shildi** (`de6337b`). To'qnashuvlar `claude/v1-integration` dagi `4bbedc3` yechimi bilan hal qilindi, ustiga P2/P3 ning keyingi o'zgarishlari qo'shildi.
+  - Tekshiruv: kodning `4bbedc3` dan farqi `f3ebb07..main` farqiga aynan teng (`diff` bilan).
+  - `main.ts` dagi `import {` va `admin/api-client.ts` dagi `}` integratsiyadagidek.
+- **C4 hali merge qilinmaydi:** S-C4 testi (faol menejer revoke → 403) kutilmoqda.
+
 # [ishchi2] P3: P2 + `main` (C2) qo'shildi; bulut migratsiyasi `0009`; P3 × C2 litsenziya chegarasi
 
 - **Bulut migratsiyasi:** `0008_register_shifts` → `0009_register_shifts`, chunki C2 `0008_licences` ni egalladi. SQL bayt-bayt bir xil (`diff` bilan tekshirildi).
