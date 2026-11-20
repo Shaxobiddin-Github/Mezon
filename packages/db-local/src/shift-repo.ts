@@ -66,6 +66,7 @@ import {
   users,
 } from './schema/index.js';
 import { resolveIntlDateKey } from './timezone.js';
+import { currentRegisterId } from './register-scope.js';
 import { type SqliteUnitOfWork, runConnectionReadOnly } from './uow.js';
 import { insertFact, insertMonotone, updateMonotone } from './writers.js';
 
@@ -109,6 +110,8 @@ export interface StoredShiftRecord {
   readonly organizationId: UuidV7;
   readonly storeId: UuidV7;
   readonly deviceId: UuidV7;
+  /** T4.2: NULL = the hub's own register, else the LAN terminal id. */
+  readonly registerId: UuidV7 | null;
   readonly shiftNo: bigint;
   readonly shiftCode: string;
   readonly status: ShiftStatus;
@@ -497,6 +500,7 @@ function toStoredShiftRecord(
     id: row.id,
     organizationId: row.organizationId,
     storeId: row.storeId,
+    registerId: row.registerId,
     deviceId: row.deviceId,
     shiftNo: row.shiftNo,
     shiftCode: row.shiftCode,
@@ -745,8 +749,13 @@ function toStoredDayCloseRecord(
   };
 }
 
+/** T4.2: shifts of one register (`null` = the hub's own register). */
+function onRegister(registerId: UuidV7 | null) {
+  return registerId === null ? isNull(shifts.registerId) : eq(shifts.registerId, registerId);
+}
+
 /**
- * Looks up the currently open shift and active cashier session on `deviceId`.
+ * Looks up the currently open shift and active cashier session on `deviceId` / `registerId`.
  */
 export function getActiveShiftSessionSync(
   db: BetterSQLite3Database,
@@ -754,6 +763,7 @@ export function getActiveShiftSessionSync(
     readonly organizationId: UuidV7;
     readonly storeId: UuidV7;
     readonly deviceId: UuidV7;
+    readonly registerId: UuidV7 | null;
   },
 ): ActiveShiftSessionContext | null {
   const orgId = parseUuidV7(params.organizationId);
@@ -768,6 +778,7 @@ export function getActiveShiftSessionSync(
         eq(shifts.organizationId, orgId),
         eq(shifts.storeId, storeId),
         eq(shifts.deviceId, deviceId),
+        onRegister(params.registerId),
         eq(shifts.status, 'open'),
       ),
     )
@@ -809,6 +820,7 @@ export function requireOpenShiftSessionSync(
     readonly organizationId: UuidV7;
     readonly storeId: UuidV7;
     readonly deviceId: UuidV7;
+    readonly registerId: UuidV7 | null;
     readonly actorUserId: UuidV7;
   },
 ): ActiveShiftSessionContext {
@@ -848,6 +860,7 @@ export function getActiveShiftDrawerBalanceSync(
     readonly organizationId: UuidV7;
     readonly storeId: UuidV7;
     readonly deviceId: UuidV7;
+    readonly registerId: UuidV7 | null;
   },
 ): Money {
   const ctx = getActiveShiftSessionSync(db, params);
@@ -899,7 +912,7 @@ export function getActiveStoreCashBalanceSync(
   const storeId = parseUuidV7(params.storeId);
 
   const openShifts = db
-    .select({ deviceId: shifts.deviceId })
+    .select({ deviceId: shifts.deviceId, registerId: shifts.registerId })
     .from(shifts)
     .where(
       and(eq(shifts.organizationId, orgId), eq(shifts.storeId, storeId), eq(shifts.status, 'open')),
@@ -917,6 +930,7 @@ export function getActiveStoreCashBalanceSync(
         organizationId: orgId,
         storeId,
         deviceId: sh.deviceId,
+        registerId: sh.registerId,
       }),
     );
   }
@@ -1191,7 +1205,10 @@ export class SqliteShiftStore {
     return ctx;
   }
 
-  async getCurrentShift(deviceId?: UuidV7): Promise<CurrentShiftOutcome> {
+  async getCurrentShift(
+    deviceId?: UuidV7,
+    registerId: UuidV7 | null = currentRegisterId(),
+  ): Promise<CurrentShiftOutcome> {
     const ctx = this.requireContext();
     const targetDeviceId = parseUuidV7(deviceId ?? ctx.uow.deviceId);
     return runConnectionReadOnly<CurrentShiftOutcome>(this.connection, () => {
@@ -1200,6 +1217,7 @@ export class SqliteShiftStore {
         organizationId: ctx.organizationId,
         storeId: ctx.storeId,
         deviceId: targetDeviceId,
+        registerId,
       });
       if (!active) {
         return Promise.resolve({
@@ -1222,6 +1240,7 @@ export class SqliteShiftStore {
           organizationId: ctx.organizationId,
           storeId: ctx.storeId,
           deviceId: targetDeviceId,
+          registerId,
         },
       );
 
@@ -1395,6 +1414,7 @@ export class SqliteShiftStore {
           organizationId: ctx.organizationId,
           storeId: ctx.storeId,
           deviceId: existingByReq.deviceId,
+          registerId: existingByReq.registerId,
         });
         return Promise.resolve({
           shift: toStoredShiftRecord(existingByReq, sessions),
@@ -1407,7 +1427,8 @@ export class SqliteShiftStore {
       requireActiveUserSync(session.db, ctx.organizationId, validActorId, 'Cashier');
       serializeDenominations(input.denominations, input.openingCash);
 
-      // 3) Ensure no currently open shift on this terminal
+      // 3) Ensure no currently open shift on this terminal's register (T4.2)
+      const registerId = currentRegisterId();
       const alreadyOpen = session.db
         .select({ id: shifts.id })
         .from(shifts)
@@ -1416,6 +1437,7 @@ export class SqliteShiftStore {
             eq(shifts.organizationId, ctx.organizationId),
             eq(shifts.storeId, ctx.storeId),
             eq(shifts.deviceId, ctx.uow.deviceId),
+            onRegister(registerId),
             eq(shifts.status, 'open'),
           ),
         )
@@ -1437,6 +1459,7 @@ export class SqliteShiftStore {
             eq(shifts.organizationId, ctx.organizationId),
             eq(shifts.storeId, ctx.storeId),
             eq(shifts.deviceId, ctx.uow.deviceId),
+            onRegister(registerId),
             eq(shifts.status, 'closed'),
           ),
         )
@@ -1490,6 +1513,7 @@ export class SqliteShiftStore {
           openRequestHash: requestHash,
           closeClientRequestId: null,
           closeRequestHash: null,
+          registerId,
         },
         eventType: 'shift.opened',
         schemaVersion: 1,
@@ -1507,6 +1531,7 @@ export class SqliteShiftStore {
         storeId: ctx.storeId,
         values: {
           shiftId: shiftWrite.entityId,
+          registerId,
           sessionSeq: 1,
           cashierUserId: validActorId,
           status: 'active',
@@ -1620,6 +1645,7 @@ export class SqliteShiftStore {
           organizationId: ctx.organizationId,
           storeId: ctx.storeId,
           deviceId: shiftRow.deviceId,
+          registerId: shiftRow.registerId,
         });
         return Promise.resolve({
           shift: toStoredShiftRecord(shiftRow, allSessions),
@@ -1732,6 +1758,7 @@ export class SqliteShiftStore {
         storeId: ctx.storeId,
         values: {
           shiftId: shiftRow.id,
+          registerId: shiftRow.registerId,
           sessionSeq: activeSess.sessionSeq + 1,
           cashierUserId: validNextCashierId,
           status: 'active',
@@ -1762,6 +1789,7 @@ export class SqliteShiftStore {
         organizationId: ctx.organizationId,
         storeId: ctx.storeId,
         deviceId: shiftRow.deviceId,
+        registerId: shiftRow.registerId,
       });
 
       return Promise.resolve({
@@ -2320,7 +2348,7 @@ export class SqliteShiftStore {
           );
         }
         const shRow = session.db
-          .select({ deviceId: shifts.deviceId })
+          .select({ deviceId: shifts.deviceId, registerId: shifts.registerId })
           .from(shifts)
           .where(eq(shifts.id, validShiftId))
           .limit(1)
@@ -2330,6 +2358,7 @@ export class SqliteShiftStore {
               organizationId: ctx.organizationId,
               storeId: ctx.storeId,
               deviceId: shRow.deviceId,
+              registerId: shRow.registerId,
             })
           : ZERO_MONEY;
         return Promise.resolve({
@@ -2388,6 +2417,7 @@ export class SqliteShiftStore {
           organizationId: ctx.organizationId,
           storeId: ctx.storeId,
           deviceId: shiftRow.deviceId,
+          registerId: shiftRow.registerId,
         });
         if (moneyToTiyin(drawerBalance) < moneyToTiyin(amount)) {
           throw new DomainError(
@@ -2410,6 +2440,7 @@ export class SqliteShiftStore {
         values: {
           shiftId: shiftRow.id,
           shiftCashierSessionId: activeSess.id,
+          registerId: shiftRow.registerId,
           type: moveType,
           amountDelta: expectedDelta,
           sourceType: 'shift_cash_move',
@@ -2427,6 +2458,7 @@ export class SqliteShiftStore {
         organizationId: ctx.organizationId,
         storeId: ctx.storeId,
         deviceId: shiftRow.deviceId,
+        registerId: shiftRow.registerId,
       });
 
       // T3.8: audit row in the same transaction as the operation.

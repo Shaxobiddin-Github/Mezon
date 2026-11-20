@@ -945,6 +945,8 @@ export const localCarts = localSchemaRegistry.defineTable(
     completedSaleId: sqliteUuidV7('completed_sale_id'),
     completedAtMs: sqliteUnixMs('completed_at_ms'),
     completionWarningsJson: text('completion_warnings_json'),
+    /** T4.2 LAN terminal (register) the cart was opened on; NULL = the hub computer itself. */
+    terminalId: sqliteUuidV7('terminal_id'),
   }),
   (self) => [
     index('idx_local_carts_store_status').on(
@@ -1258,6 +1260,8 @@ export const cashMoves = localSchemaRegistry.defineTable(
     ...common,
     shiftId: sqliteUuidV7('shift_id'),
     shiftCashierSessionId: sqliteUuidV7('shift_cashier_session_id'),
+    // T4.2 (variant B): the cash register; NULL = the hub's own register, else a LAN terminal id.
+    registerId: sqliteUuidV7('register_id'),
     type: text('type').notNull(),
     amountDelta: sqliteMoney('amount_delta').notNull(),
     sourceType: text('source_type').notNull(),
@@ -2205,11 +2209,19 @@ export const shifts = localSchemaRegistry.defineTable(
     openRequestHash: text('open_request_hash').notNull(),
     closeClientRequestId: sqliteUuidV7('close_client_request_id'),
     closeRequestHash: text('close_request_hash'),
+    // T4.2 (variant B): the cash register; NULL = the hub's own register, else a LAN terminal id.
+    registerId: sqliteUuidV7('register_id'),
   }),
   (self) => [
     uniqueIndex('uidx_shifts_org_device_no').on(self.organizationId, self.deviceId, self.shiftNo),
+    // One open shift per (device, register); NULL (the hub's register) counts as one register.
     uniqueIndex('uidx_shifts_one_open_per_device')
-      .on(self.organizationId, self.storeId, self.deviceId)
+      .on(
+        self.organizationId,
+        self.storeId,
+        self.deviceId,
+        sql`(CASE WHEN ${self.registerId} IS NULL THEN '' ELSE CAST(${self.registerId} AS text) END)`,
+      )
       .where(sql`${self.status} = 'open'`),
     uniqueIndex('uidx_shifts_org_open_req').on(self.organizationId, self.openClientRequestId),
     uniqueIndex('uidx_shifts_org_close_req')
@@ -2279,6 +2291,8 @@ export const shiftCashierSessions = localSchemaRegistry.defineTable(
     endedAtMs: sqliteUnixMs('ended_at_ms'),
     handoffClientRequestId: sqliteUuidV7('handoff_client_request_id'),
     handoffRequestHash: text('handoff_request_hash'),
+    // T4.2 (variant B): the cash register; NULL = the hub's own register, else a LAN terminal id.
+    registerId: sqliteUuidV7('register_id'),
   }),
   (self) => [
     uniqueIndex('uidx_shift_cashier_sessions_shift_seq').on(self.shiftId, self.sessionSeq),
@@ -3381,5 +3395,82 @@ export const paymentIntents = localSchemaRegistry.defineTable(
       'chk_payment_intents_consumed_paid',
       sql`${self.consumedBySaleId} IS NULL OR ${self.status} = 'paid'`,
     ),
+  ],
+);
+
+/**
+ * T4.1 LAN hub identity: the self-signed TLS certificate terminals pin. The private key is stored
+ * encrypted with the hub's SafeStoragePort (`key_enc_b64`), never in clear and never committed.
+ */
+export const localLanIdentity = localSchemaRegistry.defineTable(
+  {
+    name: 'local_lan_identity',
+    tableClass: 'LOCAL',
+    tenantScope: 'organization',
+  },
+  (common) => ({
+    ...common,
+    certPem: text('cert_pem').notNull(),
+    keyEncB64: text('key_enc_b64').notNull(),
+    fingerprint256: text('fingerprint256').notNull(),
+    notAfterMs: sqliteUnixMs('not_after_ms').notNull(),
+    lanEnabled: sqliteBigint('lan_enabled')
+      .notNull()
+      .default(sql`0`),
+  }),
+  (self) => [uniqueIndex('uidx_local_lan_identity_org').on(self.organizationId)],
+);
+
+/** T4.1 one-time pairing codes (only a hash is stored; short TTL; limited attempts). */
+export const localLanPairingCodes = localSchemaRegistry.defineTable(
+  {
+    name: 'local_lan_pairing_codes',
+    tableClass: 'LOCAL',
+    tenantScope: 'organization',
+  },
+  (common) => ({
+    ...common,
+    codeEnc: text('code_enc').notNull(),
+    createdByUserId: sqliteUuidV7('created_by_user_id').notNull(),
+    expiresAtMs: sqliteUnixMs('expires_at_ms').notNull(),
+    failedAttempts: sqliteBigint('failed_attempts')
+      .notNull()
+      .default(sql`0`),
+    usedAtMs: sqliteUnixMs('used_at_ms'),
+    usedByTerminalId: sqliteUuidV7('used_by_terminal_id'),
+  }),
+  (self) => [
+    index('idx_local_lan_pairing_codes_active').on(self.organizationId, self.expiresAtMs),
+    check('chk_local_lan_pairing_codes_attempts', sql`${self.failedAttempts} >= 0`),
+  ],
+);
+
+/** T4.1 paired LAN terminals. Only the SHA-256 of the terminal key is stored. */
+export const localLanTerminals = localSchemaRegistry.defineTable(
+  {
+    name: 'local_lan_terminals',
+    tableClass: 'LOCAL',
+    tenantScope: 'organization',
+  },
+  (common) => ({
+    ...common,
+    name: text('name').notNull(),
+    keyHash: text('key_hash').notNull(),
+    status: text('status').notNull(),
+    pairedAtMs: sqliteUnixMs('paired_at_ms').notNull(),
+    pairedByUserId: sqliteUuidV7('paired_by_user_id').notNull(),
+    revokedAtMs: sqliteUnixMs('revoked_at_ms'),
+    lastSeenAtMs: sqliteUnixMs('last_seen_at_ms'),
+    /** T4.3 the register's own printer / cash drawer (JSON, validated on read); NULL = none. */
+    printerJson: text('printer_json'),
+  }),
+  (self) => [
+    uniqueIndex('uidx_local_lan_terminals_key').on(self.keyHash),
+    check('chk_local_lan_terminals_status', sql`${self.status} IN ('active', 'revoked')`),
+    check(
+      'chk_local_lan_terminals_revoked',
+      sql`(${self.status} = 'active' AND ${self.revokedAtMs} IS NULL) OR (${self.status} = 'revoked' AND ${self.revokedAtMs} IS NOT NULL)`,
+    ),
+    check('chk_local_lan_terminals_name', sql`length(trim(${self.name})) BETWEEN 1 AND 60`),
   ],
 );

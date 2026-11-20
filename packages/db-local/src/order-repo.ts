@@ -81,6 +81,7 @@ import {
 import { getActiveShiftDrawerBalanceSync, requireOpenShiftSessionSync } from './shift-repo.js';
 import type { StockMoveWarningRecord } from './stock-repo.js';
 import { type SqliteUnitOfWork, runConnectionReadOnly } from './uow.js';
+import { currentRegisterId } from './register-scope.js';
 import { insertFact, insertMonotone, updateMonotone } from './writers.js';
 
 export interface OrderRuntimeContext {
@@ -1093,6 +1094,7 @@ export class SqliteOrderStore {
         organizationId: ctx.organizationId,
         storeId: ctx.storeId,
         deviceId: ctx.uow.deviceId,
+        registerId: currentRegisterId(),
         actorUserId: validActorId,
       });
 
@@ -1172,6 +1174,7 @@ export class SqliteOrderStore {
             values: {
               shiftId: activeShift.shift.id,
               shiftCashierSessionId: activeShift.activeSession.id,
+              registerId: activeShift.shift.registerId,
               type: 'advance_cash_in',
               amountDelta: item.tenderedAmount,
               sourceType: 'order_advance',
@@ -1191,6 +1194,7 @@ export class SqliteOrderStore {
               values: {
                 shiftId: activeShift.shift.id,
                 shiftCashierSessionId: activeShift.activeSession.id,
+                registerId: activeShift.shift.registerId,
                 type: 'advance_change_out',
                 amountDelta: negateMoney(item.changeAmount),
                 sourceType: 'order_advance',
@@ -1281,6 +1285,7 @@ export class SqliteOrderStore {
         organizationId: ctx.organizationId,
         storeId: ctx.storeId,
         deviceId: ctx.uow.deviceId,
+        registerId: currentRegisterId(),
         actorUserId: validActorId,
       });
 
@@ -1319,6 +1324,7 @@ export class SqliteOrderStore {
             organizationId: ctx.organizationId,
             storeId: ctx.storeId,
             deviceId: ctx.uow.deviceId,
+            registerId: currentRegisterId(),
           },
         );
         if (moneyToTiyin(drawerBalance) < cashRefundTiyin) {
@@ -1362,6 +1368,7 @@ export class SqliteOrderStore {
             values: {
               shiftId: activeShift.shift.id,
               shiftCashierSessionId: activeShift.activeSession.id,
+              registerId: activeShift.shift.registerId,
               type: 'advance_refund_out',
               amountDelta: negateMoney(item.amount),
               sourceType: 'order_advance_refund',
@@ -1485,6 +1492,7 @@ export class SqliteOrderStore {
         organizationId: ctx.organizationId,
         storeId: ctx.storeId,
         deviceId: ctx.uow.deviceId,
+        registerId: currentRegisterId(),
         actorUserId: validActorId,
       });
 
@@ -1760,6 +1768,7 @@ export class SqliteOrderStore {
           organizationId: ctx.organizationId,
           storeId: ctx.storeId,
           deviceId: ctx.uow.deviceId,
+          registerId: currentRegisterId(),
           actorUserId: validActorId,
         });
 
@@ -1772,6 +1781,7 @@ export class SqliteOrderStore {
               organizationId: ctx.organizationId,
               storeId: ctx.storeId,
               deviceId: ctx.uow.deviceId,
+              registerId: currentRegisterId(),
             },
           );
           if (moneyToTiyin(drawerBalance) < cashRefundTiyin) {
@@ -1815,6 +1825,7 @@ export class SqliteOrderStore {
               values: {
                 shiftId: activeShift.shift.id,
                 shiftCashierSessionId: activeShift.activeSession.id,
+                registerId: activeShift.shift.registerId,
                 type: 'advance_refund_out',
                 amountDelta: negateMoney(item.amount),
                 sourceType: 'order_advance_refund',

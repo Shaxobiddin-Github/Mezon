@@ -1,3 +1,4 @@
+import { terminalIdOf } from './lan-server.js';
 import {
   OpenCashDrawerRequestSchema,
   PrintDocumentRequestSchema,
@@ -55,7 +56,7 @@ export function registerPrinterRoutes(
 
   app.post('/printer/test-print', async (request) => {
     const session = await authorize(authService, request, 'printer:config');
-    const res = await printerService.testPrint();
+    const res = await printerService.testPrint(terminalIdOf(request));
     request.log.info(
       {
         event: 'printer.test_printed',
@@ -75,6 +76,7 @@ export function registerPrinterRoutes(
     const { response, overrideApprovedByUserId } = await printerService.openCashDrawer(
       session,
       body,
+      terminalIdOf(request),
     );
     request.log.info(
       {
@@ -94,7 +96,12 @@ export function registerPrinterRoutes(
     const session = await authorize(authService, request, 'cart:write');
     const params = SaleIdParamsSchema.parse(request.params);
     const body = PrintDocumentRequestSchema.parse(request.body);
-    const res = await printerService.printSaleReceipt(params.id, session, body);
+    const res = await printerService.printSaleReceipt(
+      params.id,
+      session,
+      body,
+      terminalIdOf(request),
+    );
     request.log.info(
       {
         event: 'sale.receipt_printed',
@@ -122,7 +129,12 @@ export function registerPrinterRoutes(
     const session = await authorize(authService, request, 'cart:write');
     const params = ReturnIdParamsSchema.parse(request.params);
     const body = PrintDocumentRequestSchema.parse(request.body);
-    const res = await printerService.printReturnReceipt(params.id, session, body);
+    const res = await printerService.printReturnReceipt(
+      params.id,
+      session,
+      body,
+      terminalIdOf(request),
+    );
     request.log.info(
       {
         event: 'return.receipt_printed',
@@ -142,7 +154,12 @@ export function registerPrinterRoutes(
     const session = await authorize(authService, request, 'shifts:read');
     const params = ShiftIdParamsSchema.parse(request.params);
     const body = PrintDocumentRequestSchema.parse(request.body);
-    const res = await printerService.printShiftCloseReport(params.id, session, body);
+    const res = await printerService.printShiftCloseReport(
+      params.id,
+      session,
+      body,
+      terminalIdOf(request),
+    );
     request.log.info(
       {
         event: 'shift.close_report_printed',

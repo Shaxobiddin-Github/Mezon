@@ -200,6 +200,8 @@ export const ShiftDtoSchema = z.strictObject({
   organizationId: UuidV7Schema,
   storeId: UuidV7Schema,
   deviceId: UuidV7Schema,
+  /** T4.2: null = the hub's own register, else the LAN terminal id. */
+  registerId: UuidV7Schema.nullable(),
   shiftNo: PositiveBigIntStringSchema,
   shiftCode: z.string(),
   status: ShiftStatusSchema,

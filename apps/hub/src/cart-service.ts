@@ -255,8 +255,11 @@ export class HubCartService {
     return { deletedId: promotionId };
   }
 
-  async openCart(cashierUserId: UuidV7): Promise<CartResponseDto> {
-    const res = await this.store.openCart(cashierUserId);
+  async openCart(
+    cashierUserId: UuidV7,
+    terminalId: UuidV7 | null = null,
+  ): Promise<CartResponseDto> {
+    const res = await this.store.openCart(cashierUserId, terminalId);
     return { cart: toCartDetailDto(res) };
   }
 

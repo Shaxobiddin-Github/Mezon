@@ -169,6 +169,20 @@
       "when": 1795073921420,
       "tag": "0023_payment_intents",
       "breakpoints": true
+    },
+    {
+      "idx": 24,
+      "version": "6",
+      "when": 1795074720400,
+      "tag": "0024_lan_terminals",
+      "breakpoints": true
+    },
+    {
+      "idx": 25,
+      "version": "6",
+      "when": 1795075680841,
+      "tag": "0025_register_shifts",
+      "breakpoints": true
     }
   ]
 }

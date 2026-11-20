@@ -65,6 +65,7 @@ function toShiftDto(shift: StoredShiftRecord): ShiftDto {
     deviceId: shift.deviceId,
     shiftNo: shift.shiftNo.toString(),
     shiftCode: shift.shiftCode,
+    registerId: shift.registerId,
     status: shift.status,
     openedByUserId: shift.openedByUserId,
     closedByUserId: shift.closedByUserId,

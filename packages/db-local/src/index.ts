@@ -602,3 +602,24 @@ export {
   listPaymentIntentsNeedingAttentionSync,
   transitionPaymentIntentSync,
 } from './payment-intent-repo.js';
+export { currentRegisterId, runInRegisterScope } from './register-scope.js';
+export {
+  type LanIdentityRow,
+  type LanPairingCodeRow,
+  type LanTerminalRow,
+  consumeLanPairingCodeAndAddTerminalSync,
+  getLanIdentitySync,
+  getLanTerminalSync,
+  getLanTerminalPrinterJsonSync,
+  setLanTerminalPrinterJsonSync,
+  getSaleTerminalIdSync,
+  listSalesByTerminalSync,
+  type TerminalSalesRow,
+  insertLanIdentityIfAbsentSync,
+  insertLanPairingCodeSync,
+  listActiveLanPairingCodesSync,
+  listLanTerminalsSync,
+  recordLanPairingFailureSync,
+  revokeLanTerminalSync,
+  touchLanTerminalSync,
+} from './lan-repo.js';

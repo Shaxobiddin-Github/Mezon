@@ -82,6 +82,7 @@ import {
   type SqliteUnitOfWorkSession,
   runConnectionReadOnly,
 } from './uow.js';
+import { currentRegisterId } from './register-scope.js';
 import { insertFact, insertMonotone } from './writers.js';
 
 export interface SaleRuntimeContext {
@@ -894,6 +895,7 @@ export function completeSaleCoreInTxSync(
         values: {
           shiftId: input.activeShift.shift.id,
           shiftCashierSessionId: input.activeShift.activeSession.id,
+          registerId: input.activeShift.shift.registerId,
           type: 'sale_cash_in',
           amountDelta: item.tenderedAmount,
           sourceType: 'sale',
@@ -914,6 +916,7 @@ export function completeSaleCoreInTxSync(
           values: {
             shiftId: input.activeShift.shift.id,
             shiftCashierSessionId: input.activeShift.activeSession.id,
+            registerId: input.activeShift.shift.registerId,
             type: 'sale_change_out',
             amountDelta: negateMoney(item.changeAmount),
             sourceType: 'sale',
@@ -1025,6 +1028,7 @@ export class SqliteSaleStore {
           organizationId: ctx.organizationId,
           storeId: ctx.storeId,
           deviceId: targetDeviceId,
+          registerId: currentRegisterId(),
         }),
       ),
     );
@@ -1145,6 +1149,7 @@ export class SqliteSaleStore {
         organizationId: ctx.organizationId,
         storeId: ctx.storeId,
         deviceId: ctx.uow.deviceId,
+        registerId: currentRegisterId(),
         actorUserId,
       });
 

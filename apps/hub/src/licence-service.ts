@@ -93,22 +93,19 @@ export class HubLicenceService {
    * organization written in the cache file): a cache copied from another organization, or edited to
    * name one, applies nothing.
    */
-  async getView(): Promise<HubLicenceView> {
-    const unknown: HubLicenceView = {
-      state: 'unknown',
-      plan: null,
-      daysLeft: null,
-      invalidLicence: false,
-      fetchedAtMs: null,
-    };
+  /** The verified licence status from the cache, or why it is unknown. Re-verified on every read. */
+  private async resolveStatus(): Promise<
+    | { readonly known: true; readonly status: LicenceStatus; readonly fetchedAtMs: string | null }
+    | { readonly known: false; readonly invalidLicence: boolean }
+  > {
     const status = await this.opts.cloud.getStatus();
     const organizationId = status.organizationId;
-    if (!organizationId) return unknown;
+    if (!organizationId) return { known: false, invalidLicence: false };
     let cache: HubLicenceCache;
     try {
       cache = JSON.parse(fs.readFileSync(this.opts.cachePath, 'utf8')) as HubLicenceCache;
     } catch {
-      return unknown;
+      return { known: false, invalidLicence: false };
     }
     let invalid = cache.organizationId !== organizationId;
     const payloads = [];
@@ -125,27 +122,54 @@ export class HubLicenceService {
     try {
       createdAt = BigInt(cache.organizationCreatedAtMs);
     } catch {
+      return { known: false, invalidLicence: true };
+    }
+    return {
+      known: true,
+      status: resolveLicenceStatus({
+        licences: payloads,
+        invalidLicence: invalid,
+        organizationCreatedAtMs: createdAt,
+        nowMs: this.opts.nowMs(),
+      }),
+      fetchedAtMs: cache.fetchedAtMs ?? null,
+    };
+  }
+
+  async getView(): Promise<HubLicenceView> {
+    const r = await this.resolveStatus();
+    if (!r.known) {
       return {
         state: 'unknown',
         plan: null,
         daysLeft: null,
-        invalidLicence: true,
+        invalidLicence: r.invalidLicence,
         fetchedAtMs: null,
       };
     }
-    const s = resolveLicenceStatus({
-      licences: payloads,
-      invalidLicence: invalid,
-      organizationCreatedAtMs: createdAt,
-      nowMs: this.opts.nowMs(),
-    });
     return {
-      state: s.state,
-      plan: s.plan,
-      daysLeft: s.daysLeft,
-      invalidLicence: s.invalidLicence,
-      fetchedAtMs: cache.fetchedAtMs ?? null,
+      state: r.status.state,
+      plan: r.status.plan,
+      daysLeft: r.status.daysLeft,
+      invalidLicence: r.status.invalidLicence,
+      fetchedAtMs: r.fetchedAtMs,
     };
+  }
+
+  /**
+   * T4.1 × T4.7: how many active LAN terminals the plan allows. The hub itself is one device of the
+   * plan, so terminals = `maxDevices - 1`. When expired, growth is frozen (`maxDevices = 0` → 0 new).
+   * Unknown licence (never paired / never fetched): no limit here — the hub cannot know the plan,
+   * and licensing never stops a shop (GEMINI.md §2); the cloud still enforces its own device limit.
+   */
+  async lanTerminalLimit(): Promise<{
+    readonly maxTerminals: number | null;
+    readonly state: string;
+  }> {
+    const r = await this.resolveStatus();
+    if (!r.known) return { maxTerminals: null, state: 'unknown' };
+    const max = r.status.limits.maxDevices;
+    return { maxTerminals: max === null ? null : Math.max(0, max - 1), state: r.status.state };
   }
 
   start(intervalMs = 6 * 60 * 60 * 1000): void {
