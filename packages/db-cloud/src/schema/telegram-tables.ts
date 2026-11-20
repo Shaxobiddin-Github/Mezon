@@ -1,5 +1,5 @@
 import { sql } from 'drizzle-orm';
-import { check, index, text, uniqueIndex } from 'drizzle-orm/pg-core';
+import { check, index, integer, text, uniqueIndex } from 'drizzle-orm/pg-core';
 import { pgBigint } from '../columns.js';
 import { cloudSchemaRegistry } from './registry-instance.js';
 
@@ -72,6 +72,8 @@ export const cloudTelegramDeliveries = cloudSchemaRegistry.defineTable(
     periodKey: text('period_key').notNull(),
     status: text('status').notNull(),
     lastError: text('last_error'),
+    /** Sends tried for this (link, kind, period): a transient failure is retried once (owner, 11-20). */
+    attempts: integer('attempts').notNull().default(1),
   }),
   (self) => [
     uniqueIndex('uidx_cloud_telegram_deliveries_once').on(
@@ -85,5 +87,6 @@ export const cloudTelegramDeliveries = cloudSchemaRegistry.defineTable(
       'chk_cloud_telegram_deliveries_status',
       sql`${self.status} IN ('claimed', 'sent', 'failed')`,
     ),
+    check('chk_cloud_telegram_deliveries_attempts', sql`${self.attempts} BETWEEN 1 AND 2`),
   ],
 );

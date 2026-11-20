@@ -20,7 +20,9 @@ Bu hujjat egasi va texnik yordam uchun. Kassir uchun yo'riqnoma: [../pilot/kassi
 
 ## 2. v2 ga qoladiganlar
 
-Egasining qarori: qonuniy integratsiyalar v2 da qilinadi.
+> **Muhim (egasi qarori, 2026-11-20):** v1 do'konda **faqat ichki hisob uchun** ishlatiladi: savdo, ombor, qarz, smena, hisobot. Xaridorga **rasmiy (fiskal) chek do'konning hozirgi onlayn-kassasida** beriladi. Guzar Kassa chiqaradigan "FISKAL EMAS" cheki rasmiy chek o'rnini bosmaydi. Fiskal chek v2 da qo'shiladi.
+
+Egasining qarori: qonuniy integratsiyalar v2 da qilinadi. Har bir kassaga alohida fiskal modul kerakmi, degan savol ham v2 ga qoldi: fiskal operator hujjatlari bilan birga aniqlanadi.
 
 | Imkoniyat                                        | v1 dagi holati                                            |
 | ------------------------------------------------ | --------------------------------------------------------- |
