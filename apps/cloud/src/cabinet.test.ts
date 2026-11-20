@@ -380,6 +380,23 @@ describePg('@mezon/cloud - T2.7b cabinet writes (price) through the event writer
       });
     expect((await revoke('kab_a@guzar.uz', system[0].id)).statusCode).toBe(404);
     expect((await revoke('kab_b@guzar.uz', kassa)).statusCode).toBe(404);
+    // S-C4: an ACTIVE manager of the same organization is refused by the role check (not by a
+    // blocked account): the earlier test blocked kab_mgr, so it is reactivated here first.
+    await withPgTenantContext(adminConn.pool, orgA, async (_tx, c) => {
+      await c.query(`UPDATE cloud_users SET status = 'active' WHERE id = $1`, [managerA]);
+    });
+    const mgrList = await server.inject({
+      method: 'GET',
+      url: '/api/v1/admin/devices',
+      headers: await auth('kab_mgr@guzar.uz'),
+    });
+    expect(mgrList.statusCode).toBe(200); // the manager is a valid, active cabinet actor
+    expect((await revoke('kab_mgr@guzar.uz', kassa)).statusCode).toBe(403);
+    const [stillActive] = await q<{ status: string }>(
+      'SELECT status FROM cloud_devices WHERE id = $1',
+      [kassa],
+    );
+    expect(stillActive.status).toBe('active');
     expect((await revoke('kab_a@guzar.uz', kassa)).statusCode).toBe(200);
     const [after] = await q<{ status: string }>('SELECT status FROM cloud_devices WHERE id = $1', [
       kassa,

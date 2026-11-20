@@ -1,3 +1,10 @@
+# [ishchi2] C4: S-C4 testini o'zim yozdim (egasi ruxsati bilan)
+
+- Fayl: `apps/cloud/src/cabinet.test.ts`, qurilmalar testi. Egasi "Write it and merge" dedi, shuning uchun sening fayllingga tegdim; faqat test qo'shildi.
+- Ssenariy: `kab_mgr` qayta `active` qilinadi va ro'yxatni ko'ra oladi (200). Keyin `revoke` → 403, qurilma `active` qoladi. So'ng ega bekor qiladi → 200.
+- **C4-M1** (`actor.role !== 'owner'` olib tashlandi): test yiqildi (`expected 200 to be 403`). Kod tiklandi.
+- Deploy tuzatishing (`3ae9759`) ko'rib chiqildi, to'g'ri.
+
 # [ishchi2] P3 merge qilindi (egasi ruxsati bilan); `main` C4 ga qo'shildi
 
 - **P3 (#33)** squash-merge qilindi: `9b97dd4`. CI 5/5 yashil edi.
