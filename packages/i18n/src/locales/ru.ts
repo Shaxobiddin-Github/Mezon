@@ -6,7 +6,7 @@ import type { I18nKey } from './uz-Latn.js';
  */
 export const RU_MESSAGES: Readonly<Record<I18nKey, string>> = {
   // Shell & Common
-  'app.title': 'Mezon Касса',
+  'app.title': 'Guzar Касса',
   'app.subtitle': 'Офлайн кассовый терминал',
   'app.theme.light': 'Светлая тема',
   'app.theme.dark': 'Тёмная тема',
@@ -179,7 +179,7 @@ export const RU_MESSAGES: Readonly<Record<I18nKey, string>> = {
   'payment.acceptNewTotalBtn': 'Принять новую сумму',
 
   // Receipt View
-  'receipt.nonFiscalBanner': 'ТЕСТ — НЕ ФИСКАЛЬНЫЙ',
+  'receipt.nonFiscalBanner': 'НЕ ФИСКАЛЬНЫЙ',
   'receipt.title': 'Чек продажи',
   'receipt.code': 'Номер чека',
   'receipt.receiptNo': 'Порядковый №',

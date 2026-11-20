@@ -1,3 +1,18 @@
+# Tekshiruv: C5 — v1 bayroqlari — QABUL
+
+Tekshiruvchi: ishchi2. Branch: `claude/C5-v1-flags` (`7fe7bd0`, P3 `284bf96` ustida). Toifa: yengil (11 fayl, +65 −28).
+
+**Xulosa.** **QABUL**, merge sharti: CI yashil. Kod v1 rejasidagi talablarni bajaradi.
+
+| Talab | Tekshiruv |
+|---|---|
+| UzQR qo'lda tanlanmaydi | `NON_CASH_METHODS` dan olib tashlangan, test bor. Kassir endi `PAYMENT_NOT_CONFIRMED` tuzog'iga tushmaydi |
+| Fiskal ekranlar yashirin | Tugma faqat `GET /fiscal/status` → `modeEnabled = true` bo'lsa ko'rinadi. So'rov yiqilsa, yashirin qoladi (xavfsiz standart) |
+| Chekda "SINOV" yo'q | Fiskal rejim o'chiq bo'lsa `*** FISKAL EMAS ***` (sotuv, smena hisoboti, printer sinovi). `SINOV — FISKAL EMAS` faqat test fiskal drayverida. Testlar yangilangan va "SINOV yo'q" ni ham tekshiradi |
+| Nom | "Guzar Kassa" (UI va printer job nomi). Exe nomi o'zgarmagan, sababi yozilgan |
+
+**Eslatma (egasi uchun, bloklamaydi).** v1 cheklari qog'ozda "FISKAL EMAS" deb chiqadi. Bu fiskal bo'lmagan cheklarni xaridorga berish qonuniy talablarga mos keladimi, egasi bilishi kerak. Bu kod masalasi emas, v1 qarori.
+
 # Tekshiruv: C4 — T2.7b kabinet yozuvlari, v1 deploy — QABUL
 
 Tekshiruvchi: ishchi2. Branch: `claude/C4-cabinet-writes` (`82941e2`). Toifa: o'rta.

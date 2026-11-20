@@ -24,7 +24,7 @@ afterEach(() => {
 
 describe('@mezon/i18n — Uzbek Latin POS dictionary', () => {
   it('interpolates parameters and keeps non-fiscal banner exact', () => {
-    expect(t('receipt.nonFiscalBanner')).toBe('SINOV — FISKAL EMAS');
+    expect(t('receipt.nonFiscalBanner')).toBe('FISKAL EMAS');
     expect(t('auth.rateLimited', { seconds: 42 })).toBe(
       'Koʻp xato urinish! 42 soniyadan keyin qayta urining.',
     );
@@ -116,7 +116,7 @@ describe('T4.6 Latin → Cyrillic transliteration', () => {
     ['Savdoni yakunlash (Enter)', 'Савдони якунлаш (Enter)'],
     ['Bank kartasi (Humo/Uzcard)', 'Банк картаси (Humo/Uzcard)'],
     ['taʼmir', 'таъмир'],
-    ['SINOV — FISKAL EMAS', 'СИНОВ — ФИСКАЛ ЭМАС'],
+    ['FISKAL EMAS', 'ФИСКАЛ ЭМАС'],
     ['Choy', 'Чой'],
   ];
   for (const [latn, cyrl] of cases) {

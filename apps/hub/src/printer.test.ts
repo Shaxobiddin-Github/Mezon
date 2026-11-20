@@ -193,7 +193,8 @@ describe('@mezon/hub - T1.12 printer API', () => {
       expect(firstBody.printRecord.status).toBe('printed');
       expect(firstBody.printRecord.copyNumber).toBe(1);
       expect(firstBody.printRecord.isReprint).toBe(false);
-      expect(firstBody.printRecord.textPreview).toContain('SINOV');
+      expect(firstBody.printRecord.textPreview).toContain('*** FISKAL EMAS ***');
+      expect(firstBody.printRecord.textPreview).not.toContain('SINOV');
       expect(firstBody.printRecord.textPreview).not.toContain('NUSXA');
       expect(fake.getSentJobs()).toHaveLength(1);
       expect(endsWithPulse(fake.getSentJobs()[0].bytes)).toBe(true);
