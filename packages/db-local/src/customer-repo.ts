@@ -58,6 +58,7 @@ import {
   runConnectionProjectionMaintenance,
   runConnectionReadOnly,
 } from './uow.js';
+import { currentRegisterId } from './register-scope.js';
 import { insertFact, insertAttr, tombstoneAttr, updateAttr } from './writers.js';
 
 export interface StoredCashMoveRecord {
@@ -1723,6 +1724,7 @@ export class SqliteCustomerStore {
           organizationId: ctx.organizationId,
           storeId: ctx.storeId,
           deviceId: session.deviceId,
+          registerId: currentRegisterId(),
           actorUserId: validActorId,
         });
         const cashWrite = insertFact(session, cashMoves, {
@@ -1731,6 +1733,7 @@ export class SqliteCustomerStore {
           values: {
             shiftId: activeShift.shift.id,
             shiftCashierSessionId: activeShift.activeSession.id,
+            registerId: activeShift.shift.registerId,
             type: 'debt_payment_in',
             amountDelta: input.amount,
             sourceType: 'debt_payment',

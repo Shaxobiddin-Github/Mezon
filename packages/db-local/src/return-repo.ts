@@ -1,4 +1,6 @@
 import { createHash } from 'node:crypto';
+import { appendAuditInTxSync } from './audit-log.js';
+import { releaseSaleMarksInTxSync } from './marking-repo.js';
 import {
   type CartLineKind,
   DEFAULT_STORE_TIMEZONE,
@@ -73,6 +75,7 @@ import {
   type SqliteUnitOfWorkSession,
   runConnectionReadOnly,
 } from './uow.js';
+import { currentRegisterId } from './register-scope.js';
 import { insertFact, updateMonotone } from './writers.js';
 
 export interface ReturnRuntimeContext {
@@ -570,6 +573,7 @@ export class SqliteReturnStore {
         organizationId: ctx.organizationId,
         storeId: ctx.storeId,
         deviceId: ctx.uow.deviceId,
+        registerId: currentRegisterId(),
         actorUserId: validActorId,
       });
 
@@ -651,6 +655,7 @@ export class SqliteReturnStore {
             organizationId: ctx.organizationId,
             storeId: ctx.storeId,
             deviceId: ctx.uow.deviceId,
+            registerId: currentRegisterId(),
           },
         );
         if (moneyToTiyin(drawerBalance) < cashRefundTiyin) {
@@ -778,6 +783,7 @@ export class SqliteReturnStore {
           values: {
             shiftId: activeShift.shift.id,
             shiftCashierSessionId: activeShift.activeSession.id,
+            registerId: activeShift.shift.registerId,
             type: 'refund_cash_out',
             amountDelta: negateMoney(cashRefundAmount),
             sourceType: 'sale_void',
@@ -793,6 +799,27 @@ export class SqliteReturnStore {
       }
 
       this.testHooks?.onBeforeCommit?.();
+
+      // T3.8: audit row in the same transaction as the operation.
+      // T3.7: the units are back on the shelf; their marking codes may be sold again.
+      releaseSaleMarksInTxSync(session.internalGetSqlite(), {
+        saleId: validSaleId,
+        saleLineId: null,
+        limit: null,
+        reason: 'void',
+        sourceId: validSaleId,
+        nowMs: session.nowUnixMs(),
+      });
+      appendAuditInTxSync(session.internalGetSqlite(), {
+        organizationId: ctx.organizationId,
+        nowMs: session.nowUnixMs(),
+        nextId: () => session.nextId(),
+        eventType: 'sale.voided',
+        actorUserId: validActorId,
+        entity: 'sales',
+        entityId: validSaleId,
+        details: { reason: cleanReason, receiptCode: saleRow.receiptCode },
+      });
 
       return Promise.resolve({
         sale: toStoredVoidedSale(updatedSaleWrite.row, lineRows, paymentRows),
@@ -884,6 +911,7 @@ export class SqliteReturnStore {
         organizationId: ctx.organizationId,
         storeId: ctx.storeId,
         deviceId: ctx.uow.deviceId,
+        registerId: currentRegisterId(),
         actorUserId: validActorId,
       });
 
@@ -1174,6 +1202,7 @@ export class SqliteReturnStore {
             organizationId: ctx.organizationId,
             storeId: ctx.storeId,
             deviceId: ctx.uow.deviceId,
+            registerId: currentRegisterId(),
           },
         );
         if (moneyToTiyin(drawerBalance) < cashRefundTiyin) {
@@ -1302,6 +1331,7 @@ export class SqliteReturnStore {
           values: {
             shiftId: activeShift.shift.id,
             shiftCashierSessionId: activeShift.activeSession.id,
+            registerId: activeShift.shift.registerId,
             type: 'refund_cash_out',
             amountDelta: negateMoney(resolvedPayments.cashRefundAmount),
             sourceType: 'return',
@@ -1345,6 +1375,32 @@ export class SqliteReturnStore {
       });
 
       this.testHooks?.onBeforeCommit?.();
+
+      // T3.8: audit row in the same transaction as the operation.
+      // T3.7: one marking code per returned unit goes back (oldest first).
+      for (const item of validItems) {
+        const units = quantityToMilli(item.qty) / 1000n;
+        if (units > 0n) {
+          releaseSaleMarksInTxSync(session.internalGetSqlite(), {
+            saleId: validSaleId,
+            saleLineId: item.saleLineId,
+            limit: units,
+            reason: 'return',
+            sourceId: returnWrite.row.id,
+            nowMs: session.nowUnixMs(),
+          });
+        }
+      }
+      appendAuditInTxSync(session.internalGetSqlite(), {
+        organizationId: ctx.organizationId,
+        nowMs: session.nowUnixMs(),
+        nextId: () => session.nextId(),
+        eventType: 'return.created',
+        actorUserId: validActorId,
+        entity: 'returns',
+        entityId: returnWrite.row.id,
+        details: { saleId: validSaleId },
+      });
 
       return Promise.resolve({
         returnDoc: toStoredReturnRecord(returnWrite.row, insertedLines, insertedPayments),

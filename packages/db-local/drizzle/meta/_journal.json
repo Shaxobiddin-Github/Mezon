@@ -148,6 +148,41 @@
       "when": 1794914388182,
       "tag": "0020_sync_overpaid_conflicts_bootstrap",
       "breakpoints": true
+    },
+    {
+      "idx": 21,
+      "version": "6",
+      "when": 1795007099378,
+      "tag": "0021_audit_log",
+      "breakpoints": true
+    },
+    {
+      "idx": 22,
+      "version": "6",
+      "when": 1795008043796,
+      "tag": "0022_marking",
+      "breakpoints": true
+    },
+    {
+      "idx": 23,
+      "version": "6",
+      "when": 1795073921420,
+      "tag": "0023_payment_intents",
+      "breakpoints": true
+    },
+    {
+      "idx": 24,
+      "version": "6",
+      "when": 1795074720400,
+      "tag": "0024_lan_terminals",
+      "breakpoints": true
+    },
+    {
+      "idx": 25,
+      "version": "6",
+      "when": 1795075680841,
+      "tag": "0025_register_shifts",
+      "breakpoints": true
     }
   ]
 }

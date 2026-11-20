@@ -181,6 +181,11 @@ export class AdminApiClient {
     return this.request<DailySalesReportResponseDto>(`/api/v1/admin/reports/daily${qs}`);
   }
 
+  // T4.7 licence
+  async getLicence(): Promise<LicenceInfo> {
+    return this.request<LicenceInfo>('/api/v1/admin/licence');
+  }
+
   // T2.8 Telegram
   async getTelegramStatus(): Promise<TelegramStatus> {
     return this.request<TelegramStatus>('/api/v1/admin/telegram/status');
@@ -262,6 +267,20 @@ export class AdminApiClient {
   }
 }
 
+export interface LicenceInfo {
+  readonly state: 'trial' | 'active' | 'grace' | 'expired';
+  readonly plan: 'start' | 'business' | 'pro' | null;
+  readonly limits: { readonly maxStores: number | null; readonly maxDevices: number | null };
+  readonly endsAtMs: string | null;
+  readonly daysLeft: number | null;
+  readonly invalidLicence: boolean;
+  readonly usage: { readonly stores: number; readonly devices: number };
+  readonly invoices: readonly {
+    readonly period: string;
+    readonly plan: string;
+    readonly amountTiyin: string;
+    readonly status: 'issued' | 'paid' | 'void';
+  }[];
 export interface CabinetDevice {
   readonly id: string;
   readonly name: string;

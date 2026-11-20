@@ -76,6 +76,9 @@ if (schemaPkg.assertShiftMigrationsComplete) {
 if (schemaPkg.assertOrderMigrationsComplete) {
   schemaPkg.assertOrderMigrationsComplete(migrationsDir);
 }
+if (schemaPkg.assertAuditMigrationsComplete) {
+  schemaPkg.assertAuditMigrationsComplete(migrationsDir);
+}
 if (schemaPkg.assertFiscalMigrationsComplete) {
   schemaPkg.assertFiscalMigrationsComplete(migrationsDir);
 }

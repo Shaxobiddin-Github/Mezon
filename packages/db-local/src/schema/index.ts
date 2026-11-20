@@ -219,6 +219,11 @@ export const localHubConfig = localSchemaRegistry.defineTable(
     fiscalReceiptFieldsJson: text('fiscal_receipt_fields_json').notNull().default('[]'),
     /** T3.3 fiscal driver id stamped on new documents. Only `fake` exists until T3.5 (§3.3). */
     fiscalDriverId: text('fiscal_driver_id').notNull().default('fake'),
+    /**
+     * T3.7 [TASDIQLANSIN]: MXIK prefixes whose goods need a marking code per unit (JSON string
+     * array). Legal configuration, not product data: empty = nothing requires marking.
+     */
+    markingMxikPrefixesJson: text('marking_mxik_prefixes_json').notNull().default('[]'),
   }),
   (self) => [
     uniqueIndex('uidx_local_hub_config_singleton').on(self.singletonGuard),
@@ -940,6 +945,8 @@ export const localCarts = localSchemaRegistry.defineTable(
     completedSaleId: sqliteUuidV7('completed_sale_id'),
     completedAtMs: sqliteUnixMs('completed_at_ms'),
     completionWarningsJson: text('completion_warnings_json'),
+    /** T4.2 LAN terminal (register) the cart was opened on; NULL = the hub computer itself. */
+    terminalId: sqliteUuidV7('terminal_id'),
   }),
   (self) => [
     index('idx_local_carts_store_status').on(
@@ -1253,6 +1260,8 @@ export const cashMoves = localSchemaRegistry.defineTable(
     ...common,
     shiftId: sqliteUuidV7('shift_id'),
     shiftCashierSessionId: sqliteUuidV7('shift_cashier_session_id'),
+    // T4.2 (variant B): the cash register; NULL = the hub's own register, else a LAN terminal id.
+    registerId: sqliteUuidV7('register_id'),
     type: text('type').notNull(),
     amountDelta: sqliteMoney('amount_delta').notNull(),
     sourceType: text('source_type').notNull(),
@@ -2200,11 +2209,19 @@ export const shifts = localSchemaRegistry.defineTable(
     openRequestHash: text('open_request_hash').notNull(),
     closeClientRequestId: sqliteUuidV7('close_client_request_id'),
     closeRequestHash: text('close_request_hash'),
+    // T4.2 (variant B): the cash register; NULL = the hub's own register, else a LAN terminal id.
+    registerId: sqliteUuidV7('register_id'),
   }),
   (self) => [
     uniqueIndex('uidx_shifts_org_device_no').on(self.organizationId, self.deviceId, self.shiftNo),
+    // One open shift per (device, register); NULL (the hub's register) counts as one register.
     uniqueIndex('uidx_shifts_one_open_per_device')
-      .on(self.organizationId, self.storeId, self.deviceId)
+      .on(
+        self.organizationId,
+        self.storeId,
+        self.deviceId,
+        sql`(CASE WHEN ${self.registerId} IS NULL THEN '' ELSE CAST(${self.registerId} AS text) END)`,
+      )
       .where(sql`${self.status} = 'open'`),
     uniqueIndex('uidx_shifts_org_open_req').on(self.organizationId, self.openClientRequestId),
     uniqueIndex('uidx_shifts_org_close_req')
@@ -2274,6 +2291,8 @@ export const shiftCashierSessions = localSchemaRegistry.defineTable(
     endedAtMs: sqliteUnixMs('ended_at_ms'),
     handoffClientRequestId: sqliteUuidV7('handoff_client_request_id'),
     handoffRequestHash: text('handoff_request_hash'),
+    // T4.2 (variant B): the cash register; NULL = the hub's own register, else a LAN terminal id.
+    registerId: sqliteUuidV7('register_id'),
   }),
   (self) => [
     uniqueIndex('uidx_shift_cashier_sessions_shift_seq').on(self.shiftId, self.sessionSeq),
@@ -3214,5 +3233,244 @@ export const fiscalDocs = localSchemaRegistry.defineTable(
       'chk_fiscal_docs_cancelled_at',
       sql`(${self.status} = 'cancelled') = (${self.cancelledAtMs} IS NOT NULL)`,
     ),
+  ],
+);
+
+/**
+ * T3.8 append-only audit journal (`LOCAL`, organization-scoped) with a SHA-256 hash chain:
+ * `hash = sha256(canonical(fields, prev_hash))`. UPDATE / DELETE are refused by triggers
+ * (`buildAuditLogTriggersSql`); `verifyAuditChainSync` names the first broken `seq`.
+ */
+export const localAuditLog = localSchemaRegistry.defineTable(
+  {
+    name: 'local_audit_log',
+    tableClass: 'LOCAL',
+    tenantScope: 'organization',
+  },
+  (common) => ({
+    ...common,
+    seq: sqliteBigint('seq').notNull(),
+    eventType: text('event_type').notNull(),
+    actorUserId: sqliteUuidV7('actor_user_id'),
+    entity: text('entity').notNull(),
+    entityId: text('entity_id'),
+    detailsJson: text('details_json').notNull(),
+    prevHash: text('prev_hash').notNull(),
+    hash: text('hash').notNull(),
+  }),
+  (self) => [
+    uniqueIndex('uidx_local_audit_log_org_seq').on(self.organizationId, self.seq),
+    index('idx_local_audit_log_event').on(self.organizationId, self.eventType, self.createdAtMs),
+    check('chk_local_audit_log_seq', sql`${self.seq} >= 1`),
+    check(
+      'chk_local_audit_log_hash',
+      sql`length(${self.hash}) = 64 AND length(${self.prevHash}) = 64`,
+    ),
+  ],
+);
+
+/**
+ * T3.7 marking codes scanned into an open cart (`LOCAL`). One row per physical unit; the same code
+ * can be in at most one open cart (UNIQUE). Moved to `local_sale_marks` by `completeSale`.
+ */
+export const localCartMarks = localSchemaRegistry.defineTable(
+  {
+    name: 'local_cart_marks',
+    tableClass: 'LOCAL',
+    tenantScope: 'store',
+  },
+  (common) => ({
+    ...common,
+    cartId: sqliteUuidV7('cart_id')
+      .notNull()
+      .references(() => localCarts.id, { onDelete: 'cascade' }),
+    cartLineId: sqliteUuidV7('cart_line_id').notNull(),
+    productId: sqliteUuidV7('product_id').notNull(),
+    codeKey: text('code_key').notNull(),
+    gtin: text('gtin').notNull(),
+    serial: text('serial').notNull(),
+    code: text('code').notNull(),
+    checkStatus: text('check_status').notNull(),
+  }),
+  (self) => [
+    uniqueIndex('uidx_local_cart_marks_code').on(self.organizationId, self.codeKey),
+    index('idx_local_cart_marks_line').on(self.cartId, self.cartLineId),
+    check('chk_local_cart_marks_status', sql`${self.checkStatus} IN ('ok', 'unchecked')`),
+  ],
+);
+
+/**
+ * T3.7 marking codes of completed sales (`LOCAL`). A code is "sold" while `released_at_ms` is NULL
+ * (partial UNIQUE); a void or a return releases it (the unit is back on the shelf).
+ */
+export const localSaleMarks = localSchemaRegistry.defineTable(
+  {
+    name: 'local_sale_marks',
+    tableClass: 'LOCAL',
+    tenantScope: 'store',
+  },
+  (common) => ({
+    ...common,
+    saleId: sqliteUuidV7('sale_id')
+      .notNull()
+      .references(() => sales.id),
+    saleLineId: sqliteUuidV7('sale_line_id').notNull(),
+    productId: sqliteUuidV7('product_id').notNull(),
+    codeKey: text('code_key').notNull(),
+    gtin: text('gtin').notNull(),
+    serial: text('serial').notNull(),
+    code: text('code').notNull(),
+    checkStatus: text('check_status').notNull(),
+    releasedAtMs: sqliteUnixMs('released_at_ms'),
+    releasedReason: text('released_reason'),
+    releaseSourceId: sqliteUuidV7('release_source_id'),
+  }),
+  (self) => [
+    uniqueIndex('uidx_local_sale_marks_active_code')
+      .on(self.organizationId, self.codeKey)
+      .where(sql`${self.releasedAtMs} IS NULL`),
+    index('idx_local_sale_marks_sale').on(self.saleId, self.saleLineId),
+    check('chk_local_sale_marks_status', sql`${self.checkStatus} IN ('ok', 'unchecked')`),
+    check(
+      'chk_local_sale_marks_release',
+      sql`(${self.releasedAtMs} IS NULL) = (${self.releasedReason} IS NULL)`,
+    ),
+  ],
+);
+
+/**
+ * T3.6 QR payment intents (`LOCAL`). One intent = one QR the customer pays; a sale may close with
+ * an `uzqr` payment only through a `paid` intent of exactly that amount, consumed ONCE
+ * (`consumed_by_sale_id`, set once by an atomic UPDATE). Status moves forward only:
+ * pending → paid | expired | cancelled | failed; expired → paid (late, `paid_late = 1`);
+ * paid (not consumed) → refunded.
+ */
+export const paymentIntents = localSchemaRegistry.defineTable(
+  {
+    name: 'payment_intents',
+    tableClass: 'LOCAL',
+    tenantScope: 'store',
+  },
+  (common) => ({
+    ...common,
+    cartId: sqliteUuidV7('cart_id'),
+    method: text('method').notNull(),
+    kind: text('kind').notNull(),
+    amount: sqliteMoney('amount').notNull(),
+    status: text('status').notNull(),
+    providerRef: text('provider_ref').notNull(),
+    qrPayload: text('qr_payload'),
+    expiresAtMs: sqliteUnixMs('expires_at_ms').notNull(),
+    paidAtMs: sqliteUnixMs('paid_at_ms'),
+    paidLate: sqliteBoolean('paid_late').notNull().default(false),
+    confirmedByUserId: sqliteUuidV7('confirmed_by_user_id'),
+    confirmNote: text('confirm_note'),
+    consumedBySaleId: sqliteUuidV7('consumed_by_sale_id').references(() => sales.id),
+    refundedAtMs: sqliteUnixMs('refunded_at_ms'),
+    // What the provider actually received (P2-K2); equals `amount` unless the status is amount_mismatch.
+    receivedAmount: sqliteMoney('received_amount'),
+  }),
+  (self) => [
+    uniqueIndex('uidx_payment_intents_provider_ref').on(self.organizationId, self.providerRef),
+    // A sale may consume several intents (two QR payments); each intent is consumed at most once by
+    // the atomic UPDATE ... WHERE consumed_by_sale_id IS NULL (not by a unique index).
+    index('idx_payment_intents_consumed').on(self.consumedBySaleId),
+    index('idx_payment_intents_cart').on(self.cartId),
+    check('chk_payment_intents_method', sql`${self.method} IN ('uzqr')`),
+    check('chk_payment_intents_kind', sql`${self.kind} IN ('dynamic', 'static')`),
+    check(
+      'chk_payment_intents_status',
+      sql`${self.status} IN ('pending', 'paid', 'expired', 'cancelled', 'failed', 'refunding', 'refunded', 'amount_mismatch')`,
+    ),
+    check('chk_payment_intents_amount', sql`${self.amount} > 0`),
+    check(
+      'chk_payment_intents_received',
+      sql`${self.receivedAmount} IS NULL OR ${self.receivedAmount} > 0`,
+    ),
+    check(
+      'chk_payment_intents_paid_at',
+      sql`(${self.status} IN ('paid', 'refunding', 'refunded', 'amount_mismatch')) = (${self.paidAtMs} IS NOT NULL)`,
+    ),
+    check(
+      'chk_payment_intents_consumed_paid',
+      sql`${self.consumedBySaleId} IS NULL OR ${self.status} = 'paid'`,
+    ),
+  ],
+);
+
+/**
+ * T4.1 LAN hub identity: the self-signed TLS certificate terminals pin. The private key is stored
+ * encrypted with the hub's SafeStoragePort (`key_enc_b64`), never in clear and never committed.
+ */
+export const localLanIdentity = localSchemaRegistry.defineTable(
+  {
+    name: 'local_lan_identity',
+    tableClass: 'LOCAL',
+    tenantScope: 'organization',
+  },
+  (common) => ({
+    ...common,
+    certPem: text('cert_pem').notNull(),
+    keyEncB64: text('key_enc_b64').notNull(),
+    fingerprint256: text('fingerprint256').notNull(),
+    notAfterMs: sqliteUnixMs('not_after_ms').notNull(),
+    lanEnabled: sqliteBigint('lan_enabled')
+      .notNull()
+      .default(sql`0`),
+  }),
+  (self) => [uniqueIndex('uidx_local_lan_identity_org').on(self.organizationId)],
+);
+
+/** T4.1 one-time pairing codes (only a hash is stored; short TTL; limited attempts). */
+export const localLanPairingCodes = localSchemaRegistry.defineTable(
+  {
+    name: 'local_lan_pairing_codes',
+    tableClass: 'LOCAL',
+    tenantScope: 'organization',
+  },
+  (common) => ({
+    ...common,
+    codeEnc: text('code_enc').notNull(),
+    createdByUserId: sqliteUuidV7('created_by_user_id').notNull(),
+    expiresAtMs: sqliteUnixMs('expires_at_ms').notNull(),
+    failedAttempts: sqliteBigint('failed_attempts')
+      .notNull()
+      .default(sql`0`),
+    usedAtMs: sqliteUnixMs('used_at_ms'),
+    usedByTerminalId: sqliteUuidV7('used_by_terminal_id'),
+  }),
+  (self) => [
+    index('idx_local_lan_pairing_codes_active').on(self.organizationId, self.expiresAtMs),
+    check('chk_local_lan_pairing_codes_attempts', sql`${self.failedAttempts} >= 0`),
+  ],
+);
+
+/** T4.1 paired LAN terminals. Only the SHA-256 of the terminal key is stored. */
+export const localLanTerminals = localSchemaRegistry.defineTable(
+  {
+    name: 'local_lan_terminals',
+    tableClass: 'LOCAL',
+    tenantScope: 'organization',
+  },
+  (common) => ({
+    ...common,
+    name: text('name').notNull(),
+    keyHash: text('key_hash').notNull(),
+    status: text('status').notNull(),
+    pairedAtMs: sqliteUnixMs('paired_at_ms').notNull(),
+    pairedByUserId: sqliteUuidV7('paired_by_user_id').notNull(),
+    revokedAtMs: sqliteUnixMs('revoked_at_ms'),
+    lastSeenAtMs: sqliteUnixMs('last_seen_at_ms'),
+    /** T4.3 the register's own printer / cash drawer (JSON, validated on read); NULL = none. */
+    printerJson: text('printer_json'),
+  }),
+  (self) => [
+    uniqueIndex('uidx_local_lan_terminals_key').on(self.keyHash),
+    check('chk_local_lan_terminals_status', sql`${self.status} IN ('active', 'revoked')`),
+    check(
+      'chk_local_lan_terminals_revoked',
+      sql`(${self.status} = 'active' AND ${self.revokedAtMs} IS NULL) OR (${self.status} = 'revoked' AND ${self.revokedAtMs} IS NOT NULL)`,
+    ),
+    check('chk_local_lan_terminals_name', sql`length(trim(${self.name})) BETWEEN 1 AND 60`),
   ],
 );

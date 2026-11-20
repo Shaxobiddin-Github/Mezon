@@ -1,3 +1,4 @@
+import { HubUpdateGate, registerUpdateGate } from './update-gate.js';
 import path from 'node:path';
 import {
   type LocalSqliteConnection,
@@ -36,6 +37,7 @@ import {
   SqliteCloudStore,
   createSqliteCloudStore,
   SqliteOutboxSyncStore,
+  runInRegisterScope,
 } from '@mezon/db-local';
 import {
   type Clock,
@@ -48,6 +50,10 @@ import {
 import {
   CryptoRandomSource,
   FakeFiscalDriver,
+  FakeMarkingDriver,
+  FakePaymentDriver,
+  type PaymentDriver,
+  type MarkingDriver,
   type FiscalDriver,
   SystemClock,
   type DiscoveredWindowsPrinter,
@@ -82,9 +88,26 @@ import { HubSyncPushWorker } from './sync-push-worker.js';
 import { PRODUCTION_TRUSTED_RULE_KEYS, type TrustedRuleKey } from '@mezon/rules';
 import { registerRulesRoutes } from './rules-routes.js';
 import { HubRulesService, nodeEd25519RulesVerifier } from './rules-service.js';
+import { HubLicenceService } from './licence-service.js';
+import { registerLicenceRoutes } from './licence-routes.js';
+import { PRODUCTION_TRUSTED_LICENCE_KEYS, type TrustedLicenceKey } from '@mezon/licensing';
 import { HubSyncPullService } from './sync-pull-service.js';
 import { HubSyncPullWorker } from './sync-pull-worker.js';
 import { registerFiscalRoutes } from './fiscal-routes.js';
+import { registerAuditRoutes } from './audit-routes.js';
+import { registerMarkingRoutes } from './marking-routes.js';
+import {
+  type LanListener,
+  newLanProxySecret,
+  registerLanRoutes,
+  registerLanTrustHook,
+  terminalIdOf,
+  startLanListener,
+} from './lan-server.js';
+import { HubLanService } from './lan-service.js';
+import { registerPaymentRoutes } from './payment-routes.js';
+import { HubPaymentService } from './payment-service.js';
+import { HubMarkingService } from './marking-service.js';
 import { registerSyncConflictRoutes } from './sync-conflicts-routes.js';
 import { HubSyncConflictService } from './sync-conflicts-service.js';
 import { HubCloudParkedService } from './sync-cloud-parked.js';
@@ -124,11 +147,19 @@ export interface CreateHubServerOptions {
    * `PRODUCTION_TRUSTED_RULE_KEYS`; passing this under NODE_ENV=production throws.
    */
   readonly trustedRuleKeys?: readonly TrustedRuleKey[];
+  /** TEST/DI ONLY (T4.7): trusted licence public keys; production uses the built-in list. */
+  readonly trustedLicenceKeys?: readonly TrustedLicenceKey[];
   /**
    * T3.3 fiscal driver (DI). Only `FakeFiscalDriver` exists until T3.5 (§3.3); the default is a fake
    * driver whose ledger lives next to the database so it survives restarts.
    */
   readonly fiscalDriver?: FiscalDriver;
+  /** T3.7 marking operator port; default: the Fake (no real operator until T3.0). */
+  readonly markingDriver?: MarkingDriver;
+  /** T3.6 QR payment provider port; default: the Fake (no real provider until T3.0). */
+  readonly paymentDriver?: PaymentDriver;
+  /** T3.6 QR lifetime override (tests). */
+  readonly paymentQrTtlMs?: bigint;
   /** TEST ONLY: fiscal worker timing / seams. */
   readonly fiscalWorkerOptions?: Pick<
     HubFiscalWorkerOptions,
@@ -169,6 +200,8 @@ export interface HubServer {
   readonly reportStore: SqliteReportStore;
   readonly reportService: HubReportService;
   readonly backupService: SqliteBackupService;
+  /** T4.8: closed while an update is prepared; refuses starting new receipt work. */
+  readonly updateGate: HubUpdateGate;
   readonly importCache: CatalogImportCache;
   readonly cloudStore: SqliteCloudStore;
   readonly cloudService: HubCloudService;
@@ -177,11 +210,19 @@ export interface HubServer {
   readonly pullService: HubSyncPullService;
   readonly pullWorker: HubSyncPullWorker;
   readonly safeStorage: SafeStoragePort;
+  readonly lanService: HubLanService;
+  /** T4.1: starts the HTTPS LAN listener for paired terminals (default host 0.0.0.0). */
+  listenLan(options: { readonly host?: string; readonly port: number }): Promise<LanListener>;
   listen(): Promise<{ readonly host: typeof DEFAULT_HUB_HOST; readonly port: number }>;
   close(): Promise<void>;
 }
 
 export async function createHubServer(options: CreateHubServerOptions): Promise<HubServer> {
+  if (options.trustedLicenceKeys !== undefined && process.env.NODE_ENV === 'production') {
+    throw new Error(
+      'trustedLicenceKeys is a test/DI-only option and must not be set in production',
+    );
+  }
   if (options.trustedRuleKeys !== undefined && process.env.NODE_ENV === 'production') {
     throw new Error('trustedRuleKeys is a test/DI-only option and must not be set in production');
   }
@@ -234,6 +275,7 @@ export async function createHubServer(options: CreateHubServerOptions): Promise<
   let shiftService: HubShiftService;
   let orderService: HubOrderService;
   let printerService: HubPrinterService;
+  let lanServiceRef: HubLanService | null = null;
   let cloudStore: SqliteCloudStore;
   let cloudService: HubCloudService;
   let app: FastifyInstance;
@@ -469,6 +511,7 @@ export async function createHubServer(options: CreateHubServerOptions): Promise<
     });
     printerService = new HubPrinterService({
       printerStore,
+      resolveTerminalPrinter: (terminalId) => lanServiceRef?.terminalPrinter(terminalId) ?? null,
       authService,
       saleStore,
       returnStore,
@@ -529,6 +572,16 @@ export async function createHubServer(options: CreateHubServerOptions): Promise<
       fetchFn: options.cloudFetchFn,
     });
 
+    const licenceService = new HubLicenceService({
+      cloud: cloudService,
+      cachePath: path.join(path.dirname(options.dbPath), 'licence-cache.json'),
+      trustedKeys: options.trustedLicenceKeys ?? PRODUCTION_TRUSTED_LICENCE_KEYS,
+      verifier: nodeEd25519RulesVerifier,
+      nowMs: () => BigInt(clock.now()),
+      fetchFn: options.cloudFetchFn,
+      logger,
+    });
+
     const outboxStore = new SqliteOutboxSyncStore(connection);
     const pullService = new HubSyncPullService(connection, idGen);
     const pullWorker = new HubSyncPullWorker({
@@ -557,6 +610,23 @@ export async function createHubServer(options: CreateHubServerOptions): Promise<
 
     const hostState = createHostAllowlistState(securityConfig.port);
     registerHubSecurityHooks(app, securityConfig, hostState);
+    const lanProxySecret = newLanProxySecret();
+    registerLanTrustHook(app, lanProxySecret);
+    // T4.2 (variant B): the rest of the request runs as work of its cash register: the verified LAN
+    // terminal (set by the trust hook above, never from the body) or null = the hub's own register.
+    app.addHook('onRequest', (request, _reply, done) => {
+      runInRegisterScope(terminalIdOf(request), done);
+    });
+    const lanService = new HubLanService({
+      connection,
+      safeStorage,
+      getOrganizationId: () => store.getActiveRuntimeContext()?.config.organizationId ?? null,
+      nowMs: () => clock.now(),
+      nextId: () => idGen.nextId(),
+      terminalLimit: () => licenceService.lanTerminalLimit(),
+    });
+    lanServiceRef = lanService;
+    let lanListener: LanListener | null = null;
     registerHubErrorHandlers(app);
     registerHubRoutes(
       app,
@@ -581,6 +651,52 @@ export async function createHubServer(options: CreateHubServerOptions): Promise<
     );
     registerRulesRoutes(app, authService, rulesService, cartService, () => BigInt(clock.now()));
     registerFiscalRoutes(app, authService, fiscalService);
+    registerMarkingRoutes(
+      app,
+      authService,
+      new HubMarkingService({
+        connection,
+        cartStore,
+        catalogStore,
+        driver: options.markingDriver ?? new FakeMarkingDriver(),
+        getContext: () => {
+          const ctx = store.getActiveRuntimeContext();
+          return ctx
+            ? { organizationId: ctx.config.organizationId, storeId: ctx.config.storeId }
+            : null;
+        },
+        nowMs: () => clock.now(),
+        nextId: () => idGen.nextId(),
+      }),
+      cartService,
+    );
+    registerPaymentRoutes(
+      app,
+      authService,
+      new HubPaymentService({
+        connection,
+        driver: options.paymentDriver ?? new FakePaymentDriver(),
+        getContext: () => {
+          const ctx = store.getActiveRuntimeContext();
+          return ctx
+            ? { organizationId: ctx.config.organizationId, storeId: ctx.config.storeId }
+            : null;
+        },
+        nowMs: () => clock.now(),
+        nextId: () => idGen.nextId(),
+        ...(options.paymentQrTtlMs !== undefined ? { ttlMs: options.paymentQrTtlMs } : {}),
+      }),
+    );
+    registerLanRoutes(app, authService, lanService);
+    registerAuditRoutes(
+      app,
+      authService,
+      connection,
+      () => store.getActiveRuntimeContext()?.config.organizationId ?? null,
+    );
+    registerLicenceRoutes(app, authService, licenceService);
+    const updateGate = new HubUpdateGate();
+    registerUpdateGate(app, updateGate);
     registerSyncConflictRoutes(
       app,
       authService,
@@ -645,6 +761,7 @@ export async function createHubServer(options: CreateHubServerOptions): Promise<
       reportStore,
       reportService,
       backupService,
+      updateGate,
       importCache,
       cloudStore,
       cloudService,
@@ -653,6 +770,20 @@ export async function createHubServer(options: CreateHubServerOptions): Promise<
       pullService,
       pullWorker,
       safeStorage,
+      lanService,
+      async listenLan(lanOptions) {
+        if (lanListener !== null) return lanListener;
+        lanListener = await startLanListener({
+          mainApp: app,
+          lanService,
+          host: lanOptions.host ?? '0.0.0.0',
+          port: lanOptions.port,
+          loopbackHost: () =>
+            [...hostState.getAllowedHosts()][0] ?? `127.0.0.1:${securityConfig.port}`,
+          proxySecret: lanProxySecret,
+        });
+        return lanListener;
+      },
       async listen() {
         await app.listen({
           host: DEFAULT_HUB_HOST,
@@ -667,6 +798,7 @@ export async function createHubServer(options: CreateHubServerOptions): Promise<
         pushWorker.start();
         pullWorker.start();
         fiscalWorker.start();
+        licenceService.start();
         return {
           host: DEFAULT_HUB_HOST,
           port: boundPort ?? securityConfig.port,
@@ -677,6 +809,8 @@ export async function createHubServer(options: CreateHubServerOptions): Promise<
           pushWorker.stop();
           pullWorker.stop();
           fiscalWorker.stop();
+          if (lanListener !== null) await lanListener.close();
+          licenceService.stop();
           await app.close();
         } finally {
           connection.close();

@@ -1,3 +1,4 @@
+import { terminalIdOf } from './lan-server.js';
 import {
   AddCartLineRequestSchema,
   CartIdParamsSchema,
@@ -94,7 +95,7 @@ export function registerCartRoutes(
   app.post('/carts', async (request, reply) => {
     const session = await authorize(authService, request, 'cart:write');
     CreateCartRequestSchema.parse(request.body);
-    const res = await cartService.openCart(session.user.id);
+    const res = await cartService.openCart(session.user.id, terminalIdOf(request));
     return reply.code(201).send(res);
   });
 

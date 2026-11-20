@@ -1583,6 +1583,7 @@ describe('@mezon/db-local - T1.8 Suppliers, Receiving, Unknown Cost, Ledger & Re
             organizationId: env.organizationId,
             storeId: env.storeId,
             deviceId: env.deviceId,
+            registerId: null,
           }),
         );
         const payAmt = BigInt(3_000 + seededNextInt(env.random, 30_000));
@@ -1671,6 +1672,7 @@ describe('@mezon/db-local - T1.8 Suppliers, Receiving, Unknown Cost, Ledger & Re
             organizationId: env.organizationId,
             storeId: env.storeId,
             deviceId: env.deviceId,
+            registerId: null,
           }),
         ),
       ).toBe(cashModelTiyin);

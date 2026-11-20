@@ -277,6 +277,7 @@ async function seedCashInDrawer(
       organizationId: env.organizationId,
       storeId: env.storeId,
       deviceId: env.deviceId,
+      registerId: null,
     })!;
     const nowMs = session.nowUnixMs();
     session.db
@@ -387,6 +388,7 @@ describe('@mezon/db-local - T1.6 Void, Return, V1-V5, Oracle Parity, C1 Crash & 
           organizationId: env.organizationId,
           storeId: env.storeId,
           deviceId: env.deviceId,
+          registerId: null,
         })!;
         session.db
           .insert(cashMoves)
@@ -491,6 +493,7 @@ describe('@mezon/db-local - T1.6 Void, Return, V1-V5, Oracle Parity, C1 Crash & 
           organizationId: env.organizationId,
           storeId: env.storeId,
           deviceId: env.deviceId,
+          registerId: null,
         }),
       ).toBe(ZERO_MONEY);
     } finally {

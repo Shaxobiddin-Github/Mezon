@@ -533,4 +533,46 @@ export const RU_MESSAGES: Readonly<Record<I18nKey, string>> = {
   'error.FISCAL_BLOCKED': 'Продажа заблокирована из-за фискального статуса.',
   'error.FISCALIZED_SALE_CANNOT_VOID':
     'Фискализированный (или отправленный) чек нельзя аннулировать — оформите возврат.',
+
+  // T4.7 Licence
+  'admin.licence.title': 'Тариф',
+  'admin.licence.plan.start': 'Start',
+  'admin.licence.plan.business': 'Business',
+  'admin.licence.plan.pro': 'Pro',
+  'admin.licence.trial': 'Бесплатный период: осталось {days} дн.',
+  'admin.licence.active': 'Тариф {plan}: осталось {days} дн.',
+  'admin.licence.grace':
+    'Тариф {plan} закончился. Оплатите в течение {days} дн., иначе нельзя будет добавлять магазины и кассы.',
+  'admin.licence.expired':
+    'Срок тарифа истёк. Продажи продолжаются, но добавлять магазины и кассы нельзя.',
+  'admin.licence.invalid': 'Файл лицензии не прошёл проверку. Свяжитесь с платформой.',
+  'admin.licence.usage': 'Магазины: {stores} / {maxStores}, кассы: {devices} / {maxDevices}',
+  'admin.licence.unlimited': 'без ограничений',
+  'admin.licence.invoice': '{period}: {amount} — {status}',
+  'admin.licence.invoice.issued': 'не оплачен',
+  'admin.licence.invoice.paid': 'оплачен',
+  'admin.licence.invoice.void': 'аннулирован',
+
+  // T4.7 POS licence banner
+  'pos.licence.endsSoon': 'Тариф закончится через {days} дн. Сообщите владельцу.',
+  'pos.licence.grace':
+    'Тариф закончился: если не оплатить за {days} дн., нельзя будет добавить новую кассу. Продажи продолжаются.',
+  'pos.licence.expired': 'Срок тарифа истёк. Продажи продолжаются; сообщите владельцу.',
+  'pos.licence.invalid': 'Файл лицензии не прошёл проверку. Сообщите владельцу.',
+
+  // T4.8 POS update banner
+  'pos.update.ready': 'Новая версия {version} загружена. Когда установить?',
+  'pos.update.now': 'Сейчас',
+  'pos.update.shiftClose': 'При закрытии смены',
+  'pos.update.tonight': 'В 22:00',
+  'pos.update.cancel': 'Отменить',
+  'pos.update.waiting.open_receipt':
+    'Обновление {version}: ждём закрытия открытого чека. Чек не пострадает.',
+  'pos.update.waiting.open_shift': 'Обновление {version}: установится после закрытия смены.',
+  'pos.update.waiting.not_yet': 'Обновление {version}: установится в {time}.',
+  'pos.update.waiting.hub_unavailable': 'Обновление {version}: служба кассы не отвечает, ожидание.',
+  'pos.update.waiting.pending': 'Обновление {version} готовится к установке.',
+  'pos.update.installing':
+    'Идёт установка обновления. Программа сама откроется через несколько минут.',
+  'pos.update.error': 'Не удалось загрузить обновление. Попробуем позже.',
 };

@@ -38,6 +38,12 @@ import {
 } from './cart-repo.js';
 import type { LocalSqliteConnection } from './connection.js';
 import {
+  consumeCartMarksForSaleLineInTxSync,
+  isMarkedMxik,
+  readMarkingPrefixesSync,
+} from './marking-repo.js';
+import { consumeUzqrPaymentInTxSync } from './payment-intent-repo.js';
+import {
   assertFiscalSaleAllowedInTxSync,
   insertSaleFiscalDocIfEnabledInTxSync,
 } from './fiscal-repo.js';
@@ -76,6 +82,7 @@ import {
   type SqliteUnitOfWorkSession,
   runConnectionReadOnly,
 } from './uow.js';
+import { currentRegisterId } from './register-scope.js';
 import { insertFact, insertMonotone } from './writers.js';
 
 export interface SaleRuntimeContext {
@@ -707,6 +714,7 @@ export function completeSaleCoreInTxSync(
   const insertedLines: (typeof saleLines.$inferSelect)[] = [];
   const rulesLines: SaleRulesCheckLine[] = [];
 
+  const markingPrefixes = readMarkingPrefixesSync(session.internalGetSqlite());
   for (const line of evaluated.lines) {
     let lineCostTiyin = 0n;
     const lineLegs: { expiryDateMs: bigint | null; qtyMilli: bigint }[] = [];
@@ -781,6 +789,26 @@ export function completeSaleCoreInTxSync(
       schemaVersion: 1,
     });
     insertedLines.push(lineWrite.row);
+    // T3.7: a marked product carries exactly one marking code per unit; the codes move from the
+    // cart to the sale in THIS transaction (any mismatch aborts the whole receipt).
+    if (
+      line.lineKind === 'catalog' &&
+      line.productId !== null &&
+      isMarkedMxik(line.mxikSnapshot, markingPrefixes)
+    ) {
+      consumeCartMarksForSaleLineInTxSync(session.internalGetSqlite(), {
+        organizationId: input.organizationId,
+        storeId: input.storeId,
+        cartId: input.sourceCartId,
+        cartLineId: line.id,
+        saleId,
+        saleLineId: lineWrite.entityId,
+        productId: line.productId,
+        qtyMilli: quantityToMilli(line.qty),
+        nowMs: input.nowMs,
+        nextId: () => session.nextId(),
+      });
+    }
     rulesLines.push({
       lineId: lineWrite.entityId,
       lineKind: line.lineKind,
@@ -789,6 +817,14 @@ export function completeSaleCoreInTxSync(
       finalTotalTiyin: moneyToTiyin(line.finalTotal),
       batchExpiries: lineLegs,
     });
+  }
+
+  // T3.7: codes left in the cart (of a line no longer in it) are released with the cart.
+  if (input.sourceCartId !== null) {
+    session
+      .internalGetSqlite()
+      .prepare('DELETE FROM local_cart_marks WHERE cart_id = ?')
+      .run(input.sourceCartId);
   }
 
   // T3.2 FINAL legal rules check (single choke point for cart complete AND order deliver).
@@ -825,6 +861,16 @@ export function completeSaleCoreInTxSync(
   // Insert immutable `payments` (`FACT`) & atomic `cash_moves` (`FACT`) — `'advance'` NEVER emits `cash_moves`
   const insertedPayments: (typeof payments.$inferSelect)[] = [];
   for (const item of resolvedPayments.payments) {
+    // T3.6: an UzQR payment closes the receipt only with a confirmed (paid) intent, used once.
+    if (item.method === 'uzqr') {
+      consumeUzqrPaymentInTxSync(session.internalGetSqlite(), {
+        organizationId: input.organizationId,
+        providerRef: item.providerRef,
+        amount: item.amount,
+        saleId,
+        nowMs: input.nowMs,
+      });
+    }
     const paymentWrite = insertFact(session, payments, {
       organizationId: input.organizationId,
       storeId: input.storeId,
@@ -849,6 +895,7 @@ export function completeSaleCoreInTxSync(
         values: {
           shiftId: input.activeShift.shift.id,
           shiftCashierSessionId: input.activeShift.activeSession.id,
+          registerId: input.activeShift.shift.registerId,
           type: 'sale_cash_in',
           amountDelta: item.tenderedAmount,
           sourceType: 'sale',
@@ -869,6 +916,7 @@ export function completeSaleCoreInTxSync(
           values: {
             shiftId: input.activeShift.shift.id,
             shiftCashierSessionId: input.activeShift.activeSession.id,
+            registerId: input.activeShift.shift.registerId,
             type: 'sale_change_out',
             amountDelta: negateMoney(item.changeAmount),
             sourceType: 'sale',
@@ -980,6 +1028,7 @@ export class SqliteSaleStore {
           organizationId: ctx.organizationId,
           storeId: ctx.storeId,
           deviceId: targetDeviceId,
+          registerId: currentRegisterId(),
         }),
       ),
     );
@@ -1100,6 +1149,7 @@ export class SqliteSaleStore {
         organizationId: ctx.organizationId,
         storeId: ctx.storeId,
         deviceId: ctx.uow.deviceId,
+        registerId: currentRegisterId(),
         actorUserId,
       });
 

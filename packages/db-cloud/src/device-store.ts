@@ -9,6 +9,7 @@ import {
 import { and, eq, isNull } from 'drizzle-orm';
 import type pg from 'pg';
 import { withPgTenantContext } from './connection.js';
+import type { GrowthGuard } from './tenant-store.js';
 import {
   cloudDevicePairingCodes,
   cloudDeviceTokens,
@@ -195,6 +196,8 @@ export class CloudDeviceStore {
     readonly appVersion: string;
     readonly idGen: IdGenerator;
     readonly nowMs: UnixMs;
+    /** T4.7: runs first INSIDE the pairing transaction (plan limit under the growth lock). */
+    readonly growthGuard?: GrowthGuard;
   }): Promise<{
     readonly deviceToken: string;
     readonly organizationId: UuidV7;
@@ -214,6 +217,7 @@ export class CloudDeviceStore {
     }
 
     return withPgTenantContext(this.pool, pairingLookup.organizationId, async (tx, client) => {
+      if (params.growthGuard) await params.growthGuard(client);
       // 1. Atomic concurrency guard on pairing code (D1)
       const updateRes = await client.query(
         `UPDATE cloud_device_pairing_codes

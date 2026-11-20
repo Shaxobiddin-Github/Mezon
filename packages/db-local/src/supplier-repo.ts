@@ -96,6 +96,7 @@ import {
   runConnectionProjectionMaintenance,
   runConnectionReadOnly,
 } from './uow.js';
+import { currentRegisterId } from './register-scope.js';
 import { insertAttr, insertFact, tombstoneAttr, updateAttr } from './writers.js';
 
 export interface SupplierRuntimeContext {
@@ -3515,12 +3516,14 @@ export class SqliteSupplierStore {
           organizationId: ctx.organizationId,
           storeId: ctx.storeId,
           deviceId: session.deviceId,
+          registerId: currentRegisterId(),
           actorUserId: validActorId,
         });
         const drawerBalance = getActiveShiftDrawerBalanceSync(session.db, sqlite, {
           organizationId: ctx.organizationId,
           storeId: ctx.storeId,
           deviceId: session.deviceId,
+          registerId: currentRegisterId(),
         });
         if (moneyToTiyin(drawerBalance) < amtTiyin) {
           throw new DomainError(
@@ -3541,6 +3544,7 @@ export class SqliteSupplierStore {
           values: {
             shiftId: activeShift.shift.id,
             shiftCashierSessionId: activeShift.activeSession.id,
+            registerId: activeShift.shift.registerId,
             type: 'supplier_payment_out',
             amountDelta: negateMoney(input.amount),
             sourceType: 'supplier_payment',

@@ -64,12 +64,28 @@ export interface HubPrinterServiceOptions {
   /** Test seam: inject a driver (e.g. `FakePrinterDriver`). Never passed by Hub/Electron runtime. */
   readonly printerDriverFactory?: (config: PrinterConfig) => PrinterDriver;
   readonly listWindowsPrintersFn?: () => Promise<readonly DiscoveredWindowsPrinter[]>;
+  /**
+   * T4.3 the printer of a LAN register. A register prints ONLY to its own printer: when it has
+   * none (null), its jobs are recorded as `disabled` instead of going to the hub's printer.
+   */
+  readonly resolveTerminalPrinter?: (terminalId: UuidV7) => TerminalPrinterDevice | null;
   readonly nowMs?: () => bigint;
   /** T3.4: fiscal block for a receipt (undefined → legacy non-fiscal receipt). */
   readonly resolveFiscalBlock?: (ref: {
     readonly saleId?: UuidV7;
     readonly returnId?: UuidV7;
   }) => ReceiptFiscalBlock | undefined;
+}
+
+export interface TerminalPrinterDevice {
+  readonly mode: PrinterConfig['mode'];
+  readonly printerName: string | null;
+  readonly host: string | null;
+  readonly port: number;
+  readonly timeoutMs: number;
+  readonly paperWidthMm: PrinterConfig['paperWidthMm'];
+  readonly encoding: PrinterConfig['encoding'];
+  readonly cashDrawerAutoOpen: boolean;
 }
 
 interface SendOutcome {
@@ -193,6 +209,7 @@ export class HubPrinterService {
   private readonly nowMs: () => bigint;
   private readonly resolveFiscalBlock: NonNullable<HubPrinterServiceOptions['resolveFiscalBlock']>;
   private readonly inFlight = new Map<string, Promise<unknown>>();
+  private readonly resolveTerminalPrinter: (terminalId: UuidV7) => TerminalPrinterDevice | null;
 
   constructor(options: HubPrinterServiceOptions) {
     this.printerStore = options.printerStore;
@@ -204,6 +221,15 @@ export class HubPrinterService {
     this.listWindowsPrintersFn = options.listWindowsPrintersFn ?? listInstalledWindowsPrinters;
     this.nowMs = options.nowMs ?? (() => BigInt(Date.now()));
     this.resolveFiscalBlock = options.resolveFiscalBlock ?? (() => undefined);
+    this.resolveTerminalPrinter = options.resolveTerminalPrinter ?? (() => null);
+  }
+
+  /** Hub settings, with the device part replaced by the register's own printer (T4.3). */
+  private configFor(base: PrinterConfig, terminalId: UuidV7 | null): PrinterConfig {
+    if (terminalId === null) return base;
+    const device = this.resolveTerminalPrinter(terminalId);
+    if (device === null) return { ...base, mode: 'disabled', cashDrawerAutoOpen: false };
+    return { ...base, ...device };
   }
 
   private createDriver(config: PrinterConfig): PrinterDriver {
@@ -333,9 +359,9 @@ export class HubPrinterService {
     return { printers: list.map((p) => ({ name: p.name, isDefault: p.isDefault })) };
   }
 
-  async testPrint(): Promise<TestPrintResponseDto> {
+  async testPrint(terminalId: UuidV7 | null = null): Promise<TestPrintResponseDto> {
     const settings = await this.printerStore.getPrinterSettings();
-    const config = toPrinterConfig(settings);
+    const config = this.configFor(toPrinterConfig(settings), terminalId);
     const target =
       config.mode === 'windows_raw'
         ? (config.printerName ?? '-')
@@ -372,6 +398,7 @@ export class HubPrinterService {
   async openCashDrawer(
     session: AuthenticatedSessionSnapshot,
     body: OpenCashDrawerRequestDto,
+    terminalId: UuidV7 | null = null,
   ): Promise<{
     readonly response: OpenCashDrawerResponseDto;
     readonly overrideApprovedByUserId: UuidV7 | null;
@@ -396,7 +423,10 @@ export class HubPrinterService {
         const supervisor = await this.authService.verifySupervisorPin(body.override);
         overrideApprovedByUserId = supervisor.id;
       }
-      const config = toPrinterConfig(await this.printerStore.getPrinterSettings());
+      const config = this.configFor(
+        toPrinterConfig(await this.printerStore.getPrinterSettings()),
+        terminalId,
+      );
       const current = await this.shiftStore.getCurrentShift();
       const out = await this.send(config, encodeCashDrawerPulse(0), 'Guzar pul yashigi');
       const saved = await this.printerStore.recordCashDrawerEvent({
@@ -423,6 +453,7 @@ export class HubPrinterService {
     readonly documentId: UuidV7;
     readonly session: AuthenticatedSessionSnapshot;
     readonly body: PrintDocumentRequestDto;
+    readonly terminalId: UuidV7 | null;
     readonly jobTitle: string;
     readonly build: (ctx: {
       readonly config: PrinterConfig;
@@ -438,7 +469,7 @@ export class HubPrinterService {
         return { printRecord: toReceiptPrintDto(existing), idempotentReplay: true };
       }
       const settings = await this.printerStore.getPrinterSettings();
-      const config = toPrinterConfig(settings);
+      const config = this.configFor(toPrinterConfig(settings), params.terminalId);
       const history = await this.printerStore.getReceiptPrintHistorySummary(
         params.documentType,
         params.documentId,
@@ -483,6 +514,7 @@ export class HubPrinterService {
     saleIdRaw: string,
     session: AuthenticatedSessionSnapshot,
     body: PrintDocumentRequestDto,
+    terminalId: UuidV7 | null = null,
   ): Promise<PrintDocumentResponseDto> {
     const saleId = parseUuidV7(saleIdRaw);
     const sale = await this.saleStore.getSaleById(saleId);
@@ -494,6 +526,7 @@ export class HubPrinterService {
       documentId: saleId,
       session,
       body,
+      terminalId,
       jobTitle: `Guzar chek ${sale.receiptCode}`,
       build: async ({ config, storeTimezone, copyNumber, isReprint }) => {
         const labels = await this.printerStore.getReceiptLabels({
@@ -561,6 +594,7 @@ export class HubPrinterService {
     returnIdRaw: string,
     session: AuthenticatedSessionSnapshot,
     body: PrintDocumentRequestDto,
+    terminalId: UuidV7 | null = null,
   ): Promise<PrintDocumentResponseDto> {
     const returnId = parseUuidV7(returnIdRaw);
     const ret = await this.returnStore.getReturnById(returnId);
@@ -573,6 +607,7 @@ export class HubPrinterService {
       documentId: returnId,
       session,
       body,
+      terminalId,
       jobTitle: `Guzar qaytarish ${ret.returnCode}`,
       build: async ({ config, storeTimezone, copyNumber, isReprint }) => {
         const labels = await this.printerStore.getReceiptLabels({
@@ -622,6 +657,7 @@ export class HubPrinterService {
     shiftIdRaw: string,
     session: AuthenticatedSessionSnapshot,
     body: PrintDocumentRequestDto,
+    terminalId: UuidV7 | null = null,
   ): Promise<PrintDocumentResponseDto> {
     const shiftId = parseUuidV7(shiftIdRaw);
     const detail = await this.shiftStore.getShiftDetail(shiftId);
@@ -644,6 +680,7 @@ export class HubPrinterService {
       documentId: shiftId,
       session,
       body,
+      terminalId,
       jobTitle: `Guzar smena ${detail.shift.shiftCode}`,
       build: async ({ config, storeTimezone, copyNumber, isReprint }) => {
         const labels = await this.printerStore.getReceiptLabels({

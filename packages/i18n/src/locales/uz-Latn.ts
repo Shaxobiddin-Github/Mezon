@@ -531,6 +531,48 @@ export const UZ_LATN_MESSAGES = {
   'error.FISCAL_BLOCKED': 'Savdo fiskal holat sababli bloklandi.',
   'error.FISCALIZED_SALE_CANNOT_VOID':
     'Fiskallashgan (yoki yuborilgan) chekni bekor qilib boʻlmaydi — qaytarish qiling.',
+
+  // T4.7 Licence
+  'admin.licence.title': 'Tarif',
+  'admin.licence.plan.start': 'Start',
+  'admin.licence.plan.business': 'Business',
+  'admin.licence.plan.pro': 'Pro',
+  'admin.licence.trial': 'Bepul sinov davri: {days} kun qoldi',
+  'admin.licence.active': '{plan} tarifi: {days} kun qoldi',
+  'admin.licence.grace':
+    "{plan} tarifi tugadi. {days} kun ichida to'lang, keyin yangi do'kon va kassa qo'shib bo'lmaydi.",
+  'admin.licence.expired':
+    "Tarif muddati tugagan. Savdo davom etadi, lekin yangi do'kon va kassa qo'shib bo'lmaydi.",
+  'admin.licence.invalid': "Litsenziya fayli tekshiruvdan o'tmadi. Platforma bilan bog'laning.",
+  'admin.licence.usage': "Do'konlar: {stores} / {maxStores}, kassalar: {devices} / {maxDevices}",
+  'admin.licence.unlimited': 'cheksiz',
+  'admin.licence.invoice': '{period}: {amount} — {status}',
+  'admin.licence.invoice.issued': "to'lanmagan",
+  'admin.licence.invoice.paid': "to'langan",
+  'admin.licence.invoice.void': 'bekor qilingan',
+
+  // T4.7 POS licence banner
+  'pos.licence.endsSoon': 'Tarif {days} kundan keyin tugaydi. Egasiga ayting.',
+  'pos.licence.grace':
+    "Tarif tugadi: {days} kun ichida to'lanmasa, yangi kassa qo'shib bo'lmaydi. Savdo davom etadi.",
+  'pos.licence.expired': 'Tarif muddati tugagan. Savdo davom etadi; egasiga ayting.',
+  'pos.licence.invalid': "Litsenziya fayli tekshiruvdan o'tmadi. Egasiga ayting.",
+  // T4.8 POS update banner
+  'pos.update.ready': "Yangi versiya {version} yuklab olindi. Qachon o'rnatilsin?",
+  'pos.update.now': 'Hozir',
+  'pos.update.shiftClose': 'Smena yopilganda',
+  'pos.update.tonight': 'Soat 22:00 da',
+  'pos.update.cancel': 'Bekor qilish',
+  'pos.update.waiting.open_receipt':
+    'Yangilanish {version}: ochiq chek yopilishi kutilmoqda. Chek buzilmaydi.',
+  'pos.update.waiting.open_shift': "Yangilanish {version}: smena yopilgach o'rnatiladi.",
+  'pos.update.waiting.not_yet': "Yangilanish {version}: {time} da o'rnatiladi.",
+  'pos.update.waiting.hub_unavailable':
+    'Yangilanish {version}: kassa xizmati javob bermayapti, kutilmoqda.',
+  'pos.update.waiting.pending': "Yangilanish {version} o'rnatishga tayyorlanmoqda.",
+  'pos.update.installing':
+    "Yangilanish o'rnatilmoqda. Dastur bir necha daqiqada o'zi qayta ochiladi.",
+  'pos.update.error': "Yangilanishni yuklab bo'lmadi. Keyinroq yana urinib ko'riladi.",
 } as const;
 
 export type I18nKey = keyof typeof UZ_LATN_MESSAGES;
