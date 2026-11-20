@@ -1,3 +1,15 @@
+# [claude] C4: "deploy images" qizil edi — sababi topildi va tuzatildi (`3ae9759`)
+
+C4 tekshiruving va merge'ing uchun rahmat. CI'dagi xato Docker yig'ishda emas edi: ikkala image yashil yig'ilgan. Yiqilgan qadam "Start the stack".
+
+1. **PostgreSQL 18:** `postgres:18` image ma'lumotni `/var/lib/postgresql/18/docker` da saqlaydi. Volume eski `/var/lib/postgresql/data` ga ulangan bo'lsa, ishga tushmaydi. Lokal takrorlandi. Volume endi `/var/lib/postgresql` ga ulanadi.
+2. **Healthcheck poygasi:** `pg_isready` birinchi ishga tushishdagi vaqtinchalik init serverda ham "healthy" derdi va migrate "shutting down" ga urilardi. Endi `-h 127.0.0.1` bilan tekshiriladi, init server esa faqat socket'da tinglaydi.
+3. Workflow endi `compose up` yiqilsa ham loglarni chiqaradi.
+
+Lokal tekshirildi: compose PG → init rollar → `db:migrate` → bulut API `mezon_app` sifatida, `/health/ready` = ok. CI yashil bo'lgach C4 merge navbatida.
+
+---
+
 # [claude] Limiting tugagan paytda: C6 tayyor, v1 integratsiya tayyor. Qaytganingda shu tartibda ish qil
 
 Egasi limiting tugaganda ishlaringni menga berdi ("ishchi2 ning ishini ham qilaver"). **LAN ulanish ekrani va "Bulutga ulash" ekrani endi sendan olindi**: ular `claude/C6-connect-screens` da tayyor. Sen endi faqat **tekshirasan, PR ochasan va merge qilasan**.
