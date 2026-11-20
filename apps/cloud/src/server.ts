@@ -30,7 +30,10 @@ import {
 import {
   AdminReadStore,
   CloudTelegramStore,
+  CloudLicenceStore,
   CloudAuthStore,
+  CloudCabinetStore,
+  CloudEventWriter,
   CloudDeviceStore,
   type CloudParkedEventRecord,
   CloudSyncParkedStore,
@@ -42,11 +45,16 @@ import {
   type VerifiedDeviceContext,
   assertNonSuperuserNonBypassRls,
 } from '@mezon/db-cloud';
-import { registerAdminRoutes } from './admin-routes.js';
+import { createRequireAdminAuth, registerAdminRoutes } from './admin-routes.js';
 import { isTelegramEnabled } from './config.js';
 import { TelegramBotService } from './telegram/bot-service.js';
 import { TelegramScheduler } from './telegram/scheduler.js';
 import { registerTelegramRoutes } from './telegram-routes.js';
+import { CloudLicenceService, PlanLimitError } from './licence-service.js';
+import { planLimitReply, registerLicenceRoutes } from './licence-routes.js';
+import { PRODUCTION_TRUSTED_LICENCE_KEYS, type TrustedLicenceKey } from '@mezon/licensing';
+import { CloudCabinetService } from './cabinet-service.js';
+import { registerCabinetRoutes } from './cabinet-routes.js';
 import {
   MIN_CLIENT_VERSION,
   SyncPushRequestSchema,
@@ -93,6 +101,8 @@ export interface BuildServerOptions {
   readonly adminStore?: AdminReadStore;
   /** T2.8: injected in tests (FakeTelegramClient); production builds HttpTelegramClient. */
   readonly telegramClient?: TelegramClient;
+  /** T4.7: licence signing public keys (tests inject a test key; production list is empty until the owner provides one). */
+  readonly trustedLicenceKeys?: readonly TrustedLicenceKey[];
   readonly syncPullStore?: CloudSyncPullStore;
   readonly syncParkedStore?: CloudSyncParkedStore;
   readonly idGen?: { nextId(): UuidV7 };
@@ -142,6 +152,11 @@ export async function buildCloudServer(options: BuildServerOptions): Promise<Fas
   });
   const idGen = options.idGen ?? defaultIdGen;
   const clock = options.clock ?? { nowMs: () => unixMsFromBigInt(BigInt(Date.now())) };
+  const licenceStore = new CloudLicenceStore(conn.pool, idGen);
+  const licenceService = new CloudLicenceService(
+    licenceStore,
+    options.trustedLicenceKeys ?? PRODUCTION_TRUSTED_LICENCE_KEYS,
+  );
 
   const app = Fastify({
     logger: {
@@ -520,13 +535,21 @@ export async function buildCloudServer(options: BuildServerOptions): Promise<Fas
     const storeId = idGen.nextId();
     const nowMs = clock.nowMs();
 
-    const created = await tenantStore.createStore({
-      storeId,
-      organizationId: auth.org,
-      name,
-      code,
-      nowMs,
-    });
+    // T4.7: the plan limits growth (never sales). Checked inside the insert transaction.
+    let created: Awaited<ReturnType<typeof tenantStore.createStore>>;
+    try {
+      created = await tenantStore.createStore({
+        storeId,
+        organizationId: auth.org,
+        name,
+        code,
+        nowMs,
+        growthGuard: await licenceService.growthGuard(auth.org, 'stores', nowMs),
+      });
+    } catch (err) {
+      if (err instanceof PlanLimitError) return planLimitReply(reply, err);
+      throw err;
+    }
 
     const dto: CloudStoreDto = {
       id: created.id,
@@ -629,6 +652,13 @@ export async function buildCloudServer(options: BuildServerOptions): Promise<Fas
       const nowMs = clock.nowMs();
 
       try {
+        await licenceService.assertCanAdd(auth.org, 'devices', nowMs);
+      } catch (err) {
+        if (err instanceof PlanLimitError) return planLimitReply(reply, err);
+        throw err;
+      }
+
+      try {
         const created = await deviceStore.createPairingCode({
           organizationId: auth.org,
           storeId: parseUuidV7(storeId),
@@ -702,6 +732,8 @@ export async function buildCloudServer(options: BuildServerOptions): Promise<Fas
         });
       }
 
+      // T4.7: authoritative device limit at pairing time (a code may predate the limit), checked
+      // inside the pairing transaction under the organization's growth lock.
       try {
         const paired = await deviceStore.pairDevice({
           pairingLookup: lookup,
@@ -710,6 +742,7 @@ export async function buildCloudServer(options: BuildServerOptions): Promise<Fas
           appVersion,
           idGen,
           nowMs,
+          growthGuard: await licenceService.growthGuard(lookup.organizationId, 'devices', nowMs),
         });
 
         const response: CloudPairDeviceResponseDto = {
@@ -722,6 +755,7 @@ export async function buildCloudServer(options: BuildServerOptions): Promise<Fas
 
         return reply.code(201).send(response);
       } catch (err) {
+        if (err instanceof PlanLimitError) return planLimitReply(reply, err);
         if (err instanceof DomainError) {
           if (err.code === 'PAIRING_ALREADY_USED') {
             return reply.code(409).send({
@@ -936,6 +970,20 @@ export async function buildCloudServer(options: BuildServerOptions): Promise<Fas
     });
   }
   app.decorate('telegramScheduler', telegramScheduler);
+  await registerLicenceRoutes(app, {
+    jwtService,
+    service: licenceService,
+    store: licenceStore,
+    clock,
+    requireDevice: async (req, reply) => {
+      try {
+        const r = await requireDeviceAuth(req, reply);
+        return { organizationId: r.device.organizationId };
+      } catch {
+        return null;
+      }
+    },
+  });
   await registerTelegramRoutes(app, {
     config,
     jwtService,
@@ -951,6 +999,20 @@ export async function buildCloudServer(options: BuildServerOptions): Promise<Fas
     authStore,
     adminStore,
     clock,
+  });
+  // T2.7b: cabinet writes go through the cloud event writer (ordinary sync events).
+  const cabinetStore = new CloudCabinetStore(conn.pool);
+  registerCabinetRoutes(app, {
+    requireAdminAuth: createRequireAdminAuth(jwtService),
+    store: cabinetStore,
+    deviceStore,
+    clock,
+    service: new CloudCabinetService({
+      store: cabinetStore,
+      writer: new CloudEventWriter(conn.pool, syncPushStore, idGen),
+      idGen,
+      clock,
+    }),
   });
   // T2.6: parked push events of the calling hub's store (device token). View, retry, acknowledge.
   const toParkedDto = (r: CloudParkedEventRecord): CloudParkedEventDto => ({

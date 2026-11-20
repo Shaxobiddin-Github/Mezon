@@ -90,8 +90,24 @@ export class HubLanService {
       readonly getOrganizationId: () => UuidV7 | null;
       readonly nowMs: () => UnixMs;
       readonly nextId: () => UuidV7;
+      /** T4.7: active terminals the licence allows (null = no limit). */
+      readonly terminalLimit?: () => Promise<{
+        readonly maxTerminals: number | null;
+        readonly state: string;
+      }>;
     },
   ) {}
+
+  private async maxTerminals(): Promise<number | null> {
+    return this.o.terminalLimit ? (await this.o.terminalLimit()).maxTerminals : null;
+  }
+
+  private planLimit(max: number): DomainError {
+    return new DomainError(
+      'PLAN_LIMIT_REACHED',
+      `The plan allows ${max} additional register(s); revoke one or upgrade the plan`,
+    );
+  }
 
   private get sqlite() {
     return this.o.connection.sqlite;
@@ -155,6 +171,13 @@ export class HubLanService {
     readonly expiresAtMs: string;
     readonly fingerprint256: string;
   }> {
+    const max = await this.maxTerminals();
+    if (max !== null) {
+      const active = listLanTerminalsSync(this.sqlite, this.org()).filter(
+        (t) => t.status === 'active',
+      ).length;
+      if (active >= max) throw this.planLimit(max);
+    }
     const org = this.org();
     const { fingerprint256 } = await this.tlsMaterial();
     const bytes = randomBytes(10);
@@ -188,6 +211,8 @@ export class HubLanService {
   }> {
     const org = this.org();
     const { fingerprint256 } = await this.tlsMaterial();
+    // Read before the transaction (async); the count itself is checked inside it.
+    const max = await this.maxTerminals();
     const nowMs = this.o.nowMs();
     const active = listActiveLanPairingCodesSync(
       this.sqlite,
@@ -202,15 +227,18 @@ export class HubLanService {
       }
       const terminalId = this.o.nextId();
       const terminalKey = randomBytes(32).toString('base64url');
-      const ok = consumeLanPairingCodeAndAddTerminalSync(this.sqlite, {
+      const res = consumeLanPairingCodeAndAddTerminalSync(this.sqlite, {
         codeId: c.id,
         organizationId: org,
         terminalId,
         name: input.terminalName,
         keyHash: sha256(terminalKey),
         nowMs,
+        maxActiveTerminals: max,
       });
-      if (!ok) break; // a concurrent pairing used this code first
+      // The plan is full: the right code, so no attempt is burnt and the code stays usable.
+      if (res === 'limit') throw this.planLimit(max ?? 0);
+      if (res === 'used') break; // a concurrent pairing used this code first
       return {
         terminalId,
         terminalKey,

@@ -27,6 +27,19 @@ module.exports = {
       },
     },
     {
+      name: 'licensing-src-imports-only-domain-and-rules',
+      comment:
+        'packages/licensing (T4.7) is pure: it imports only itself, packages/domain and packages/rules (canonical JSON); Ed25519 is injected',
+      severity: 'error',
+      from: {
+        path: '^packages/licensing/src/',
+        pathNot: '\\.test\\.ts$',
+      },
+      to: {
+        pathNot: '^(packages/licensing/src/|packages/domain/|packages/rules/)',
+      },
+    },
+    {
       name: 'rules-src-imports-only-domain',
       comment:
         'packages/rules source files can only import within packages/rules/src or from packages/domain',
@@ -157,13 +170,13 @@ module.exports = {
       },
       to: {
         pathNot:
-          '^(apps/hub/src/|packages/(domain|contracts|db-local|drivers|sync|rules)/|node_modules/(\\.pnpm/)?(fastify|pino|@node-rs/argon2|@node-rs\\+argon2|zod|exceljs)@|(node:)?(crypto|fs|os|path|stream)$)',
+          '^(apps/hub/src/|packages/(domain|contracts|db-local|drivers|sync|rules|licensing)/|node_modules/(\\.pnpm/)?(fastify|pino|@node-rs/argon2|@node-rs\\+argon2|zod|exceljs)@|(node:)?(crypto|fs|os|path|stream)$)',
       },
     },
     {
       name: 'desktop-src-imports',
       comment:
-        'apps/desktop source files can only import internal files, domain, contracts, drivers, electron, pino, koffi, and safe node builtins (never db-local, db-cloud, hub, or pos)',
+        'apps/desktop source files can only import internal files, domain, contracts, drivers, electron, pino, koffi, and safe node builtins (never db-local, db-cloud, hub, or pos). T4.8: crypto (update signature / SHA-256) and child_process (starting the verified installer) are allowed for the updater.',
       severity: 'error',
       from: {
         path: '^apps/desktop/src/',
@@ -171,7 +184,7 @@ module.exports = {
       },
       to: {
         pathNot:
-          '^(apps/desktop/src/|packages/(domain|contracts|drivers)/|electron$|node_modules/(\\.pnpm/)?(electron|pino|koffi)@|(node:)?(events|fs|fs/promises|os|path|crypto|http|https)$)',
+          '^(apps/desktop/src/|packages/(domain|contracts|drivers)/|electron$|node_modules/(\\.pnpm/)?(electron|pino|koffi)@|(node:)?(events|fs|fs/promises|os|path|crypto|child_process|http|https)$)',
       },
     },
     {

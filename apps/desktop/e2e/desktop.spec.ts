@@ -236,13 +236,18 @@ test('Playwright unfused Electron against identical app.asar: app://mezon, CSP, 
       hasRequire: false,
       hasIpcRenderer: false,
       cspInlineExecuted: false,
+      // T4.8 update bridge and v1 LAN terminal bridge; nothing else is exposed.
       bridgeKeys: [
+        'cancelUpdate',
         'getHubState',
         'getTerminalInfo',
+        'getUpdateState',
         'leaveTerminal',
         'onHubState',
+        'onUpdateState',
         'pairAsTerminal',
         'relaunchApp',
+        'scheduleUpdate',
       ],
     });
 

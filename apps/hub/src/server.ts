@@ -1,3 +1,4 @@
+import { HubUpdateGate, registerUpdateGate } from './update-gate.js';
 import path from 'node:path';
 import {
   type LocalSqliteConnection,
@@ -87,6 +88,9 @@ import { HubSyncPushWorker } from './sync-push-worker.js';
 import { PRODUCTION_TRUSTED_RULE_KEYS, type TrustedRuleKey } from '@mezon/rules';
 import { registerRulesRoutes } from './rules-routes.js';
 import { HubRulesService, nodeEd25519RulesVerifier } from './rules-service.js';
+import { HubLicenceService } from './licence-service.js';
+import { registerLicenceRoutes } from './licence-routes.js';
+import { PRODUCTION_TRUSTED_LICENCE_KEYS, type TrustedLicenceKey } from '@mezon/licensing';
 import { HubSyncPullService } from './sync-pull-service.js';
 import { HubSyncPullWorker } from './sync-pull-worker.js';
 import { registerFiscalRoutes } from './fiscal-routes.js';
@@ -143,6 +147,8 @@ export interface CreateHubServerOptions {
    * `PRODUCTION_TRUSTED_RULE_KEYS`; passing this under NODE_ENV=production throws.
    */
   readonly trustedRuleKeys?: readonly TrustedRuleKey[];
+  /** TEST/DI ONLY (T4.7): trusted licence public keys; production uses the built-in list. */
+  readonly trustedLicenceKeys?: readonly TrustedLicenceKey[];
   /**
    * T3.3 fiscal driver (DI). Only `FakeFiscalDriver` exists until T3.5 (§3.3); the default is a fake
    * driver whose ledger lives next to the database so it survives restarts.
@@ -200,6 +206,8 @@ export interface HubServer {
   readonly reportStore: SqliteReportStore;
   readonly reportService: HubReportService;
   readonly backupService: SqliteBackupService;
+  /** T4.8: closed while an update is prepared; refuses starting new receipt work. */
+  readonly updateGate: HubUpdateGate;
   readonly importCache: CatalogImportCache;
   readonly cloudStore: SqliteCloudStore;
   readonly cloudService: HubCloudService;
@@ -216,6 +224,11 @@ export interface HubServer {
 }
 
 export async function createHubServer(options: CreateHubServerOptions): Promise<HubServer> {
+  if (options.trustedLicenceKeys !== undefined && process.env.NODE_ENV === 'production') {
+    throw new Error(
+      'trustedLicenceKeys is a test/DI-only option and must not be set in production',
+    );
+  }
   if (options.trustedRuleKeys !== undefined && process.env.NODE_ENV === 'production') {
     throw new Error('trustedRuleKeys is a test/DI-only option and must not be set in production');
   }
@@ -565,6 +578,16 @@ export async function createHubServer(options: CreateHubServerOptions): Promise<
       fetchFn: options.cloudFetchFn,
     });
 
+    const licenceService = new HubLicenceService({
+      cloud: cloudService,
+      cachePath: path.join(path.dirname(options.dbPath), 'licence-cache.json'),
+      trustedKeys: options.trustedLicenceKeys ?? PRODUCTION_TRUSTED_LICENCE_KEYS,
+      verifier: nodeEd25519RulesVerifier,
+      nowMs: () => BigInt(clock.now()),
+      fetchFn: options.cloudFetchFn,
+      logger,
+    });
+
     const outboxStore = new SqliteOutboxSyncStore(connection);
     const pullService = new HubSyncPullService(connection, idGen);
     const pullWorker = new HubSyncPullWorker({
@@ -606,6 +629,7 @@ export async function createHubServer(options: CreateHubServerOptions): Promise<
       getOrganizationId: () => store.getActiveRuntimeContext()?.config.organizationId ?? null,
       nowMs: () => clock.now(),
       nextId: () => idGen.nextId(),
+      terminalLimit: () => licenceService.lanTerminalLimit(),
     });
     lanServiceRef = lanService;
     let lanListener: LanListener | null = null;
@@ -713,6 +737,9 @@ export async function createHubServer(options: CreateHubServerOptions): Promise<
       connection,
       () => store.getActiveRuntimeContext()?.config.organizationId ?? null,
     );
+    registerLicenceRoutes(app, authService, licenceService);
+    const updateGate = new HubUpdateGate();
+    registerUpdateGate(app, updateGate);
     registerSyncConflictRoutes(
       app,
       authService,
@@ -777,6 +804,7 @@ export async function createHubServer(options: CreateHubServerOptions): Promise<
       reportStore,
       reportService,
       backupService,
+      updateGate,
       importCache,
       cloudStore,
       cloudService,
@@ -801,6 +829,7 @@ export async function createHubServer(options: CreateHubServerOptions): Promise<
         pushWorker.start();
         pullWorker.start();
         fiscalWorker.start();
+        licenceService.start();
         if (lanPort !== undefined && lanService.hasActiveTerminals()) {
           // Paired terminals must reach the hub after a restart; a busy port must not stop the hub.
           await startLan({ port: lanPort }).catch((err: unknown) => {
@@ -821,6 +850,7 @@ export async function createHubServer(options: CreateHubServerOptions): Promise<
           pullWorker.stop();
           fiscalWorker.stop();
           if (lanListener !== null) await lanListener.close();
+          licenceService.stop();
           await app.close();
         } finally {
           connection.close();

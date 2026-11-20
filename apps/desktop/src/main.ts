@@ -29,6 +29,17 @@ import {
   resolveAppProtocolFilePath,
 } from './security-policy.js';
 import {
+  DEFAULT_UPDATE_MANIFEST_URL,
+  PRODUCTION_TRUSTED_UPDATE_KEYS,
+  nodeEd25519UpdateVerifier,
+} from './update/update-manifest.js';
+import { UpdateManager, type UpdateSchedule, type UpdateState } from './update/update-manager.js';
+import {
+  downloadInstaller,
+  fetchUpdateEnvelope,
+  sha256File,
+  startInstallerDetached,
+} from './update/update-node-ports.js';
   type TerminalConfig,
   deleteTerminalConfig,
   isValidLanHost,
@@ -82,6 +93,9 @@ const terminalConfigPath = path.join(layoutPaths.userDataDir, 'terminal.json');
 let currentHubBaseUrl: string | null = null;
 let hubShutdownCompleted = false;
 let shutdownInProgress: Promise<void> | null = null;
+let updateManager: UpdateManager | null = null;
+const UPDATE_CHECK_EVERY_MS = 6 * 60 * 60_000;
+const UPDATE_TICK_EVERY_MS = 60_000;
 
 function focusMainWindow(): void {
   if (mainWindow === null || mainWindow.isDestroyed()) {
@@ -393,6 +407,20 @@ if (singleInstanceLockAcquired) {
           { hubHost: terminalConfig.hub.host, hubPort: terminalConfig.hub.port },
           'desktop_terminal_mode',
         );
+        // v1: a LAN terminal has no local hub, so it cannot check for an open receipt before an
+        // install. Automatic update stays off here; a terminal is updated with the installer.
+        const terminalUpdateState: UpdateState = {
+          phase: 'disabled',
+          currentVersion: app.getVersion(),
+          version: null,
+          notes: null,
+          schedule: null,
+          waitReason: null,
+          error: null,
+        };
+        ipcMain.handle('mezon:update-get-state', (): UpdateState => terminalUpdateState);
+        ipcMain.handle('mezon:update-schedule', () => false);
+        ipcMain.handle('mezon:update-cancel', () => undefined);
         mainWindow = createMainWindow();
         await mainWindow.loadURL(APP_HOME_URL);
         if (process.env['MEZON_E2E'] !== '1') {
@@ -465,6 +493,70 @@ if (singleInstanceLockAcquired) {
 
       supervisor.start();
       await initialHubReadyPromise;
+
+      // T4.8: signed automatic update. Off until the owner's update key is built in and a
+      // manifest URL is configured (MEZON_UPDATE_MANIFEST_URL).
+      const manifestUrl = process.env['MEZON_UPDATE_MANIFEST_URL'] ?? DEFAULT_UPDATE_MANIFEST_URL;
+      const hub = supervisor;
+      updateManager = new UpdateManager({
+        dir: path.join(layoutPaths.userDataDir, 'updates'),
+        currentVersion: app.getVersion(),
+        platform: `${process.platform}-${process.arch}`,
+        channel: 'stable',
+        enabled:
+          app.isPackaged &&
+          PRODUCTION_TRUSTED_UPDATE_KEYS.length > 0 &&
+          manifestUrl.startsWith('https://'),
+        trustedKeys: PRODUCTION_TRUSTED_UPDATE_KEYS,
+        verifier: nodeEd25519UpdateVerifier,
+        ports: {
+          fetchEnvelope: () => fetchUpdateEnvelope(manifestUrl),
+          download: (url, dest, maxBytes) => downloadInstaller(url, dest, maxBytes),
+          sha256File,
+          // A backup of a large database can take minutes: wait for it, so a slow backup is never
+          // mistaken for "no answer" (which would start another backup on the next tick).
+          prepare: (version, backup) =>
+            hub.prepareUpdate(version, backup, backup ? 10 * 60_000 : 30_000),
+          launchInstaller: async (installerPath, expected) => {
+            desktopLog.logger.info({ installerPath }, 'desktop_update_installing');
+            await performCleanShutdown('update-install');
+            // B3: the very last check, after the hub is stopped and right before the start.
+            const actual = await sha256File(installerPath);
+            if (
+              actual.sha256 !== expected.sha256 ||
+              String(actual.sizeBytes) !== expected.sizeBytes
+            ) {
+              await fs.rm(installerPath, { force: true });
+              app.relaunch();
+              app.quit();
+              throw new Error('Installer changed on disk before start; removed, app restarted');
+            }
+            startInstallerDetached(installerPath);
+            app.quit();
+          },
+          cancelPrepared: () => hub.cancelPreparedUpdate(),
+          nowMs: () => BigInt(Date.now()),
+        },
+        onState: (state: UpdateState) => {
+          desktopLog.logger.info(
+            { phase: state.phase, version: state.version, waitReason: state.waitReason },
+            'desktop_update_state',
+          );
+          if (mainWindow !== null && !mainWindow.isDestroyed()) {
+            mainWindow.webContents.send('mezon:update-state', state);
+          }
+        },
+      });
+      const updates = updateManager;
+      ipcMain.handle('mezon:update-get-state', (): UpdateState => updates.getState());
+      ipcMain.handle('mezon:update-schedule', (_event, choice: unknown) =>
+        updates.schedule(choice as UpdateSchedule),
+      );
+      ipcMain.handle('mezon:update-cancel', () => updates.cancelSchedule());
+      await updates.init();
+      void updates.check();
+      setInterval(() => void updates.check(), UPDATE_CHECK_EVERY_MS).unref();
+      setInterval(() => void updates.tick(), UPDATE_TICK_EVERY_MS).unref();
 
       mainWindow = createMainWindow();
       await mainWindow.loadURL(APP_HOME_URL);
