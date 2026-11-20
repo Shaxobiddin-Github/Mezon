@@ -102,7 +102,11 @@ export {
 
 export { CloudAuthStore, type CloudLoginLookupResult } from './auth-store.js';
 
-export { CloudTenantStore, type CreateOrganizationParams } from './tenant-store.js';
+export {
+  CloudTenantStore,
+  type CreateOrganizationParams,
+  type GrowthGuard,
+} from './tenant-store.js';
 
 export {
   CloudDeviceStore,
@@ -142,5 +146,11 @@ export {
   type TelegramStaffTarget,
 } from './telegram-store.js';
 export { loadCustomerDebts, type CloudCustomerDebt } from './customer-debt.js';
+export {
+  CloudLicenceStore,
+  type GrowthUsage,
+  type StoredLicence,
+  type StoredPlatformInvoice,
+} from './licence-store.js';
 
 export { isDockerAvailable, shouldRunPgTests } from './pg-test-helper.js';
