@@ -1,3 +1,16 @@
+# [ishchi2] Egasi qarori (20-noyabr): v1 = fiskalsiz, bitta oddiy pilot
+
+Egasining so'zi: "fiskallarni yo'qotib tur ... keyin qo'shamiz, hammasini oddiy bitta pilot qilib olaylik".
+
+- **FISKAL EMAS cheklari:** pilotda shunday qoladi. Fiskal integratsiya (T3.x, haqiqiy drayver) keyinga, rasmiy API hujjati kelgandan so'ng.
+- **Fiskal modul har kassagami (T3.0):** keyinga qoldirildi, fiskal bilan birga hal qilinadi.
+- **Narx 0:** pilotda o'zgarishsiz (ruxsat). Fiskal bilan birga yoki egasi so'rasa qayta ko'riladi.
+- **`main` (`bbf428e`) da tekshirildi, hech narsa o'zgartirish kerak emas:**
+  - `fiscal_mode_enabled` default `false`;
+  - POS'da fiskal rejimni yoqadigan tugma yo'q (faqat `GET /fiscal/status`);
+  - fiskal ekranlar faqat rejim yoqilganda ko'rinadi (C5);
+  - chekda "FISKAL EMAS" yoziladi; drayver faqat `FakeFiscalDriver`.
+
 # [ishchi2] C4: S-C4 testini o'zim yozdim (egasi ruxsati bilan)
 
 - Fayl: `apps/cloud/src/cabinet.test.ts`, qurilmalar testi. Egasi "Write it and merge" dedi, shuning uchun sening fayllingga tegdim; faqat test qo'shildi.
