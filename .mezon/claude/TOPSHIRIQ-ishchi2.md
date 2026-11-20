@@ -1,3 +1,67 @@
+# [claude] Limiting tugagan paytda: C6 tayyor, v1 integratsiya tayyor. Qaytganingda shu tartibda ish qil
+
+Egasi limiting tugaganda ishlaringni menga berdi ("ishchi2 ning ishini ham qilaver"). **LAN ulanish ekrani va "Bulutga ulash" ekrani endi sendan olindi**: ular `claude/C6-connect-screens` da tayyor. Sen endi faqat **tekshirasan, PR ochasan va merge qilasan**.
+
+## 1. Nima tayyor
+
+**`claude/C6-connect-screens`** (`1007305`, C5 ustida). Hisobot: `.mezon/claude/HISOBOT-C6.md`.
+
+Tarkibi:
+- POS'da "Ulanishlar" oynasi:
+  - bulutga ulash (faqat ega);
+  - "Kassa qo'shish": kod, kompyuter manzili va barmoq izi;
+  - ulangan kassalar ro'yxati va ularni bekor qilish.
+- Sozlash ekranida "Ikkinchi kassa sifatida ulanish". Desktop terminal rejimida ishlaydi: loopback proksi orqali, pinned TLS bilan; terminal kaliti renderer'ga chiqmaydi.
+- Hub: LAN tinglovchisi desktop'da **hech qachon ishga tushmas edi**. Endi talab bo'yicha ochiladi (port 47821), faol terminal bo'lsa ishga tushganda ham ochiladi.
+
+Tuzatilgan **ikki jiddiy xato**:
+- **X1.** Electron worker `safeStorage` bermas edi. Shu sababli bulut tokeni va LAN kaliti qayta ishga tushgandan keyin o'qilmay qolardi. Endi `hub-data-key.json` bor: kalit OS bilan o'ralgan.
+- **X2 (sening P3 ingdan).** `GET /carts` barcha kassalarning cheklarini qaytarardi, shuning uchun terminal hub'ning ochiq chekini olib, o'zida yopardi. Endi ro'yxat `terminal_id` bo'yicha filtrlanadi; test qo'shildi.
+
+**`claude/v1-integration`** (`2b2b5c9`): `main` + C2 → P2 → P3 → C4 → C5 → C6, barcha to'qnashuvlar hal qilingan. Hisobot: `.mezon/claude/V1-INTEGRATSIYA.md`.
+- P3 bulut migratsiyasi `0009_register_shifts` qilib qayta yaratildi. SQL bayt-bayt bir xil.
+- Terminal rejimida yangilanish IPC'si `disabled` qaytaradi.
+- Versiya 1.0.0; o'rnatuvchi nomi `Guzar-Setup-1.0.0-x64.exe`. `HUB_APP_VERSION` bulutga to'g'ri versiyani yuboradi.
+- `uow.test.ts` property testiga 120 soniyalik chegara berildi. To'liq parallel yugurishda 30 soniyadan oshib, ikki marta yiqildi; alohida 8.7 soniyada o'tadi.
+
+**Tekshiruv (integratsiyada):**
+- `MEZON_REQUIRE_PG_TESTS=1`: 1153 test; perf 17/17.
+- Lint, depcruise, `db:check`, prettier: yashil.
+- POS E2E: yashil.
+- Desktop `pack:dir` + E2E: yashil.
+- **Ikki nusxali haqiqiy sinov** (ikkita `app.asar`): kod → ulanish → qayta ishga tushish → terminalda smena va 1-chek. Hub hisobotida `Kassa 2` ko'rinadi.
+
+## 2. Sening vazifang (tartib bilan)
+
+1. **C6 ni tekshir. Toifa: chuqur** (LAN xavfsizligi, maxfiylar, kassa pul oqimi). Diqqat qaratadigan joylar:
+   - `apps/desktop/src/terminal/terminal-proxy.ts`:
+     - `Host` tekshiruvi;
+     - tashqaridan kelgan `x-mezon-*` sarlavhalarini olib tashlash;
+     - pin mismatch holatida bayt yuborilmasligi.
+   - `apps/desktop/src/data-key.ts`: buzilgan kalit faylida start to'xtaydi, jimgina yangi kalit yaratilmaydi.
+   - `main.ts` dagi `mezon:terminal-pair`: faqat `needsSetup = true` bo'lsa ulaydi.
+   - `lan-server.ts`: `OPTIONS` endi uzatiladi; CORS qarorini asosiy ilovaning xavfsizlik hook'i qiladi.
+   - `cart-repo.ts`, `listCarts`: filtr.
+   
+   O'z mutatsiyalaringni qil. Masalan:
+   - filtrni olib tashla → `multi-register` testi yiqilishi kerak;
+   - `Host` tekshiruvini olib tashla → proksi testi yiqilishi kerak;
+   - worker'da `dataKeyB64` e'tiborsiz qolsin → worker testi yiqilishi kerak.
+   
+   Natijani QABUL yoki QAYTARILDI deb shu faylga yoz.
+2. **PR'larni och** (base `main`), agar hali ochilmagan bo'lsa: C4, C5, C6. Merge navbati o'zgarmadi: **C2 (#34) → P2 (#32) → P3 (#33) → C4 → C5 → C6**. Har biri faqat QABUL va yashil CI bilan.
+3. **P3 ni merge qilishdan oldin** bulut migratsiyasini `0009` ga o'tkaz (C2 `0008_licences` ni egallagan). Eng oson yo'l `claude/v1-integration` dagi `packages/db-cloud/drizzle/` holatini olish. Har merge'dan keyin keyingi branch'ga `main` ni merge qil. To'qnashuvlarning yechimlari `V1-INTEGRATSIYA.md` jadvalida. Diqqat: "ikkalasini saqlash" usuli ikki joyda umumiy qatorni yo'qotdi (`main.ts` dagi `import {` va `admin/api-client.ts` dagi `}`). Ularni integratsiyadagidek tikla.
+4. **Muqobil yo'l:** egasi rozi bo'lsa, `claude/v1-integration` ni bitta "v1" PR qilib, bir marta tekshirish mumkin. Qaror egasida. Undan so'ra.
+5. **C4 dagi `deploy-images.yml`** faqat PR'da ishga tushadi. Ikkala image yig'ilishi va `/health/ready` yashil bo'lishi shart. Bu kompyuterda Docker yig'ishni tekshirib bo'lmadi: tarmoq juda sekin.
+
+## 3. Bilib qo'y
+
+- Chekni `id` bo'yicha o'zgartiradigan route'lar (`/carts/:id/...`) boshqa kassaning chekiga qarshi tekshirilmaydi. UI'dan bunga yo'l yo'q, chunki ro'yxat filtrlangan. Bu v2 ga qoldi.
+- Ega birinchi marta "Kassa qo'shish" ni bosganda Windows tarmoq ruxsatini so'raydi. Ekranda bu haqda maslahat bor.
+- Terminalda avtomatik yangilanish yo'q; u o'rnatuvchi bilan yangilanadi (`docs/v1/README.md`).
+
+---
+
 # [claude] Olindi: "v1 bayroqlari" (sen 2 soatdan ko'p jim edding) — `claude/C5-v1-flags`
 
 Qoidaga ko'ra boshlanmagan kichik ishingni oldim. **LAN ulanish ekrani va "Bulutga ulash" ekrani SENDA qoladi.**
