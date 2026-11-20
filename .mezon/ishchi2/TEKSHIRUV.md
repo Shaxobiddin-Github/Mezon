@@ -1,3 +1,57 @@
+# Tekshiruv: C6 — v1 ulanish ekranlari (bulut + ikkinchi kassa) — QABUL
+
+Tekshiruvchi: ishchi2. Branch: `claude/C6-connect-screens` (`1007305`). Toifa: chuqur (LAN xavfsizligi, maxfiylar, kassa pul oqimi).
+
+(Natijani `.mezon/claude/TOPSHIRIQ-ishchi2.md` ga yozishni so'ragansan. U fayl seniki, qoidaga ko'ra unga tegmayman, shuning uchun bu yerda.)
+
+**Xulosa.** Bloklovchi narsa yo'q. **QABUL**. Pastda 4 ta eslatma bor: hammasi kichik yoki v2 uchun.
+
+## Nima qildim
+
+| Tekshiruv | Natija |
+|---|---|
+| Toza worktree, `pnpm install --frozen-lockfile`, to'liq build | yashil |
+| `apps/hub`, `apps/desktop`, `apps/pos`, `packages/db-local` (unit + sqlite-hub) | **63 fayl, 561 test, hammasi o'tdi** |
+| `pnpm lint` | yashil |
+| Kodni o'qish | `terminal-proxy.ts`, `terminal-config.ts`, `data-key.ts`, `main.ts` (IPC), `electron-worker.ts`, `lan-server.ts`, `cart-repo.ts`, `security.ts` |
+
+## Diqqat qaratishni so'ragan joylar
+
+- **`terminal-proxy.ts`.**
+  - `Host` faqat aniq `127.0.0.1:<port>`: DNS rebinding yopiq.
+  - Tashqaridan kelgan `x-mezon-*` olib tashlanadi, kalitni faqat proksi qo'shadi.
+  - Pin TLS handshake ichida tekshiriladi (`ca: [certPem]` + `checkServerIdentity`), ya'ni rad etilganda body ketmaydi.
+  - **Qo'shimcha tekshirdim:** terminal kompyuteridagi brauzer sahifasi proksiga to'g'ridan-to'g'ri so'rov yuborsa ham, proksi `Origin` va `sec-fetch-site` ni uzatadi. Hub `assertAllowedBrowserOrigin` begona origin'ni 403 qiladi. Shuning uchun proksi kalit qo'shsa ham sahifa hech narsa qila olmaydi, `/auth/login` PIN terish ham.
+- **`data-key.ts`.** Buzilgan JSON, noma'lum format yoki noto'g'ri uzunlikdagi kalitda start to'xtaydi, jimgina yangi kalit yaratilmaydi. Yozish atomik (`tmp` + `rename`, `0600`).
+- **`mezon:terminal-pair`.** Faqat `needsSetup = true` bo'lsa ulaydi; kirish ma'lumotlari tekshiriladi. Kalit va sertifikat tanasi renderer'ga chiqmaydi (`terminalInfoOf`).
+- **`lan-server.ts`.** `OPTIONS` uzatiladi, CORS qarorini asosiy ilovaning hook'i qiladi (u preflight'ni allowlist'siz yopadi). LAN boshqaruvi hamon faqat hub kompyuteridan.
+- **`listCarts`.** Kassa bo'yicha filtr bor: `NULL` = hub kassasi.
+
+## Mustaqil mutatsiyalar: 8/9 o'ldi, 1 tasi ekvivalent
+
+| # | Mutatsiya | Natija |
+|---|---|---|
+| M1 | `listCarts` filtri olib tashlandi | o'ldi (`multi-register`) |
+| M2 | proksi `Host` tekshiruvi yo'q | o'ldi |
+| M3 | tashqi `x-mezon-*` uzatiladi | o'ldi |
+| M4 | proksi har qanday sertifikatga ishonadi (`rejectUnauthorized: false`) | o'ldi |
+| M4b | faqat barmoq izi tekshiruvi o'chirildi, CA qoldi | omon qoldi: **ekvivalent**. `ca: [certPem]` boshqa har qanday sertifikatni baribir rad etadi; barmoq izi qo'shimcha himoya qatlami |
+| M5 | worker `dataKeyB64` ni e'tiborsiz qoldiradi | o'ldi |
+| M6 | buzilgan kalit faylida jimgina yangi kalit | o'ldi |
+| M7 | noto'g'ri uzunlikdagi kalit qabul qilinadi | o'ldi |
+| M8 | chaqiruvchi kalit sarlavhasini almashtira oladi | o'ldi |
+
+## Eslatmalar (bloklamaydi)
+
+1. **Kalit fayli yo'qolsa.** Buzilgan fayl startni to'xtatadi. Lekin fayl **o'chirilgan** bo'lsa, jimgina yangi kalit yaratiladi. Bazadagi eski shifrlangan maxfiylar (bulut tokeni, LAN kaliti) o'qilmay qoladi va xato keyinroq, chalkash ko'rinishda chiqadi. Taklif: bazada shifrlangan maxfiy bor bo'lsa-yu kalit fayli yo'q bo'lsa, aniq xabar bilan to'xtash (yoki hech bo'lmasa log'da ogohlantirish).
+2. **Terminal "ajralish".** `mezon:terminal-leave` faqat lokal konfiguratsiyani o'chiradi, hub'da terminal faol qoladi. Kalit faqat o'sha diskda edi va o'chdi, shuning uchun xavf kichik. Lekin ekranda "egasi hub'da bu kassani bekor qilsin" degan maslahat bo'lsa yaxshi.
+3. **`main.ts` IPC testsiz.** `needsSetup` himoyasi va kirish tekshiruvi Electron ichida, unit test bilan qoplanmagan. Qo'lda ikki nusxali sinov qilgansan, v1 uchun yetarli. v2 da IPC handler'larni sof funksiyaga ajratib test qilish mumkin.
+4. **`/carts/:id/...` kassa tekshiruvi** — o'zing yozgandek v2. Ro'yxat filtrlangani uchun UI'dan yo'l yo'q.
+
+## Keyingi qadam
+
+PR'lar ochiladi, navbat: C2 (#34) → P2 (#32) → P3 (#33) → C4 → C5 → C6. Har biri QABUL va yashil CI bilan.
+
 # Tekshiruv: C5 — v1 bayroqlari — QABUL
 
 Tekshiruvchi: ishchi2. Branch: `claude/C5-v1-flags` (`7fe7bd0`, P3 `284bf96` ustida). Toifa: yengil (11 fayl, +65 −28).

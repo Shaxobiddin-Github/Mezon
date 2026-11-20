@@ -134,7 +134,12 @@ import {
   type ExcelImportCommitResponseDto,
   ExcelImportCommitResponseSchema,
 } from '@mezon/contracts';
-import type { z } from 'zod';
+import {
+  type HubCloudStatusDto,
+  HubCloudStatusSchema,
+  HubPairCloudRequestSchema,
+} from '@mezon/contracts';
+import { z } from 'zod';
 import { normalizeLoopbackHubBaseUrl } from '../bridge.js';
 
 export class HubApiError extends Error {
@@ -876,4 +881,91 @@ export class HubApiClient {
       responseSchema: ExcelImportCommitResponseSchema,
     });
   }
+
+  // --- v1 connections: cloud pairing (owner) and LAN terminals (owner/manager) ---
+
+  async getCloudStatus(): Promise<HubCloudStatusDto> {
+    return this.request({
+      method: 'GET',
+      path: '/cloud/status',
+      responseSchema: HubCloudStatusSchema,
+    });
+  }
+
+  async pairCloud(input: { cloudUrl: string; code: string }): Promise<CloudPairResult> {
+    const validated = HubPairCloudRequestSchema.parse(input);
+    return this.request({
+      method: 'POST',
+      path: '/cloud/pair',
+      body: validated,
+      responseSchema: CloudPairResultSchema,
+    });
+  }
+
+  async unpairCloud(): Promise<void> {
+    await this.request({ method: 'POST', path: '/cloud/unpair', responseSchema: z.unknown() });
+  }
+
+  async getLanStatus(): Promise<LanStatus> {
+    return this.request({ method: 'GET', path: '/lan/status', responseSchema: LanStatusSchema });
+  }
+
+  async createLanPairingCode(): Promise<LanPairingCode> {
+    return this.request({
+      method: 'POST',
+      path: '/lan/pairing-codes',
+      responseSchema: LanPairingCodeSchema,
+    });
+  }
+
+  async listLanTerminals(): Promise<readonly LanTerminal[]> {
+    const res = await this.request({
+      method: 'GET',
+      path: '/lan/terminals',
+      responseSchema: z.object({ terminals: z.array(LanTerminalSchema) }),
+    });
+    return res.terminals;
+  }
+
+  async revokeLanTerminal(id: string): Promise<void> {
+    await this.request({
+      method: 'POST',
+      path: `/lan/terminals/${encodeURIComponent(id)}/revoke`,
+      responseSchema: z.unknown(),
+    });
+  }
 }
+
+const CloudPairResultSchema = z.object({
+  status: z.literal('paired'),
+  organizationName: z.string(),
+  storeName: z.string(),
+});
+export type CloudPairResult = z.infer<typeof CloudPairResultSchema>;
+
+const LanStatusSchema = z.object({
+  fingerprint256: z.string(),
+  activeTerminals: z.number().int(),
+  port: z.number().int().nullable(),
+  addresses: z.array(z.string()),
+});
+export type LanStatus = z.infer<typeof LanStatusSchema>;
+
+const LanPairingCodeSchema = z.object({
+  code: z.string(),
+  expiresAtMs: z.string(),
+  fingerprint256: z.string(),
+  port: z.number().int().nullable(),
+  addresses: z.array(z.string()),
+});
+export type LanPairingCode = z.infer<typeof LanPairingCodeSchema>;
+
+const LanTerminalSchema = z.object({
+  id: z.string(),
+  name: z.string(),
+  status: z.enum(['active', 'revoked']),
+  pairedAtMs: z.string(),
+  revokedAtMs: z.string().nullable(),
+  lastSeenAtMs: z.string().nullable(),
+});
+export type LanTerminal = z.infer<typeof LanTerminalSchema>;

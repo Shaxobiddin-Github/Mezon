@@ -270,6 +270,13 @@ export class HubLanService {
     return t.id;
   }
 
+  /** True when at least one paired terminal is active (the LAN listener must run). */
+  hasActiveTerminals(): boolean {
+    const org = this.o.getOrganizationId();
+    if (org === null) return false;
+    return listLanTerminalsSync(this.sqlite, org).some((t) => t.status === 'active');
+  }
+
   listTerminals(): LanTerminalDto[] {
     return listLanTerminalsSync(this.sqlite, this.org()).map(toDto);
   }

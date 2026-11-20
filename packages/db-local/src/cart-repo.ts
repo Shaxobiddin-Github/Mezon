@@ -1123,7 +1123,14 @@ export class SqliteCartStore {
     });
   }
 
-  async listCarts(): Promise<readonly StoredCartSummaryRecord[]> {
+  /**
+   * Open and parked carts. With `register`, only that cash register's carts (T4.2): a LAN terminal
+   * must never pick up the hub's open cart (or another terminal's), even for the same cashier.
+   * `terminalId: null` = the hub computer's own register.
+   */
+  async listCarts(register?: {
+    readonly terminalId: UuidV7 | null;
+  }): Promise<readonly StoredCartSummaryRecord[]> {
     const ctx = this.requireContext();
     return ctx.uow.runReadOnly(() => {
       const nowMs = unixMsFromBigInt(ctx.uow.internalClock.now());
@@ -1135,6 +1142,11 @@ export class SqliteCartStore {
             eq(localCarts.organizationId, ctx.organizationId),
             eq(localCarts.storeId, ctx.storeId),
             inArray(localCarts.status, ['open', 'parked']),
+            register === undefined
+              ? undefined
+              : register.terminalId === null
+                ? isNull(localCarts.terminalId)
+                : eq(localCarts.terminalId, register.terminalId),
           ),
         )
         .orderBy(desc(localCarts.updatedAtMs), desc(localCarts.id))

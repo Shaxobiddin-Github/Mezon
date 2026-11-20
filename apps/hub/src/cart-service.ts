@@ -263,8 +263,9 @@ export class HubCartService {
     return { cart: toCartDetailDto(res) };
   }
 
-  async listCarts(): Promise<ListCartsResponseDto> {
-    const res = await this.store.listCarts();
+  /** T4.2: the carts of ONE cash register (null = the hub computer's own register). */
+  async listCarts(terminalId: UuidV7 | null): Promise<ListCartsResponseDto> {
+    const res = await this.store.listCarts({ terminalId });
     return { carts: res.map(toCartSummaryDto) };
   }
 

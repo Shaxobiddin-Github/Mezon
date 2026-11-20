@@ -237,6 +237,26 @@ describe('T4.2 several registers sell in parallel through the LAN hub', () => {
       .get(viaLan.json.cart.id) as { terminal_id: string | null };
     expect(row2.terminal_id).toBe(env.regs[0].creds.terminalId);
   });
+
+  it('GET /carts lists only the carts of the asking register (a terminal never takes the hub open cart)', async () => {
+    // Found by the v1 two-app smoke: the same owner signed in on both computers, the terminal's
+    // POS took the hub's open cart from GET /carts and completed it on the wrong register.
+    const env = await bootWithRegisters(4203, 2, 5);
+    const hubCart = (await env.local('POST', '/carts', env.owner, {})).json<{
+      cart: { id: string };
+    }>().cart.id;
+    const t1Cart = (await env.regs[0].call('POST', '/carts', {})).json.cart.id;
+    const t2Cart = (await env.regs[1].call('POST', '/carts', {})).json.cart.id;
+    const ids = (body: unknown) => (body as { carts: { id: string }[] }).carts.map((c) => c.id);
+
+    const onHub = await env.local('GET', '/carts', env.owner);
+    expect(onHub.statusCode).toBe(200);
+    expect(ids(onHub.json())).toEqual([hubCart]);
+    const onT1 = await env.regs[0].call('GET', '/carts');
+    expect(onT1.status).toBe(200);
+    expect(ids(onT1.json)).toEqual([t1Cart]);
+    expect(ids((await env.regs[1].call('GET', '/carts')).json)).toEqual([t2Cart]);
+  });
 });
 
 describe('T4.2 variant B: every register has its own shift, cashier session and drawer', () => {
