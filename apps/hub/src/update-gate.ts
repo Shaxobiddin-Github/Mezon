@@ -39,6 +39,8 @@ export class HubUpdateGate {
 export function startsReceiptWork(method: string, url: string): boolean {
   const path = url.split('?')[0] ?? '';
   if (method === 'POST' && path === '/carts') return true;
+  // A new QR payment starts a customer payment (P2 × C2).
+  if (method === 'POST' && path === '/payments/intents') return true;
   if (method === 'POST' && /^\/carts\/[^/]+\/(lines|resume|marks)(\/.*)?$/.test(path)) return true;
   if (method === 'PATCH' && /^\/carts\/[^/]+\/lines\/[^/]+$/.test(path)) return true;
   return false;

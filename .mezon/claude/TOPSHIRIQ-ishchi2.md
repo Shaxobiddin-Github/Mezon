@@ -1,3 +1,91 @@
+# [claude-tekshiruv] P2 qayta tekshiruv (`a0aa755`): QABUL
+
+Tekshirdim: toza build; `payment*`, `marking*`, `sync-conflicts` testlari — 4 fayl, 27 test, yashil.
+
+**K1 (kod bo'yicha).** Tuzatish to'g'ri:
+- avval `paid → refunding` da'vo, `consumed_by_sale_id IS NULL` sharti bilan;
+- chek faqat `status = 'paid'` intentni oladi;
+- provayder oflayn bo'lsa, `refunding` da qoladi (hech narsa taxmin qilinmaydi);
+- aniq rad etilsa, oldingi holat tiklanadi.
+
+Isbot testim endi o'tadi.
+
+**Mustaqil mutatsiyalar:**
+
+| # | Mutatsiya | Natija |
+|---|---|---|
+| P1 | `refunding` da'vosidan `consumed IS NULL` olib tashlandi | omon qoldi, **ekvivalent**: `require` va da'vo orasida `await` yo'q, SQLite sinxron, bitta jarayonda chek ular orasiga kira olmaydi. Guard — chuqur himoya, qolsin |
+| P2 | chek `amount_mismatch` intentni ham oladi | o'ldi |
+
+**Eslatma (T3.6 haqiqiy drayveri uchun).** `refunding` holatida qaytarish qayta yuborilganda provayder `refund` ni **idempotent** bajarishi shart. Sen buni kontraktga yozibsan. Haqiqiy drayver hujjatida provayderning idempotentlik kalitini topib ishlatish kerak. Topilmasa, qayta yuborish faqat qo'lda tasdiq bilan bo'lsin.
+
+**Merge tartibi:** P1 ✓ → C2 (tayyor, `fd1c89c`) → P2 → P3. P2 bulut migratsiyasiga tegmaydi.
+
+---
+
+# [claude-tekshiruv] P2 (PR #32): QAYTARILDI — bitta jiddiy pul xatosi (K1), bitta pul bo'shlig'i (K2)
+
+Tekshirilgan commit: `861945d`. Toza worktree, build. Natijalar:
+- unit + sqlite-hub + pg-cloud: **126 fayl, 875 test, hammasi yashil**;
+- keshsiz lint: yashil.
+
+Audit zanjiri (T3.8) va markirovka (T3.7) asosan yaxshi. Ruxsatlar ham to'g'ri: `payments:confirm` faqat owner/manager.
+
+## K1 (JIDDIY, pul) — pul qaytarish va chek yopish poygasi. **Isbotlangan.**
+
+`HubPaymentService.refund()` ishlash tartibi:
+1. holatni tekshiradi (`paid`, ishlatilmagan);
+2. **provayderda pulni qaytaradi** (`await driver.refund`);
+3. faqat shundan keyin lokal `paid → refunded` qiladi.
+
+2-qadamdagi `await` paytida kassir o'sha QR bilan chekni yopishi mumkin, chunki intent hali `paid`.
+
+Natija:
+- chek yopiladi (200);
+- 3-qadam `consumed_by_sale_id IS NULL` sharti tufayli rad etiladi (409 "used by a sale meanwhile");
+- lekin provayder pulni **allaqachon qaytargan**. Xaridor ham tovarni, ham pulni oladi.
+
+Bu holat kech tasdiqlangan intent'da real: u ham qaytariladigan, ham chekda ishlatiladigan bo'ladi. Menejer qaytarayotganda kassir ham shu QR'ni ishlatsa, xato yuz beradi.
+
+**Isbot testi:** `.mezon/claude/isbot/p2-k1-refund-race.test.ts.txt`. Uni `apps/hub/src/` ga `.test.ts` qilib ko'chir. Hozir yiqiladi:
+
+```
+expected { sale: 200, refund: 409, moneyBack: true } to not match { sale: 200, moneyBack: true }
+```
+
+**Tuzatish (taklif):** avval lokal da'vo, keyin provayder.
+1. Yangi holat `refunding`. Bitta himoyalangan UPDATE: `paid → refunding WHERE consumed_by_sale_id IS NULL`. `consumeUzqrPaymentInTxSync` faqat `status='paid'` ni oladi, shuning uchun chek endi yopilmaydi.
+2. Provayder `refund`:
+   - `refunded` bo'lsa → `refunding → refunded`;
+   - aniq rad (`failed`) bo'lsa → `refunding → paid`;
+   - oflayn yoki timeout bo'lsa → `refunding` da qoladi (pul taqdiri noma'lum). Uni `refresh` provayder holati bo'yicha yakunlaydi, hech qachon taxmin qilmaydi.
+3. Mutatsiya: da'voni provayderdan keyinga ko'chirish → isbot testi yiqilishi kerak.
+
+## K2 (pul) — summa mos kelmagan to'lov jim yo'qoladi
+
+`refresh()` da `st.state === 'paid' && st.amountTiyin !== r.amountTiyin` holati hech narsa qilmaydi:
+- intent `pending` qoladi, keyin `expired` bo'ladi;
+- mijozdan pul yechilgan, lekin kassa ham, menejer ham buni bilmaydi.
+
+**Tuzatish:**
+- holat yoki konflikt qo'sh (masalan, `amount_mismatch`, chekni yopmaydi);
+- POS'da menejerga ko'rinsin;
+- `payment.amount_mismatch` audit yozuvi bo'lsin;
+- test: Fake driver'ga `pay(ref, amount)` qo'sh.
+
+## K3 (kichik) — markirovka kodi poygasi
+
+`insertCartMarkSync` qatorni tranzaksiyasiz INSERT qiladi, keyin "sotilganmi" deb tekshiradi va xato tashlaydi. Xato bo'lsa qator **qolib ketadi**:
+- mavjud qatorga qo'shish yo'lida ham;
+- yangi qator yo'lida ham: savat qatori o'chiriladi, lekin mark qolib ketadi.
+
+Oyna operator tekshiruvi davom etadigan vaqtga teng (LAN'da boshqa terminal sotsa). INSERT va tekshiruvni bitta tranzaksiyaga ol. Test: tekshiruv paytida shu kod sotiladi → savatda mark qolmasligi kerak.
+
+## Merge tartibi
+
+P1 → C2 → P2. P2 bulut migratsiyasiga tegmaydi, lokal migratsiyalari `0021`–`0023`.
+
+K1 va K2 tuzatilgach, P2 ni qayta tekshiraman. K3 ni ham shu bilan qilsang yaxshi.
 # [claude] C2: `main` (P1) merge qilindi, migratsiya `0008`, T1 tuzatildi — merge'ga tayyor
 
 - **Merge.** `main` (P1, #31) C2 ga merge qilindi.

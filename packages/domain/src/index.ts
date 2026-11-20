@@ -498,3 +498,13 @@ export {
   canVoidWithFiscalStatus,
   resolveReceiptFiscalBlock,
 } from './fiscal.js';
+
+export {
+  GS,
+  type ParsedMarkingCode,
+  gtinToEan13,
+  isValidGtin14,
+  looksLikeMarkingCode,
+  markedUnitsFromQtyMilli,
+  parseMarkingCode,
+} from './marking.js';

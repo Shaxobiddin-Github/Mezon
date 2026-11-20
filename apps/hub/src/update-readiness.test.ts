@@ -152,6 +152,53 @@ describe('@mezon/hub - update readiness (T4.8)', () => {
     }
   });
 
+  it('P2 × C2: a QR payment still waiting for the customer counts as a receipt in progress until it expires', async () => {
+    const hub = await makeHub();
+    try {
+      await seed(hub);
+      const login = await hub.app.inject({
+        method: 'POST',
+        url: '/auth/login',
+        headers: HOST,
+        payload: { username: 'ega48', pin: '849201' },
+      });
+      const owner = {
+        ...HOST,
+        authorization: `Bearer ${login.json<{ token: string }>().token}`,
+      };
+      const qr = await hub.app.inject({
+        method: 'POST',
+        url: '/payments/intents',
+        headers: owner,
+        payload: { amount: '5000', kind: 'dynamic' },
+      });
+      expect(qr.statusCode, qr.body).toBe(201);
+      const { expiresAtMs } = qr.json<{ intent: { expiresAtMs: string } }>().intent;
+      const now = Number(NOW);
+      expect(readUpdateReadiness(hub.connection, now).openReceipts).toBe(1);
+      expect(readUpdateReadiness(hub.connection, Number(expiresAtMs)).openReceipts).toBe(0);
+      // Paid but unused (for example cancelled, then paid late): a manager refunds it; no block.
+      hub.connection.sqlite
+        .prepare(
+          "UPDATE payment_intents SET status = 'paid', paid_at_ms = ?, received_amount = amount",
+        )
+        .run(now);
+      expect(readUpdateReadiness(hub.connection, now).openReceipts).toBe(0);
+      // While the update gate is closed no new QR can be created.
+      hub.updateGate.close();
+      const blocked = await hub.app.inject({
+        method: 'POST',
+        url: '/payments/intents',
+        headers: owner,
+        payload: { amount: '5000', kind: 'dynamic' },
+      });
+      expect(blocked.statusCode).toBe(503);
+      hub.updateGate.open();
+    } finally {
+      await hub.close();
+    }
+  });
+
   it('the worker answers over the parent port and backs up only when no receipt is open', async () => {
     const hub = await makeHub();
     const sent: HubWorkerOutgoingMessage[] = [];
@@ -300,6 +347,9 @@ describe('@mezon/hub - update readiness (T4.8)', () => {
     expect(startsReceiptWork('PATCH', '/carts/abc/lines/l1')).toBe(true);
     expect(startsReceiptWork('POST', '/carts/abc/resume')).toBe(true);
     expect(startsReceiptWork('POST', '/carts/abc/marks?x=1')).toBe(true);
+    expect(startsReceiptWork('POST', '/payments/intents')).toBe(true);
+    expect(startsReceiptWork('GET', '/payments/intents/abc')).toBe(false);
+    expect(startsReceiptWork('POST', '/payments/intents/abc/refund')).toBe(false);
     expect(startsReceiptWork('POST', '/carts/abc/complete')).toBe(false);
     expect(startsReceiptWork('POST', '/carts/abc/park')).toBe(false);
     expect(startsReceiptWork('DELETE', '/carts/abc/lines/l1')).toBe(false);

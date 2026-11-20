@@ -1,4 +1,6 @@
 import { createHash } from 'node:crypto';
+import { appendAuditInTxSync } from './audit-log.js';
+import { releaseSaleMarksInTxSync } from './marking-repo.js';
 import {
   type CartLineKind,
   DEFAULT_STORE_TIMEZONE,
@@ -794,6 +796,27 @@ export class SqliteReturnStore {
 
       this.testHooks?.onBeforeCommit?.();
 
+      // T3.8: audit row in the same transaction as the operation.
+      // T3.7: the units are back on the shelf; their marking codes may be sold again.
+      releaseSaleMarksInTxSync(session.internalGetSqlite(), {
+        saleId: validSaleId,
+        saleLineId: null,
+        limit: null,
+        reason: 'void',
+        sourceId: validSaleId,
+        nowMs: session.nowUnixMs(),
+      });
+      appendAuditInTxSync(session.internalGetSqlite(), {
+        organizationId: ctx.organizationId,
+        nowMs: session.nowUnixMs(),
+        nextId: () => session.nextId(),
+        eventType: 'sale.voided',
+        actorUserId: validActorId,
+        entity: 'sales',
+        entityId: validSaleId,
+        details: { reason: cleanReason, receiptCode: saleRow.receiptCode },
+      });
+
       return Promise.resolve({
         sale: toStoredVoidedSale(updatedSaleWrite.row, lineRows, paymentRows),
         cashRefundAmount,
@@ -1345,6 +1368,32 @@ export class SqliteReturnStore {
       });
 
       this.testHooks?.onBeforeCommit?.();
+
+      // T3.8: audit row in the same transaction as the operation.
+      // T3.7: one marking code per returned unit goes back (oldest first).
+      for (const item of validItems) {
+        const units = quantityToMilli(item.qty) / 1000n;
+        if (units > 0n) {
+          releaseSaleMarksInTxSync(session.internalGetSqlite(), {
+            saleId: validSaleId,
+            saleLineId: item.saleLineId,
+            limit: units,
+            reason: 'return',
+            sourceId: returnWrite.row.id,
+            nowMs: session.nowUnixMs(),
+          });
+        }
+      }
+      appendAuditInTxSync(session.internalGetSqlite(), {
+        organizationId: ctx.organizationId,
+        nowMs: session.nowUnixMs(),
+        nextId: () => session.nextId(),
+        eventType: 'return.created',
+        actorUserId: validActorId,
+        entity: 'returns',
+        entityId: returnWrite.row.id,
+        details: { saleId: validSaleId },
+      });
 
       return Promise.resolve({
         returnDoc: toStoredReturnRecord(returnWrite.row, insertedLines, insertedPayments),

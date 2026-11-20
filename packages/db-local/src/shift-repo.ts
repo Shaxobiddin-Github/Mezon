@@ -1,4 +1,5 @@
 import { createHash } from 'node:crypto';
+import { appendAuditInTxSync } from './audit-log.js';
 import {
   type CashDenominationCount,
   type ComputedShiftClosureSummary,
@@ -1527,6 +1528,18 @@ export class SqliteShiftStore {
         schemaVersion: 1,
       });
 
+      // T3.8: audit row in the same transaction as the operation.
+      appendAuditInTxSync(session.internalGetSqlite(), {
+        organizationId: ctx.organizationId,
+        nowMs: session.nowUnixMs(),
+        nextId: () => session.nextId(),
+        eventType: 'shift.opened',
+        actorUserId: validActorId,
+        entity: 'shifts',
+        entityId: shiftWrite.row.id,
+        details: {},
+      });
+
       return Promise.resolve({
         shift: toStoredShiftRecord(shiftWrite.row, [sessWrite.row]),
         drawerCashBalance: input.openingCash,
@@ -2011,6 +2024,18 @@ export class SqliteShiftStore {
         closedSessWrite.row,
       ];
 
+      // T3.8: audit row in the same transaction as the operation.
+      appendAuditInTxSync(session.internalGetSqlite(), {
+        organizationId: ctx.organizationId,
+        nowMs: session.nowUnixMs(),
+        nextId: () => session.nextId(),
+        eventType: 'shift.closed',
+        actorUserId: validActorId,
+        entity: 'shifts',
+        entityId: validShiftId,
+        details: {},
+      });
+
       return Promise.resolve({
         shift: toStoredShiftRecord(closedShiftWrite.row, updatedSessions),
         closure: loadClosureDetailsSync(session.db, closureWrite.row),
@@ -2404,6 +2429,18 @@ export class SqliteShiftStore {
         deviceId: shiftRow.deviceId,
       });
 
+      // T3.8: audit row in the same transaction as the operation.
+      appendAuditInTxSync(session.internalGetSqlite(), {
+        organizationId: ctx.organizationId,
+        nowMs: session.nowUnixMs(),
+        nextId: () => session.nextId(),
+        eventType: 'shift.cash_move',
+        actorUserId: validActorId,
+        entity: 'cash_moves',
+        entityId: write.row.id,
+        details: { type: String(write.row.type) },
+      });
+
       return Promise.resolve({
         cashMove: toStoredCashMove(write.row),
         drawerCashBalance: updatedDrawerBalance,
@@ -2599,6 +2636,18 @@ export class SqliteShiftStore {
         },
         eventType: 'day_close.created',
         schemaVersion: 1,
+      });
+
+      // T3.8: audit row in the same transaction as the operation.
+      appendAuditInTxSync(session.internalGetSqlite(), {
+        organizationId: ctx.organizationId,
+        nowMs: session.nowUnixMs(),
+        nextId: () => session.nextId(),
+        eventType: 'day_close.created',
+        actorUserId: validActorId,
+        entity: 'day_closes',
+        entityId: write.row.id,
+        details: {},
       });
 
       return Promise.resolve({

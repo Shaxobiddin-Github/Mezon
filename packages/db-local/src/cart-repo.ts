@@ -35,6 +35,7 @@ import {
 } from '@mezon/domain';
 import { and, asc, desc, eq, inArray, isNull } from 'drizzle-orm';
 import type { BetterSQLite3Database } from 'drizzle-orm/better-sqlite3';
+import { appendAuditInTxSync } from './audit-log.js';
 import type { LocalSqliteConnection } from './connection.js';
 import { effectiveVatRateBp, readEffectiveVatSettingsSync } from './tax-settings-repo.js';
 import {
@@ -1489,6 +1490,11 @@ export class SqliteCartStore {
       if (deleted.changes === 0) {
         throw new DomainError('CART_LINE_NOT_FOUND', `Cart line "${lineId}" was not found`);
       }
+      // T3.7: the line's marking codes go with it (they are free for another cart again).
+      session
+        .internalGetSqlite()
+        .prepare('DELETE FROM local_cart_marks WHERE cart_id = ? AND cart_line_id = ?')
+        .run(cartRow.id, validLineId);
 
       session.db
         .update(localCarts)
@@ -1701,6 +1707,22 @@ export class SqliteCartStore {
         })
         .where(eq(localCarts.id, cartRow.id))
         .run();
+
+      appendAuditInTxSync(session.internalGetSqlite(), {
+        organizationId: ctx.organizationId,
+        eventType: 'discount.applied',
+        actorUserId: cartRow.cashierUserId,
+        entity: 'carts',
+        entityId: cartRow.id,
+        details: {
+          mode: input.mode,
+          value: proposedDbValue.toString(),
+          reason: cleanReason,
+          approvedBy,
+        },
+        nowMs,
+        nextId: () => session.nextId(),
+      });
 
       const updated = this.requireCartRowSync(ctx, cartRow.id);
       return Promise.resolve(this.evaluateCartRowSync(ctx, updated, nowMs));

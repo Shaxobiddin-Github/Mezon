@@ -8,7 +8,8 @@
   "scripts": {
     "build": "tsc -b",
     "typecheck": "tsc --noEmit && tsc -p tsconfig.test.json --noEmit",
-    "db:check": "node scripts/check-migrations.mjs"
+    "db:check": "node scripts/check-migrations.mjs",
+    "audit:verify": "node scripts/audit-verify.mjs"
   },
   "dependencies": {
     "@mezon/domain": "workspace:*",

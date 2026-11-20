@@ -1,3 +1,140 @@
+# [ishchi2] P2: `main` (C2) merge qilindi va P2 × C2 integratsiyasi — merge'ga tayyor
+
+- `main` (C2, #34) merge qilindi. To'qnashuv faqat `apps/hub/src/server.ts` da edi, ikkala tomon saqlandi: P2 route'lari va C2 litsenziya + yangilash darvozasi.
+- **Kelishilgan integratsiya:**
+  - `readUpdateReadiness`: mijoz hali to'lamagan QR (`pending`, muddati o'tmagan) ochiq chek deb sanaladi;
+  - yangilash darvozasi yopiq paytda `POST /payments/intents` → 503.
+- To'langan, lekin ishlatilmagan QR yangilanishni **to'xtatmaydi**. Ochiq savati baribir sanaladi; yetim kech to'lov esa faqat menejer qaytarishini kutadi va yangilanishni abadiy to'sib qo'ymasligi kerak. Test bor.
+- `pnpm verify` (PG bilan): **yashil** — 134 fayl, 1104 test; perf 17; E2E 1.
+
+---
+
+# [ishchi2] P2 tuzatishlar: K1, K2, K3 va S8 — qayta tekshiruv so'rovi
+
+Nazoratchi tekshiruvi (`0e0150f`, QAYTARILDI) bo'yicha. `main` (P1 squash, #31) branch'ga merge qilindi; daraxt `ac7b3a7` bilan bir xil. PR #32 base'i endi `main`.
+
+| # | Tuzatish | Isbot |
+|---|---|---|
+| K1 | Pul qaytarishda avval lokal da'vo, keyin provayder. Yangi holat `refunding`: `paid \| amount_mismatch → refunding` bitta himoyalangan UPDATE (`consumed_by_sale_id IS NULL`). Chek faqat `status='paid'` ni oladi, shuning uchun `refunding` QR chekni yopmaydi. Provayder javobi: `refunded` → `refunded`; aniq rad → oldingi holatga qaytadi; oflayn yoki timeout → `refunding` da qoladi | Nazoratchining isbot testi `apps/hub/src/payment-k1-race.test.ts` ga ko'chirildi, endi o'tadi. Yana 3 test: provayder ishlayotgan paytda chek rad etiladi, rad etilsa QR qaytadi; javob yo'qolsa `refresh` provayder holatidan yakunlaydi; oflayn bo'lsa `refunding` da qoladi |
+| K1 (qo'shimcha) | Taklifdan bitta farq: provayder hali "paid" desa, `refresh` intentni `paid` ga **qaytarmaydi**. Sabab: so'rovimiz yo'lda bo'lishi mumkin, qaytarsak K1 qayta ochiladi (MK2 mutatsiyasi buni isbotlaydi). `refunding` faqat provayder "refunded" desa yopiladi. Aks holda menejer qaytarishni qayta yuboradi. `PaymentDriver.refund` kontrakti: bitta reference bo'yicha **idempotent** (takror so'rov pulni ikki marta qaytarmaydi, yana `refunded` beradi). Fake shunday qilindi | Javob yo'qolgan va oflayn testlari |
+| K2 | Yangi holat `amount_mismatch`. Provayder boshqa summa olsa: holat, `received_amount` va `payment.amount_mismatch` audit yozuvi bitta tranzaksiyada. Chekni hech qachon yopmaydi. Menejer uchun `GET /payments/attention` (`payments:confirm`; kassir 403): `amount_mismatch` va `refunding` intentlar. Qaytarish **haqiqatda olingan** summa bilan, `payment.refunded` audit menejer nomidan. Fake: `pay(ref, amount)` | `amount_mismatch` testi: audit bir marta, chek rad, ro'yxatda ko'rinadi, 9000 qaytariladi |
+| K3 | `insertCartMarkSync`: "sotilganmi" tekshiruvi va INSERT bitta SQLite tranzaksiyasida. Rad etilsa qator qolmaydi | Test: operator tekshiruvi sekin, shu paytda boshqa kassa shu kodni sotadi. Ikki yo'l ham: mavjud qator (`qty` 1000 qoladi, 1 mark) va yangi qator (qator ham, mark ham yo'q) |
+| S8 | Pull konfliktini retry qilganda hodisa park bo'lsa, konflikt ochiq qoladi va `applied=false` | `sync-conflicts.test.ts`: ota-qatorsiz (mavjud bo'lmagan mijoz) hodisa. Konflikt ochiq, xato "Still waiting…", park qatori bor, ma'lumot o'zgarmagan. Sening R4 mutatsiyang (`if (parked)` o'chirilgan) endi **o'ldi** |
+
+**Migratsiya.** Lokal `0023_payment_intents` qayta yaratildi (P2 hali chiqmagan, shuning uchun alohida jadval-qayta-qurish migratsiyasi kerak emas): `received_amount`, holatlar ro'yxati, `chk_payment_intents_paid_at` (`refunding` va `amount_mismatch` ham `paid_at_ms` bilan). Diff faqat shu.
+
+**Mutatsiyalar: 8/8 o'ldi** (va R4).
+
+| # | Mutatsiya | Natija |
+|---|---|---|
+| MK1 | provayderdan oldin lokal da'vo yo'q | o'ldi |
+| MK2 | provayder "paid" desa `refunding` qayta ochiladi | o'ldi |
+| MK3 | summa farqi e'tiborsiz | o'ldi |
+| MK4 | chek `refunding` intentni ham oladi | o'ldi |
+| MK5 | aniq rad etilganda holat tiklanmaydi | o'ldi |
+| MK6 | mark avval INSERT, keyin tekshiruv, tranzaksiyasiz (eski kod) | o'ldi |
+| MK7 | `payment.amount_mismatch` audit yozilmaydi | o'ldi |
+| MK8 | qaytarish olingan summa bilan emas, QR summasi bilan | o'ldi |
+
+**Ochiq qoldi (POS UI yo'q).** POS'da hozircha to'lov ekrani yo'q. K2 "menejerga ko'rinsin" API darajasida qilindi (`/payments/attention`). Ekran T4.4 bilan.
+
+`pnpm verify` (PG bilan): **yashil**: 127 fayl, 1042 test; perf 17; E2E 1; lint, depcruise, db:check.
+
+---
+
+# Hisobot: P2 — T3.8 audit xesh zanjiri, T3.7 markirovka (Fake), T3.6 UzQR to'lov yadrosi (Fake)
+
+Branch: `ishchi2/P2-payments`. U P1 (PR #31) ustidan ochilgan. P1 merge bo'lgach, base `main` bo'ladi va `main` shu branch'ga merge qilinadi.
+Holat: **HISOBOT**. Tekshiruv kutilyapti. O'zim merge qilmayman.
+Tashqi tizimlar (UzQR provayderi, Asl belgisi operatori) uchun endpoint, maydon yoki imzo o'ylab topilmagan. Faqat port va `Fake…Driver` bor; haqiqiy drayverlar T3.0 hujjatidan keyin.
+
+## Qisqa xulosa
+
+| Vazifa | Natija | Asosiy isbot |
+|---|---|---|
+| T3.8 audit | tayyor | faqat qo'shiladigan SHA-256 zanjir (`0021`), amal tranzaksiyasi ichida yoziladi; `GET /audit`, `GET /audit/verify` (owner), CLI `audit:verify` (chiqish 0/1/2); mutatsiyalar A1–A8 o'ldi |
+| T3.7 markirovka | tayyor | GS1 tahlilchisi (17 test), `MarkingDriver` + Fake, `0022`, `/carts/:id/marks`; `completeSale`: kodlar = dona; void va qaytarishda kod bo'shaydi; K1–K8 o'ldi |
+| T3.6 UzQR | tayyor | `PaymentDriver` + Fake, `payment_intents` (`0023`); chek faqat `paid` intent bilan yopiladi; kech tasdiq bitta chekka bir marta; Q1–Q8 o'ldi |
+
+`pnpm verify`: yashil (1011 + 17 test).
+
+## T3.6 — qanday ishlaydi
+
+**Holatlar.** Oldinga yo'naluvchi:
+- `pending → paid | expired | cancelled | failed`;
+- `expired | cancelled → paid` — kech tasdiq, `paid_late = 1`;
+- `paid → refunded` — faqat ishlatilmagan intent.
+
+Har o'tish bitta himoyalangan `UPDATE … WHERE status IN (…)`. Ikki parallel so'rov uni ikki marta qo'llay olmaydi.
+
+**Chek yopish.** `completeSale` ichida har `uzqr` to'lovi intentni `provider_ref` bo'yicha atomik oladi. Shartlar:
+- `status='paid'`;
+- `consumed_by_sale_id IS NULL`;
+- summa aniq teng.
+
+Bo'lmasa `PAYMENT_NOT_CONFIRMED` (409) va chek yopilmaydi. Bitta chekda bir nechta QR to'lovi bo'lishi mumkin.
+
+**Provayder.** Provayder SQLite tranzaksiyasidan **tashqarida** chaqiriladi. Oflayn bo'lsa:
+- yaratish → 502;
+- yangilash holatni o'zgartirmaydi (hech narsa taxmin qilinmaydi).
+
+**Statik QR.** Faqat owner/manager (`payments:confirm`) izoh bilan qo'lda tasdiqlaydi. Tasdiq va `payment.manual_confirmed` audit yozuvi bitta tranzaksiyada.
+
+**Qaytarish.** Faqat `paid` va hech bir chekda ishlatilmagan intent (`payments:confirm`). Dinamik QR'da avval provayder `refund`, keyin holat.
+
+**API:**
+- `POST /payments/intents`;
+- `GET /payments/intents/:id` — yangilash;
+- `POST …/cancel` — kassir;
+- `POST …/confirm` va `POST …/refund` — manager/owner.
+
+**Testlar** (`apps/hub/src/payment.test.ts`, 8 ta):
+- tasdiqsiz chek yopilmaydi;
+- bitta QR ikkinchi chekni yopmaydi;
+- noto'g'ri summa yoki noma'lum havola rad etiladi;
+- vaqt tugagach kelgan to'lov `paid_late`, bir marta ishlatiladi, qayta yangilash hech narsa yozmaydi;
+- bekor qilingan, keyin to'langan → manager qaytaradi (kassir 403, ikkinchi qaytarish 409);
+- ishlatilgan QR qaytarilmaydi;
+- statik tasdiq: kassir 403, audit yozuvi bor;
+- poyga: bir QR bilan ikki chek parallel → aniq bittasi 200;
+- provayder oflayn.
+
+**Mutatsiyalar** (hammasi o'ldi):
+- Q1 — ishlatilgan tekshiruvi olib tashlandi;
+- Q2 — `paid` tekshiruvi olib tashlandi;
+- Q3 — summa e'tiborsiz;
+- Q4 — kech to'lov belgilanmaydi;
+- Q5 — statik tasdiq auditsiz;
+- Q6 — ishlatilgan intent qaytariladi;
+- Q7 — muddat tugashi qo'llanmaydi;
+- Q8 — kassirga `payments:confirm`.
+
+## Rejadan farqlar (ko'rib chiqing)
+
+1. **`consumed_by_sale_id` UNIQUE emas, oddiy indeks.** Bitta chekda ikki QR to'lovi bo'lishi mumkin (fuzz testi buni topdi). Bir intent ikki chekka tushmasligini atomik `UPDATE … consumed_by_sale_id IS NULL` kafolatlaydi (Q1 va poyga testi).
+2. **Statik QR'ni kassir emas, owner/manager tasdiqlaydi.** Rejada "kassir, ruxsat bilan" edi. Xavfsizroq variantni tanladim — `QAROR (javobsiz)`.
+3. **QR muddati `DEFAULT_QR_TTL_MS = 120 s`** `[TASDIQLANSIN]`.
+
+## Migratsiyalar (lokal)
+
+`0021_audit_log`, `0022_marking`, `0023_payment_intents`. `main` merge bo'lganda, raqamlar nazoratchining lokal migratsiyalari bilan to'qnashsa qayta yaratiladi.
+
+## Egasi uchun savollar
+
+1. MXIK prefikslari ro'yxati (markirovka talab qilinadigan tovarlar) — hozir sozlama `[]` `[TASDIQLANSIN]`.
+2. QR muddati: 120 s maqulmi?
+3. Statik QR'ni kassir ham tasdiqlay oladimi, yoki faqat manager?
+4. Audit zanjirining oxirgi xeshini bulutga "langar" qilish (qurilma egasi butun zanjirni qayta hisoblasa, lokal tekshiruv sezmaydi) — keyingi bosqichga taklif.
+
+## Commit'lar
+
+- `5a00938`, `1d90a1a` — T3.8;
+- `b86a357` … `d780442` — T3.7;
+- `e771164` … `706f619` — T3.6;
+- `096da24` — test turlari.
+
+---
+
 # Hisobot: P1 — T2.6 + T2.5 + bulut buyruq yozuvchi porti + fiskal test qarzi
 
 Branch: `ishchi2/T2.6-projections`. PR: [#31](https://github.com/Shaxobiddin-Github/Mezon/pull/31) (base `main`).
