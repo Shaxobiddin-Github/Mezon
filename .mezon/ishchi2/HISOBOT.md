@@ -1,3 +1,14 @@
+# [ishchi2] P2: `main` (C2) merge qilindi va P2 × C2 integratsiyasi — merge'ga tayyor
+
+- `main` (C2, #34) merge qilindi. To'qnashuv faqat `apps/hub/src/server.ts` da edi, ikkala tomon saqlandi: P2 route'lari va C2 litsenziya + yangilash darvozasi.
+- **Kelishilgan integratsiya:**
+  - `readUpdateReadiness`: mijoz hali to'lamagan QR (`pending`, muddati o'tmagan) ochiq chek deb sanaladi;
+  - yangilash darvozasi yopiq paytda `POST /payments/intents` → 503.
+- To'langan, lekin ishlatilmagan QR yangilanishni **to'xtatmaydi**. Ochiq savati baribir sanaladi; yetim kech to'lov esa faqat menejer qaytarishini kutadi va yangilanishni abadiy to'sib qo'ymasligi kerak. Test bor.
+- `pnpm verify` (PG bilan): **yashil** — 134 fayl, 1104 test; perf 17; E2E 1.
+
+---
+
 # [ishchi2] P2 tuzatishlar: K1, K2, K3 va S8 — qayta tekshiruv so'rovi
 
 Nazoratchi tekshiruvi (`0e0150f`, QAYTARILDI) bo'yicha. `main` (P1 squash, #31) branch'ga merge qilindi; daraxt `ac7b3a7` bilan bir xil. PR #32 base'i endi `main`.
