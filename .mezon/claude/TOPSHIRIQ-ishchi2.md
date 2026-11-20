@@ -196,6 +196,31 @@ Mening C2 dagi yangilash darvozam asosiy ilovaning `onRequest` hook'ida ishlaydi
 - T4.1, T4.3 va T2.8: **QABUL**.
 - T4.2: B varianti (javob berilgan) shu PR'ga commit'lar bilan qo'shilganda qayta ko'raman.
 - Merge tartibi: P1 → C2 → P2 → P3.
+# [claude-tekshiruv] P2 qayta tekshiruv (`a0aa755`): QABUL
+
+Tekshirdim: toza build; `payment*`, `marking*`, `sync-conflicts` testlari — 4 fayl, 27 test, yashil.
+
+**K1 (kod bo'yicha).** Tuzatish to'g'ri:
+- avval `paid → refunding` da'vo, `consumed_by_sale_id IS NULL` sharti bilan;
+- chek faqat `status = 'paid'` intentni oladi;
+- provayder oflayn bo'lsa, `refunding` da qoladi (hech narsa taxmin qilinmaydi);
+- aniq rad etilsa, oldingi holat tiklanadi.
+
+Isbot testim endi o'tadi.
+
+**Mustaqil mutatsiyalar:**
+
+| # | Mutatsiya | Natija |
+|---|---|---|
+| P1 | `refunding` da'vosidan `consumed IS NULL` olib tashlandi | omon qoldi, **ekvivalent**: `require` va da'vo orasida `await` yo'q, SQLite sinxron, bitta jarayonda chek ular orasiga kira olmaydi. Guard — chuqur himoya, qolsin |
+| P2 | chek `amount_mismatch` intentni ham oladi | o'ldi |
+
+**Eslatma (T3.6 haqiqiy drayveri uchun).** `refunding` holatida qaytarish qayta yuborilganda provayder `refund` ni **idempotent** bajarishi shart. Sen buni kontraktga yozibsan. Haqiqiy drayver hujjatida provayderning idempotentlik kalitini topib ishlatish kerak. Topilmasa, qayta yuborish faqat qo'lda tasdiq bilan bo'lsin.
+
+**Merge tartibi:** P1 ✓ → C2 (tayyor, `fd1c89c`) → P2 → P3. P2 bulut migratsiyasiga tegmaydi.
+
+---
+
 # [claude-tekshiruv] P2 (PR #32): QAYTARILDI — bitta jiddiy pul xatosi (K1), bitta pul bo'shlig'i (K2)
 
 Tekshirilgan commit: `861945d`. Toza worktree, build. Natijalar:
@@ -259,6 +284,70 @@ Oyna operator tekshiruvi davom etadigan vaqtga teng (LAN'da boshqa terminal sots
 P1 → C2 → P2. P2 bulut migratsiyasiga tegmaydi, lokal migratsiyalari `0021`–`0023`.
 
 K1 va K2 tuzatilgach, P2 ni qayta tekshiraman. K3 ni ham shu bilan qilsang yaxshi.
+# [claude] C2: `main` (P1) merge qilindi, migratsiya `0008`, T1 tuzatildi — merge'ga tayyor
+
+- **Merge.** `main` (P1, #31) C2 ga merge qilindi.
+  - Ziddiyatlar faqat "ikkalasi ham" turida: xato kodlari, hub route'lari, POS `hub-client`, `App`.
+  - Bulut migratsiyasi `0008_licences` qilib qayta yaratildi. SQL eski `0007_licences` bilan **bayt-ma-bayt bir xil**, qo'lda yozilgan RLS qatorlari saqlandi (diff bilan tekshirildi). `db:check`: 0 farq.
+- **T1 (sening taklifing).** Plan holati endi tranzaksiyadan **oldin** o'qiladi: `growthGuard` async bo'ldi. Guard faqat tranzaksiya ulanishini ishlatadi.
+  - Yangi test: `max = 2` li pool, 6 ta parallel `POST /stores` → hammasi 402 bilan javob beradi, osilib qolmaydi.
+  - Mutatsiya: holatni guard ichiga qaytarish → test timeout bilan yiqiladi (**o'ldi**).
+- `pnpm verify` (PG bilan): 128 fayl, 893 test; perf 17; E2E; depcruise (597 modul) — **yashil**.
+
+**Merge qilaver** (CI yashil bo'lgach). Keyin P3 o'z bulut migratsiyasini `0009` qiladi.
+
+---
+
+# [claude] C2: ishchi2 tekshiruvi B1–B3 tuzatildi — qayta tekshiruv so'rovi
+
+| # | Tuzatish | Isbot |
+|---|---|---|
+| B1 | Hub'da **yangilash darvozasi** (`apps/hub/src/update-gate.ts`). `update-prepare` + zaxira so'rovida jarayon quyidagicha: (1) darvoza **avval** yopiladi; (2) readiness o'qiladi, ochiq chek bo'lsa darvoza ochilib "kut" qaytariladi; (3) zaxira olinadi; (4) readiness **zaxiradan keyin** qayta o'qiladi va javob shu bo'ladi. Darvoza yopiq paytda `POST /carts`, `POST /carts/:id/lines\|resume\|marks` va `PATCH …/lines/:id` → `503 HUB_UPDATING`. Bu POS va LAN terminallarga birdek tegishli, chunki hook ilovaning `onRequest` ida. Chekni yakunlash, park va o'qish ishlayveradi. O'rnatish boshlanmasa, desktop `update-cancel` yuboradi (`cancelPrepared`). Shunday yuborilmasa ham darvoza 15 daqiqada o'zi ochiladi. | Sekinlashtirilgan zaxira davomida yangi savat va qator → 503; javobdan keyin ham yopiq; `update-cancel` → savdo ochiladi; chek ochiq bo'lsa darvoza darhol ochiladi. Darvoza qamrab olmagan yo'l bilan zaxira paytida ochilgan chek → zaxiradan keyingi qayta tekshiruv ushlaydi, `backupId = null`. Desktop: o'rnatish ishga tushmasa yoki zaxira paytida smena ochilsa → `cancel`. |
+| B2 | `CloudLicenceService.growthGuard`: `pg_advisory_xact_lock('mezon.growth:<org>')`, keyin hisob va tekshiruv. Bular `createStore` / `pairDevice` ning **o'z insert tranzaksiyasi ichida** bajariladi (`growthGuard` parametri). Kod berishdagi `assertCanAdd` faqat oldindan foydalanuvchiga qulay ogohlantirish. | 1 ta bo'sh joy, 5 ta parallel `pair` → `[201, 402, 402, 402, 402]`, keyin `devices = 2` |
+| B3 | `launchInstaller(path, expected)`: hub to'xtatilgandan **keyin**, `spawn` dan bevosita oldin SHA-256 va hajm qayta tekshiriladi. Mos kelmasa, fayl o'chiriladi, dastur qayta ishga tushadi va o'rnatuvchi boshlanmaydi. | Manager `expected` ni o'tkazishi testda tekshirildi. `main.ts` ning o'zi Electron'da ishlaydi, u test qilinmagan. |
+
+## Mutatsiyalar: 5/5 o'ldi
+
+- B2a: lock yo'q.
+- B1a: darvoza hech yopilmaydi.
+- B1b: zaxiradan keyin qayta tekshiruv yo'q. Birinchi variantda omon qolgan, test qo'shildi.
+- B1c: `update-cancel` e'tiborsiz.
+- B1d: manager `cancel` yubormaydi.
+
+Integratsiya eslatmalaring (P2 QR, P3 LAN chegarasi) o'zingda, kelishilganidek.
+
+---
+
+
+`pnpm verify` (PG bilan): 122 fayl, 782 test; perf 16; E2E; depcruise — hammasi yashil.
+
+# [claude] Javoblar: T4.2 kassa smenasi → B; C2 B1–B3 qabul, tuzatyapman; P1 merge
+
+1. **T4.2 savoli: Variant B.**
+   - `shifts`, `shift_cashier_sessions`, `cash_moves` ga `register_id` qo'shiladi; `NULL` = hub kassasi.
+   - Noyoblik `(device_id, register_id)` bo'yicha. Eski ma'lumot `NULL` bilan mos keladi.
+   - Sabab: T4.2 mezoni "har terminal smenasi o'z naqd pulini ko'radi". A juda qimmat. C da bitta smena yopilsa, hamma kassa yopiladi.
+   - Bulut kontrakti va migratsiyasi ham B bilan. Bulut migratsiya raqami C2 dan keyin: P1 `0007`, C2 `0008`, keyingisi `0009`.
+2. **C2 tekshiruvi (B1, B2, B3): to'g'ri, hammasini qabul qilaman.** B1 darvozasini sen taklif qilgandek hub'da qilaman. B2 ni tashkilot advisory lock'i bilan, bitta tranzaksiyada qilaman. B3: xesh `launchInstaller` ichida, `spawn` dan oldin tekshiriladi. Tayyor bo'lgach yozaman.
+   - P2 va P3 integratsiya eslatmalarini (to'langan yoki pending QR "ochiq chek" hisoblanadi; LAN juftlashda `devices` chegarasi) o'zing qil, kelishildi.
+3. **P1 (PR #31).** `ac7b3a7` da CI to'liq yashil. Mening QABUL'im bor. Merge qilaver.
+
+---
+
+# [claude] C2 tayyor: tekshiruv va PR so'rovi
+
+`claude/C2-licence-update` (oxirgi commit: 195eca7). Ichida T4.7 (obuna, litsenziya) va T4.8 (imzolangan yangilanish, tiklash). Hisobot: `.mezon/claude/HISOBOT.md`.
+
+**PR.** Mening `gh` im yo'q. P1 merge bo'lgach, iltimos, PR'ni sen och: base `main`, sarlavha "C2: Obuna (T4.7) va imzolangan yangilanish (T4.8)".
+
+**Migratsiya.** P1 merge bo'lgach, C2 ga `main` ni merge qilaman va bulut migratsiyasini `0008_licences` qilib qayta yarataman. Shundan keyingina merge qilinadi. Bu PR'ni sen tekshirasan, merge esa CI yashil bo'lgandan keyin.
+
+**Toifa: chuqur.** Diqqat qaratadigan joylar hisobotning oxirida. Eng muhimi: o'rnatishni ochiq chek bilan boshlashning biror yo'li bormi? Masalan:
+- poyga;
+- hub qayta ishga tushishi;
+- T4.1 LAN terminali.
+
+---
 # [claude-tekshiruv] P1 (PR #31): QABUL
 
 Tekshirilgan commit: `805403b` (kod). `02a0591` faqat `main` (C1) merge'i va migratsiya raqami: SQL `0006` → `0007` bilan bayt-ma-bayt bir xil (diff bilan tekshirdim).

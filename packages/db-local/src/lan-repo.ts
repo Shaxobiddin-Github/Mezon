@@ -150,16 +150,26 @@ export function consumeLanPairingCodeAndAddTerminalSync(
     readonly name: string;
     readonly keyHash: string;
     readonly nowMs: UnixMs;
+    /** T4.7: plan limit on active terminals (null = none); counted inside this transaction. */
+    readonly maxActiveTerminals?: number | null;
   },
-): boolean {
-  return sqlite.transaction(() => {
+): 'ok' | 'used' | 'limit' {
+  return sqlite.transaction((): 'ok' | 'used' | 'limit' => {
+    if (p.maxActiveTerminals !== undefined && p.maxActiveTerminals !== null) {
+      const active = sqlite
+        .prepare(
+          "SELECT count(*) AS n FROM local_lan_terminals WHERE organization_id = ? AND status = 'active'",
+        )
+        .get(p.organizationId) as { n: number | bigint };
+      if (Number(active.n) >= p.maxActiveTerminals) return 'limit';
+    }
     const used = sqlite
       .prepare(
         `UPDATE local_lan_pairing_codes SET used_at_ms = ?, used_by_terminal_id = ?, updated_at_ms = ?
           WHERE id = ? AND used_at_ms IS NULL`,
       )
       .run(p.nowMs, p.terminalId, p.nowMs, p.codeId);
-    if (used.changes !== 1) return false;
+    if (used.changes !== 1) return 'used';
     const by = sqlite
       .prepare('SELECT created_by_user_id AS u FROM local_lan_pairing_codes WHERE id = ?')
       .get(p.codeId) as { u: UuidV7 };
@@ -170,7 +180,7 @@ export function consumeLanPairingCodeAndAddTerminalSync(
          VALUES (?, ?, ?, ?, ?, ?, 'active', ?, ?)`,
       )
       .run(p.terminalId, p.organizationId, p.nowMs, p.nowMs, p.name, p.keyHash, p.nowMs, by.u);
-    return true;
+    return 'ok';
   })();
 }
 

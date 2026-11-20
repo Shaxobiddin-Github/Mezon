@@ -5,9 +5,32 @@ export interface HubBridgeState {
   readonly lastError?: string;
 }
 
+/** T4.8: application update state from the desktop shell (`apps/desktop/src/update`). */
+export interface UpdateBridgeState {
+  readonly phase:
+    'disabled' | 'idle' | 'downloading' | 'ready' | 'waiting' | 'installing' | 'error';
+  readonly currentVersion: string;
+  readonly version: string | null;
+  readonly notes: string | null;
+  readonly schedule:
+    | { readonly kind: 'now' }
+    | { readonly kind: 'shift_close' }
+    | { readonly kind: 'at'; readonly atMs: string }
+    | null;
+  readonly waitReason: 'not_yet' | 'hub_unavailable' | 'open_receipt' | 'open_shift' | null;
+  readonly error: string | null;
+}
+
+export type UpdateChoice = NonNullable<UpdateBridgeState['schedule']>;
+
 export interface MezonBridge {
   getHubState(): Promise<HubBridgeState>;
   onHubState(listener: (state: HubBridgeState) => void): () => void;
+  /** Present only in the desktop shell (not in the browser / web kassa). */
+  getUpdateState?(): Promise<UpdateBridgeState>;
+  scheduleUpdate?(choice: UpdateChoice): Promise<boolean>;
+  cancelUpdate?(): Promise<void>;
+  onUpdateState?(listener: (state: UpdateBridgeState) => void): () => void;
 }
 
 export interface HealthPayload {

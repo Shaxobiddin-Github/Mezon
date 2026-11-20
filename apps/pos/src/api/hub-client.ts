@@ -1,4 +1,6 @@
 import {
+  type LicenceStatusResponseDto,
+  LicenceStatusResponseSchema,
   type FiscalDocDto,
   FiscalDocResponseSchema,
   type FiscalStatusResponse,
@@ -437,6 +439,15 @@ export class HubApiClient {
       method: 'GET',
       path: '/fiscal/status',
       responseSchema: FiscalStatusResponseSchema,
+    });
+  }
+
+  /** T4.7 licence state for the banner; never used to block sales. */
+  async getLicenceStatus(): Promise<LicenceStatusResponseDto> {
+    return this.request({
+      method: 'GET',
+      path: '/licence/status',
+      responseSchema: LicenceStatusResponseSchema,
     });
   }
 
