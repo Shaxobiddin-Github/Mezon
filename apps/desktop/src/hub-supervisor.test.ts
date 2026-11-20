@@ -121,4 +121,82 @@ describe('HubSupervisor', () => {
     await shutdownPromise;
     expect(secondWorker.killed).toBe(true);
   });
+
+  it('T4.8 prepareUpdate: asks the worker; no ready worker or no answer means "wait" (readiness null)', async () => {
+    vi.useFakeTimers();
+    const workers: FakeHubChild[] = [];
+    const supervisor = new HubSupervisor({
+      dbPath: 'data/mezon.db',
+      logDir: 'logs',
+      allowedOrigins: [],
+      workerPath: 'worker.js',
+      forkWorker: () => {
+        const child = new FakeHubChild(2000 + workers.length);
+        workers.push(child);
+        return child;
+      },
+      onStateChange: () => undefined,
+    });
+    expect(await supervisor.prepareUpdate('1.3.0', true)).toEqual({
+      readiness: null,
+      backupId: null,
+    });
+    supervisor.start();
+    // Spawned but not ready yet: still no.
+    expect(await supervisor.prepareUpdate('1.3.0', true)).toEqual({
+      readiness: null,
+      backupId: null,
+    });
+    workers[0].emitMessage({
+      type: 'ready',
+      baseUrl: 'http://127.0.0.1:1',
+      port: 1,
+      reusedPreferredPort: false,
+    });
+
+    const asked = supervisor.prepareUpdate('1.3.0', true);
+    const sent = workers[0].messagesToWorker.at(-1) as {
+      type: string;
+      requestId: string;
+      backupIfReady: boolean;
+    };
+    expect(sent).toMatchObject({
+      type: 'update-prepare',
+      backupIfReady: true,
+      targetVersion: '1.3.0',
+    });
+    // An answer to another request id is ignored.
+    workers[0].emitMessage({
+      type: 'update-readiness',
+      requestId: 'other',
+      readiness: { openReceipts: 9, openShifts: 0, pendingFiscalDocs: 0 },
+      backupId: 'x',
+    });
+    workers[0].emitMessage({
+      type: 'update-readiness',
+      requestId: sent.requestId,
+      readiness: { openReceipts: 0, openShifts: 1, pendingFiscalDocs: 2 },
+      backupId: 'backup-9',
+    });
+    expect(await asked).toEqual({
+      readiness: { openReceipts: 0, openShifts: 1, pendingFiscalDocs: 2 },
+      backupId: 'backup-9',
+    });
+
+    // A malformed readiness is treated as no answer.
+    const bad = supervisor.prepareUpdate('1.3.0', false);
+    const sent2 = workers[0].messagesToWorker.at(-1) as { requestId: string };
+    workers[0].emitMessage({
+      type: 'update-readiness',
+      requestId: sent2.requestId,
+      readiness: { openReceipts: -1 },
+      backupId: null,
+    });
+    expect((await bad).readiness).toBeNull();
+
+    // No answer in time: wait.
+    const silent = supervisor.prepareUpdate('1.3.0', true, 1000);
+    await vi.advanceTimersByTimeAsync(1001);
+    expect(await silent).toEqual({ readiness: null, backupId: null });
+  });
 });

@@ -31,6 +31,10 @@ const PROTECTED_WORDS = new Set([
   'Mezon',
   'Guzar',
   'Telegram',
+  // T4.7 plan names (brands)
+  'Start',
+  'Business',
+  'Pro',
   'Owner',
   'Manager',
   'username',
