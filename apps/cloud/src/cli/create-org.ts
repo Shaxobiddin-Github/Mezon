@@ -28,15 +28,22 @@ function parseCliArgs(argv: string[]): CliArgs {
 }
 
 export async function runCreateOrgCli(argv: string[] = process.argv.slice(2)): Promise<void> {
-  const config = loadCloudConfig();
   const args = parseCliArgs(argv);
+  // v1: no default owner login or password — this repository is public, so a built-in default would
+  // be a known password on a production cabinet.
+  if (!args.login || !args.password || args.password.length < 10) {
+    throw new Error(
+      'org:create requires --login <email> and --password <at least 10 characters> (no defaults)',
+    );
+  }
+  const config = loadCloudConfig();
 
   const orgName = args.orgName ?? 'Guzar Kattaqo‘rg‘on Asosiy';
   const storeName = args.storeName ?? 'Bosh Do‘kon';
   const storeCode = args.storeCode ?? 'main';
-  const login = normalizeCloudLogin(args.login ?? 'admin@guzar.uz');
+  const login = normalizeCloudLogin(args.login);
   const username = args.username ?? 'Administrator';
-  const rawPassword = args.password ?? 'Guzar2026!Secure';
+  const rawPassword = args.password;
 
   console.log(`[org:create] Connecting to database...`);
   const conn = createCloudPgPool({

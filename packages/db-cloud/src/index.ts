@@ -102,7 +102,11 @@ export {
 
 export { CloudAuthStore, type CloudLoginLookupResult } from './auth-store.js';
 
-export { CloudTenantStore, type CreateOrganizationParams } from './tenant-store.js';
+export {
+  CloudTenantStore,
+  type CreateOrganizationParams,
+  type GrowthGuard,
+} from './tenant-store.js';
 
 export {
   CloudDeviceStore,
@@ -123,6 +127,15 @@ export { resolveIntlDateKey } from './timezone.js';
 export { CloudSyncPullStore, ForeignStoreError } from './sync-pull-store.js';
 export { CloudSyncParkedStore, type CloudParkedEventRecord } from './sync-parked-store.js';
 export {
+  type CabinetActor,
+  type CabinetCommand,
+  CloudCabinetStore,
+  cabinetAttributionUserCommand,
+  priceChangeCommands,
+  type SyncRowPayload,
+  syncPayloadKeys,
+} from './cabinet-store.js';
+export {
   CloudEventWriter,
   type CloudCommand,
   type CloudEventWriteResult,
@@ -142,5 +155,11 @@ export {
   type TelegramStaffTarget,
 } from './telegram-store.js';
 export { loadCustomerDebts, type CloudCustomerDebt } from './customer-debt.js';
+export {
+  CloudLicenceStore,
+  type GrowthUsage,
+  type StoredLicence,
+  type StoredPlatformInvoice,
+} from './licence-store.js';
 
 export { isDockerAvailable, shouldRunPgTests } from './pg-test-helper.js';

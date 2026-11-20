@@ -3,12 +3,14 @@ import { type I18nKey, t } from '@mezon/i18n';
 import { useAuthStore } from '../state/auth.js';
 import { LocaleSelect } from './LocaleSelect.js';
 
-export type AdminTab = 'dashboard' | 'receipts' | 'customers' | 'reports';
+export type AdminTab = 'dashboard' | 'receipts' | 'customers' | 'products' | 'devices' | 'reports';
 
 const TABS: ReadonlyArray<{ readonly id: AdminTab; readonly label: I18nKey }> = [
   { id: 'dashboard', label: 'admin.nav.dashboard' },
   { id: 'receipts', label: 'admin.nav.receipts' },
   { id: 'customers', label: 'admin.nav.customers' },
+  { id: 'products', label: 'admin.nav.products' },
+  { id: 'devices', label: 'admin.nav.devices' },
   { id: 'reports', label: 'admin.nav.reports' },
 ];
 

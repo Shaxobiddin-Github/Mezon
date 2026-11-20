@@ -24,6 +24,18 @@ export function formatSom(tiyin: string | null | undefined): string {
   }
 }
 
+/**
+ * T2.7b: a price typed in so'm (`12500`, `12 500`, `12500.5`, `12500,50`) → tiyin as a decimal
+ * string, without float math. Null when it is not a valid non-negative amount.
+ */
+export function parseSomToTiyin(input: string): string | null {
+  const s = input.replace(/[\s ]/g, '').replace(',', '.');
+  const m = /^(\d{1,13})(?:\.(\d{1,2}))?$/.exec(s);
+  if (!m) return null;
+  const tiyin = BigInt(m[1]) * 100n + BigInt((m[2] ?? '').padEnd(2, '0') || '0');
+  return tiyin.toString();
+}
+
 /** Quantity from milli-units without float math (`1500` → `1.5`). */
 export function formatQty(milli: string): string {
   try {

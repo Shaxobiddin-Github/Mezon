@@ -1,3 +1,52 @@
+# [ishchi2] C4: S-C4 testini o'zim yozdim (egasi ruxsati bilan)
+
+- Fayl: `apps/cloud/src/cabinet.test.ts`, qurilmalar testi. Egasi "Write it and merge" dedi, shuning uchun sening fayllingga tegdim; faqat test qo'shildi.
+- Ssenariy: `kab_mgr` qayta `active` qilinadi va ro'yxatni ko'ra oladi (200). Keyin `revoke` → 403, qurilma `active` qoladi. So'ng ega bekor qiladi → 200.
+- **C4-M1** (`actor.role !== 'owner'` olib tashlandi): test yiqildi (`expected 200 to be 403`). Kod tiklandi.
+- Deploy tuzatishing (`3ae9759`) ko'rib chiqildi, to'g'ri.
+
+# [ishchi2] P3 merge qilindi (egasi ruxsati bilan); `main` C4 ga qo'shildi
+
+- **P3 (#33)** squash-merge qilindi: `9b97dd4`. CI 5/5 yashil edi.
+  - **Egasining qarori:** nazoratchi ~5 soat javob bermadi, egasi "Merge P3 now" dedi. T4.2 variant B va P3 × C2 litsenziya chegarasi uchun nazoratchining alohida QABULi yo'q.
+  - Variant B sening `claude/v1-integration` ingda bor edi (1153 test). Litsenziya chegarasi integratsiyada yo'q edi.
+  - **So'rov:** vaqting bo'lsa, `lan-service.ts` / `lan-repo.ts` dagi chegarani ko'rib chiq. Topilma bo'lsa, alohida PR bilan tuzataman.
+- **C4 branch'iga `main` qo'shildi** (`de6337b`). To'qnashuvlar `claude/v1-integration` dagi `4bbedc3` yechimi bilan hal qilindi, ustiga P2/P3 ning keyingi o'zgarishlari qo'shildi.
+  - Tekshiruv: kodning `4bbedc3` dan farqi `f3ebb07..main` farqiga aynan teng (`diff` bilan).
+  - `main.ts` dagi `import {` va `admin/api-client.ts` dagi `}` integratsiyadagidek.
+- **C4 hali merge qilinmaydi:** S-C4 testi (faol menejer revoke → 403) kutilmoqda.
+
+# [ishchi2] P3: P2 + `main` (C2) qo'shildi; bulut migratsiyasi `0009`; P3 × C2 litsenziya chegarasi
+
+- **Bulut migratsiyasi:** `0008_register_shifts` → `0009_register_shifts`, chunki C2 `0008_licences` ni egalladi. SQL bayt-bayt bir xil (`diff` bilan tekshirildi).
+- **To'qnashuvlar:** `server.ts` da `close()` ikkala tomoni saqlandi: `licenceService.stop()` va LAN listener'ni yopish. Bulut meta `main` dan olindi.
+- **Kelishilgan integratsiya: LAN terminallar litsenziyaning `devices` chegarasiga kiradi.**
+  - Hub ham bitta qurilma, shuning uchun terminallar soni `maxDevices − 1` gacha. Muddati o'tganda o'sish muzlaydi (yangi terminal yo'q, mavjudlari ishlayveradi).
+  - Ikki joyda tekshiriladi:
+    - kod berishda: oldindan, foydalanuvchiga qulay → 402 `PLAN_LIMIT_REACHED`;
+    - **juftlashda:** faol terminallar soni kodni ishlatadigan **o'sha SQLite tranzaksiyasi ichida** sanaladi, shuning uchun parallel juftlashlar chegaradan o'ta olmaydi.
+  - Chegara tufayli rad etilgan **to'g'ri** kod xato urinish deb sanalmaydi va yonmaydi. Joy bo'shasa (terminal bekor qilinsa), o'sha kod ishlaydi.
+  - **QAROR (javobsiz):** litsenziya noma'lum bo'lsa (hub bulutga ulanmagan yoki kesh yo'q), hub chegarani bilmaydi va juftlashni to'xtatmaydi (GEMINI §2: litsenziya do'konni to'xtatmaydi). Bulut o'z qurilma chegarasini baribir tekshiradi.
+- **Test:** haqiqiy imzolangan litsenziya (2 qurilma) bilan to'liq hub. Birinchi terminal juftlanadi. Ikkinchi to'g'ri kod rad etiladi, lekin ishlatilmagan va `failed_attempts = 0` qoladi. Yangi kod → 402. Bekor qilgandan keyin o'sha kod juftlanadi.
+- **Mutatsiyalar 4/4 o'ldi:**
+  - L-M1: juftlash chegarani e'tiborsiz qoldiradi;
+  - L-M2: kod berish chegarani e'tiborsiz qoldiradi;
+  - L-M3: hub qurilma sifatida sanalmaydi;
+  - L-M4: chegara rad etishi urinishni yoqadi.
+
+---
+
+# [ishchi2] P2: `main` (C2) merge qilindi va P2 × C2 integratsiyasi — merge'ga tayyor
+
+- `main` (C2, #34) merge qilindi. To'qnashuv faqat `apps/hub/src/server.ts` da edi, ikkala tomon saqlandi: P2 route'lari va C2 litsenziya + yangilash darvozasi.
+- **Kelishilgan integratsiya:**
+  - `readUpdateReadiness`: mijoz hali to'lamagan QR (`pending`, muddati o'tmagan) ochiq chek deb sanaladi;
+  - yangilash darvozasi yopiq paytda `POST /payments/intents` → 503.
+- To'langan, lekin ishlatilmagan QR yangilanishni **to'xtatmaydi**. Ochiq savati baribir sanaladi; yetim kech to'lov esa faqat menejer qaytarishini kutadi va yangilanishni abadiy to'sib qo'ymasligi kerak. Test bor.
+- `pnpm verify` (PG bilan): **yashil** — 134 fayl, 1104 test; perf 17; E2E 1.
+
+---
+
 # [ishchi2] P2 tuzatishlar: K1, K2, K3 va S8 — qayta tekshiruv so'rovi
 
 Nazoratchi tekshiruvi (`0e0150f`, QAYTARILDI) bo'yicha. `main` (P1 squash, #31) branch'ga merge qilindi; daraxt `ac7b3a7` bilan bir xil. PR #32 base'i endi `main`.
@@ -27,6 +76,7 @@ Nazoratchi tekshiruvi (`0e0150f`, QAYTARILDI) bo'yicha. `main` (P1 squash, #31) 
 
 **Ochiq qoldi (POS UI yo'q).** POS'da hozircha to'lov ekrani yo'q. K2 "menejerga ko'rinsin" API darajasida qilindi (`/payments/attention`). Ekran T4.4 bilan.
 
+`pnpm verify` (PG bilan): **yashil**: 127 fayl, 1042 test; perf 17; E2E 1; lint, depcruise, db:check.
 `pnpm verify` (PG bilan): VERIFY_RESULT
 # Hisobot: P3 — T4.1 LAN hub (pinned TLS), T4.2 ko'p kassa, T4.3 terminal printeri va yashik, T2.8 yakuniy integratsion test
 
@@ -65,7 +115,6 @@ Holat: **HISOBOT**. Tekshiruv kutilyapti. O'zim merge qilmayman.
    - `readUpdateReadiness` to'langan va ishlatilmagan / `pending` QR'ni (P2) ochiq chek deb sanaydi.
 
    Ikkalasi C2 tekshiruvida ham yozilgan.
-   - bulut migratsiyasi `0008_register_shifts` → `0009` qilib qayta yaratiladi (C2 `0008_licences` dan keyin).
 2. **POS ilovasida LAN ulanish ekrani** (kod kiritish, barmoq izini ko'rsatish) — T4.4 (C2, web-kassa) bilan birga. Hozir faqat API va `pairWithLanHub` mijoz kodi bor.
 
 ## T4.1 — LAN hub, juftlangan terminallar, pinned TLS
@@ -140,7 +189,7 @@ Hub bitta qurilma. Shuning uchun 3 terminal bitta smena va bitta yashikni bo'lis
 
 **Ma'lumot.** `shifts`, `shift_cashier_sessions`, `cash_moves` ga `register_id` qo'shildi. `NULL` = hub kompyuterining o'z kassasi, aks holda LAN terminal id. Ikkala tomonda:
 - hub: `0025_register_shifts`;
-- bulut: `0008_register_shifts` (C2 dan keyin `0009` bo'ladi).
+- bulut: `0009_register_shifts` (C2 dan keyin `0009` bo'ladi).
 
 Kontrakt: payload'larda `registerId` ixtiyoriy va nullable, ya'ni eski hub va eski hodisalar o'zgarishsiz qabul qilinadi. `ShiftDto` da `registerId`.
 

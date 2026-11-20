@@ -1,8 +1,10 @@
-import { randomBytes } from 'node:crypto';
+import { generateKeyPairSync, randomBytes, sign } from 'node:crypto';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { LoginResponseSchema } from '@mezon/contracts';
+import { MonotonicUuidV7Generator, parseUuidV7, unixMsFromBigInt } from '@mezon/domain';
+import { PLAN_CATALOG, buildLicenceSigningMessage, licencePayloadToWire } from '@mezon/licensing';
 import type { PinHasher } from '@mezon/domain';
 import {
   LanPairingRejectedError,
@@ -14,7 +16,7 @@ import {
 } from '@mezon/drivers/node';
 import { FixedClock, SeededRandomSource } from '@mezon/test-utils';
 import { afterEach, describe, expect, it } from 'vitest';
-import { type HubServer, createHubServer } from './index.js';
+import { type CreateHubServerOptions, type HubServer, createHubServer } from './index.js';
 
 const HOST = '127.0.0.1:47879';
 const fastHasher: PinHasher = {
@@ -30,7 +32,7 @@ afterEach(async () => {
 
 const nonce = () => randomBytes(18).toString('base64url');
 
-async function boot(seed: number) {
+async function boot(seed: number, extra: Partial<CreateHubServerOptions> = {}) {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'mezon-lan-'));
   dirs.push(dir);
   const clock = new FixedClock(BigInt(Date.now()));
@@ -41,6 +43,7 @@ async function boot(seed: number) {
     clock,
     random: new SeededRandomSource(seed),
     pinHasher: fastHasher,
+    ...extra,
   });
   hubs.push(hub);
   const h = (t?: string) => (t ? { host: HOST, authorization: `Bearer ${t}` } : { host: HOST });
@@ -80,7 +83,7 @@ async function boot(seed: number) {
     expect(r.statusCode, r.body).toBe(201);
     return r.json<{ code: string; fingerprint256: string }>();
   };
-  return { hub, clock, h, owner, cashier, lan, target, newCode };
+  return { hub, dir, clock, h, owner, cashier, lan, target, newCode };
 }
 
 const viaLan = (
@@ -316,5 +319,97 @@ describe('T4.1 LAN hub: only a paired terminal gets in', () => {
     expect(
       env.hub.connection.sqlite.prepare('SELECT count(*) AS n FROM local_lan_terminals').get(),
     ).toEqual({ n: 1n });
+  });
+
+  it('T4.7 × T4.1: the licence device limit caps LAN terminals (the hub is one device); the code is not burnt', async () => {
+    // A test signing key the hub trusts; a licence for 2 devices = the hub + 1 terminal.
+    const { privateKey, publicKey } = generateKeyPairSync('ed25519');
+    const pub = (publicKey.export({ type: 'spki', format: 'der' }) as Buffer)
+      .subarray(-32)
+      .toString('base64');
+    const env = await boot(4107, {
+      trustedLicenceKeys: [{ keyId: 'k', publicKeyB64: pub, validFromMs: 0n, validUntilMs: null }],
+    });
+    const cfg = env.hub.connection.sqlite
+      .prepare('SELECT organization_id AS o, store_id AS s FROM local_hub_config LIMIT 1')
+      .get() as { o: string; s: string };
+    const org = parseUuidV7(cfg.o);
+    const now = unixMsFromBigInt(BigInt(env.clock.now()));
+    await env.hub.cloudStore.saveCloudState({
+      status: 'paired',
+      cloudUrl: 'https://cloud.invalid',
+      organizationId: org,
+      organizationName: 'Test',
+      storeId: parseUuidV7(cfg.s),
+      storeName: 'Dokon',
+      encryptedDeviceToken: (await env.hub.safeStorage.encryptString('t')).toString('base64'),
+      pairedAtMs: now,
+      nowMs: now,
+      idGen: new MonotonicUuidV7Generator({
+        clock: { now: () => now },
+        random: new SeededRandomSource(9),
+      }),
+    });
+    const payload = {
+      licenceId: '01950000-0000-7000-8000-0000000000aa',
+      organizationId: org,
+      plan: 'start' as const,
+      limits: { ...PLAN_CATALOG.start.limits, maxDevices: 2 },
+      issuedAtMs: 1n,
+      validFromMs: 0n,
+      validUntilMs: BigInt(env.clock.now()) + 30n * 86_400_000n,
+    };
+    const signature = sign(
+      null,
+      Buffer.from(buildLicenceSigningMessage('k', payload), 'utf8'),
+      privateKey,
+    ).toString('base64');
+    fs.writeFileSync(
+      path.join(env.dir, 'licence-cache.json'),
+      JSON.stringify({
+        organizationId: org,
+        organizationCreatedAtMs: '0',
+        envelopes: [{ payload: licencePayloadToWire(payload), keyId: 'k', signature }],
+        fetchedAtMs: String(env.clock.now()),
+      }),
+    );
+
+    // Two codes are issued while there is room; the first pairing fills the plan.
+    const a = await env.newCode();
+    const b = await env.newCode();
+    const first = await pairWithLanHub({
+      target: env.target,
+      code: a.code,
+      terminalName: 'Kassa 2',
+      nonce: nonce(),
+    });
+    // The second (right) code is refused by the plan, not burnt as a wrong guess.
+    await expect(
+      pairWithLanHub({ target: env.target, code: b.code, terminalName: 'Kassa 3', nonce: nonce() }),
+    ).rejects.toBeInstanceOf(LanPairingRejectedError);
+    const codeB = env.hub.connection.sqlite
+      .prepare(
+        'SELECT used_at_ms AS u, failed_attempts AS f FROM local_lan_pairing_codes ORDER BY created_at_ms DESC, id DESC LIMIT 1',
+      )
+      .get() as { u: unknown; f: bigint };
+    expect(codeB).toEqual({ u: null, f: 0n });
+    // A new code is refused up front with the plan's code.
+    const more = await env.hub.app.inject({
+      method: 'POST',
+      url: '/lan/pairing-codes',
+      headers: env.h(env.owner),
+    });
+    expect(more.statusCode).toBe(402);
+    expect(more.json<{ error: { code: string } }>().error.code).toBe('PLAN_LIMIT_REACHED');
+    // Revoking the terminal frees the place: the unburnt code now pairs.
+    const revoke = await env.hub.app.inject({
+      method: 'POST',
+      url: `/lan/terminals/${first.terminalId}/revoke`,
+      headers: env.h(env.owner),
+    });
+    expect(revoke.statusCode, revoke.body).toBe(200);
+    await expect(
+      pairWithLanHub({ target: env.target, code: b.code, terminalName: 'Kassa 3', nonce: nonce() }),
+    ).resolves.toMatchObject({ terminalId: expect.any(String) as string });
   });
 });

@@ -3,6 +3,7 @@ import type {
   AdminCustomersQueryDto,
   AdminCustomersResponseDto,
   AdminDashboardResponseDto,
+  AdminProductsResponseDto,
   AdminReceiptDetailResponseDto,
   AdminReceiptsQueryDto,
   AdminReceiptsResponseDto,
@@ -180,6 +181,11 @@ export class AdminApiClient {
     return this.request<DailySalesReportResponseDto>(`/api/v1/admin/reports/daily${qs}`);
   }
 
+  // T4.7 licence
+  async getLicence(): Promise<LicenceInfo> {
+    return this.request<LicenceInfo>('/api/v1/admin/licence');
+  }
+
   // T2.8 Telegram
   async getTelegramStatus(): Promise<TelegramStatus> {
     return this.request<TelegramStatus>('/api/v1/admin/telegram/status');
@@ -193,12 +199,115 @@ export class AdminApiClient {
     await this.request<unknown>('/api/v1/admin/telegram/link', { method: 'DELETE' });
   }
 
+  async getProducts(params?: {
+    search?: string;
+    cursor?: string;
+    limit?: number;
+  }): Promise<AdminProductsResponseDto> {
+    const query = new URLSearchParams();
+    if (params?.search) query.set('search', params.search);
+    if (params?.cursor) query.set('cursor', params.cursor);
+    if (params?.limit) query.set('limit', params.limit.toString());
+    const qs = query.toString() ? `?${query.toString()}` : '';
+    return this.request<AdminProductsResponseDto>(`/api/v1/admin/products${qs}`);
+  }
+
+  /** T2.7b: new sale price (tiyin) — reaches every kassa by sync. */
+  async changeProductPrice(
+    productId: string,
+    body: { newPrice: string; reason?: string },
+  ): Promise<{ changed: boolean; oldPrice: string | null; newPrice: string }> {
+    return this.request(`/api/v1/admin/products/${encodeURIComponent(productId)}/price`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    });
+  }
+
+  async getDevices(): Promise<{ devices: CabinetDevice[] }> {
+    return this.request('/api/v1/admin/devices');
+  }
+
+  /** Owner only (the server refuses a manager). */
+  async revokeDevice(id: string): Promise<void> {
+    await this.request(`/api/v1/admin/devices/${encodeURIComponent(id)}/revoke`, {
+      method: 'POST',
+    });
+  }
+
+  async getStores(): Promise<{ stores: { id: string; name: string; isActive: boolean }[] }> {
+    return this.request('/api/v1/stores');
+  }
+
+  /** One-time code a new kassa types to connect to the cloud (owner only, plan limits apply). */
+  async createPairingCode(body: {
+    storeId: string;
+    name: string;
+  }): Promise<{ code: string; expiresAtMs: number; storeName: string }> {
+    return this.request('/api/v1/devices/pairing-codes', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    });
+  }
+
+  async getStaff(): Promise<{ staff: CabinetStaff[] }> {
+    return this.request('/api/v1/admin/staff');
+  }
+
+  async getPriceChanges(productId: string): Promise<{ changes: PriceChange[] }> {
+    return this.request(`/api/v1/admin/products/${encodeURIComponent(productId)}/price-changes`);
+  }
+
   async createCustomerTelegramLink(customerId: string): Promise<TelegramLink> {
     return this.request<TelegramLink>(
       `/api/v1/admin/customers/${encodeURIComponent(customerId)}/telegram-link`,
       { method: 'POST' },
     );
   }
+}
+
+export interface LicenceInfo {
+  readonly state: 'trial' | 'active' | 'grace' | 'expired';
+  readonly plan: 'start' | 'business' | 'pro' | null;
+  readonly limits: { readonly maxStores: number | null; readonly maxDevices: number | null };
+  readonly endsAtMs: string | null;
+  readonly daysLeft: number | null;
+  readonly invalidLicence: boolean;
+  readonly usage: { readonly stores: number; readonly devices: number };
+  readonly invoices: readonly {
+    readonly period: string;
+    readonly plan: string;
+    readonly amountTiyin: string;
+    readonly status: 'issued' | 'paid' | 'void';
+  }[];
+}
+
+export interface CabinetDevice {
+  readonly id: string;
+  readonly name: string;
+  readonly storeName: string | null;
+  readonly platform: string;
+  readonly appVersion: string;
+  readonly status: string;
+  readonly lastSeenAtMs: string;
+}
+
+export interface CabinetStaff {
+  readonly id: string;
+  readonly username: string;
+  readonly fullName: string;
+  readonly role: string;
+  readonly isActive: boolean;
+}
+
+export interface PriceChange {
+  readonly id: string;
+  readonly oldPrice: string | null;
+  readonly newPrice: string;
+  readonly changedByName: string | null;
+  readonly reason: string | null;
+  readonly createdAtMs: string;
 }
 
 export interface TelegramStatus {
