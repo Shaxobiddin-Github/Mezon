@@ -70,3 +70,39 @@ jobs:
           docker compose logs migrate cloud
           docker compose down -v
           exit 1
+
+      - name: Backup, restore on a fresh server, and the API still starts
+        working-directory: deploy
+        env:
+          MEZON_POSTGRES_ADMIN_PASSWORD: ci-admin-password-1234567890
+          MEZON_APP_DB_PASSWORD: ci-app-password-1234567890
+          JWT_SECRET: ci-jwt-secret-at-least-32-characters-long
+          CLOUD_DOMAIN: localhost
+          ACME_EMAIL: ci@example.invalid
+        run: |
+          set -eu
+          fail() { docker compose logs postgres migrate cloud || true; docker compose down -v; exit 1; }
+          # Migrated database -> dump with the compose backup service (deploy/BACKUP-RESTORE.md).
+          docker compose up -d --wait postgres || fail
+          docker compose run --rm migrate || fail
+          docker compose run --rm backup || fail
+          dump=$(basename "$(ls backups/*.dump | head -n1)")
+          tables_before=$(docker compose exec -T postgres psql -U mezon_admin -d mezon_cloud -tAc "select count(*) from pg_tables where schemaname='public'")
+          policies_before=$(docker compose exec -T postgres psql -U mezon_admin -d mezon_cloud -tAc "select count(*) from pg_policies")
+          # A new server: empty volume, roles from init-db, then restore.
+          docker compose down -v
+          docker compose up -d --wait postgres || fail
+          docker compose run --rm --entrypoint /bin/sh backup /scripts/restore-pg.sh "/backups/$dump" || fail
+          tables_after=$(docker compose exec -T postgres psql -U mezon_admin -d mezon_cloud -tAc "select count(*) from pg_tables where schemaname='public'")
+          policies_after=$(docker compose exec -T postgres psql -U mezon_admin -d mezon_cloud -tAc "select count(*) from pg_policies")
+          echo "tables $tables_before -> $tables_after, policies $policies_before -> $policies_after"
+          [ "$tables_before" = "$tables_after" ] && [ "$policies_before" = "$policies_after" ] && [ "$tables_after" -gt 0 ] || fail
+          # The restored database is current: migrate is a no-op and the API answers.
+          docker compose up -d migrate cloud || fail
+          for i in $(seq 1 60); do
+            if docker compose exec -T cloud wget -q -O - http://127.0.0.1:4000/health/ready | grep -q '"ok"'; then
+              echo "cloud ready on the restored database"; docker compose down -v; exit 0
+            fi
+            sleep 2
+          done
+          fail

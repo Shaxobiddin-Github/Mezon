@@ -90,6 +90,28 @@ services:
     networks:
       - mezon_internal
 
+  # Daily backup and restore (deploy/BACKUP-RESTORE.md). A one-off container from the same
+  # PostgreSQL image; it never runs with `up`, only with `docker compose run --rm backup`.
+  backup:
+    image: postgres:18-alpine
+    profiles: ['tools']
+    restart: 'no'
+    entrypoint: ['/bin/sh', '/scripts/backup-pg.sh']
+    environment:
+      MEZON_POSTGRES_ADMIN_PASSWORD: ${MEZON_POSTGRES_ADMIN_PASSWORD}
+      POSTGRES_USER: ${POSTGRES_USER:-mezon_admin}
+      POSTGRES_DB: ${POSTGRES_DB:-mezon_cloud}
+      # 13 = the last 14 daily copies (find -mtime +13).
+      RETENTION_DAYS: ${MEZON_BACKUP_RETENTION_DAYS:-13}
+    volumes:
+      - ./scripts:/scripts:ro
+      - ${MEZON_BACKUP_DIR:-./backups}:/backups
+    depends_on:
+      postgres:
+        condition: service_healthy
+    networks:
+      - mezon_internal
+
 volumes:
   mezon_pgdata:
   mezon_caddy_data:
