@@ -71,6 +71,13 @@
       "when": 1795156978133,
       "tag": "0009_register_shifts",
       "breakpoints": true
+    },
+    {
+      "idx": 10,
+      "version": "7",
+      "when": 1795174215208,
+      "tag": "0010_telegram_retry",
+      "breakpoints": true
     }
   ]
 }

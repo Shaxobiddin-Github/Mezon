@@ -41,6 +41,8 @@ const PriceEditor: React.FC<{
       setMessage(t('admin.products.invalidPrice'));
       return;
     }
+    // Owner decision (2026-11-20): a zero price is allowed, but only after an explicit confirmation.
+    if (BigInt(tiyin) === 0n && !window.confirm(t('admin.products.confirmFree'))) return;
     setSaving(true);
     setMessage(null);
     try {

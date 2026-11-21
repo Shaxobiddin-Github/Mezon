@@ -333,6 +333,7 @@ export const UZ_LATN_MESSAGES = {
   'admin.products.save': 'Saqlash',
   'admin.products.cancel': 'Bekor qilish',
   'admin.products.invalidPrice': "Narxni to'g'ri kiriting, masalan 12500",
+  'admin.products.confirmFree': "Narx 0 so'm: bu tovar bepul sotiladi. Tasdiqlaysizmi?",
   'admin.products.saved': 'Saqlandi. Kassalar keyingi sinxronda yangi narxni oladi.',
   'admin.products.unchanged': "Narx o'zgarmadi",
   'admin.products.history': 'Narx tarixi',

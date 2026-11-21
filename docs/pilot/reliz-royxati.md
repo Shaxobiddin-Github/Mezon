@@ -4,6 +4,8 @@ Pilot do'konga har yangi versiya o'rnatishdan oldin. Har band belgilanmaguncha r
 
 **v1 doirasi (egasi qarori, 2026-11-19):** fiskal chek, UzQR/Payme/Click/Uzum bilan avtomatik ulanish va markirovka v2 ga qoldi. v1 da chek "FISKAL EMAS", naqdsiz to'lov qo'lda yoziladi. To'liq ro'yxat: [../v1/README.md](../v1/README.md).
 
+> **Muhim (egasi qarori, 2026-11-20):** v1 do'konda **faqat ichki hisob uchun** ishlatiladi: savdo, ombor, qarz, smena, hisobot. Xaridorga **rasmiy (fiskal) chek do'konning hozirgi onlayn-kassasida** beriladi. Guzar Kassa chiqaradigan "FISKAL EMAS" cheki rasmiy chek o'rnini bosmaydi. Fiskal chek v2 da qo'shiladi.
+
 ## A. Kod va tekshiruv
 
 - [ ] `main` ga barcha PR'lar QABUL va yashil CI bilan tushgan (Desktop Installer va Deploy images job'lari ham).
@@ -21,6 +23,7 @@ Pilot do'konga har yangi versiya o'rnatishdan oldin. Har band belgilanmaguncha r
 
 ## C. Konfiguratsiya (egasi bilan)
 
+- [ ] Do'kon xodimlari biladi: xaridorga rasmiy chek **hozirgi onlayn-kassada** beriladi. Guzar Kassa faqat ichki hisob uchun.
 - [ ] Fiskal rejim **o'chiq**: chekda va ekranda "FISKAL EMAS", "Fiskallashmagan cheklar" tugmasi ko'rinmaydi. Haqiqiy fiskal v2 da, egasining yozma tasdig'i bilan.
 - [ ] To'lov usullari ro'yxatida UzQR yo'q; karta, Payme, Click, Uzum qo'lda yoziladi.
 - [ ] Imzolangan qoidalar paketi (bo'lsa): muddati amalda, imzo kaliti egasida (repoda emas).

@@ -1,0 +1,2 @@
+ALTER TABLE "cloud_telegram_deliveries" ADD COLUMN "attempts" integer DEFAULT 1 NOT NULL;--> statement-breakpoint
+ALTER TABLE "cloud_telegram_deliveries" ADD CONSTRAINT "chk_cloud_telegram_deliveries_attempts" CHECK ("cloud_telegram_deliveries"."attempts" BETWEEN 1 AND 2);

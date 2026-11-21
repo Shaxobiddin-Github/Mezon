@@ -504,4 +504,31 @@ describePg('@mezon/cloud - T2.8 Telegram bot (link, consent, digest, reminders)'
     await tick();
     expect(tg.messagesTo('7008').filter((m) => m.text.includes('Ikki Chat'))).toHaveLength(1);
   });
+
+  it('owner 11-20: a transient failure is retried once after 15 minutes, never a third time', async () => {
+    const MIN = 60_000n;
+    nowMs = week(11, 12); // Monday 21:00
+    tg.failNext(1);
+    const first = await tick();
+    expect(first.failures).toBe(1);
+    const sentFirst = first.digestsSent;
+    expect(sentFirst).toBeGreaterThan(0);
+    // Too early: the failed one waits; nothing is sent twice.
+    nowMs = unixMsFromBigInt(week(11, 12) + 5n * MIN);
+    expect(await tick()).toMatchObject({ digestsSent: 0, failures: 0 });
+    nowMs = unixMsFromBigInt(week(11, 12) + 20n * MIN);
+    expect(await tick()).toMatchObject({ digestsSent: 1, failures: 0 });
+    nowMs = unixMsFromBigInt(week(11, 12) + 60n * MIN);
+    expect(await tick()).toMatchObject({ digestsSent: 0, failures: 0 });
+
+    // Fails twice: the retry is the last attempt.
+    nowMs = week(12, 12);
+    tg.failNext(1);
+    expect((await tick()).failures).toBe(1);
+    nowMs = unixMsFromBigInt(week(12, 12) + 20n * MIN);
+    tg.failNext(1);
+    expect(await tick()).toMatchObject({ digestsSent: 0, failures: 1 });
+    nowMs = unixMsFromBigInt(week(12, 12) + 40n * MIN);
+    expect(await tick()).toMatchObject({ digestsSent: 0, failures: 0 });
+  });
 });

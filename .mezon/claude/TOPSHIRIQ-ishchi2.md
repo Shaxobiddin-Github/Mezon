@@ -1,3 +1,41 @@
+# [claude] Narx 0: egasi aniqlashtirdi (2026-11-20, 16:55) — **A varianti**
+
+`ishchi2/pilot-qaror` da (`d210774`) "Narx 0: pilotda o'zgarishsiz" deb yozilgan. Egasidan qayta so'radim, javobi: **"A ni qilamiz"**. Ya'ni kabinetda 0 so'm narx qo'yilganda "bepul sotiladi, tasdiqlaysizmi?" deb so'raladi.
+
+Bu C7 da tayyor (`ProductsView.tsx`, `admin.products.confirmFree`). Hisobotingdagi shu bandni shunga moslab tuzat. Qolgan qarorlar (fiskalsiz pilot, T3.0 keyinga) bir xil, ziddiyat yo'q.
+
+C7 ni tekshirish, PR ochish va merge qilish so'rovi o'z kuchida.
+
+---
+
+# [claude] Egasining javoblari (2026-11-20) va C7 — tekshirish va PR so'rovi
+
+Egasi qoidasi (yangi): **ishchi2 ning har bir savoli egasiga yetkaziladi.** Hisobotlaringdagi savollarni men yig'ib, egasiga o'zbekcha tushuntiraman. Savollarni avvalgidek `Egasiga savol` yoki `QAROR (javobsiz)` deb belgilab yoz.
+
+## Egasining javoblari
+1. **"FISKAL EMAS" chek:** v1 do'konda **faqat ichki hisob uchun** ishlatiladi. Xaridorga rasmiy chek do'konning hozirgi onlayn-kassasida beriladi. Hujjatlarga yozildi (`docs/v1/README.md`, `reliz-royxati.md`).
+2. **Kabinetda 0 narx:** ruxsat, lekin tasdiq so'raladi ("bepul sotiladi, tasdiqlaysizmi?"). C7 da qilindi.
+3. **Har kassaga alohida fiskal modul:** v2 ga qoldi. Fiskal hujjatlar bilan birga aniqlanadi.
+4. **Telegram yetkazish xatosi:** bir marta qayta urinilsin. C7 da qilindi.
+5. Sening `QAROR (javobsiz)` laring — **hammasi tasdiqlandi**:
+   - litsenziya noma'lum bo'lsa, juftlash to'xtamaydi;
+   - printeri yo'q LAN kassa hub printeriga chiqarmaydi;
+   - statik QR'ni ega yoki menejer tasdiqlaydi (v2).
+
+## C7: `claude/C7-owner-decisions` (`0fa3e6b`, `main` = `bbf428e` ustida)
+- `TelegramStore.claimDelivery`: vaqtinchalik xato **15 daqiqadan keyin bir marta** qayta urinadi; uchinchi marta yo'q, bloklangan chatga yo'q. Qayta urinish guarded UPDATE orqali da'vo qilinadi, shuning uchun ikki bulut nusxasi ham ikki marta yubora olmaydi.
+- **Migratsiya `0010_telegram_retry`:** `attempts` ustuni (1..2), mavjud qatorlar 1 bo'ladi. Faqat ustun qo'shiladi, ma'lumot o'chirilmaydi.
+- Kabinet: 0 narxda `window.confirm`.
+- Tekshiruv: build, typecheck, lint, depcruise, prettier, `db:check` yashil; `telegram.test.ts` 14/14 (PG).
+- Mutatsiyalar:
+  - `attempts < 3` → o'ldi;
+  - kechikish shartini olib tashlash → o'ldi (6 test);
+  - `chatUnavailable` sharti → **omon qoldi, ekvivalent**: bloklangan chatning bog'lanishi oldin bekor qilinadi, shart qo'shimcha himoya.
+
+**Iltimos:** tekshir (toifa **o'rta**: migratsiya va sinxron bo'lmagan bulut jadvali), PR och, QABUL va yashil CI bilan merge qil.
+
+---
+
 # [claude] C4: "deploy images" qizil edi — sababi topildi va tuzatildi (`3ae9759`)
 
 C4 tekshiruving va merge'ing uchun rahmat. CI'dagi xato Docker yig'ishda emas edi: ikkala image yashil yig'ilgan. Yiqilgan qadam "Start the stack".
