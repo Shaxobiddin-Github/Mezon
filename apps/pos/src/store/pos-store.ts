@@ -40,6 +40,9 @@ function persistLocale(locale: Locale): void {
 const initialLocale = readStoredLocale();
 setI18nLocale(initialLocale);
 export type PosScreen = 'loading' | 'setup' | 'login' | 'open_shift' | 'pos';
+/** Professional layout (owner 11-21): the kassa is split into sections with a side menu. */
+export type PosSection = 'sale' | 'receipts' | 'products' | 'settings';
+
 export type PosModal =
   | 'none'
   | 'quick_sale'
@@ -87,6 +90,7 @@ export interface PosStoreState {
   readonly locale: Locale;
   readonly screen: PosScreen;
   readonly activeModal: PosModal;
+  readonly section: PosSection;
 
   // Auth
   readonly token: string | null;
@@ -136,6 +140,7 @@ export interface PosStoreState {
   readonly setLocale: (locale: Locale) => void;
   readonly setScreen: (screen: PosScreen) => void;
   readonly setActiveModal: (modal: PosModal) => void;
+  readonly setSection: (section: PosSection) => void;
   readonly setLoginOptions: (options: readonly LoginOptionDto[]) => void;
   readonly setAuthenticated: (token: string, user: UserSummaryDto) => void;
   readonly clearSession: () => void;
@@ -178,6 +183,7 @@ export const usePosStore = create<PosStoreState>((set) => ({
   locale: initialLocale,
   screen: 'loading',
   activeModal: 'none',
+  section: 'sale',
 
   token: null,
   user: null,
@@ -237,6 +243,8 @@ export const usePosStore = create<PosStoreState>((set) => ({
 
   setScreen: (screen) => set({ screen }),
 
+  setSection: (section) => set({ section, activeModal: 'none', errorBanner: null }),
+
   setActiveModal: (modal) =>
     set((state) => {
       if (modal === 'payment' && state.activeModal !== 'payment') {
@@ -271,6 +279,7 @@ export const usePosStore = create<PosStoreState>((set) => ({
       selectedLineId: null,
       selectedCustomer: null,
       activeModal: 'none',
+      section: 'sale',
       screen: 'login',
       errorBanner: null,
     }),
