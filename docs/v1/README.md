@@ -71,12 +71,14 @@ Egasining qarori: qonuniy integratsiyalar v2 da qilinadi. Har bir kassaga alohid
 
    Bu variantda serverda hech qanday port ochilmaydi. HTTPS sertifikatni Cloudflare beradi. Keyingi `docker compose exec ...` buyruqlarida ham ikkala `-f` ni yozing.
 
-4. Birinchi tashkilot va ega akkauntini yarating. **Parol majburiy**, standart parol yo'q:
+4. Birinchi tashkilot va ega akkauntini yarating. **Parol majburiy**, standart parol yo'q. Buyruq `migrate` konteynerida ishlaydi, chunki bazaning admin ulanishi faqat unda bor. Parol ekranda ko'rinmaydi va terminal tarixida qolmaydi:
 
    ```
-   docker compose exec cloud pnpm --filter @mezon/cloud org:create -- \
+   read -rsp "Parol (kamida 10 belgi): " P; echo
+   docker compose run --rm migrate node /app/apps/cloud/dist/cli/create-org.js \
      --org-name "Do'kon nomi" --store-name "Bosh do'kon" --store-code main \
-     --login ega@misol.uz --password "<kamida 10 belgili parol>"
+     --login ega@misol.uz --password "$P"
+   unset P
    ```
 
 5. Zaxira: [../../deploy/BACKUP-RESTORE.md](../../deploy/BACKUP-RESTORE.md) dagi cron qatorini qo'shing.
