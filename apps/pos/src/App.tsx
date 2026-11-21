@@ -40,6 +40,7 @@ import {
   ShiftManagementModal,
 } from './components/PaymentAndShiftModals.js';
 import './App.css';
+import { describeHubError } from './utils/error-text.js';
 
 function resolveBrowserFallbackBaseUrl(): string | null {
   if (typeof window.__MEZON_HUB_URL__ === 'string' && window.__MEZON_HUB_URL__.trim().length > 0) {
@@ -146,10 +147,10 @@ export function App() {
           setErrorBanner(t(`error.${err.code}`));
           return;
         }
-        setErrorBanner(`${err.code}: ${err.message}`);
+        setErrorBanner(describeHubError(err));
         return;
       }
-      setErrorBanner(err instanceof Error ? err.message : String(err));
+      setErrorBanner(describeHubError(err));
     },
     [setErrorBanner],
   );
@@ -886,7 +887,12 @@ export function App() {
 
       {activeModal === 'shortcuts' && <ShortcutsModal />}
       {activeModal === 'catalog' && (user?.role === 'owner' || user?.role === 'manager') && (
-        <CatalogScreen api={api} onClose={() => setActiveModal('none')} onError={handleError} />
+        <CatalogScreen
+          api={api}
+          fiscalMode={fiscalModeEnabled}
+          onClose={() => setActiveModal('none')}
+          onError={handleError}
+        />
       )}
       {activeModal === 'fiscal_unsettled' &&
         (user?.role === 'owner' || user?.role === 'manager') && (

@@ -224,6 +224,16 @@ export const UZ_LATN_MESSAGES = {
   'error.BARCODE_NOT_FOUND': 'Shtrix-kod katalogdan topilmadi: {code}',
   'error.AUTH_INVALID_CREDENTIALS': 'Login yoki PIN kod notoʻgʻri.',
   'error.AUTH_FORBIDDEN': 'Ushbu amalni bajarish uchun ruxsatingiz yoʻq.',
+  'error.generic': 'Amalni bajarib boʻlmadi ({code}). Qayta urinib koʻring.',
+  'error.INVALID_BARCODE':
+    'Shtrix-kod notoʻgʻri: faqat harf, raqam va . _ + / = ( ) - belgilari boʻlishi mumkin.',
+  'error.INVALID_BARCODE_CHECK_DIGIT':
+    'Shtrix-kodning oxirgi (nazorat) raqami notoʻgʻri. Kodni qayta skanerlang.',
+  'error.BARCODE_ALREADY_EXISTS': 'Bu shtrix-kod boshqa tovarga biriktirilgan.',
+  'error.PRODUCT_SKU_ALREADY_EXISTS': 'Bu artikul boshqa tovarda bor.',
+  'error.CATEGORY_ALREADY_EXISTS': 'Bunday nomli kategoriya allaqachon bor.',
+  'error.PRODUCT_NOT_FOUND': 'Tovar topilmadi (oʻchirilgan boʻlishi mumkin).',
+  'error.VALIDATION_ERROR': 'Kiritilgan maʼlumot notoʻgʻri. Maydonlarni tekshiring.',
   'error.CART_EMPTY': 'Savat boʻsh.',
 
   // T3.1 Catalog management (MXIK, qadoq kodi, QQS)
@@ -254,6 +264,26 @@ export const UZ_LATN_MESSAGES = {
   'catalog.col.price': 'Narx',
   'catalog.col.mxik': 'MXIK',
   'catalog.col.vat': 'QQS',
+  'catalog.form.barcode': 'Shtrix-kod',
+  'catalog.form.barcodeHint': 'Skanerlang yoki qoʻlda yozing',
+  'catalog.form.barcodeAdd': 'Yana shtrix-kod qoʻshish',
+  'catalog.form.barcodeRemove': 'Olib tashlash',
+  'catalog.form.sku': 'Artikul (SKU)',
+  'catalog.form.category': 'Kategoriya',
+  'catalog.form.noCategory': '— Kategoriyasiz —',
+  'catalog.form.newCategory': '+ Yangi kategoriya',
+  'catalog.form.newCategoryName': 'Yangi kategoriya nomi',
+  'catalog.form.unlimited': 'Qoldiq hisoblanmasin (xizmat yoki cheksiz tovar)',
+  'catalog.form.minStock': 'Minimal qoldiq (shundan kam qolsa ogohlantiradi)',
+  'catalog.form.sectionMain': 'Asosiy',
+  'catalog.form.sectionStock': 'Ombor',
+  'catalog.form.sectionFiscal': 'Soliq va fiskal maydonlar (ixtiyoriy)',
+  'catalog.form.invalidSku': 'Artikul notoʻgʻri',
+  'catalog.form.invalidBarcode': 'Shtrix-kod notoʻgʻri',
+  'catalog.form.invalidMinStock': 'Minimal qoldiq notoʻgʻri',
+  'catalog.form.invalidCategory': 'Kategoriya nomi notoʻgʻri',
+  'catalog.col.code': 'Artikul / shtrix-kod',
+  'catalog.col.category': 'Kategoriya',
   'catalog.noMxik': 'yoʻq',
 
   // T3.1 Organization tax settings

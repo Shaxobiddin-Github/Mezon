@@ -922,3 +922,141 @@ select.pos-btn {
     grid-template-columns: 1fr;
   }
 }
+
+/* ---------- Forms & lists (C11) ---------- */
+.pos-modal-wide {
+  max-width: 980px;
+}
+
+.pos-form-row {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 12px;
+}
+
+.pos-form-row > .pos-form-field {
+  margin-bottom: 0;
+}
+
+.pos-modal-body .pos-form-field {
+  margin-bottom: 0;
+}
+
+.pos-form-section-title {
+  margin-top: 4px;
+  font-size: 12px;
+  font-weight: 800;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--brand-text);
+}
+
+[data-theme='dark'] .pos-form-section-title {
+  color: var(--brand);
+}
+
+.pos-check {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-height: 44px;
+  padding: 8px 12px;
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-sm);
+  background-color: var(--bg-elevated);
+  cursor: pointer;
+  font-size: 14px;
+}
+
+.pos-check input {
+  width: 20px;
+  height: 20px;
+  accent-color: var(--brand);
+}
+
+.pos-form-details {
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius);
+  background-color: var(--bg-elevated);
+}
+
+.pos-form-details > summary {
+  padding: 12px 14px;
+  cursor: pointer;
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--text-secondary);
+}
+
+.pos-form-details-body {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 0 14px 14px;
+}
+
+.pos-chip-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.pos-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 4px 4px 4px 10px;
+  border-radius: 999px;
+  background-color: var(--brand-soft);
+  color: var(--brand-text);
+  font-family: ui-monospace, 'Cascadia Mono', Consolas, monospace;
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.pos-chip-remove {
+  width: 24px;
+  height: 24px;
+  border: none;
+  border-radius: 999px;
+  background: transparent;
+  color: inherit;
+  font-size: 16px;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.pos-chip-remove:hover {
+  background-color: var(--row-selected);
+}
+
+.pos-toolbar-row {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  flex-wrap: wrap;
+}
+
+.pos-toolbar-row > .pos-input {
+  flex: 1;
+  min-width: 220px;
+}
+
+.pos-num {
+  text-align: right !important;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.pos-muted {
+  color: var(--text-secondary);
+}
+
+.pos-table tbody tr:hover {
+  background-color: var(--bg-elevated);
+}
+
+.pos-table td .pos-btn {
+  min-height: 38px;
+  padding: 4px 12px;
+}
