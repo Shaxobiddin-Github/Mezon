@@ -1,3 +1,25 @@
+# Tekshiruv: C7 — egasining 11-20 qarorlari — QABUL (merge'dan keyin)
+
+Tekshiruvchi: ishchi2. Commit: `0fa3e6b` (`main` da `cbff627`, #39). Toifa: o'rta.
+
+**Holat:** PR #39 mening tekshiruvimsiz merge qilingan (`Shaxobiddin-Github`). Shuning uchun bu tekshiruv merge'dan keyin qilindi. CI 5/5 yashil edi (installer o'tkazib yuborilgan, desktop o'zgarmagan).
+
+**Xulosa.** Kod to'g'ri, bloklovchi topilma yo'q. **QABUL.**
+
+## Nimani tekshirdim
+- **Migratsiya `0010_telegram_retry`:** faqat ustun qo'shiladi (`DEFAULT 1 NOT NULL`) va `CHECK attempts BETWEEN 1 AND 2`. Mavjud qatorlar 1 bo'ladi, ma'lumot o'chmaydi. `attempts + 1` faqat `attempts < 2` bo'lganda, shuning uchun CHECK hech qachon buzilmaydi.
+- **Qayta da'vo (`claimDelivery`):**
+  - guarded `UPDATE ... WHERE status = 'failed' AND attempts < 2 ... RETURNING id`. Bu bitta atomar qator yangilanishi, shuning uchun ikki bulut nusxasi bir vaqtda urinsa ham faqat bittasi qator oladi;
+  - `last_error` qiymati `finishDelivery` ga berilgan `err.kind` bilan bir xil (`'chatUnavailable'`), shart to'g'ri qiymatni solishtiradi;
+  - `period_key` bir xil bo'lishi shart, shuning uchun kechagi xato bugun qayta yuborilmaydi.
+- **Test:** 15 daqiqadan oldin yuborilmaydi, keyin bir marta yuboriladi, uchinchi urinish yo'q. Ikki marta yiqilish ssenariysi ham bor.
+- **Kabinet:** 0 narxda `window.confirm`; rad etilsa so'rov ketmaydi. Server 0 ni baribir qabul qiladi (egasi qarori: ruxsat).
+
+## Eslatmalar (bloklamaydi)
+1. **`'unexpected'` xato ham bir marta qayta uriniladi** (masalan, Telegram 400 "bad request" doimiy xato bo'lsa). Bitta qo'shimcha urinish xolos, zarari yo'q. Eslatib qo'yaman.
+2. **Kabinetdagi tasdiq test bilan himoyalanmagan:** `apps/admin` da komponent testlari yo'q. `confirm` qatorini olib tashlash hech bir testni yiqitmaydi. UI darajasidagi himoya va server 0 ni ruxsat etadi, shuning uchun pilot uchun yetarli. v2 da komponent testi taklif qilinadi.
+3. **`'claimed'` holatida qolgan qator** (jarayon yuborish o'rtasida o'lsa) qayta urinilmaydi. Bu C7 dan oldin ham shunday edi, yangi xato emas.
+
 # Tekshiruv: C6 — v1 ulanish ekranlari (bulut + ikkinchi kassa) — QABUL
 
 Tekshiruvchi: ishchi2. Branch: `claude/C6-connect-screens` (`1007305`). Toifa: chuqur (LAN xavfsizligi, maxfiylar, kassa pul oqimi).
