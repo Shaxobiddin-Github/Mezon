@@ -1,0 +1,4 @@
+/* The cabinet is styled with Tailwind utility classes (pilot 11-21: before this import no CSS was
+ * generated and the cabinet showed as unstyled HTML). The deploy-images CI checks the built web
+ * image contains this stylesheet. */
+@import 'tailwindcss';
