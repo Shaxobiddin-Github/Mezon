@@ -44,8 +44,12 @@ jobs:
       - name: Build web (Caddy + admin cabinet) image
         run: docker build -f deploy/Dockerfile --target web -t guzar-web:ci .
 
-      - name: Admin cabinet is inside the web image
-        run: docker run --rm guzar-web:ci test -f /srv/admin/index.html
+      - name: Admin cabinet is inside the web image, with its stylesheet
+        # Pilot 11-21: the cabinet shipped without CSS (Tailwind was never wired in) and rendered as
+        # plain HTML. The page must link a stylesheet that contains the utilities it uses.
+        run: |
+          docker run --rm guzar-web:ci test -f /srv/admin/index.html
+          docker run --rm guzar-web:ci sh -c 'grep -q "rel=\"stylesheet\"" /srv/admin/index.html && grep -l "bg-slate-50" /srv/admin/assets/*.css'
 
       - name: Start the stack and check /health/ready
         working-directory: deploy
