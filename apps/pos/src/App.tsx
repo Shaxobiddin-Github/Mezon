@@ -40,6 +40,7 @@ import {
   ShiftManagementModal,
 } from './components/PaymentAndShiftModals.js';
 import './App.css';
+import { describeHubError } from './utils/error-text.js';
 
 function resolveBrowserFallbackBaseUrl(): string | null {
   if (typeof window.__MEZON_HUB_URL__ === 'string' && window.__MEZON_HUB_URL__.trim().length > 0) {
@@ -146,10 +147,10 @@ export function App() {
           setErrorBanner(t(`error.${err.code}`));
           return;
         }
-        setErrorBanner(`${err.code}: ${err.message}`);
+        setErrorBanner(describeHubError(err));
         return;
       }
-      setErrorBanner(err instanceof Error ? err.message : String(err));
+      setErrorBanner(describeHubError(err));
     },
     [setErrorBanner],
   );
@@ -618,67 +619,32 @@ export function App() {
     <div className="pos-shell" data-testid="pos-shell" key={locale}>
       <header className="pos-header">
         <div className="pos-header-brand">
+          <span className="pos-logo-mark" aria-hidden="true">
+            G
+          </span>
           <h1 className="pos-header-title">{t('app.title')}</h1>
           <span className="pos-non-fiscal-badge" data-testid="non-fiscal-badge">
             {t('receipt.nonFiscalBanner')}
           </span>
           {user && (
-            <span className="pos-telemetry-item" data-testid="active-user-badge">
-              {user.fullName} ({user.role})
+            <span className="pos-user-chip" data-testid="active-user-badge">
+              <span className="pos-user-avatar" aria-hidden="true">
+                {user.fullName.trim().charAt(0).toUpperCase()}
+              </span>
+              {user.fullName}
+              <span className="pos-user-role">· {t(`auth.role.${user.role}`)}</span>
             </span>
           )}
           {currentShift && (
             <span className="pos-telemetry-item" data-testid="active-shift-badge">
-              Smena #{currentShift.shiftNo}
+              {t('shift.badge', { no: String(currentShift.shiftNo) })}
             </span>
           )}
         </div>
 
-        {screen !== 'pos' && (
-          <div className="pos-telemetry" data-testid="pos-telemetry-bar">
-            <span className="pos-telemetry-item">
-              {t('app.hub.status')}: <strong data-testid="hub-status">{hubStatus}</strong>
-            </span>
-            <span className="pos-telemetry-item">
-              <strong data-testid="hub-url">{hubBaseUrl ?? 'kutilyapti...'}</strong>
-            </span>
-            <span className="pos-telemetry-item">
-              <strong data-testid="hub-origin">{window.location.origin}</strong>
-            </span>
-            <span className="pos-telemetry-item">
-              {t('app.hub.restarts')}:{' '}
-              <strong data-testid="hub-restart-count">{hubRestartCount}</strong>
-            </span>
-            <span className="pos-telemetry-item">
-              {t('app.hub.health')}: <strong data-testid="health-status">{healthStatus}</strong>
-            </span>
-            <span className="pos-telemetry-item">
-              {t('app.hub.needsSetup')}:{' '}
-              <strong data-testid="health-needs-setup">
-                {needsSetup === null ? 'unknown' : String(needsSetup)}
-              </strong>
-            </span>
-            <span className="pos-telemetry-item">
-              <strong data-testid="health-check-count">{healthCheckCount}</strong>
-            </span>
-          </div>
-        )}
-
         <div className="pos-top-actions">
-          {screen !== 'pos' && (
-            <button
-              type="button"
-              className="pos-btn"
-              data-testid="refresh-health-btn"
-              onClick={() => {
-                void checkHubHealth(hubBaseUrl);
-              }}
-            >
-              {t('app.hub.refresh')}
-            </button>
-          )}
           <select
-            className="pos-btn"
+            className="pos-btn pos-btn-ghost"
             data-testid="locale-select"
             aria-label="Til / Тил / Язык"
             value={locale}
@@ -694,17 +660,19 @@ export function App() {
           </select>
           <button
             type="button"
-            className="pos-btn"
+            className="pos-btn pos-btn-ghost"
             data-testid="theme-toggle-btn"
             onClick={toggleTheme}
+            title={theme === 'light' ? t('app.theme.dark') : t('app.theme.light')}
+            aria-label={theme === 'light' ? t('app.theme.dark') : t('app.theme.light')}
           >
-            {theme === 'light' ? t('app.theme.dark') : t('app.theme.light')}
+            {theme === 'light' ? '☾' : '☀'}
           </button>
           {screen === 'pos' && (
             <>
               <button
                 type="button"
-                className="pos-btn"
+                className="pos-btn pos-btn-ghost"
                 data-testid="topbar-shortcuts-btn"
                 onClick={() => setActiveModal('shortcuts')}
               >
@@ -713,7 +681,7 @@ export function App() {
               {(user?.role === 'owner' || user?.role === 'manager') && (
                 <button
                   type="button"
-                  className="pos-btn"
+                  className="pos-btn pos-btn-secondary"
                   data-testid="topbar-catalog-btn"
                   onClick={() => setActiveModal('catalog')}
                 >
@@ -723,7 +691,7 @@ export function App() {
               {fiscalModeEnabled && (user?.role === 'owner' || user?.role === 'manager') && (
                 <button
                   type="button"
-                  className="pos-btn"
+                  className="pos-btn pos-btn-ghost"
                   data-testid="topbar-fiscal-btn"
                   onClick={() => setActiveModal('fiscal_unsettled')}
                 >
@@ -733,7 +701,7 @@ export function App() {
               {(user?.role === 'owner' || user?.role === 'manager') && (
                 <button
                   type="button"
-                  className="pos-btn"
+                  className="pos-btn pos-btn-ghost"
                   data-testid="topbar-connections-btn"
                   onClick={() => setActiveModal('connections')}
                 >
@@ -743,7 +711,7 @@ export function App() {
               {(user?.role === 'owner' || user?.role === 'manager') && (
                 <button
                   type="button"
-                  className="pos-btn"
+                  className="pos-btn pos-btn-ghost"
                   data-testid="topbar-sync-conflicts-btn"
                   onClick={() => setActiveModal('sync_conflicts')}
                 >
@@ -752,7 +720,7 @@ export function App() {
               )}
               <button
                 type="button"
-                className="pos-btn"
+                className="pos-btn pos-btn-secondary"
                 data-testid="topbar-shift-btn"
                 onClick={() => setActiveModal('shift_manage')}
               >
@@ -760,7 +728,7 @@ export function App() {
               </button>
               <button
                 type="button"
-                className="pos-btn pos-btn-danger"
+                className="pos-btn pos-btn-danger-soft"
                 data-testid="topbar-logout-btn"
                 onClick={() => void handleLogout()}
               >
@@ -875,9 +843,56 @@ export function App() {
         />
       )}
 
+      {screen !== 'pos' && (
+        <footer className="pos-status-footer">
+          <div className="pos-telemetry" data-testid="pos-telemetry-bar">
+            <span className="pos-telemetry-item">
+              {t('app.hub.status')}: <strong data-testid="hub-status">{hubStatus}</strong>
+            </span>
+            <span className="pos-telemetry-item">
+              <strong data-testid="hub-url">{hubBaseUrl ?? 'kutilyapti...'}</strong>
+            </span>
+            <span className="pos-telemetry-item">
+              <strong data-testid="hub-origin">{window.location.origin}</strong>
+            </span>
+            <span className="pos-telemetry-item">
+              {t('app.hub.restarts')}:{' '}
+              <strong data-testid="hub-restart-count">{hubRestartCount}</strong>
+            </span>
+            <span className="pos-telemetry-item">
+              {t('app.hub.health')}: <strong data-testid="health-status">{healthStatus}</strong>
+            </span>
+            <span className="pos-telemetry-item">
+              {t('app.hub.needsSetup')}:{' '}
+              <strong data-testid="health-needs-setup">
+                {needsSetup === null ? 'unknown' : String(needsSetup)}
+              </strong>
+            </span>
+            <span className="pos-telemetry-item">
+              <strong data-testid="health-check-count">{healthCheckCount}</strong>
+            </span>
+          </div>
+          <button
+            type="button"
+            className="pos-btn"
+            data-testid="refresh-health-btn"
+            onClick={() => {
+              void checkHubHealth(hubBaseUrl);
+            }}
+          >
+            {t('app.hub.refresh')}
+          </button>
+        </footer>
+      )}
+
       {activeModal === 'shortcuts' && <ShortcutsModal />}
       {activeModal === 'catalog' && (user?.role === 'owner' || user?.role === 'manager') && (
-        <CatalogScreen api={api} onClose={() => setActiveModal('none')} onError={handleError} />
+        <CatalogScreen
+          api={api}
+          fiscalMode={fiscalModeEnabled}
+          onClose={() => setActiveModal('none')}
+          onError={handleError}
+        />
       )}
       {activeModal === 'fiscal_unsettled' &&
         (user?.role === 'owner' || user?.role === 'manager') && (

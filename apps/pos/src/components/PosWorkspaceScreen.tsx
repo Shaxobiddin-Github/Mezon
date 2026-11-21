@@ -217,7 +217,7 @@ export function PosWorkspaceScreen({
                       <td>
                         <button
                           type="button"
-                          className="pos-btn pos-btn-danger"
+                          className="pos-btn pos-btn-danger-soft"
                           data-testid={`cart-line-del-${String(index)}`}
                           onClick={(e) => {
                             e.stopPropagation();
@@ -245,13 +245,15 @@ export function PosWorkspaceScreen({
           <div className="pos-totals-row">
             <span>{t('pos.promoDiscount')}:</span>
             <span data-testid="cart-promo-discount">
-              -{formatTiyinToSom(activeCart?.totalPromoDiscount ?? '0')} {t('common.currency')}
+              {(activeCart?.totalPromoDiscount ?? '0') === '0' ? '' : '−'}
+              {formatTiyinToSom(activeCart?.totalPromoDiscount ?? '0')} {t('common.currency')}
             </span>
           </div>
           <div className="pos-totals-row">
             <span>{t('pos.manualDiscount')}:</span>
             <span data-testid="cart-manual-discount">
-              -{formatTiyinToSom(activeCart?.effectiveOrderDiscount ?? '0')} {t('common.currency')}
+              {(activeCart?.effectiveOrderDiscount ?? '0') === '0' ? '' : '−'}
+              {formatTiyinToSom(activeCart?.effectiveOrderDiscount ?? '0')} {t('common.currency')}
             </span>
           </div>
           <div className="pos-totals-row">

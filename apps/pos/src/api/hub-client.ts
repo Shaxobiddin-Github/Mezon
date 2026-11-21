@@ -22,6 +22,14 @@ import {
   type MissingMxikCountResponseDto,
   ProductDetailResponseSchema,
   type ProductDetailResponseDto,
+  BarcodeResponseSchema,
+  type BarcodeResponseDto,
+  CategoryResponseSchema,
+  type CategoryResponseDto,
+  type CreateBarcodeRequestDto,
+  type CreateCategoryRequestDto,
+  DeleteBarcodeResponseSchema,
+  type DeleteBarcodeResponseDto,
   ProductResponseSchema,
   type ProductResponseDto,
   TaxProfileResponseSchema,
@@ -381,6 +389,46 @@ export class HubApiClient {
       method: 'GET',
       path: '/categories',
       responseSchema: ListCategoriesResponseSchema,
+    });
+  }
+
+  async createCategory(input: CreateCategoryRequestDto): Promise<CategoryResponseDto> {
+    return this.request({
+      method: 'POST',
+      path: '/categories',
+      body: input,
+      responseSchema: CategoryResponseSchema,
+    });
+  }
+
+  async getProduct(productId: string): Promise<ProductDetailResponseDto> {
+    return this.request({
+      method: 'GET',
+      path: `/products/${encodeURIComponent(productId)}`,
+      responseSchema: ProductDetailResponseSchema,
+    });
+  }
+
+  async addProductBarcode(
+    productId: string,
+    input: CreateBarcodeRequestDto,
+  ): Promise<BarcodeResponseDto> {
+    return this.request({
+      method: 'POST',
+      path: `/products/${encodeURIComponent(productId)}/barcodes`,
+      body: input,
+      responseSchema: BarcodeResponseSchema,
+    });
+  }
+
+  async deleteProductBarcode(
+    productId: string,
+    barcodeId: string,
+  ): Promise<DeleteBarcodeResponseDto> {
+    return this.request({
+      method: 'DELETE',
+      path: `/products/${encodeURIComponent(productId)}/barcodes/${encodeURIComponent(barcodeId)}`,
+      responseSchema: DeleteBarcodeResponseSchema,
     });
   }
 

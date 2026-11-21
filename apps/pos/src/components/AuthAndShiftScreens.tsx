@@ -156,7 +156,7 @@ export function LoginScreen({
                 setUsername('');
               }}
             >
-              {opt.fullName} ({opt.role})
+              {opt.fullName} · {t(`auth.role.${opt.role}`)}
             </button>
           ))}
         </div>
