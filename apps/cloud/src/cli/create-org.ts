@@ -2,7 +2,6 @@ import { randomBytes } from 'node:crypto';
 import { MonotonicUuidV7Generator, normalizeCloudLogin, unixMsFromBigInt } from '@mezon/domain';
 import { createCloudPgPool, CloudTenantStore, migrateCloudDatabase } from '@mezon/db-cloud';
 import * as argon2 from '@node-rs/argon2';
-import { loadCloudConfig } from '../config.js';
 
 interface CliArgs {
   orgName?: string;
@@ -36,7 +35,13 @@ export async function runCreateOrgCli(argv: string[] = process.argv.slice(2)): P
       'org:create requires --login <email> and --password <at least 10 characters> (no defaults)',
     );
   }
-  const config = loadCloudConfig();
+  // Only a database connection is needed: the admin URL (the `migrate` container has it) or the app
+  // URL. The API's JWT secret and other settings are not required to create an owner (pilot 11-21:
+  // requiring them made `docker compose run migrate ... org:create` fail on the server).
+  const connectionString = process.env.DATABASE_ADMIN_URL ?? process.env.DATABASE_URL;
+  if (!connectionString) {
+    throw new Error('org:create requires DATABASE_ADMIN_URL (or DATABASE_URL)');
+  }
 
   const orgName = args.orgName ?? 'Guzar Kattaqo‘rg‘on Asosiy';
   const storeName = args.storeName ?? 'Bosh Do‘kon';
@@ -47,7 +52,7 @@ export async function runCreateOrgCli(argv: string[] = process.argv.slice(2)): P
 
   console.log(`[org:create] Connecting to database...`);
   const conn = createCloudPgPool({
-    connectionString: process.env.DATABASE_ADMIN_URL ?? config.databaseUrl,
+    connectionString,
   });
 
   try {

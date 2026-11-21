@@ -47,6 +47,45 @@ describePg('@mezon/cloud - CLI org:create (C4)', () => {
     );
   });
 
+  it('pilot 11-21: runs with only DATABASE_ADMIN_URL, as in the migrate container (no JWT_SECRET, no DATABASE_URL)', async () => {
+    const saved = { jwt: process.env.JWT_SECRET, url: process.env.DATABASE_URL };
+    delete process.env.JWT_SECRET;
+    delete process.env.DATABASE_URL;
+    try {
+      await runCreateOrgCli([
+        '--store-code',
+        'adminonly',
+        '--login',
+        'admin_only@guzar.uz',
+        '--password',
+        'AdminOnlyPassword2026',
+      ]);
+      const appConnUri = new URL(container.getConnectionUri());
+      appConnUri.username = PG_APP_ROLE_NAME;
+      appConnUri.password = 'test-cli-password-12345';
+      const appConn = createCloudPgPool({ connectionString: appConnUri.toString() });
+      try {
+        const lookup = await new CloudAuthStore(appConn.pool).lookupLogin('admin_only@guzar.uz');
+        expect(lookup?.userRole).toBe('owner');
+      } finally {
+        await appConn.close();
+      }
+      // Without any database URL it fails clearly, before touching anything.
+      const admin = process.env.DATABASE_ADMIN_URL;
+      delete process.env.DATABASE_ADMIN_URL;
+      try {
+        await expect(
+          runCreateOrgCli(['--login', 'x@guzar.uz', '--password', 'AdminOnlyPassword2026']),
+        ).rejects.toThrow(/DATABASE_ADMIN_URL/);
+      } finally {
+        process.env.DATABASE_ADMIN_URL = admin;
+      }
+    } finally {
+      process.env.JWT_SECRET = saved.jwt;
+      process.env.DATABASE_URL = saved.url;
+    }
+  }, 30_000);
+
   it('provisions organization, store, and owner via CLI and enables login without leaking password', async () => {
     const rawPassword = 'CliOwnerPassword2026!';
     const login = 'cli_owner@guzar.uz';

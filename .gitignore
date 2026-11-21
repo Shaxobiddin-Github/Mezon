@@ -28,3 +28,6 @@ apps/pos/test-results/
 *.key
 *.pem
 *.pub.b64
+
+# Cloud database dumps (deploy/BACKUP-RESTORE.md)
+deploy/backups/
