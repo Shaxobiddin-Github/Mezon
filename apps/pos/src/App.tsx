@@ -18,12 +18,10 @@ import { CatalogScreen } from './components/CatalogScreen.js';
 import { FiscalOfflineBanner, FiscalUnsettledModal } from './components/FiscalPanels.js';
 import { LicenceBanner } from './components/LicenceBanner.js';
 import { UpdateBanner } from './components/UpdateBanner.js';
-import { SyncConflictsModal } from './components/SyncConflictsModal.js';
-import {
-  ConnectionsModal,
-  TerminalModeSection,
-  TerminalPairForm,
-} from './components/ConnectionsPanels.js';
+import { SideNav } from './components/SideNav.js';
+import { ReceiptsPage } from './components/ReceiptsPage.js';
+import { SettingsPage } from './components/SettingsPage.js';
+import { TerminalModeSection, TerminalPairForm } from './components/ConnectionsPanels.js';
 import type { TerminalInfo } from './bridge.js';
 import {
   ShortcutsModal,
@@ -100,6 +98,8 @@ export function App() {
   const setCustomerList = usePosStore((s) => s.setCustomerList);
   const activeModal = usePosStore((s) => s.activeModal);
   const setActiveModal = usePosStore((s) => s.setActiveModal);
+  const section = usePosStore((s) => s.section);
+  const setSection = usePosStore((s) => s.setSection);
   const errorBanner = usePosStore((s) => s.errorBanner);
   const setErrorBanner = usePosStore((s) => s.setErrorBanner);
   const setLastScannedBarcode = usePosStore((s) => s.setLastScannedBarcode);
@@ -393,7 +393,9 @@ export function App() {
           focusedInputRef.current = null;
           preBurstValueRef.current = null;
 
-          void handleScanBarcode(outcome.barcode);
+          if (usePosStore.getState().section === 'sale') {
+            void handleScanBarcode(outcome.barcode);
+          }
           return;
         }
       }
@@ -411,6 +413,18 @@ export function App() {
         if (usePosStore.getState().activeModal !== 'none') {
           event.preventDefault();
           setActiveModal('none');
+          return;
+        }
+      }
+
+      if (
+        usePosStore.getState().section !== 'sale' &&
+        ['F2', 'F3', 'F4', 'F5', 'F6', 'F7', 'F9'].includes(event.key)
+      ) {
+        setSection('sale');
+        if (event.key === 'F2') {
+          event.preventDefault();
+          requestAnimationFrame(() => searchInputRef.current?.focus());
           return;
         }
       }
@@ -481,7 +495,11 @@ export function App() {
       }
 
       // Cart line navigation & adjustment when no modal is open and no input is focused
-      if (usePosStore.getState().activeModal === 'none' && !isInputFocused) {
+      if (
+        usePosStore.getState().activeModal === 'none' &&
+        usePosStore.getState().section === 'sale' &&
+        !isInputFocused
+      ) {
         const state = usePosStore.getState();
         const cart = state.activeCart;
         const line = cart?.lines.find((l) => l.id === state.selectedLineId);
@@ -669,72 +687,14 @@ export function App() {
             {theme === 'light' ? '☾' : '☀'}
           </button>
           {screen === 'pos' && (
-            <>
-              <button
-                type="button"
-                className="pos-btn pos-btn-ghost"
-                data-testid="topbar-shortcuts-btn"
-                onClick={() => setActiveModal('shortcuts')}
-              >
-                {t('pos.shortcutsBtn')}
-              </button>
-              {(user?.role === 'owner' || user?.role === 'manager') && (
-                <button
-                  type="button"
-                  className="pos-btn pos-btn-secondary"
-                  data-testid="topbar-catalog-btn"
-                  onClick={() => setActiveModal('catalog')}
-                >
-                  {t('catalog.openButton')}
-                </button>
-              )}
-              {fiscalModeEnabled && (user?.role === 'owner' || user?.role === 'manager') && (
-                <button
-                  type="button"
-                  className="pos-btn pos-btn-ghost"
-                  data-testid="topbar-fiscal-btn"
-                  onClick={() => setActiveModal('fiscal_unsettled')}
-                >
-                  {t('fiscal.unsettled.openButton')}
-                </button>
-              )}
-              {(user?.role === 'owner' || user?.role === 'manager') && (
-                <button
-                  type="button"
-                  className="pos-btn pos-btn-ghost"
-                  data-testid="topbar-connections-btn"
-                  onClick={() => setActiveModal('connections')}
-                >
-                  {t('connections.openButton')}
-                </button>
-              )}
-              {(user?.role === 'owner' || user?.role === 'manager') && (
-                <button
-                  type="button"
-                  className="pos-btn pos-btn-ghost"
-                  data-testid="topbar-sync-conflicts-btn"
-                  onClick={() => setActiveModal('sync_conflicts')}
-                >
-                  {t('sync.conflicts.openButton')}
-                </button>
-              )}
-              <button
-                type="button"
-                className="pos-btn pos-btn-secondary"
-                data-testid="topbar-shift-btn"
-                onClick={() => setActiveModal('shift_manage')}
-              >
-                {t('shift.manageButton')}
-              </button>
-              <button
-                type="button"
-                className="pos-btn pos-btn-danger-soft"
-                data-testid="topbar-logout-btn"
-                onClick={() => void handleLogout()}
-              >
-                {t('auth.logoutButton')}
-              </button>
-            </>
+            <button
+              type="button"
+              className="pos-btn pos-btn-danger-soft"
+              data-testid="topbar-logout-btn"
+              onClick={() => void handleLogout()}
+            >
+              {t('auth.logoutButton')}
+            </button>
           )}
         </div>
       </header>
@@ -833,14 +793,52 @@ export function App() {
       )}
 
       {screen === 'pos' && (
-        <PosWorkspaceScreen
-          api={api}
-          searchInputRef={searchInputRef}
-          onSearchProducts={handleSearchProducts}
-          onOpenParkedModal={handleOpenParkedModal}
-          onOpenCustomerModal={handleOpenCustomerModal}
-          onError={handleError}
-        />
+        <div className="pos-layout">
+          <SideNav
+            section={section}
+            role={user?.role ?? null}
+            fiscalMode={fiscalModeEnabled}
+            onSection={setSection}
+            onShift={() => setActiveModal('shift_manage')}
+            onFiscal={() => setActiveModal('fiscal_unsettled')}
+            onShortcuts={() => setActiveModal('shortcuts')}
+          />
+          <main className="pos-main" data-testid={`section-${section}`}>
+            {section === 'sale' && (
+              <PosWorkspaceScreen
+                api={api}
+                searchInputRef={searchInputRef}
+                onSearchProducts={handleSearchProducts}
+                onOpenParkedModal={handleOpenParkedModal}
+                onOpenCustomerModal={handleOpenCustomerModal}
+                onError={handleError}
+              />
+            )}
+            {section === 'receipts' && (
+              <ReceiptsPage api={api} role={user?.role ?? null} onError={handleError} />
+            )}
+            {section === 'products' && (user?.role === 'owner' || user?.role === 'manager') && (
+              <div className="pos-page-host">
+                <CatalogScreen
+                  api={api}
+                  fiscalMode={fiscalModeEnabled}
+                  onClose={() => setSection('sale')}
+                  onError={handleError}
+                />
+              </div>
+            )}
+            {section === 'settings' &&
+              user !== null &&
+              (user.role === 'owner' || user.role === 'manager') && (
+                <SettingsPage
+                  api={api}
+                  role={user.role}
+                  terminalInfo={terminalInfo}
+                  onError={handleError}
+                />
+              )}
+          </main>
+        </div>
       )}
 
       {screen !== 'pos' && (
@@ -886,14 +884,6 @@ export function App() {
       )}
 
       {activeModal === 'shortcuts' && <ShortcutsModal />}
-      {activeModal === 'catalog' && (user?.role === 'owner' || user?.role === 'manager') && (
-        <CatalogScreen
-          api={api}
-          fiscalMode={fiscalModeEnabled}
-          onClose={() => setActiveModal('none')}
-          onError={handleError}
-        />
-      )}
       {activeModal === 'fiscal_unsettled' &&
         (user?.role === 'owner' || user?.role === 'manager') && (
           <FiscalUnsettledModal
@@ -902,24 +892,6 @@ export function App() {
             onError={handleError}
           />
         )}
-      {activeModal === 'connections' &&
-        user !== null &&
-        (user.role === 'owner' || user.role === 'manager') && (
-          <ConnectionsModal
-            api={api}
-            role={user.role}
-            terminalInfo={terminalInfo}
-            onClose={() => setActiveModal('none')}
-            onError={handleError}
-          />
-        )}
-      {activeModal === 'sync_conflicts' && (user?.role === 'owner' || user?.role === 'manager') && (
-        <SyncConflictsModal
-          api={api}
-          onClose={() => setActiveModal('none')}
-          onError={handleError}
-        />
-      )}
       {activeModal === 'diagnostics' && (user?.role === 'owner' || user?.role === 'manager') && (
         <div className="pos-modal-backdrop" data-testid="diagnostics-modal">
           <div className="pos-modal" style={{ maxWidth: '520px' }}>

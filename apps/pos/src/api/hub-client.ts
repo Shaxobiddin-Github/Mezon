@@ -22,6 +22,14 @@ import {
   type MissingMxikCountResponseDto,
   ProductDetailResponseSchema,
   type ProductDetailResponseDto,
+  ListSalesResponseSchema,
+  type ListSalesResponseDto,
+  SaleReturnContextResponseSchema,
+  type SaleReturnContextResponseDto,
+  CreateReturnRequestSchema,
+  type CreateReturnRequestDto,
+  CreateReturnResponseSchema,
+  type CreateReturnResponseDto,
   BarcodeResponseSchema,
   type BarcodeResponseDto,
   CategoryResponseSchema,
@@ -751,6 +759,63 @@ export class HubApiClient {
   }
 
   /** Same `clientRequestId` is reused on retry so the hub never prints the receipt twice (P1). */
+  // --- C12: receipts history and returns ---
+
+  async listSales(query: {
+    readonly q?: string;
+    readonly fromMs?: string;
+    readonly toMs?: string;
+    readonly limit?: number;
+    readonly offset?: number;
+  }): Promise<ListSalesResponseDto> {
+    return this.request({
+      method: 'GET',
+      path: '/sales',
+      query: {
+        q: query.q !== undefined && query.q.trim() !== '' ? query.q.trim() : undefined,
+        fromMs: query.fromMs,
+        toMs: query.toMs,
+        limit: query.limit,
+        offset: query.offset,
+      },
+      responseSchema: ListSalesResponseSchema,
+    });
+  }
+
+  async getSaleReturnContext(saleId: string): Promise<SaleReturnContextResponseDto> {
+    return this.request({
+      method: 'GET',
+      path: `/sales/${encodeURIComponent(saleId)}/return-context`,
+      responseSchema: SaleReturnContextResponseSchema,
+    });
+  }
+
+  async createReturn(
+    saleId: string,
+    input: z.input<typeof CreateReturnRequestSchema>,
+  ): Promise<CreateReturnResponseDto> {
+    const validated: CreateReturnRequestDto = CreateReturnRequestSchema.parse(input);
+    return this.request({
+      method: 'POST',
+      path: `/sales/${encodeURIComponent(saleId)}/returns`,
+      body: validated,
+      responseSchema: CreateReturnResponseSchema,
+    });
+  }
+
+  async printReturnReceipt(
+    returnId: string,
+    input: z.input<typeof PrintDocumentRequestSchema>,
+  ): Promise<PrintDocumentResponseDto> {
+    const validated: PrintDocumentRequestDto = PrintDocumentRequestSchema.parse(input);
+    return this.request({
+      method: 'POST',
+      path: `/returns/${encodeURIComponent(returnId)}/print`,
+      body: validated,
+      responseSchema: PrintDocumentResponseSchema,
+    });
+  }
+
   async printSaleReceipt(
     saleId: string,
     input: z.input<typeof PrintDocumentRequestSchema>,
