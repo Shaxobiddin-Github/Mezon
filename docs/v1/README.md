@@ -36,7 +36,7 @@ Egasining qarori: qonuniy integratsiyalar v2 da qilinadi. Har bir kassaga alohid
 
 **Talablar:** Linux server, Docker, domen (masalan, `api.guzar.uz`) va unga yo'naltirilgan DNS.
 
-1. Repodagi `deploy/` papkasini serverga ko'chiring.
+1. Reponi serverga to'liq klon qiling (`git clone`). Faqat `deploy/` papkasi yetmaydi: image'lar butun repodan yig'iladi.
 2. `deploy/.env` faylini yarating. Qiymatlarni o'zingiz o'ylab toping: uzun va tasodifiy bo'lsin. Bu fayl repoga **hech qachon** qo'shilmaydi.
 
    ```
@@ -57,6 +57,19 @@ Egasining qarori: qonuniy integratsiyalar v2 da qilinadi. Har bir kassaga alohid
    ```
 
    Caddy HTTPS sertifikatni o'zi oladi. Kabinet `https://<CLOUD_DOMAIN>` da ochiladi, kassalar ham shu manzilga ulanadi.
+
+   **Server NAT ortida bo'lsa (ochiq IP yoki 80/443 port yo'q): Cloudflare Tunnel.** Domen Cloudflare'da bo'lishi kerak.
+
+   - Cloudflare → Zero Trust → Networks → Tunnels → **Create a tunnel** (Cloudflared). Tunnel tokenini oling.
+   - Tunnelga **Public hostname** qo'shing: `CLOUD_DOMAIN` (masalan, `guzar.misol.uz`), Service: `HTTP`, URL: `caddy:80`.
+   - `deploy/.env` ga qo'shing: `CLOUDFLARE_TUNNEL_TOKEN=...` (token faqat shu faylda turadi). `ACME_EMAIL` baribir to'ldiriladi, lekin ishlatilmaydi.
+   - Docker Compose v2.24 yoki yangisi kerak. Ishga tushirish:
+
+     ```
+     docker compose -f docker-compose.yml -f docker-compose.tunnel.yml up -d --build
+     ```
+
+   Bu variantda serverda hech qanday port ochilmaydi. HTTPS sertifikatni Cloudflare beradi. Keyingi `docker compose exec ...` buyruqlarida ham ikkala `-f` ni yozing.
 
 4. Birinchi tashkilot va ega akkauntini yarating. **Parol majburiy**, standart parol yo'q:
 

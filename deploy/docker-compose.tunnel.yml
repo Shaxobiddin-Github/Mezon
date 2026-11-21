@@ -1,0 +1,29 @@
+# Cloudflare Tunnel variant: for a server behind NAT with no public 80/443 (owner, 2026-11-21).
+# Nothing is published on the host. cloudflared dials out to Cloudflare, Cloudflare terminates
+# HTTPS for CLOUD_DOMAIN and forwards it through the tunnel to Caddy on plain HTTP inside the
+# private Docker network.
+#
+#   docker compose -f docker-compose.yml -f docker-compose.tunnel.yml up -d --build
+#
+# Needs Docker Compose v2.24+ (for `!reset`). In the Cloudflare dashboard the tunnel's public
+# hostname is CLOUD_DOMAIN with the service `http://caddy:80`.
+services:
+  caddy:
+    # No host ports: the server's 80/443 stay free for other projects.
+    ports: !reset []
+    environment:
+      # An `http://` site address makes Caddy serve plain HTTP and never ask Let's Encrypt.
+      CLOUD_DOMAIN: http://${CLOUD_DOMAIN}
+
+  cloudflared:
+    image: cloudflare/cloudflared:2024.12.2
+    container_name: mezon-cloudflared
+    restart: unless-stopped
+    command: ['tunnel', '--no-autoupdate', 'run']
+    environment:
+      # The token comes from the Cloudflare dashboard and lives only in deploy/.env.
+      TUNNEL_TOKEN: ${CLOUDFLARE_TUNNEL_TOKEN:?CLOUDFLARE_TUNNEL_TOKEN is required}
+    depends_on:
+      - caddy
+    networks:
+      - mezon_internal
