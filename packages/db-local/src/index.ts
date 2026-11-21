@@ -394,6 +394,10 @@ export {
   type StoredReturnRecord,
   type CreateReturnOutcome,
   type SalesLinesReportSummaryRecord,
+  type SaleListFilter,
+  type SaleListItemRecord,
+  type SaleReturnContextLineRecord,
+  type SaleReturnContextRecord,
   SqliteReturnStore,
   createSqliteReturnStore,
 } from './return-repo.js';
