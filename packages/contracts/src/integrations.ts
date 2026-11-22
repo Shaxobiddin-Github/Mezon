@@ -80,3 +80,11 @@ export const CartMarksResponseSchema = z.object({
 export type CartMarksResponseDto = z.infer<typeof CartMarksResponseSchema>;
 
 export const CartMarksListResponseSchema = z.object({ marks: z.array(CartMarkDtoSchema) });
+
+/** C18: the starter catalog (100 goods, opening stock, regular customers) loaded on an empty kassa. */
+export const LoadDemoCatalogResponseSchema = z.strictObject({
+  categories: z.number().int().min(0),
+  products: z.number().int().min(0),
+  customers: z.number().int().min(0),
+});
+export type LoadDemoCatalogResponse = z.infer<typeof LoadDemoCatalogResponseSchema>;

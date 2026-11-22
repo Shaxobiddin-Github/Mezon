@@ -14,6 +14,7 @@ import {
 import { DomainError, type HubPermission, type UnixMs, type UuidV7 } from '@mezon/domain';
 import type { FastifyInstance, FastifyRequest } from 'fastify';
 import type { HubAuthService } from './auth-service.js';
+import { type DemoCatalogDeps, loadDemoCatalog } from './demo-catalog.js';
 import type { HubRulesService } from './rules-service.js';
 
 export interface IntegrationDriverInfo {
@@ -32,6 +33,8 @@ export interface DemoRoutesDeps {
   readonly getOrganizationId: () => UuidV7 | null;
   readonly nowMs: () => UnixMs;
   readonly nextId: () => UuidV7;
+  /** C18: services that write the starter catalog (absent in narrow test setups). */
+  readonly demoCatalog?: DemoCatalogDeps;
 }
 
 /**
@@ -39,6 +42,7 @@ export interface DemoRoutesDeps {
  * - GET /settings/integrations      every signed-in user (the kassa shows SINOV when demo is on)
  * - PUT /settings/demo              owner only (`fiscal:mode`), audit-logged
  * - PUT /settings/marking-prefixes  owner / manager (`tax:write`), audit-logged
+ * - POST /settings/demo-catalog     owner only, empty catalog only: 100 sample goods, stock, customers
  */
 export function registerDemoRoutes(
   app: FastifyInstance,
@@ -52,7 +56,10 @@ export function registerDemoRoutes(
     return session;
   };
   const audit = (
-    eventType: 'settings.demo_mode_changed' | 'settings.marking_prefixes_changed',
+    eventType:
+      | 'settings.demo_mode_changed'
+      | 'settings.marking_prefixes_changed'
+      | 'settings.demo_catalog_loaded',
     actorUserId: UuidV7,
     details: Readonly<Record<string, string | number | boolean | null>>,
   ) => {
@@ -113,5 +120,21 @@ export function registerDemoRoutes(
       audit('settings.marking_prefixes_changed', session.user.id, { prefixes: saved.join(',') });
     })();
     return status();
+  });
+
+  app.post('/settings/demo-catalog', async (request) => {
+    const session = await authorize(request, 'fiscal:mode');
+    if (deps.demoCatalog === undefined) {
+      throw new DomainError('VALIDATION_ERROR', 'Namuna katalog bu kassada mavjud emas');
+    }
+    const res = await loadDemoCatalog(deps.demoCatalog, session.user.id);
+    sqlite.transaction(() => {
+      audit('settings.demo_catalog_loaded', session.user.id, {
+        categories: res.categories,
+        products: res.products,
+        customers: res.customers,
+      });
+    })();
+    return res;
   });
 }

@@ -914,6 +914,8 @@ export {
   CartMarksResponseSchema,
   type CartMarksResponseDto,
   CartMarksListResponseSchema,
+  LoadDemoCatalogResponseSchema,
+  type LoadDemoCatalogResponse,
 } from './integrations.js';
 
 export {

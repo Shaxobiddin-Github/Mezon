@@ -15,8 +15,9 @@ export function SettingsPage(props: {
   readonly terminalInfo: TerminalInfo;
   readonly onError: (err: unknown) => void;
   readonly onIntegrationsChanged?: (st: IntegrationsStatusResponse) => void;
+  readonly onCatalogLoaded?: () => void;
 }) {
-  const { api, role, terminalInfo, onError, onIntegrationsChanged } = props;
+  const { api, role, terminalInfo, onError, onIntegrationsChanged, onCatalogLoaded } = props;
   const [tab, setTab] = useState<'connections' | 'integrations' | 'sync'>('connections');
   return (
     <section className="pos-page" data-testid="settings-page">
@@ -76,6 +77,7 @@ export function SettingsPage(props: {
             role={role}
             onError={onError}
             {...(onIntegrationsChanged ? { onChanged: onIntegrationsChanged } : {})}
+            {...(onCatalogLoaded ? { onCatalogLoaded } : {})}
           />
         ) : (
           <SyncConflictsModal api={api} onClose={() => undefined} onError={onError} />

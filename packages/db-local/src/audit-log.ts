@@ -39,6 +39,7 @@ export const AUDIT_EVENT_TYPES = [
   'payment.demo_paid',
   'settings.demo_mode_changed',
   'settings.marking_prefixes_changed',
+  'settings.demo_catalog_loaded',
 ] as const;
 export type AuditEventType = (typeof AUDIT_EVENT_TYPES)[number];
 

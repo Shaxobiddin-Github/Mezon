@@ -706,6 +706,7 @@ export async function createHubServer(options: CreateHubServerOptions): Promise<
       getOrganizationId: () => store.getActiveRuntimeContext()?.config.organizationId ?? null,
       nowMs: () => clock.now(),
       nextId: () => idGen.nextId(),
+      demoCatalog: { catalogService, stockService, customerService },
     });
     registerMarkingRoutes(
       app,

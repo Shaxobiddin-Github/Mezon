@@ -477,6 +477,12 @@ export const RU_MESSAGES: Readonly<Record<I18nKey, string>> = {
   'pos.qtyDecrease': 'Уменьшить на один',
   'pos.qtyIncrease': 'Увеличить на один',
   'pos.removeLine': 'Удалить строку',
+  'integrations.catalog.title': 'Образец каталога (100 товаров)',
+  'integrations.catalog.text':
+    'Чтобы проверить кассу как в настоящем магазине: 100 повседневных товаров в 10 категориях, начальные остатки и 5 покупателей в долг. Загружается только в пустой каталог.',
+  'integrations.catalog.load': 'Загрузить образец каталога',
+  'integrations.catalog.done':
+    'Загружено: {products} товаров, {categories} категорий, {customers} покупателей. Перейдите в «Продажа».',
   'error.CART_EMPTY': 'Корзина пуста.',
 
   // T3.1 Catalog management (MXIK, qadoq kodi, QQS)
