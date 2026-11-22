@@ -13,9 +13,12 @@ describe('Android virtual hub URL', () => {
     expect(isVirtualHubUrl('not a url')).toBe(false);
   });
 
-  it('is accepted by the POS loopback check', async () => {
-    const { normalizeLoopbackHubBaseUrl } = await import('../../pos/src/bridge.js');
-    expect(normalizeLoopbackHubBaseUrl(VIRTUAL_HUB_BASE_URL)).toBe(VIRTUAL_HUB_BASE_URL);
+  it('has the exact form the POS loopback check accepts (http, 127.0.0.1, explicit port)', () => {
+    const url = new URL(VIRTUAL_HUB_BASE_URL);
+    expect(url.protocol).toBe('http:');
+    expect(url.hostname).toBe('127.0.0.1');
+    expect(url.port).not.toBe('');
+    expect(`http://127.0.0.1:${url.port}`).toBe(VIRTUAL_HUB_BASE_URL);
   });
 });
 

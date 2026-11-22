@@ -1,11 +1,11 @@
 import { BarcodeScanner } from '@capacitor-mlkit/barcode-scanning';
 import { registerPlugin } from '@capacitor/core';
 import type {
+  AndroidMezonBridge,
   HubBridgeState,
-  MezonBridge,
   TerminalInfo,
   TerminalPairResult,
-} from '../../pos/src/bridge.js';
+} from './pos-bridge-types.js';
 import { decodeNativeResponse, isVirtualHubUrl, VIRTUAL_HUB_BASE_URL } from './virtual-hub.js';
 
 /**
@@ -126,7 +126,7 @@ const scanBarcode = async (): Promise<string | null> => {
   }
 };
 
-const bridge: MezonBridge = {
+const bridge: AndroidMezonBridge = {
   thinClient: true,
   getHubState: hubState,
   onHubState: () => () => undefined,
