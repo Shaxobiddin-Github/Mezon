@@ -303,6 +303,17 @@ export const UZ_LATN_MESSAGES = {
   'error.INSUFFICIENT_CASH_IN_DRAWER': 'Kassada naqd pul yetarli emas.',
   'error.SALE_ALREADY_VOIDED': 'Bu chek bekor qilingan, uni qaytarib boʻlmaydi.',
   'error.SALE_NOT_FOUND': 'Chek topilmadi.',
+  'auth.chooseUser': 'Avval kim kirayotganini tanlang.',
+  'auth.enterPin': 'PIN kodni kiriting.',
+  'auth.chooseUserHint': 'Ismingizni tanlang va PIN kodni kiriting',
+  'auth.enterPinHint': 'PIN kodingizni kiriting',
+  'app.systemStatus': 'Tizim holati',
+  'admin.login.heroTitle': 'Doʻkoningiz bir qarashda',
+  'admin.login.hero1': 'Bugungi savdo, cheklar va foyda — real vaqtda',
+  'admin.login.hero2': 'Har bir kassa va filial holati bir joyda',
+  'admin.login.hero3': 'Mijozlar qarzi va hisobotlar telefoningizda',
+  'admin.menu.open': 'Menyuni ochish',
+  'admin.menu.close': 'Menyuni yopish',
   'error.CART_EMPTY': 'Savat boʻsh.',
 
   // T3.1 Catalog management (MXIK, qadoq kodi, QQS)

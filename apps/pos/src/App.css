@@ -1464,6 +1464,248 @@ select.pos-btn {
   flex-wrap: nowrap;
 }
 
+/* ---------- C14 polish (owner 11-22: calm, clear, pleasant) ---------- */
+/* Sale actions: icon + words + hotkey chip, so every button reads at a glance. */
+.pos-action {
+  display: inline-flex;
+  align-items: center;
+  justify-content: flex-start;
+  gap: 10px;
+  text-align: left;
+  font-weight: 600;
+}
+.pos-action .pos-nav-icon {
+  width: 20px;
+  height: 20px;
+  color: var(--brand);
+  flex-shrink: 0;
+}
+.pos-action:disabled .pos-nav-icon {
+  color: inherit;
+}
+.pos-action-text {
+  flex: 1;
+  min-width: 0;
+}
+.pos-kbd {
+  font: inherit;
+  font-size: 11px;
+  font-weight: 700;
+  line-height: 1;
+  padding: 3px 6px;
+  border-radius: 6px;
+  color: var(--text-secondary);
+  background-color: var(--bg-elevated);
+  border: 1px solid var(--border-color);
+}
+.pos-count {
+  min-width: 22px;
+  padding: 2px 7px;
+  border-radius: 999px;
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--text-on-accent);
+  background-color: var(--brand);
+  text-align: center;
+}
+.pos-pay-btn {
+  justify-content: center;
+  font-size: 17px;
+}
+.pos-pay-btn .pos-nav-icon,
+.pos-pay-btn .pos-kbd {
+  color: inherit;
+}
+.pos-pay-btn .pos-action-text {
+  flex: none;
+}
+.pos-pay-btn .pos-kbd {
+  background-color: rgba(255, 255, 255, 0.18);
+  border-color: rgba(255, 255, 255, 0.3);
+}
+
+/* Totals: only rows that matter; the amount to pay is the one big number. */
+.pos-totals-box {
+  gap: 6px;
+}
+.pos-totals-grand {
+  margin-top: 0;
+  padding-top: 0;
+  border-top: none;
+  text-transform: none;
+  letter-spacing: 0;
+  font-size: 15px;
+  color: var(--text-secondary);
+  font-weight: 600;
+}
+.pos-totals-row + .pos-totals-grand {
+  margin-top: 4px;
+  padding-top: 10px;
+  border-top: 1px dashed var(--border-strong);
+}
+.pos-totals-discount span:last-child {
+  color: var(--text-success);
+  font-weight: 600;
+}
+
+/* Empty cart: a calm picture and one sentence. */
+.pos-empty-state {
+  height: 100%;
+  min-height: 180px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  padding: 24px;
+  text-align: center;
+  color: var(--text-secondary);
+}
+.pos-empty-state p {
+  max-width: 320px;
+  margin: 0;
+}
+.pos-empty-icon {
+  width: 64px;
+  height: 64px;
+  border-radius: 20px;
+  display: grid;
+  place-items: center;
+  color: var(--brand);
+  background-color: var(--brand-soft);
+}
+.pos-empty-icon .pos-nav-icon {
+  width: 30px;
+  height: 30px;
+}
+
+/* Search field with its icon inside. */
+.pos-search-field {
+  position: relative;
+  flex: 1.6;
+  display: flex;
+  align-items: center;
+  min-width: 0;
+}
+.pos-search-field > .pos-nav-icon {
+  position: absolute;
+  left: 14px;
+  width: 20px;
+  height: 20px;
+  color: var(--text-secondary);
+  pointer-events: none;
+}
+.pos-search-field .pos-input {
+  flex: 1;
+  padding-left: 44px;
+}
+
+/* Categories as one row of chips. */
+.pos-chips {
+  display: flex;
+  gap: 6px;
+  overflow-x: auto;
+  padding-bottom: 2px;
+  scrollbar-width: none;
+}
+.pos-chips::-webkit-scrollbar {
+  display: none;
+}
+.pos-chip {
+  flex-shrink: 0;
+  min-height: 38px;
+  padding: 6px 14px;
+  border-radius: 999px;
+  border: 1px solid var(--border-color);
+  background-color: var(--bg-surface);
+  color: var(--text-secondary);
+  font: inherit;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  transition:
+    background-color 0.12s,
+    color 0.12s,
+    border-color 0.12s;
+}
+.pos-chip:hover {
+  color: var(--text-primary);
+  border-color: var(--border-strong);
+}
+.pos-chip-active,
+.pos-chip-active:hover {
+  color: var(--text-on-accent);
+  background-color: var(--brand);
+  border-color: var(--brand);
+}
+
+/* Product tiles: a coloured letter, the name, the price. */
+.pos-product-list .pos-product-item {
+  min-height: 120px;
+  gap: 6px;
+  justify-content: flex-start;
+}
+.pos-product-list .pos-product-item > .pos-tile-badge {
+  width: 36px;
+  height: 36px;
+  border-radius: 10px;
+  display: grid;
+  place-items: center;
+  font-size: 16px;
+  font-weight: 800;
+  margin-bottom: 2px;
+}
+.pos-product-list .pos-product-item > .pos-tile-name {
+  font-size: 14px;
+  font-weight: 600;
+  line-height: 1.3;
+  color: var(--text-primary);
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+.pos-tile-name small,
+.pos-tile-price small {
+  font-weight: 500;
+  color: var(--text-secondary);
+}
+.pos-product-list .pos-product-item > .pos-tile-price {
+  margin-top: auto;
+  font-size: 14px;
+  color: var(--brand-text);
+}
+[data-theme='dark'] .pos-product-item > .pos-tile-price {
+  color: var(--text-primary);
+}
+.pos-tone-0 {
+  background: #eef2ff;
+  color: #4338ca;
+}
+.pos-tone-1 {
+  background: #ecfdf5;
+  color: #047857;
+}
+.pos-tone-2 {
+  background: #fff7ed;
+  color: #c2410c;
+}
+.pos-tone-3 {
+  background: #fdf2f8;
+  color: #be185d;
+}
+.pos-tone-4 {
+  background: #f0f9ff;
+  color: #0369a1;
+}
+.pos-tone-5 {
+  background: #fefce8;
+  color: #a16207;
+}
+[data-theme='dark'] .pos-tile-badge {
+  filter: saturate(1.2) brightness(0.85);
+}
+
 /* ---------- Camera scan button (Android shell, T4.4) ---------- */
 .pos-camera-btn {
   display: inline-flex;
@@ -1496,6 +1738,23 @@ select.pos-btn {
     min-height: 38px;
     padding: 4px 8px;
     font-size: 12px;
+  }
+  /* One tidy header line: the person as an avatar only, compact controls. */
+  .pos-header,
+  .pos-header > * {
+    flex-wrap: nowrap;
+    min-width: 0;
+  }
+  .pos-user-chip {
+    font-size: 0;
+    gap: 0;
+    padding: 2px;
+  }
+  .pos-user-chip .pos-user-avatar {
+    font-size: 12px;
+  }
+  .pos-header [data-testid='locale-select'] {
+    max-width: 92px;
   }
 
   /* Side menu becomes a bottom tab bar. */
@@ -1563,8 +1822,7 @@ select.pos-btn {
   }
   [data-testid='cart-lines-table'] th:nth-child(1),
   [data-testid='cart-lines-table'] td:nth-child(1),
-  [data-testid='cart-lines-table'] th:nth-child(5),
-  [data-testid='cart-lines-table'] td:nth-child(5) {
+  [data-testid='cart-lines-table'] .pos-line-discount {
     display: none;
   }
   .pos-cart-table th,
@@ -1623,4 +1881,138 @@ select.pos-btn {
     padding: 18px;
     max-width: none;
   }
+}
+
+/* ---------- C14: the kassa fits the screen (desktop/tablet) ----------
+ * The sale screen never scrolls as a page: the cart and the product grid scroll inside their
+ * panes, so the total and the pay button always stay in view. */
+@media (min-width: 761px) {
+  .pos-shell {
+    height: 100vh;
+    min-height: 0;
+    overflow: hidden;
+  }
+  .pos-layout {
+    flex: 1;
+    min-height: 0;
+  }
+  .pos-sidenav {
+    position: static;
+    height: auto;
+  }
+  .pos-main {
+    min-height: 0;
+    overflow-y: auto;
+  }
+  .pos-main > .pos-workspace {
+    min-height: 0;
+    grid-template-rows: minmax(0, 1fr);
+  }
+  .pos-workspace > .pos-pane {
+    min-height: 0;
+    overflow: hidden;
+  }
+}
+
+/* ---------- C14: login and status footer ---------- */
+.pos-login {
+  max-width: 520px;
+}
+.pos-auth-head {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  margin-bottom: 18px;
+}
+.pos-auth-head h2 {
+  margin: 0;
+}
+.pos-auth-sub {
+  margin: 2px 0 0;
+  color: var(--text-secondary);
+  font-size: 14px;
+}
+.pos-logo-lg {
+  width: 48px;
+  height: 48px;
+  border-radius: 14px;
+  font-size: 22px;
+}
+.pos-user-cards {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(190px, 1fr));
+  gap: 10px;
+  margin-bottom: 16px;
+}
+.pos-user-card {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-height: 64px;
+  padding: 10px 12px;
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius);
+  background-color: var(--bg-surface);
+  color: var(--text-primary);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+  transition:
+    border-color 0.12s,
+    box-shadow 0.12s,
+    background-color 0.12s;
+}
+.pos-user-card:hover {
+  border-color: var(--border-strong);
+}
+.pos-user-card-active,
+.pos-user-card-active:hover {
+  border-color: var(--brand);
+  background-color: var(--brand-soft);
+  box-shadow: var(--focus-ring);
+}
+.pos-user-card .pos-user-avatar {
+  width: 40px;
+  height: 40px;
+  font-size: 17px;
+  flex-shrink: 0;
+}
+.pos-user-card-text {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+.pos-user-card-text strong {
+  font-size: 15px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.pos-user-card-text small {
+  color: var(--text-secondary);
+  font-size: 13px;
+}
+.pos-status-footer {
+  justify-content: flex-start;
+  border-top: none;
+  background: transparent;
+}
+.pos-status-details {
+  width: 100%;
+}
+.pos-status-details > summary {
+  cursor: pointer;
+  width: max-content;
+  font-size: 12px;
+  color: var(--text-secondary);
+  user-select: none;
+}
+.pos-status-details[open] {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
+}
+.pos-status-details[open] > summary {
+  width: 100%;
 }

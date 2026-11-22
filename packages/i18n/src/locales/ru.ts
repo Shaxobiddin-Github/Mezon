@@ -309,6 +309,17 @@ export const RU_MESSAGES: Readonly<Record<I18nKey, string>> = {
   'error.INSUFFICIENT_CASH_IN_DRAWER': 'В кассе недостаточно наличных.',
   'error.SALE_ALREADY_VOIDED': 'Чек аннулирован, возврат невозможен.',
   'error.SALE_NOT_FOUND': 'Чек не найден.',
+  'auth.chooseUser': 'Сначала выберите, кто входит.',
+  'auth.enterPin': 'Введите PIN-код.',
+  'auth.chooseUserHint': 'Выберите своё имя и введите PIN-код',
+  'auth.enterPinHint': 'Введите свой PIN-код',
+  'app.systemStatus': 'Состояние системы',
+  'admin.login.heroTitle': 'Ваш магазин с одного взгляда',
+  'admin.login.hero1': 'Продажи, чеки и прибыль за сегодня — в реальном времени',
+  'admin.login.hero2': 'Состояние каждой кассы и филиала в одном месте',
+  'admin.login.hero3': 'Долги клиентов и отчёты — в вашем телефоне',
+  'admin.menu.open': 'Открыть меню',
+  'admin.menu.close': 'Закрыть меню',
   'error.CART_EMPTY': 'Корзина пуста.',
 
   // T3.1 Catalog management (MXIK, qadoq kodi, QQS)

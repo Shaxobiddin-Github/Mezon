@@ -24,6 +24,16 @@ describe('C11 describeHubError', () => {
     );
   });
 
+  it('a client-side schema error is a plain sentence, not JSON', () => {
+    const zodLike = Object.assign(new Error('[{"code":"invalid_union"}]'), {
+      name: 'ZodError',
+      issues: [{ code: 'invalid_union', path: ['username'], message: 'bad' }],
+    });
+    const text = describeHubError(zodLike);
+    expect(text).toBe('Kiritilgan maʼlumot notoʻgʻri. Maydonlarni tekshiring.');
+    expect(text).not.toContain('{');
+  });
+
   it('follows the selected language', () => {
     setLocale('ru');
     expect(describeHubError(hubError('PRODUCT_SKU_ALREADY_EXISTS'))).toBe(

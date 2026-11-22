@@ -856,43 +856,47 @@ export function App() {
 
       {screen !== 'pos' && !thinClientUnpaired && (
         <footer className="pos-status-footer">
-          <div className="pos-telemetry" data-testid="pos-telemetry-bar">
-            <span className="pos-telemetry-item">
-              {t('app.hub.status')}: <strong data-testid="hub-status">{hubStatus}</strong>
-            </span>
-            <span className="pos-telemetry-item">
-              <strong data-testid="hub-url">{hubBaseUrl ?? 'kutilyapti...'}</strong>
-            </span>
-            <span className="pos-telemetry-item">
-              <strong data-testid="hub-origin">{window.location.origin}</strong>
-            </span>
-            <span className="pos-telemetry-item">
-              {t('app.hub.restarts')}:{' '}
-              <strong data-testid="hub-restart-count">{hubRestartCount}</strong>
-            </span>
-            <span className="pos-telemetry-item">
-              {t('app.hub.health')}: <strong data-testid="health-status">{healthStatus}</strong>
-            </span>
-            <span className="pos-telemetry-item">
-              {t('app.hub.needsSetup')}:{' '}
-              <strong data-testid="health-needs-setup">
-                {needsSetup === null ? 'unknown' : String(needsSetup)}
-              </strong>
-            </span>
-            <span className="pos-telemetry-item">
-              <strong data-testid="health-check-count">{healthCheckCount}</strong>
-            </span>
-          </div>
-          <button
-            type="button"
-            className="pos-btn"
-            data-testid="refresh-health-btn"
-            onClick={() => {
-              void checkHubHealth(hubBaseUrl);
-            }}
-          >
-            {t('app.hub.refresh')}
-          </button>
+          {/* Technical status for support: folded away, one click to open. */}
+          <details className="pos-status-details">
+            <summary>{t('app.systemStatus')}</summary>
+            <div className="pos-telemetry" data-testid="pos-telemetry-bar">
+              <span className="pos-telemetry-item">
+                {t('app.hub.status')}: <strong data-testid="hub-status">{hubStatus}</strong>
+              </span>
+              <span className="pos-telemetry-item">
+                <strong data-testid="hub-url">{hubBaseUrl ?? 'kutilyapti...'}</strong>
+              </span>
+              <span className="pos-telemetry-item">
+                <strong data-testid="hub-origin">{window.location.origin}</strong>
+              </span>
+              <span className="pos-telemetry-item">
+                {t('app.hub.restarts')}:{' '}
+                <strong data-testid="hub-restart-count">{hubRestartCount}</strong>
+              </span>
+              <span className="pos-telemetry-item">
+                {t('app.hub.health')}: <strong data-testid="health-status">{healthStatus}</strong>
+              </span>
+              <span className="pos-telemetry-item">
+                {t('app.hub.needsSetup')}:{' '}
+                <strong data-testid="health-needs-setup">
+                  {needsSetup === null ? 'unknown' : String(needsSetup)}
+                </strong>
+              </span>
+              <span className="pos-telemetry-item">
+                <strong data-testid="health-check-count">{healthCheckCount}</strong>
+              </span>
+            </div>
+            <button
+              type="button"
+              className="pos-btn"
+              data-testid="refresh-health-btn"
+              onClick={() => {
+                void checkHubHealth(hubBaseUrl);
+              }}
+            >
+              {t('app.hub.refresh')}
+            </button>
+          </details>
         </footer>
       )}
 

@@ -20,5 +20,9 @@ export function describeHubError(err: unknown): string {
     if (isKnownKey(key)) return t(key);
     return t('error.generic', { code: err.code });
   }
+  // A schema check that failed in the kassa itself (e.g. an empty login): never show its JSON.
+  if (typeof err === 'object' && err !== null && 'issues' in err && Array.isArray(err.issues)) {
+    return t('error.VALIDATION_ERROR');
+  }
   return err instanceof Error ? err.message : String(err);
 }
