@@ -73,11 +73,11 @@ export const DevicesView: React.FC = () => {
   return (
     <div className="space-y-6">
       <div>
-        <h1 className="text-xl font-bold text-slate-900">{t('admin.devices.title')}</h1>
-        <p className="text-sm text-slate-500">{t('admin.devices.subtitle')}</p>
+        <h1 className="page-title">{t('admin.devices.title')}</h1>
+        <p className="page-subtitle">{t('admin.devices.subtitle')}</p>
       </div>
       {error && <p className="text-sm text-red-600">{error}</p>}
-      <div className="bg-white rounded-lg border border-slate-200 p-4 space-y-3">
+      <div className="card p-4 space-y-3">
         <p className="font-semibold text-slate-900">{t('admin.devices.addTitle')}</p>
         <p className="text-xs text-slate-500">{t('admin.devices.addHelp')}</p>
         <div className="flex flex-wrap items-end gap-2">
@@ -108,7 +108,7 @@ export const DevicesView: React.FC = () => {
             type="button"
             disabled={!storeId}
             onClick={() => void newCode()}
-            className="rounded bg-indigo-600 px-3 py-1.5 text-sm font-semibold text-white disabled:opacity-50"
+            className="btn btn-primary"
           >
             {t('admin.devices.getCode')}
           </button>
@@ -122,7 +122,7 @@ export const DevicesView: React.FC = () => {
           </p>
         )}
       </div>
-      <div className="bg-white rounded-lg border border-slate-200 divide-y divide-slate-100">
+      <div className="card divide-y divide-slate-100">
         {devices.length === 0 && (
           <p className="p-4 text-sm text-slate-400">{t('admin.devices.empty')}</p>
         )}
@@ -158,7 +158,7 @@ export const DevicesView: React.FC = () => {
         <h2 className="text-lg font-bold text-slate-900">{t('admin.staff.title')}</h2>
         <p className="text-sm text-slate-500">{t('admin.staff.subtitle')}</p>
       </div>
-      <div className="bg-white rounded-lg border border-slate-200 divide-y divide-slate-100">
+      <div className="card divide-y divide-slate-100">
         {staff.length === 0 && (
           <p className="p-4 text-sm text-slate-400">{t('admin.staff.empty')}</p>
         )}
