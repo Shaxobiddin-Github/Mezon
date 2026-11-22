@@ -19,6 +19,36 @@ export function readMarkingPrefixesSync(sqlite: SqliteLike): readonly string[] {
   }
 }
 
+/**
+ * V2: the owner sets the marking MXIK prefixes from the kassa (until the official list arrives in
+ * the signed rules package). Digits only, 2–17 chars, at most 200 entries, de-duplicated.
+ */
+export function writeMarkingPrefixesSync(
+  sqlite: SqliteLike,
+  prefixes: readonly string[],
+): string[] {
+  const clean = [...new Set(prefixes.map((p) => p.trim()).filter((p) => p.length > 0))];
+  if (clean.length > 200 || clean.some((p) => !/^\d{2,17}$/.test(p))) {
+    throw new DomainError('VALIDATION_ERROR', 'Marking prefixes must be 2-17 digit MXIK prefixes');
+  }
+  sqlite
+    .prepare('UPDATE local_hub_config SET marking_mxik_prefixes_json = ?')
+    .run(JSON.stringify(clean));
+  return clean;
+}
+
+/** V2 demo mode flag (see `local_hub_config.demo_mode_enabled`). */
+export function readDemoModeSync(sqlite: SqliteLike): boolean {
+  const row = sqlite
+    .prepare('SELECT demo_mode_enabled AS d FROM local_hub_config LIMIT 1')
+    .get() as { d: number | bigint } | undefined;
+  return row !== undefined && Number(row.d) === 1;
+}
+
+export function writeDemoModeSync(sqlite: SqliteLike, enabled: boolean): void {
+  sqlite.prepare('UPDATE local_hub_config SET demo_mode_enabled = ?').run(enabled ? 1 : 0);
+}
+
 export function isMarkedMxik(mxik: string | null, prefixes: readonly string[]): boolean {
   return mxik !== null && prefixes.some((p) => mxik.startsWith(p));
 }

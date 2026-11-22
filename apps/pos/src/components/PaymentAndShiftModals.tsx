@@ -1,4 +1,4 @@
-import type { SalePaymentInputDto } from '@mezon/contracts';
+import type { IntegrationsStatusResponse, SalePaymentInputDto } from '@mezon/contracts';
 import type { ShiftExpenseCategory } from '@mezon/domain';
 import { t } from '@mezon/i18n';
 import {
@@ -9,16 +9,21 @@ import {
 } from '@mezon/ui';
 import { type FormEvent, useEffect, useRef, useState } from 'react';
 import { ReceiptFiscalBadge } from './FiscalPanels.js';
+import { QrPayPanel } from './QrPayPanel.js';
 import { RulesPanel } from './RulesPanel.js';
 import { type HubApiClient, HubApiError } from '../api/hub-client.js';
-import { type InsufficientStockLineDetail, usePosStore } from '../store/pos-store.js';
+import {
+  type InsufficientStockLineDetail,
+  type PaidQrPayment,
+  usePosStore,
+} from '../store/pos-store.js';
 import { generateBrowserUuidV7 } from '../utils/browser-uuid.js';
 
 type NonCashMethod = 'card' | 'uzqr' | 'payme' | 'click' | 'uzum' | 'social_card' | 'other';
 
 /**
- * v1: non-cash payments are recorded by hand. UzQR is not offered: since T3.6 a UzQR payment closes a
- * receipt only with a provider-confirmed QR, and the QR screen comes with the real driver (v2).
+ * Non-cash payments recorded by hand. UzQR is not in this list: a UzQR payment closes a receipt only
+ * with a provider-confirmed QR, so it has its own button and screen (`QrPayPanel`, V2).
  */
 export const NON_CASH_METHODS: readonly NonCashMethod[] = [
   'card',
@@ -28,6 +33,8 @@ export const NON_CASH_METHODS: readonly NonCashMethod[] = [
   'social_card',
   'other',
 ];
+
+const NO_PAID_QR: readonly PaidQrPayment[] = [];
 
 const EXPENSE_CATEGORIES: readonly ShiftExpenseCategory[] = [
   'supplies',
@@ -68,6 +75,24 @@ export function PaymentModal({
   const setInsufficientStockLines = usePosStore((s) => s.setInsufficientStockLines);
   const clearInsufficientStockLines = usePosStore((s) => s.clearInsufficientStockLines);
   const setErrorBanner = usePosStore((s) => s.setErrorBanner);
+  const paidQr = usePosStore((s) => s.paidQrByCart[activeCart?.id ?? ''] ?? NO_PAID_QR);
+  const addPaidQr = usePosStore((s) => s.addPaidQr);
+  const clearPaidQr = usePosStore((s) => s.clearPaidQr);
+  const [integrations, setIntegrations] = useState<IntegrationsStatusResponse | null>(null);
+  const [qrAmountTiyin, setQrAmountTiyin] = useState<string | null>(null);
+
+  useEffect(() => {
+    let alive = true;
+    api.getIntegrations().then(
+      (st) => {
+        if (alive) setIntegrations(st);
+      },
+      () => undefined,
+    );
+    return () => {
+      alive = false;
+    };
+  }, [api]);
 
   const initialTotalTiyin = activeCart?.totalFinal ?? '0';
   const [expectedTotalTiyin, setExpectedTotalTiyin] = useState(initialTotalTiyin);
@@ -100,6 +125,7 @@ export function PaymentModal({
   }
 
   let nonCashSumTiyin = 0n;
+  for (const qr of paidQr) nonCashSumTiyin += BigInt(qr.amountTiyin);
   for (const row of nonCashRows) {
     try {
       if (row.amountSom.trim().length > 0) {
@@ -127,6 +153,10 @@ export function PaymentModal({
     tenderedCashTiyin > cashAppliedTiyin ? tenderedCashTiyin - cashAppliedTiyin : 0n;
   const unallocatedTiyin = totalTiyin - (cashAppliedTiyin + nonCashSumTiyin + debtTiyin);
 
+  // A real provider, or the test one while the owner's demo mode is on.
+  const qrAvailable =
+    integrations !== null && (integrations.demoMode || !integrations.payment.isTestDriver);
+
   const onInputsChanged = () => {
     if (networkRetryPending) {
       setNetworkRetryPending(false);
@@ -142,6 +172,9 @@ export function PaymentModal({
         tenderedAmount: tenderedCashTiyin.toString(),
         amount: cashAppliedTiyin.toString(),
       });
+    }
+    for (const qr of paidQr) {
+      out.push({ method: 'uzqr', amount: qr.amountTiyin, providerRef: qr.providerRef });
     }
     for (const row of nonCashRows) {
       let amt: string;
@@ -191,6 +224,7 @@ export function PaymentModal({
       });
 
       clearInsufficientStockLines();
+      clearPaidQr(activeCart.id);
       setNetworkRetryPending(false);
       setTotalChangedPrompt(null);
       setLastCompletedSale(res);
@@ -349,7 +383,60 @@ export function PaymentModal({
           </div>
         </div>
 
-        <div>
+        {paidQr.length > 0 && (
+          <div className="pos-qr-paid-list" data-testid="payment-qr-paid-list">
+            {paidQr.map((qr) => (
+              <div key={qr.intentId} className="pos-qr-paid-row">
+                <span className="pos-qr-paid-ok" aria-hidden="true">
+                  ✓
+                </span>
+                <span>
+                  {t('payment.method.uzqr')} · {formatTiyinToSom(qr.amountTiyin)}{' '}
+                  {t('common.currency')}
+                </span>
+                <small>
+                  {qr.isTestDriver ? `${t('payment.qr.testShort')} · ` : ''}
+                  {qr.providerRef}
+                </small>
+              </div>
+            ))}
+          </div>
+        )}
+
+        {qrAmountTiyin !== null && (
+          <QrPayPanel
+            api={api}
+            cartId={activeCart.id}
+            amountTiyin={qrAmountTiyin}
+            onError={onError}
+            onClose={() => setQrAmountTiyin(null)}
+            onPaid={(intent) => {
+              onInputsChanged();
+              const paid: PaidQrPayment = {
+                intentId: intent.id,
+                providerRef: intent.providerRef,
+                amountTiyin: intent.amount,
+                isTestDriver: intent.isTestDriver,
+              };
+              addPaidQr(activeCart.id, paid);
+              const left = remainingForCashTiyin - BigInt(intent.amount);
+              setTenderedCashSom(tiyinToSomInputString((left > 0n ? left : 0n).toString()));
+              setQrAmountTiyin(null);
+            }}
+          />
+        )}
+
+        <div className="pos-quick-tenders">
+          {qrAvailable && qrAmountTiyin === null && remainingForCashTiyin > 0n && (
+            <button
+              type="button"
+              className="pos-btn pos-btn-primary"
+              data-testid="payment-qr-btn"
+              onClick={() => setQrAmountTiyin(remainingForCashTiyin.toString())}
+            >
+              {t('payment.qr.button')}
+            </button>
+          )}
           <button
             type="button"
             className="pos-btn"
@@ -370,7 +457,8 @@ export function PaymentModal({
           >
             {t('payment.addNonCashBtn')}
           </button>
-
+        </div>
+        <div>
           {nonCashRows.map((row, index) => (
             <div
               key={row.key}

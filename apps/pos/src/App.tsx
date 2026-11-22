@@ -1,5 +1,5 @@
 import { useEffect, useCallback, useRef, useState } from 'react';
-import type { UuidV7 } from '@mezon/domain';
+import { type UuidV7, gtinToEan13, looksLikeMarkingCode, parseMarkingCode } from '@mezon/domain';
 import { LOCALE_LABELS, SUPPORTED_LOCALES, isLocale, t } from '@mezon/i18n';
 import { stepMilliQuantity } from '@mezon/ui';
 import { normalizeLoopbackHubBaseUrl } from './bridge.js';
@@ -78,6 +78,7 @@ export function App() {
   const user = usePosStore((s) => s.user);
   // v1: fiscal mode is off by default; its screens are shown only when it is on.
   const [fiscalModeEnabled, setFiscalModeEnabled] = useState(false);
+  const [demoMode, setDemoMode] = useState(false);
   // v1 LAN: is this computer the main register (hub) or a second register (terminal)?
   const [terminalInfo, setTerminalInfo] = useState<TerminalInfo>({ mode: 'hub' });
   const [showTerminalPair, setShowTerminalPair] = useState(false);
@@ -326,9 +327,23 @@ export function App() {
           setActiveCart(created.cart);
           cartId = created.cart.id;
         }
+        let scanCode = barcode;
+        // V2 marking: a DataMatrix (GS1) code goes to the marking check; goods that do not need
+        // one are added by the GTIN inside the code, like an ordinary barcode.
+        if (looksLikeMarkingCode(barcode)) {
+          try {
+            const marked = await api.scanMark(cartId, barcode);
+            setActiveCart(marked.cart);
+            return;
+          } catch (err) {
+            if (!(err instanceof HubApiError) || err.code !== 'MARKING_NOT_REQUIRED') throw err;
+            const gtin = parseMarkingCode(barcode).gtin;
+            scanCode = gtinToEan13(gtin) ?? gtin;
+          }
+        }
         const updated = await api.addCartLine(cartId, {
           kind: 'scan',
-          barcode,
+          barcode: scanCode,
           qty: '1000',
         });
         setActiveCart(updated.cart);
@@ -637,6 +652,12 @@ export function App() {
         if (!cancelled) setFiscalModeEnabled(st.modeEnabled);
       })
       .catch(() => undefined);
+    api
+      .getIntegrations()
+      .then((st) => {
+        if (!cancelled) setDemoMode(st.demoMode);
+      })
+      .catch(() => undefined);
     return () => {
       cancelled = true;
     };
@@ -651,9 +672,19 @@ export function App() {
             G
           </span>
           <h1 className="pos-header-title">{t('app.title')}</h1>
-          <span className="pos-non-fiscal-badge" data-testid="non-fiscal-badge">
-            {t('receipt.nonFiscalBanner')}
-          </span>
+          {demoMode ? (
+            <span
+              className="pos-demo-badge"
+              data-testid="demo-mode-badge"
+              title={t('demo.badgeHint')}
+            >
+              {t('demo.badge')}
+            </span>
+          ) : (
+            <span className="pos-non-fiscal-badge" data-testid="non-fiscal-badge">
+              {t('receipt.nonFiscalBanner')}
+            </span>
+          )}
           {user && (
             <span className="pos-user-chip" data-testid="active-user-badge">
               <span className="pos-user-avatar" aria-hidden="true">
@@ -848,6 +879,10 @@ export function App() {
                   role={user.role}
                   terminalInfo={terminalInfo}
                   onError={handleError}
+                  onIntegrationsChanged={(st) => {
+                    setDemoMode(st.demoMode);
+                    setFiscalModeEnabled(st.fiscal.modeEnabled);
+                  }}
                 />
               )}
           </main>

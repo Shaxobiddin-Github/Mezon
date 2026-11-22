@@ -899,3 +899,19 @@ export {
 } from './fiscal.js';
 
 export { LicenceStatusResponseSchema, type LicenceStatusResponseDto } from './licence.js';
+
+export {
+  PaymentIntentStatusSchema,
+  PaymentIntentDtoSchema,
+  type PaymentIntentDto,
+  PaymentIntentResponseSchema,
+  IntegrationsStatusResponseSchema,
+  type IntegrationsStatusResponse,
+  SetDemoModeRequestSchema,
+  SetMarkingPrefixesRequestSchema,
+  CartMarkDtoSchema,
+  type CartMarkDto,
+  CartMarksResponseSchema,
+  type CartMarksResponseDto,
+  CartMarksListResponseSchema,
+} from './integrations.js';
