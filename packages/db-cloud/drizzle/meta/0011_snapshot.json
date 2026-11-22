@@ -116,9 +116,7 @@
           "name": "cloud_device_pairing_codes_tenant_isolation",
           "as": "PERMISSIVE",
           "for": "ALL",
-          "to": [
-            "mezon_app"
-          ],
+          "to": ["mezon_app"],
           "using": "\"organization_id\" = mezon_current_organization_id()",
           "withCheck": "\"organization_id\" = mezon_current_organization_id()"
         }
@@ -249,9 +247,7 @@
           "name": "cloud_device_tokens_tenant_isolation",
           "as": "PERMISSIVE",
           "for": "ALL",
-          "to": [
-            "mezon_app"
-          ],
+          "to": ["mezon_app"],
           "using": "\"organization_id\" = mezon_current_organization_id()",
           "withCheck": "\"organization_id\" = mezon_current_organization_id()"
         }
@@ -377,9 +373,7 @@
           "name": "cloud_devices_tenant_isolation",
           "as": "PERMISSIVE",
           "for": "ALL",
-          "to": [
-            "mezon_app"
-          ],
+          "to": ["mezon_app"],
           "using": "\"organization_id\" = mezon_current_organization_id()",
           "withCheck": "\"organization_id\" = mezon_current_organization_id()"
         }
@@ -465,9 +459,7 @@
           "name": "cloud_hlc_state_tenant_isolation",
           "as": "PERMISSIVE",
           "for": "ALL",
-          "to": [
-            "mezon_app"
-          ],
+          "to": ["mezon_app"],
           "using": "\"organization_id\" = mezon_current_organization_id()",
           "withCheck": "\"organization_id\" = mezon_current_organization_id()"
         }
@@ -597,9 +589,7 @@
           "name": "cloud_licences_tenant_isolation",
           "as": "PERMISSIVE",
           "for": "ALL",
-          "to": [
-            "mezon_app"
-          ],
+          "to": ["mezon_app"],
           "using": "\"organization_id\" = mezon_current_organization_id()",
           "withCheck": "\"organization_id\" = mezon_current_organization_id()"
         }
@@ -759,9 +749,7 @@
           "name": "cloud_organizations_tenant_isolation",
           "as": "PERMISSIVE",
           "for": "ALL",
-          "to": [
-            "mezon_app"
-          ],
+          "to": ["mezon_app"],
           "using": "\"organization_id\" = mezon_current_organization_id()",
           "withCheck": "\"organization_id\" = mezon_current_organization_id()"
         }
@@ -859,9 +847,7 @@
           "name": "cloud_platform_invoices_tenant_isolation",
           "as": "PERMISSIVE",
           "for": "ALL",
-          "to": [
-            "mezon_app"
-          ],
+          "to": ["mezon_app"],
           "using": "\"organization_id\" = mezon_current_organization_id()",
           "withCheck": "\"organization_id\" = mezon_current_organization_id()"
         }
@@ -974,9 +960,7 @@
           "name": "cloud_refresh_tokens_tenant_isolation",
           "as": "PERMISSIVE",
           "for": "ALL",
-          "to": [
-            "mezon_app"
-          ],
+          "to": ["mezon_app"],
           "using": "\"organization_id\" = mezon_current_organization_id()",
           "withCheck": "\"organization_id\" = mezon_current_organization_id()"
         }
@@ -1086,9 +1070,7 @@
           "name": "cloud_shop_order_lines_tenant_isolation",
           "as": "PERMISSIVE",
           "for": "ALL",
-          "to": [
-            "mezon_app"
-          ],
+          "to": ["mezon_app"],
           "using": "\"organization_id\" = mezon_current_organization_id()",
           "withCheck": "\"organization_id\" = mezon_current_organization_id()"
         }
@@ -1264,9 +1246,7 @@
           "name": "cloud_shop_orders_tenant_isolation",
           "as": "PERMISSIVE",
           "for": "ALL",
-          "to": [
-            "mezon_app"
-          ],
+          "to": ["mezon_app"],
           "using": "\"organization_id\" = mezon_current_organization_id()",
           "withCheck": "\"organization_id\" = mezon_current_organization_id()"
         }
@@ -1364,9 +1344,7 @@
           "name": "cloud_shop_products_tenant_isolation",
           "as": "PERMISSIVE",
           "for": "ALL",
-          "to": [
-            "mezon_app"
-          ],
+          "to": ["mezon_app"],
           "using": "\"organization_id\" = mezon_current_organization_id()",
           "withCheck": "\"organization_id\" = mezon_current_organization_id()"
         }
@@ -1499,9 +1477,7 @@
           "name": "cloud_shops_tenant_isolation",
           "as": "PERMISSIVE",
           "for": "ALL",
-          "to": [
-            "mezon_app"
-          ],
+          "to": ["mezon_app"],
           "using": "\"organization_id\" = mezon_current_organization_id()",
           "withCheck": "\"organization_id\" = mezon_current_organization_id()"
         }
@@ -1595,9 +1571,7 @@
           "name": "cloud_store_sync_positions_tenant_isolation",
           "as": "PERMISSIVE",
           "for": "ALL",
-          "to": [
-            "mezon_app"
-          ],
+          "to": ["mezon_app"],
           "using": "\"organization_id\" = mezon_current_organization_id()",
           "withCheck": "\"organization_id\" = mezon_current_organization_id()"
         }
@@ -1684,9 +1658,7 @@
           "name": "cloud_stores_tenant_isolation",
           "as": "PERMISSIVE",
           "for": "ALL",
-          "to": [
-            "mezon_app"
-          ],
+          "to": ["mezon_app"],
           "using": "\"organization_id\" = mezon_current_organization_id()",
           "withCheck": "\"organization_id\" = mezon_current_organization_id()"
         }
@@ -1908,9 +1880,7 @@
           "name": "cloud_sync_events_tenant_isolation",
           "as": "PERMISSIVE",
           "for": "ALL",
-          "to": [
-            "mezon_app"
-          ],
+          "to": ["mezon_app"],
           "using": "\"organization_id\" = mezon_current_organization_id()",
           "withCheck": "\"organization_id\" = mezon_current_organization_id()"
         }
@@ -2096,9 +2066,7 @@
           "name": "cloud_sync_parked_tenant_isolation",
           "as": "PERMISSIVE",
           "for": "ALL",
-          "to": [
-            "mezon_app"
-          ],
+          "to": ["mezon_app"],
           "using": "\"organization_id\" = mezon_current_organization_id()",
           "withCheck": "\"organization_id\" = mezon_current_organization_id()"
         }
@@ -2220,9 +2188,7 @@
           "name": "cloud_telegram_deliveries_tenant_isolation",
           "as": "PERMISSIVE",
           "for": "ALL",
-          "to": [
-            "mezon_app"
-          ],
+          "to": ["mezon_app"],
           "using": "\"organization_id\" = mezon_current_organization_id()",
           "withCheck": "\"organization_id\" = mezon_current_organization_id()"
         }
@@ -2339,9 +2305,7 @@
           "name": "cloud_telegram_link_codes_tenant_isolation",
           "as": "PERMISSIVE",
           "for": "ALL",
-          "to": [
-            "mezon_app"
-          ],
+          "to": ["mezon_app"],
           "using": "\"organization_id\" = mezon_current_organization_id()",
           "withCheck": "\"organization_id\" = mezon_current_organization_id()"
         }
@@ -2499,9 +2463,7 @@
           "name": "cloud_telegram_links_tenant_isolation",
           "as": "PERMISSIVE",
           "for": "ALL",
-          "to": [
-            "mezon_app"
-          ],
+          "to": ["mezon_app"],
           "using": "\"organization_id\" = mezon_current_organization_id()",
           "withCheck": "\"organization_id\" = mezon_current_organization_id()"
         }
@@ -2624,9 +2586,7 @@
           "name": "cloud_users_tenant_isolation",
           "as": "PERMISSIVE",
           "for": "ALL",
-          "to": [
-            "mezon_app"
-          ],
+          "to": ["mezon_app"],
           "using": "\"organization_id\" = mezon_current_organization_id()",
           "withCheck": "\"organization_id\" = mezon_current_organization_id()"
         }
@@ -2769,12 +2729,8 @@
           "name": "batches_product_id_products_id_fk",
           "tableFrom": "batches",
           "tableTo": "products",
-          "columnsFrom": [
-            "product_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["product_id"],
+          "columnsTo": ["id"],
           "onDelete": "no action",
           "onUpdate": "no action"
         },
@@ -2782,12 +2738,8 @@
           "name": "batches_variant_id_product_variants_id_fk",
           "tableFrom": "batches",
           "tableTo": "product_variants",
-          "columnsFrom": [
-            "variant_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["variant_id"],
+          "columnsTo": ["id"],
           "onDelete": "no action",
           "onUpdate": "no action"
         }
@@ -2799,9 +2751,7 @@
           "name": "batches_tenant_isolation",
           "as": "PERMISSIVE",
           "for": "ALL",
-          "to": [
-            "mezon_app"
-          ],
+          "to": ["mezon_app"],
           "using": "\"organization_id\" = mezon_current_organization_id()",
           "withCheck": "\"organization_id\" = mezon_current_organization_id()"
         }
@@ -3065,12 +3015,8 @@
           "name": "cash_moves_payment_id_payments_id_fk",
           "tableFrom": "cash_moves",
           "tableTo": "payments",
-          "columnsFrom": [
-            "payment_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["payment_id"],
+          "columnsTo": ["id"],
           "onDelete": "no action",
           "onUpdate": "no action"
         },
@@ -3078,12 +3024,8 @@
           "name": "cash_moves_created_by_user_id_users_id_fk",
           "tableFrom": "cash_moves",
           "tableTo": "users",
-          "columnsFrom": [
-            "created_by_user_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["created_by_user_id"],
+          "columnsTo": ["id"],
           "onDelete": "no action",
           "onUpdate": "no action"
         }
@@ -3095,9 +3037,7 @@
           "name": "cash_moves_tenant_isolation",
           "as": "PERMISSIVE",
           "for": "ALL",
-          "to": [
-            "mezon_app"
-          ],
+          "to": ["mezon_app"],
           "using": "\"organization_id\" = mezon_current_organization_id()",
           "withCheck": "\"organization_id\" = mezon_current_organization_id()"
         }
@@ -3273,12 +3213,8 @@
           "name": "categories_parent_id_categories_id_fk",
           "tableFrom": "categories",
           "tableTo": "categories",
-          "columnsFrom": [
-            "parent_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["parent_id"],
+          "columnsTo": ["id"],
           "onDelete": "no action",
           "onUpdate": "no action"
         }
@@ -3290,9 +3226,7 @@
           "name": "categories_tenant_isolation",
           "as": "PERMISSIVE",
           "for": "ALL",
-          "to": [
-            "mezon_app"
-          ],
+          "to": ["mezon_app"],
           "using": "\"organization_id\" = mezon_current_organization_id()",
           "withCheck": "\"organization_id\" = mezon_current_organization_id()"
         }
@@ -3577,12 +3511,8 @@
           "name": "customer_ledger_customer_id_customers_id_fk",
           "tableFrom": "customer_ledger",
           "tableTo": "customers",
-          "columnsFrom": [
-            "customer_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["customer_id"],
+          "columnsTo": ["id"],
           "onDelete": "no action",
           "onUpdate": "no action"
         },
@@ -3590,12 +3520,8 @@
           "name": "customer_ledger_sale_id_sales_id_fk",
           "tableFrom": "customer_ledger",
           "tableTo": "sales",
-          "columnsFrom": [
-            "sale_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["sale_id"],
+          "columnsTo": ["id"],
           "onDelete": "no action",
           "onUpdate": "no action"
         },
@@ -3603,12 +3529,8 @@
           "name": "customer_ledger_cash_move_id_cash_moves_id_fk",
           "tableFrom": "customer_ledger",
           "tableTo": "cash_moves",
-          "columnsFrom": [
-            "cash_move_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["cash_move_id"],
+          "columnsTo": ["id"],
           "onDelete": "no action",
           "onUpdate": "no action"
         },
@@ -3616,12 +3538,8 @@
           "name": "customer_ledger_created_by_user_id_users_id_fk",
           "tableFrom": "customer_ledger",
           "tableTo": "users",
-          "columnsFrom": [
-            "created_by_user_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["created_by_user_id"],
+          "columnsTo": ["id"],
           "onDelete": "no action",
           "onUpdate": "no action"
         },
@@ -3629,12 +3547,8 @@
           "name": "customer_ledger_override_approved_by_user_id_users_id_fk",
           "tableFrom": "customer_ledger",
           "tableTo": "users",
-          "columnsFrom": [
-            "override_approved_by_user_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["override_approved_by_user_id"],
+          "columnsTo": ["id"],
           "onDelete": "no action",
           "onUpdate": "no action"
         }
@@ -3646,9 +3560,7 @@
           "name": "customer_ledger_tenant_isolation",
           "as": "PERMISSIVE",
           "for": "ALL",
-          "to": [
-            "mezon_app"
-          ],
+          "to": ["mezon_app"],
           "using": "\"organization_id\" = mezon_current_organization_id()",
           "withCheck": "\"organization_id\" = mezon_current_organization_id()"
         }
@@ -3878,9 +3790,7 @@
           "name": "customers_tenant_isolation",
           "as": "PERMISSIVE",
           "for": "ALL",
-          "to": [
-            "mezon_app"
-          ],
+          "to": ["mezon_app"],
           "using": "\"organization_id\" = mezon_current_organization_id()",
           "withCheck": "\"organization_id\" = mezon_current_organization_id()"
         }
@@ -4175,12 +4085,8 @@
           "name": "day_closes_closed_by_user_id_users_id_fk",
           "tableFrom": "day_closes",
           "tableTo": "users",
-          "columnsFrom": [
-            "closed_by_user_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["closed_by_user_id"],
+          "columnsTo": ["id"],
           "onDelete": "no action",
           "onUpdate": "no action"
         }
@@ -4192,9 +4098,7 @@
           "name": "day_closes_tenant_isolation",
           "as": "PERMISSIVE",
           "for": "ALL",
-          "to": [
-            "mezon_app"
-          ],
+          "to": ["mezon_app"],
           "using": "\"organization_id\" = mezon_current_organization_id()",
           "withCheck": "\"organization_id\" = mezon_current_organization_id()"
         }
@@ -4480,12 +4384,8 @@
           "name": "fiscal_docs_sale_id_sales_id_fk",
           "tableFrom": "fiscal_docs",
           "tableTo": "sales",
-          "columnsFrom": [
-            "sale_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["sale_id"],
+          "columnsTo": ["id"],
           "onDelete": "no action",
           "onUpdate": "no action"
         },
@@ -4493,12 +4393,8 @@
           "name": "fiscal_docs_return_id_returns_id_fk",
           "tableFrom": "fiscal_docs",
           "tableTo": "returns",
-          "columnsFrom": [
-            "return_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["return_id"],
+          "columnsTo": ["id"],
           "onDelete": "no action",
           "onUpdate": "no action"
         },
@@ -4506,12 +4402,8 @@
           "name": "fiscal_docs_shift_id_shifts_id_fk",
           "tableFrom": "fiscal_docs",
           "tableTo": "shifts",
-          "columnsFrom": [
-            "shift_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["shift_id"],
+          "columnsTo": ["id"],
           "onDelete": "no action",
           "onUpdate": "no action"
         },
@@ -4519,12 +4411,8 @@
           "name": "fiscal_docs_depends_on_doc_id_fiscal_docs_id_fk",
           "tableFrom": "fiscal_docs",
           "tableTo": "fiscal_docs",
-          "columnsFrom": [
-            "depends_on_doc_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["depends_on_doc_id"],
+          "columnsTo": ["id"],
           "onDelete": "no action",
           "onUpdate": "no action"
         }
@@ -4536,9 +4424,7 @@
           "name": "fiscal_docs_tenant_isolation",
           "as": "PERMISSIVE",
           "for": "ALL",
-          "to": [
-            "mezon_app"
-          ],
+          "to": ["mezon_app"],
           "using": "\"organization_id\" = mezon_current_organization_id()",
           "withCheck": "\"organization_id\" = mezon_current_organization_id()"
         }
@@ -4764,12 +4650,8 @@
           "name": "goods_receiving_lines_receiving_id_goods_receivings_id_fk",
           "tableFrom": "goods_receiving_lines",
           "tableTo": "goods_receivings",
-          "columnsFrom": [
-            "receiving_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["receiving_id"],
+          "columnsTo": ["id"],
           "onDelete": "no action",
           "onUpdate": "no action"
         },
@@ -4777,12 +4659,8 @@
           "name": "goods_receiving_lines_product_id_products_id_fk",
           "tableFrom": "goods_receiving_lines",
           "tableTo": "products",
-          "columnsFrom": [
-            "product_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["product_id"],
+          "columnsTo": ["id"],
           "onDelete": "no action",
           "onUpdate": "no action"
         },
@@ -4790,12 +4668,8 @@
           "name": "goods_receiving_lines_variant_id_product_variants_id_fk",
           "tableFrom": "goods_receiving_lines",
           "tableTo": "product_variants",
-          "columnsFrom": [
-            "variant_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["variant_id"],
+          "columnsTo": ["id"],
           "onDelete": "no action",
           "onUpdate": "no action"
         },
@@ -4803,12 +4677,8 @@
           "name": "goods_receiving_lines_stock_move_id_stock_moves_id_fk",
           "tableFrom": "goods_receiving_lines",
           "tableTo": "stock_moves",
-          "columnsFrom": [
-            "stock_move_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["stock_move_id"],
+          "columnsTo": ["id"],
           "onDelete": "no action",
           "onUpdate": "no action"
         },
@@ -4816,12 +4686,8 @@
           "name": "goods_receiving_lines_batch_id_batches_id_fk",
           "tableFrom": "goods_receiving_lines",
           "tableTo": "batches",
-          "columnsFrom": [
-            "batch_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["batch_id"],
+          "columnsTo": ["id"],
           "onDelete": "no action",
           "onUpdate": "no action"
         }
@@ -4833,9 +4699,7 @@
           "name": "goods_receiving_lines_tenant_isolation",
           "as": "PERMISSIVE",
           "for": "ALL",
-          "to": [
-            "mezon_app"
-          ],
+          "to": ["mezon_app"],
           "using": "\"organization_id\" = mezon_current_organization_id()",
           "withCheck": "\"organization_id\" = mezon_current_organization_id()"
         }
@@ -5069,12 +4933,8 @@
           "name": "goods_receivings_supplier_id_suppliers_id_fk",
           "tableFrom": "goods_receivings",
           "tableTo": "suppliers",
-          "columnsFrom": [
-            "supplier_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["supplier_id"],
+          "columnsTo": ["id"],
           "onDelete": "no action",
           "onUpdate": "no action"
         },
@@ -5082,12 +4942,8 @@
           "name": "goods_receivings_posted_by_user_id_users_id_fk",
           "tableFrom": "goods_receivings",
           "tableTo": "users",
-          "columnsFrom": [
-            "posted_by_user_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["posted_by_user_id"],
+          "columnsTo": ["id"],
           "onDelete": "no action",
           "onUpdate": "no action"
         }
@@ -5099,9 +4955,7 @@
           "name": "goods_receivings_tenant_isolation",
           "as": "PERMISSIVE",
           "for": "ALL",
-          "to": [
-            "mezon_app"
-          ],
+          "to": ["mezon_app"],
           "using": "\"organization_id\" = mezon_current_organization_id()",
           "withCheck": "\"organization_id\" = mezon_current_organization_id()"
         }
@@ -5274,12 +5128,8 @@
           "name": "inventory_count_lines_count_id_inventory_counts_id_fk",
           "tableFrom": "inventory_count_lines",
           "tableTo": "inventory_counts",
-          "columnsFrom": [
-            "count_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["count_id"],
+          "columnsTo": ["id"],
           "onDelete": "no action",
           "onUpdate": "no action"
         },
@@ -5287,12 +5137,8 @@
           "name": "inventory_count_lines_product_id_products_id_fk",
           "tableFrom": "inventory_count_lines",
           "tableTo": "products",
-          "columnsFrom": [
-            "product_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["product_id"],
+          "columnsTo": ["id"],
           "onDelete": "no action",
           "onUpdate": "no action"
         },
@@ -5300,12 +5146,8 @@
           "name": "inventory_count_lines_variant_id_product_variants_id_fk",
           "tableFrom": "inventory_count_lines",
           "tableTo": "product_variants",
-          "columnsFrom": [
-            "variant_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["variant_id"],
+          "columnsTo": ["id"],
           "onDelete": "no action",
           "onUpdate": "no action"
         }
@@ -5317,9 +5159,7 @@
           "name": "inventory_count_lines_tenant_isolation",
           "as": "PERMISSIVE",
           "for": "ALL",
-          "to": [
-            "mezon_app"
-          ],
+          "to": ["mezon_app"],
           "using": "\"organization_id\" = mezon_current_organization_id()",
           "withCheck": "\"organization_id\" = mezon_current_organization_id()"
         }
@@ -5454,12 +5294,8 @@
           "name": "inventory_counts_started_by_user_id_users_id_fk",
           "tableFrom": "inventory_counts",
           "tableTo": "users",
-          "columnsFrom": [
-            "started_by_user_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["started_by_user_id"],
+          "columnsTo": ["id"],
           "onDelete": "no action",
           "onUpdate": "no action"
         },
@@ -5467,12 +5303,8 @@
           "name": "inventory_counts_finalized_by_user_id_users_id_fk",
           "tableFrom": "inventory_counts",
           "tableTo": "users",
-          "columnsFrom": [
-            "finalized_by_user_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["finalized_by_user_id"],
+          "columnsTo": ["id"],
           "onDelete": "no action",
           "onUpdate": "no action"
         }
@@ -5484,9 +5316,7 @@
           "name": "inventory_counts_tenant_isolation",
           "as": "PERMISSIVE",
           "for": "ALL",
-          "to": [
-            "mezon_app"
-          ],
+          "to": ["mezon_app"],
           "using": "\"organization_id\" = mezon_current_organization_id()",
           "withCheck": "\"organization_id\" = mezon_current_organization_id()"
         }
@@ -5742,12 +5572,8 @@
           "name": "order_lines_order_id_orders_id_fk",
           "tableFrom": "order_lines",
           "tableTo": "orders",
-          "columnsFrom": [
-            "order_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["order_id"],
+          "columnsTo": ["id"],
           "onDelete": "no action",
           "onUpdate": "no action"
         },
@@ -5755,12 +5581,8 @@
           "name": "order_lines_product_id_products_id_fk",
           "tableFrom": "order_lines",
           "tableTo": "products",
-          "columnsFrom": [
-            "product_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["product_id"],
+          "columnsTo": ["id"],
           "onDelete": "no action",
           "onUpdate": "no action"
         },
@@ -5768,12 +5590,8 @@
           "name": "order_lines_variant_id_product_variants_id_fk",
           "tableFrom": "order_lines",
           "tableTo": "product_variants",
-          "columnsFrom": [
-            "variant_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["variant_id"],
+          "columnsTo": ["id"],
           "onDelete": "no action",
           "onUpdate": "no action"
         }
@@ -5785,9 +5603,7 @@
           "name": "order_lines_tenant_isolation",
           "as": "PERMISSIVE",
           "for": "ALL",
-          "to": [
-            "mezon_app"
-          ],
+          "to": ["mezon_app"],
           "using": "\"organization_id\" = mezon_current_organization_id()",
           "withCheck": "\"organization_id\" = mezon_current_organization_id()"
         }
@@ -6088,12 +5904,8 @@
           "name": "order_payments_order_id_orders_id_fk",
           "tableFrom": "order_payments",
           "tableTo": "orders",
-          "columnsFrom": [
-            "order_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["order_id"],
+          "columnsTo": ["id"],
           "onDelete": "no action",
           "onUpdate": "no action"
         },
@@ -6101,12 +5913,8 @@
           "name": "order_payments_shift_id_shifts_id_fk",
           "tableFrom": "order_payments",
           "tableTo": "shifts",
-          "columnsFrom": [
-            "shift_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["shift_id"],
+          "columnsTo": ["id"],
           "onDelete": "no action",
           "onUpdate": "no action"
         },
@@ -6114,12 +5922,8 @@
           "name": "order_payments_shift_cashier_session_id_shift_cashier_sessions_id_fk",
           "tableFrom": "order_payments",
           "tableTo": "shift_cashier_sessions",
-          "columnsFrom": [
-            "shift_cashier_session_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["shift_cashier_session_id"],
+          "columnsTo": ["id"],
           "onDelete": "no action",
           "onUpdate": "no action"
         },
@@ -6127,12 +5931,8 @@
           "name": "order_payments_created_by_user_id_users_id_fk",
           "tableFrom": "order_payments",
           "tableTo": "users",
-          "columnsFrom": [
-            "created_by_user_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["created_by_user_id"],
+          "columnsTo": ["id"],
           "onDelete": "no action",
           "onUpdate": "no action"
         },
@@ -6140,12 +5940,8 @@
           "name": "order_payments_override_approved_by_user_id_users_id_fk",
           "tableFrom": "order_payments",
           "tableTo": "users",
-          "columnsFrom": [
-            "override_approved_by_user_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["override_approved_by_user_id"],
+          "columnsTo": ["id"],
           "onDelete": "no action",
           "onUpdate": "no action"
         }
@@ -6157,9 +5953,7 @@
           "name": "order_payments_tenant_isolation",
           "as": "PERMISSIVE",
           "for": "ALL",
-          "to": [
-            "mezon_app"
-          ],
+          "to": ["mezon_app"],
           "using": "\"organization_id\" = mezon_current_organization_id()",
           "withCheck": "\"organization_id\" = mezon_current_organization_id()"
         }
@@ -6690,12 +6484,8 @@
           "name": "orders_customer_id_customers_id_fk",
           "tableFrom": "orders",
           "tableTo": "customers",
-          "columnsFrom": [
-            "customer_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["customer_id"],
+          "columnsTo": ["id"],
           "onDelete": "no action",
           "onUpdate": "no action"
         },
@@ -6703,12 +6493,8 @@
           "name": "orders_override_approved_by_user_id_users_id_fk",
           "tableFrom": "orders",
           "tableTo": "users",
-          "columnsFrom": [
-            "override_approved_by_user_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["override_approved_by_user_id"],
+          "columnsTo": ["id"],
           "onDelete": "no action",
           "onUpdate": "no action"
         },
@@ -6716,12 +6502,8 @@
           "name": "orders_created_by_user_id_users_id_fk",
           "tableFrom": "orders",
           "tableTo": "users",
-          "columnsFrom": [
-            "created_by_user_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["created_by_user_id"],
+          "columnsTo": ["id"],
           "onDelete": "no action",
           "onUpdate": "no action"
         },
@@ -6729,12 +6511,8 @@
           "name": "orders_delivered_sale_id_sales_id_fk",
           "tableFrom": "orders",
           "tableTo": "sales",
-          "columnsFrom": [
-            "delivered_sale_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["delivered_sale_id"],
+          "columnsTo": ["id"],
           "onDelete": "no action",
           "onUpdate": "no action"
         },
@@ -6742,12 +6520,8 @@
           "name": "orders_cancelled_by_user_id_users_id_fk",
           "tableFrom": "orders",
           "tableTo": "users",
-          "columnsFrom": [
-            "cancelled_by_user_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["cancelled_by_user_id"],
+          "columnsTo": ["id"],
           "onDelete": "no action",
           "onUpdate": "no action"
         }
@@ -6759,9 +6533,7 @@
           "name": "orders_tenant_isolation",
           "as": "PERMISSIVE",
           "for": "ALL",
-          "to": [
-            "mezon_app"
-          ],
+          "to": ["mezon_app"],
           "using": "\"organization_id\" = mezon_current_organization_id()",
           "withCheck": "\"organization_id\" = mezon_current_organization_id()"
         }
@@ -6929,12 +6701,8 @@
           "name": "organization_tax_profiles_updated_by_user_id_users_id_fk",
           "tableFrom": "organization_tax_profiles",
           "tableTo": "users",
-          "columnsFrom": [
-            "updated_by_user_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["updated_by_user_id"],
+          "columnsTo": ["id"],
           "onDelete": "no action",
           "onUpdate": "no action"
         }
@@ -6946,9 +6714,7 @@
           "name": "organization_tax_profiles_tenant_isolation",
           "as": "PERMISSIVE",
           "for": "ALL",
-          "to": [
-            "mezon_app"
-          ],
+          "to": ["mezon_app"],
           "using": "\"organization_id\" = mezon_current_organization_id()",
           "withCheck": "\"organization_id\" = mezon_current_organization_id()"
         }
@@ -7114,12 +6880,8 @@
           "name": "payments_sale_id_sales_id_fk",
           "tableFrom": "payments",
           "tableTo": "sales",
-          "columnsFrom": [
-            "sale_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["sale_id"],
+          "columnsTo": ["id"],
           "onDelete": "no action",
           "onUpdate": "no action"
         }
@@ -7131,9 +6893,7 @@
           "name": "payments_tenant_isolation",
           "as": "PERMISSIVE",
           "for": "ALL",
-          "to": [
-            "mezon_app"
-          ],
+          "to": ["mezon_app"],
           "using": "\"organization_id\" = mezon_current_organization_id()",
           "withCheck": "\"organization_id\" = mezon_current_organization_id()"
         }
@@ -7263,12 +7023,8 @@
           "name": "price_changes_product_id_products_id_fk",
           "tableFrom": "price_changes",
           "tableTo": "products",
-          "columnsFrom": [
-            "product_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["product_id"],
+          "columnsTo": ["id"],
           "onDelete": "no action",
           "onUpdate": "no action"
         },
@@ -7276,12 +7032,8 @@
           "name": "price_changes_variant_id_product_variants_id_fk",
           "tableFrom": "price_changes",
           "tableTo": "product_variants",
-          "columnsFrom": [
-            "variant_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["variant_id"],
+          "columnsTo": ["id"],
           "onDelete": "no action",
           "onUpdate": "no action"
         },
@@ -7289,12 +7041,8 @@
           "name": "price_changes_changed_by_user_id_users_id_fk",
           "tableFrom": "price_changes",
           "tableTo": "users",
-          "columnsFrom": [
-            "changed_by_user_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["changed_by_user_id"],
+          "columnsTo": ["id"],
           "onDelete": "no action",
           "onUpdate": "no action"
         }
@@ -7306,9 +7054,7 @@
           "name": "price_changes_tenant_isolation",
           "as": "PERMISSIVE",
           "for": "ALL",
-          "to": [
-            "mezon_app"
-          ],
+          "to": ["mezon_app"],
           "using": "\"organization_id\" = mezon_current_organization_id()",
           "withCheck": "\"organization_id\" = mezon_current_organization_id()"
         }
@@ -7473,12 +7219,8 @@
           "name": "product_barcodes_product_id_products_id_fk",
           "tableFrom": "product_barcodes",
           "tableTo": "products",
-          "columnsFrom": [
-            "product_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["product_id"],
+          "columnsTo": ["id"],
           "onDelete": "no action",
           "onUpdate": "no action"
         },
@@ -7486,12 +7228,8 @@
           "name": "product_barcodes_variant_id_product_variants_id_fk",
           "tableFrom": "product_barcodes",
           "tableTo": "product_variants",
-          "columnsFrom": [
-            "variant_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["variant_id"],
+          "columnsTo": ["id"],
           "onDelete": "no action",
           "onUpdate": "no action"
         }
@@ -7503,9 +7241,7 @@
           "name": "product_barcodes_tenant_isolation",
           "as": "PERMISSIVE",
           "for": "ALL",
-          "to": [
-            "mezon_app"
-          ],
+          "to": ["mezon_app"],
           "using": "\"organization_id\" = mezon_current_organization_id()",
           "withCheck": "\"organization_id\" = mezon_current_organization_id()"
         }
@@ -7666,12 +7402,8 @@
           "name": "product_variants_product_id_products_id_fk",
           "tableFrom": "product_variants",
           "tableTo": "products",
-          "columnsFrom": [
-            "product_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["product_id"],
+          "columnsTo": ["id"],
           "onDelete": "no action",
           "onUpdate": "no action"
         }
@@ -7683,9 +7415,7 @@
           "name": "product_variants_tenant_isolation",
           "as": "PERMISSIVE",
           "for": "ALL",
-          "to": [
-            "mezon_app"
-          ],
+          "to": ["mezon_app"],
           "using": "\"organization_id\" = mezon_current_organization_id()",
           "withCheck": "\"organization_id\" = mezon_current_organization_id()"
         }
@@ -7980,12 +7710,8 @@
           "name": "products_category_id_categories_id_fk",
           "tableFrom": "products",
           "tableTo": "categories",
-          "columnsFrom": [
-            "category_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["category_id"],
+          "columnsTo": ["id"],
           "onDelete": "no action",
           "onUpdate": "no action"
         }
@@ -7997,9 +7723,7 @@
           "name": "products_tenant_isolation",
           "as": "PERMISSIVE",
           "for": "ALL",
-          "to": [
-            "mezon_app"
-          ],
+          "to": ["mezon_app"],
           "using": "\"organization_id\" = mezon_current_organization_id()",
           "withCheck": "\"organization_id\" = mezon_current_organization_id()"
         }
@@ -8208,12 +7932,8 @@
           "name": "promotions_target_product_id_products_id_fk",
           "tableFrom": "promotions",
           "tableTo": "products",
-          "columnsFrom": [
-            "target_product_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["target_product_id"],
+          "columnsTo": ["id"],
           "onDelete": "no action",
           "onUpdate": "no action"
         },
@@ -8221,12 +7941,8 @@
           "name": "promotions_target_category_id_categories_id_fk",
           "tableFrom": "promotions",
           "tableTo": "categories",
-          "columnsFrom": [
-            "target_category_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["target_category_id"],
+          "columnsTo": ["id"],
           "onDelete": "no action",
           "onUpdate": "no action"
         }
@@ -8238,9 +7954,7 @@
           "name": "promotions_tenant_isolation",
           "as": "PERMISSIVE",
           "for": "ALL",
-          "to": [
-            "mezon_app"
-          ],
+          "to": ["mezon_app"],
           "using": "\"organization_id\" = mezon_current_organization_id()",
           "withCheck": "\"organization_id\" = mezon_current_organization_id()"
         }
@@ -8484,12 +8198,8 @@
           "name": "receiving_cost_confirmations_receiving_id_goods_receivings_id_fk",
           "tableFrom": "receiving_cost_confirmations",
           "tableTo": "goods_receivings",
-          "columnsFrom": [
-            "receiving_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["receiving_id"],
+          "columnsTo": ["id"],
           "onDelete": "no action",
           "onUpdate": "no action"
         },
@@ -8497,12 +8207,8 @@
           "name": "receiving_cost_confirmations_receiving_line_id_goods_receiving_lines_id_fk",
           "tableFrom": "receiving_cost_confirmations",
           "tableTo": "goods_receiving_lines",
-          "columnsFrom": [
-            "receiving_line_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["receiving_line_id"],
+          "columnsTo": ["id"],
           "onDelete": "no action",
           "onUpdate": "no action"
         },
@@ -8510,12 +8216,8 @@
           "name": "receiving_cost_confirmations_supplier_id_suppliers_id_fk",
           "tableFrom": "receiving_cost_confirmations",
           "tableTo": "suppliers",
-          "columnsFrom": [
-            "supplier_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["supplier_id"],
+          "columnsTo": ["id"],
           "onDelete": "no action",
           "onUpdate": "no action"
         },
@@ -8523,12 +8225,8 @@
           "name": "receiving_cost_confirmations_product_id_products_id_fk",
           "tableFrom": "receiving_cost_confirmations",
           "tableTo": "products",
-          "columnsFrom": [
-            "product_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["product_id"],
+          "columnsTo": ["id"],
           "onDelete": "no action",
           "onUpdate": "no action"
         },
@@ -8536,12 +8234,8 @@
           "name": "receiving_cost_confirmations_variant_id_product_variants_id_fk",
           "tableFrom": "receiving_cost_confirmations",
           "tableTo": "product_variants",
-          "columnsFrom": [
-            "variant_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["variant_id"],
+          "columnsTo": ["id"],
           "onDelete": "no action",
           "onUpdate": "no action"
         },
@@ -8549,12 +8243,8 @@
           "name": "receiving_cost_confirmations_batch_id_batches_id_fk",
           "tableFrom": "receiving_cost_confirmations",
           "tableTo": "batches",
-          "columnsFrom": [
-            "batch_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["batch_id"],
+          "columnsTo": ["id"],
           "onDelete": "no action",
           "onUpdate": "no action"
         },
@@ -8562,12 +8252,8 @@
           "name": "receiving_cost_confirmations_confirmed_by_user_id_users_id_fk",
           "tableFrom": "receiving_cost_confirmations",
           "tableTo": "users",
-          "columnsFrom": [
-            "confirmed_by_user_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["confirmed_by_user_id"],
+          "columnsTo": ["id"],
           "onDelete": "no action",
           "onUpdate": "no action"
         }
@@ -8579,9 +8265,7 @@
           "name": "receiving_cost_confirmations_tenant_isolation",
           "as": "PERMISSIVE",
           "for": "ALL",
-          "to": [
-            "mezon_app"
-          ],
+          "to": ["mezon_app"],
           "using": "\"organization_id\" = mezon_current_organization_id()",
           "withCheck": "\"organization_id\" = mezon_current_organization_id()"
         }
@@ -8851,12 +8535,8 @@
           "name": "return_lines_return_id_returns_id_fk",
           "tableFrom": "return_lines",
           "tableTo": "returns",
-          "columnsFrom": [
-            "return_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["return_id"],
+          "columnsTo": ["id"],
           "onDelete": "no action",
           "onUpdate": "no action"
         },
@@ -8864,12 +8544,8 @@
           "name": "return_lines_sale_id_sales_id_fk",
           "tableFrom": "return_lines",
           "tableTo": "sales",
-          "columnsFrom": [
-            "sale_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["sale_id"],
+          "columnsTo": ["id"],
           "onDelete": "no action",
           "onUpdate": "no action"
         },
@@ -8877,12 +8553,8 @@
           "name": "return_lines_sale_line_id_sale_lines_id_fk",
           "tableFrom": "return_lines",
           "tableTo": "sale_lines",
-          "columnsFrom": [
-            "sale_line_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["sale_line_id"],
+          "columnsTo": ["id"],
           "onDelete": "no action",
           "onUpdate": "no action"
         },
@@ -8890,12 +8562,8 @@
           "name": "return_lines_product_id_products_id_fk",
           "tableFrom": "return_lines",
           "tableTo": "products",
-          "columnsFrom": [
-            "product_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["product_id"],
+          "columnsTo": ["id"],
           "onDelete": "no action",
           "onUpdate": "no action"
         },
@@ -8903,12 +8571,8 @@
           "name": "return_lines_variant_id_product_variants_id_fk",
           "tableFrom": "return_lines",
           "tableTo": "product_variants",
-          "columnsFrom": [
-            "variant_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["variant_id"],
+          "columnsTo": ["id"],
           "onDelete": "no action",
           "onUpdate": "no action"
         }
@@ -8920,9 +8584,7 @@
           "name": "return_lines_tenant_isolation",
           "as": "PERMISSIVE",
           "for": "ALL",
-          "to": [
-            "mezon_app"
-          ],
+          "to": ["mezon_app"],
           "using": "\"organization_id\" = mezon_current_organization_id()",
           "withCheck": "\"organization_id\" = mezon_current_organization_id()"
         }
@@ -9083,12 +8745,8 @@
           "name": "return_payments_return_id_returns_id_fk",
           "tableFrom": "return_payments",
           "tableTo": "returns",
-          "columnsFrom": [
-            "return_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["return_id"],
+          "columnsTo": ["id"],
           "onDelete": "no action",
           "onUpdate": "no action"
         },
@@ -9096,12 +8754,8 @@
           "name": "return_payments_sale_id_sales_id_fk",
           "tableFrom": "return_payments",
           "tableTo": "sales",
-          "columnsFrom": [
-            "sale_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["sale_id"],
+          "columnsTo": ["id"],
           "onDelete": "no action",
           "onUpdate": "no action"
         }
@@ -9113,9 +8767,7 @@
           "name": "return_payments_tenant_isolation",
           "as": "PERMISSIVE",
           "for": "ALL",
-          "to": [
-            "mezon_app"
-          ],
+          "to": ["mezon_app"],
           "using": "\"organization_id\" = mezon_current_organization_id()",
           "withCheck": "\"organization_id\" = mezon_current_organization_id()"
         }
@@ -9429,12 +9081,8 @@
           "name": "returns_sale_id_sales_id_fk",
           "tableFrom": "returns",
           "tableTo": "sales",
-          "columnsFrom": [
-            "sale_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["sale_id"],
+          "columnsTo": ["id"],
           "onDelete": "no action",
           "onUpdate": "no action"
         },
@@ -9442,12 +9090,8 @@
           "name": "returns_processed_by_user_id_users_id_fk",
           "tableFrom": "returns",
           "tableTo": "users",
-          "columnsFrom": [
-            "processed_by_user_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["processed_by_user_id"],
+          "columnsTo": ["id"],
           "onDelete": "no action",
           "onUpdate": "no action"
         },
@@ -9455,12 +9099,8 @@
           "name": "returns_override_approved_by_user_id_users_id_fk",
           "tableFrom": "returns",
           "tableTo": "users",
-          "columnsFrom": [
-            "override_approved_by_user_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["override_approved_by_user_id"],
+          "columnsTo": ["id"],
           "onDelete": "no action",
           "onUpdate": "no action"
         }
@@ -9472,9 +9112,7 @@
           "name": "returns_tenant_isolation",
           "as": "PERMISSIVE",
           "for": "ALL",
-          "to": [
-            "mezon_app"
-          ],
+          "to": ["mezon_app"],
           "using": "\"organization_id\" = mezon_current_organization_id()",
           "withCheck": "\"organization_id\" = mezon_current_organization_id()"
         }
@@ -9757,12 +9395,8 @@
           "name": "sale_lines_sale_id_sales_id_fk",
           "tableFrom": "sale_lines",
           "tableTo": "sales",
-          "columnsFrom": [
-            "sale_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["sale_id"],
+          "columnsTo": ["id"],
           "onDelete": "no action",
           "onUpdate": "no action"
         },
@@ -9770,12 +9404,8 @@
           "name": "sale_lines_product_id_products_id_fk",
           "tableFrom": "sale_lines",
           "tableTo": "products",
-          "columnsFrom": [
-            "product_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["product_id"],
+          "columnsTo": ["id"],
           "onDelete": "no action",
           "onUpdate": "no action"
         },
@@ -9783,12 +9413,8 @@
           "name": "sale_lines_variant_id_product_variants_id_fk",
           "tableFrom": "sale_lines",
           "tableTo": "product_variants",
-          "columnsFrom": [
-            "variant_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["variant_id"],
+          "columnsTo": ["id"],
           "onDelete": "no action",
           "onUpdate": "no action"
         }
@@ -9800,9 +9426,7 @@
           "name": "sale_lines_tenant_isolation",
           "as": "PERMISSIVE",
           "for": "ALL",
-          "to": [
-            "mezon_app"
-          ],
+          "to": ["mezon_app"],
           "using": "\"organization_id\" = mezon_current_organization_id()",
           "withCheck": "\"organization_id\" = mezon_current_organization_id()"
         }
@@ -10289,12 +9913,8 @@
           "name": "sales_cashier_user_id_users_id_fk",
           "tableFrom": "sales",
           "tableTo": "users",
-          "columnsFrom": [
-            "cashier_user_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["cashier_user_id"],
+          "columnsTo": ["id"],
           "onDelete": "no action",
           "onUpdate": "no action"
         },
@@ -10302,12 +9922,8 @@
           "name": "sales_completed_by_user_id_users_id_fk",
           "tableFrom": "sales",
           "tableTo": "users",
-          "columnsFrom": [
-            "completed_by_user_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["completed_by_user_id"],
+          "columnsTo": ["id"],
           "onDelete": "no action",
           "onUpdate": "no action"
         },
@@ -10315,12 +9931,8 @@
           "name": "sales_override_approved_by_user_id_users_id_fk",
           "tableFrom": "sales",
           "tableTo": "users",
-          "columnsFrom": [
-            "override_approved_by_user_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["override_approved_by_user_id"],
+          "columnsTo": ["id"],
           "onDelete": "no action",
           "onUpdate": "no action"
         },
@@ -10328,12 +9940,8 @@
           "name": "sales_voided_by_user_id_users_id_fk",
           "tableFrom": "sales",
           "tableTo": "users",
-          "columnsFrom": [
-            "voided_by_user_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["voided_by_user_id"],
+          "columnsTo": ["id"],
           "onDelete": "no action",
           "onUpdate": "no action"
         }
@@ -10345,9 +9953,7 @@
           "name": "sales_tenant_isolation",
           "as": "PERMISSIVE",
           "for": "ALL",
-          "to": [
-            "mezon_app"
-          ],
+          "to": ["mezon_app"],
           "using": "\"organization_id\" = mezon_current_organization_id()",
           "withCheck": "\"organization_id\" = mezon_current_organization_id()"
         }
@@ -10638,12 +10244,8 @@
           "name": "shift_cashier_sessions_shift_id_shifts_id_fk",
           "tableFrom": "shift_cashier_sessions",
           "tableTo": "shifts",
-          "columnsFrom": [
-            "shift_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["shift_id"],
+          "columnsTo": ["id"],
           "onDelete": "no action",
           "onUpdate": "no action"
         },
@@ -10651,12 +10253,8 @@
           "name": "shift_cashier_sessions_cashier_user_id_users_id_fk",
           "tableFrom": "shift_cashier_sessions",
           "tableTo": "users",
-          "columnsFrom": [
-            "cashier_user_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["cashier_user_id"],
+          "columnsTo": ["id"],
           "onDelete": "no action",
           "onUpdate": "no action"
         },
@@ -10664,12 +10262,8 @@
           "name": "shift_cashier_sessions_override_approved_by_user_id_users_id_fk",
           "tableFrom": "shift_cashier_sessions",
           "tableTo": "users",
-          "columnsFrom": [
-            "override_approved_by_user_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["override_approved_by_user_id"],
+          "columnsTo": ["id"],
           "onDelete": "no action",
           "onUpdate": "no action"
         },
@@ -10677,12 +10271,8 @@
           "name": "shift_cashier_sessions_handed_off_by_user_id_users_id_fk",
           "tableFrom": "shift_cashier_sessions",
           "tableTo": "users",
-          "columnsFrom": [
-            "handed_off_by_user_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["handed_off_by_user_id"],
+          "columnsTo": ["id"],
           "onDelete": "no action",
           "onUpdate": "no action"
         }
@@ -10694,9 +10284,7 @@
           "name": "shift_cashier_sessions_tenant_isolation",
           "as": "PERMISSIVE",
           "for": "ALL",
-          "to": [
-            "mezon_app"
-          ],
+          "to": ["mezon_app"],
           "using": "\"organization_id\" = mezon_current_organization_id()",
           "withCheck": "\"organization_id\" = mezon_current_organization_id()"
         }
@@ -10882,12 +10470,8 @@
           "name": "shift_closure_cashiers_shift_closure_id_shift_closures_id_fk",
           "tableFrom": "shift_closure_cashiers",
           "tableTo": "shift_closures",
-          "columnsFrom": [
-            "shift_closure_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["shift_closure_id"],
+          "columnsTo": ["id"],
           "onDelete": "no action",
           "onUpdate": "no action"
         },
@@ -10895,12 +10479,8 @@
           "name": "shift_closure_cashiers_session_id_shift_cashier_sessions_id_fk",
           "tableFrom": "shift_closure_cashiers",
           "tableTo": "shift_cashier_sessions",
-          "columnsFrom": [
-            "session_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["session_id"],
+          "columnsTo": ["id"],
           "onDelete": "no action",
           "onUpdate": "no action"
         },
@@ -10908,12 +10488,8 @@
           "name": "shift_closure_cashiers_cashier_user_id_users_id_fk",
           "tableFrom": "shift_closure_cashiers",
           "tableTo": "users",
-          "columnsFrom": [
-            "cashier_user_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["cashier_user_id"],
+          "columnsTo": ["id"],
           "onDelete": "no action",
           "onUpdate": "no action"
         }
@@ -10925,9 +10501,7 @@
           "name": "shift_closure_cashiers_tenant_isolation",
           "as": "PERMISSIVE",
           "for": "ALL",
-          "to": [
-            "mezon_app"
-          ],
+          "to": ["mezon_app"],
           "using": "\"organization_id\" = mezon_current_organization_id()",
           "withCheck": "\"organization_id\" = mezon_current_organization_id()"
         }
@@ -11043,12 +10617,8 @@
           "name": "shift_closure_method_totals_shift_closure_id_shift_closures_id_fk",
           "tableFrom": "shift_closure_method_totals",
           "tableTo": "shift_closures",
-          "columnsFrom": [
-            "shift_closure_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["shift_closure_id"],
+          "columnsTo": ["id"],
           "onDelete": "no action",
           "onUpdate": "no action"
         }
@@ -11060,9 +10630,7 @@
           "name": "shift_closure_method_totals_tenant_isolation",
           "as": "PERMISSIVE",
           "for": "ALL",
-          "to": [
-            "mezon_app"
-          ],
+          "to": ["mezon_app"],
           "using": "\"organization_id\" = mezon_current_organization_id()",
           "withCheck": "\"organization_id\" = mezon_current_organization_id()"
         }
@@ -11324,12 +10892,8 @@
           "name": "shift_closures_shift_id_shifts_id_fk",
           "tableFrom": "shift_closures",
           "tableTo": "shifts",
-          "columnsFrom": [
-            "shift_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["shift_id"],
+          "columnsTo": ["id"],
           "onDelete": "no action",
           "onUpdate": "no action"
         },
@@ -11337,12 +10901,8 @@
           "name": "shift_closures_closed_by_user_id_users_id_fk",
           "tableFrom": "shift_closures",
           "tableTo": "users",
-          "columnsFrom": [
-            "closed_by_user_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["closed_by_user_id"],
+          "columnsTo": ["id"],
           "onDelete": "no action",
           "onUpdate": "no action"
         },
@@ -11350,12 +10910,8 @@
           "name": "shift_closures_override_approved_by_user_id_users_id_fk",
           "tableFrom": "shift_closures",
           "tableTo": "users",
-          "columnsFrom": [
-            "override_approved_by_user_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["override_approved_by_user_id"],
+          "columnsTo": ["id"],
           "onDelete": "no action",
           "onUpdate": "no action"
         }
@@ -11367,9 +10923,7 @@
           "name": "shift_closures_tenant_isolation",
           "as": "PERMISSIVE",
           "for": "ALL",
-          "to": [
-            "mezon_app"
-          ],
+          "to": ["mezon_app"],
           "using": "\"organization_id\" = mezon_current_organization_id()",
           "withCheck": "\"organization_id\" = mezon_current_organization_id()"
         }
@@ -11735,12 +11289,8 @@
           "name": "shifts_opened_by_user_id_users_id_fk",
           "tableFrom": "shifts",
           "tableTo": "users",
-          "columnsFrom": [
-            "opened_by_user_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["opened_by_user_id"],
+          "columnsTo": ["id"],
           "onDelete": "no action",
           "onUpdate": "no action"
         },
@@ -11748,12 +11298,8 @@
           "name": "shifts_closed_by_user_id_users_id_fk",
           "tableFrom": "shifts",
           "tableTo": "users",
-          "columnsFrom": [
-            "closed_by_user_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["closed_by_user_id"],
+          "columnsTo": ["id"],
           "onDelete": "no action",
           "onUpdate": "no action"
         }
@@ -11765,9 +11311,7 @@
           "name": "shifts_tenant_isolation",
           "as": "PERMISSIVE",
           "for": "ALL",
-          "to": [
-            "mezon_app"
-          ],
+          "to": ["mezon_app"],
           "using": "\"organization_id\" = mezon_current_organization_id()",
           "withCheck": "\"organization_id\" = mezon_current_organization_id()"
         }
@@ -12029,12 +11573,8 @@
           "name": "stock_moves_product_id_products_id_fk",
           "tableFrom": "stock_moves",
           "tableTo": "products",
-          "columnsFrom": [
-            "product_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["product_id"],
+          "columnsTo": ["id"],
           "onDelete": "no action",
           "onUpdate": "no action"
         },
@@ -12042,12 +11582,8 @@
           "name": "stock_moves_variant_id_product_variants_id_fk",
           "tableFrom": "stock_moves",
           "tableTo": "product_variants",
-          "columnsFrom": [
-            "variant_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["variant_id"],
+          "columnsTo": ["id"],
           "onDelete": "no action",
           "onUpdate": "no action"
         },
@@ -12055,12 +11591,8 @@
           "name": "stock_moves_batch_id_batches_id_fk",
           "tableFrom": "stock_moves",
           "tableTo": "batches",
-          "columnsFrom": [
-            "batch_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["batch_id"],
+          "columnsTo": ["id"],
           "onDelete": "no action",
           "onUpdate": "no action"
         },
@@ -12068,12 +11600,8 @@
           "name": "stock_moves_created_by_user_id_users_id_fk",
           "tableFrom": "stock_moves",
           "tableTo": "users",
-          "columnsFrom": [
-            "created_by_user_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["created_by_user_id"],
+          "columnsTo": ["id"],
           "onDelete": "no action",
           "onUpdate": "no action"
         }
@@ -12085,9 +11613,7 @@
           "name": "stock_moves_tenant_isolation",
           "as": "PERMISSIVE",
           "for": "ALL",
-          "to": [
-            "mezon_app"
-          ],
+          "to": ["mezon_app"],
           "using": "\"organization_id\" = mezon_current_organization_id()",
           "withCheck": "\"organization_id\" = mezon_current_organization_id()"
         }
@@ -12347,12 +11873,8 @@
           "name": "supplier_ledger_supplier_id_suppliers_id_fk",
           "tableFrom": "supplier_ledger",
           "tableTo": "suppliers",
-          "columnsFrom": [
-            "supplier_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["supplier_id"],
+          "columnsTo": ["id"],
           "onDelete": "no action",
           "onUpdate": "no action"
         },
@@ -12360,12 +11882,8 @@
           "name": "supplier_ledger_receiving_id_goods_receivings_id_fk",
           "tableFrom": "supplier_ledger",
           "tableTo": "goods_receivings",
-          "columnsFrom": [
-            "receiving_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["receiving_id"],
+          "columnsTo": ["id"],
           "onDelete": "no action",
           "onUpdate": "no action"
         },
@@ -12373,12 +11891,8 @@
           "name": "supplier_ledger_supplier_return_id_supplier_returns_id_fk",
           "tableFrom": "supplier_ledger",
           "tableTo": "supplier_returns",
-          "columnsFrom": [
-            "supplier_return_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["supplier_return_id"],
+          "columnsTo": ["id"],
           "onDelete": "no action",
           "onUpdate": "no action"
         },
@@ -12386,12 +11900,8 @@
           "name": "supplier_ledger_cash_move_id_cash_moves_id_fk",
           "tableFrom": "supplier_ledger",
           "tableTo": "cash_moves",
-          "columnsFrom": [
-            "cash_move_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["cash_move_id"],
+          "columnsTo": ["id"],
           "onDelete": "no action",
           "onUpdate": "no action"
         },
@@ -12399,12 +11909,8 @@
           "name": "supplier_ledger_created_by_user_id_users_id_fk",
           "tableFrom": "supplier_ledger",
           "tableTo": "users",
-          "columnsFrom": [
-            "created_by_user_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["created_by_user_id"],
+          "columnsTo": ["id"],
           "onDelete": "no action",
           "onUpdate": "no action"
         }
@@ -12416,9 +11922,7 @@
           "name": "supplier_ledger_tenant_isolation",
           "as": "PERMISSIVE",
           "for": "ALL",
-          "to": [
-            "mezon_app"
-          ],
+          "to": ["mezon_app"],
           "using": "\"organization_id\" = mezon_current_organization_id()",
           "withCheck": "\"organization_id\" = mezon_current_organization_id()"
         }
@@ -12612,12 +12116,8 @@
           "name": "supplier_return_lines_supplier_return_id_supplier_returns_id_fk",
           "tableFrom": "supplier_return_lines",
           "tableTo": "supplier_returns",
-          "columnsFrom": [
-            "supplier_return_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["supplier_return_id"],
+          "columnsTo": ["id"],
           "onDelete": "no action",
           "onUpdate": "no action"
         },
@@ -12625,12 +12125,8 @@
           "name": "supplier_return_lines_receiving_line_id_goods_receiving_lines_id_fk",
           "tableFrom": "supplier_return_lines",
           "tableTo": "goods_receiving_lines",
-          "columnsFrom": [
-            "receiving_line_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["receiving_line_id"],
+          "columnsTo": ["id"],
           "onDelete": "no action",
           "onUpdate": "no action"
         },
@@ -12638,12 +12134,8 @@
           "name": "supplier_return_lines_product_id_products_id_fk",
           "tableFrom": "supplier_return_lines",
           "tableTo": "products",
-          "columnsFrom": [
-            "product_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["product_id"],
+          "columnsTo": ["id"],
           "onDelete": "no action",
           "onUpdate": "no action"
         },
@@ -12651,12 +12143,8 @@
           "name": "supplier_return_lines_variant_id_product_variants_id_fk",
           "tableFrom": "supplier_return_lines",
           "tableTo": "product_variants",
-          "columnsFrom": [
-            "variant_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["variant_id"],
+          "columnsTo": ["id"],
           "onDelete": "no action",
           "onUpdate": "no action"
         },
@@ -12664,12 +12152,8 @@
           "name": "supplier_return_lines_batch_id_batches_id_fk",
           "tableFrom": "supplier_return_lines",
           "tableTo": "batches",
-          "columnsFrom": [
-            "batch_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["batch_id"],
+          "columnsTo": ["id"],
           "onDelete": "no action",
           "onUpdate": "no action"
         },
@@ -12677,12 +12161,8 @@
           "name": "supplier_return_lines_stock_move_id_stock_moves_id_fk",
           "tableFrom": "supplier_return_lines",
           "tableTo": "stock_moves",
-          "columnsFrom": [
-            "stock_move_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["stock_move_id"],
+          "columnsTo": ["id"],
           "onDelete": "no action",
           "onUpdate": "no action"
         }
@@ -12694,9 +12174,7 @@
           "name": "supplier_return_lines_tenant_isolation",
           "as": "PERMISSIVE",
           "for": "ALL",
-          "to": [
-            "mezon_app"
-          ],
+          "to": ["mezon_app"],
           "using": "\"organization_id\" = mezon_current_organization_id()",
           "withCheck": "\"organization_id\" = mezon_current_organization_id()"
         }
@@ -12886,12 +12364,8 @@
           "name": "supplier_returns_receiving_id_goods_receivings_id_fk",
           "tableFrom": "supplier_returns",
           "tableTo": "goods_receivings",
-          "columnsFrom": [
-            "receiving_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["receiving_id"],
+          "columnsTo": ["id"],
           "onDelete": "no action",
           "onUpdate": "no action"
         },
@@ -12899,12 +12373,8 @@
           "name": "supplier_returns_supplier_id_suppliers_id_fk",
           "tableFrom": "supplier_returns",
           "tableTo": "suppliers",
-          "columnsFrom": [
-            "supplier_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["supplier_id"],
+          "columnsTo": ["id"],
           "onDelete": "no action",
           "onUpdate": "no action"
         },
@@ -12912,12 +12382,8 @@
           "name": "supplier_returns_created_by_user_id_users_id_fk",
           "tableFrom": "supplier_returns",
           "tableTo": "users",
-          "columnsFrom": [
-            "created_by_user_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["created_by_user_id"],
+          "columnsTo": ["id"],
           "onDelete": "no action",
           "onUpdate": "no action"
         }
@@ -12929,9 +12395,7 @@
           "name": "supplier_returns_tenant_isolation",
           "as": "PERMISSIVE",
           "for": "ALL",
-          "to": [
-            "mezon_app"
-          ],
+          "to": ["mezon_app"],
           "using": "\"organization_id\" = mezon_current_organization_id()",
           "withCheck": "\"organization_id\" = mezon_current_organization_id()"
         }
@@ -13148,9 +12612,7 @@
           "name": "suppliers_tenant_isolation",
           "as": "PERMISSIVE",
           "for": "ALL",
-          "to": [
-            "mezon_app"
-          ],
+          "to": ["mezon_app"],
           "using": "\"organization_id\" = mezon_current_organization_id()",
           "withCheck": "\"organization_id\" = mezon_current_organization_id()"
         }
@@ -13305,9 +12767,7 @@
           "name": "users_tenant_isolation",
           "as": "PERMISSIVE",
           "for": "ALL",
-          "to": [
-            "mezon_app"
-          ],
+          "to": ["mezon_app"],
           "using": "\"organization_id\" = mezon_current_organization_id()",
           "withCheck": "\"organization_id\" = mezon_current_organization_id()"
         }
