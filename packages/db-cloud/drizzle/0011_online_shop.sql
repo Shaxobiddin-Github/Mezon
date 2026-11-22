@@ -76,4 +76,32 @@ CREATE UNIQUE INDEX "uidx_cloud_shops_store" ON "cloud_shops" USING btree ("orga
 CREATE POLICY "cloud_shop_order_lines_tenant_isolation" ON "cloud_shop_order_lines" AS PERMISSIVE FOR ALL TO "mezon_app" USING ("organization_id" = mezon_current_organization_id()) WITH CHECK ("organization_id" = mezon_current_organization_id());--> statement-breakpoint
 CREATE POLICY "cloud_shop_orders_tenant_isolation" ON "cloud_shop_orders" AS PERMISSIVE FOR ALL TO "mezon_app" USING ("organization_id" = mezon_current_organization_id()) WITH CHECK ("organization_id" = mezon_current_organization_id());--> statement-breakpoint
 CREATE POLICY "cloud_shop_products_tenant_isolation" ON "cloud_shop_products" AS PERMISSIVE FOR ALL TO "mezon_app" USING ("organization_id" = mezon_current_organization_id()) WITH CHECK ("organization_id" = mezon_current_organization_id());--> statement-breakpoint
-CREATE POLICY "cloud_shops_tenant_isolation" ON "cloud_shops" AS PERMISSIVE FOR ALL TO "mezon_app" USING ("organization_id" = mezon_current_organization_id()) WITH CHECK ("organization_id" = mezon_current_organization_id());
+CREATE POLICY "cloud_shops_tenant_isolation" ON "cloud_shops" AS PERMISSIVE FOR ALL TO "mezon_app" USING ("organization_id" = mezon_current_organization_id()) WITH CHECK ("organization_id" = mezon_current_organization_id());--> statement-breakpoint
+ALTER TABLE "cloud_shops" FORCE ROW LEVEL SECURITY;--> statement-breakpoint
+REVOKE ALL ON TABLE "cloud_shops" FROM "mezon_app";--> statement-breakpoint
+GRANT SELECT, INSERT, UPDATE ON TABLE "cloud_shops" TO "mezon_app";--> statement-breakpoint
+ALTER TABLE "cloud_shop_products" FORCE ROW LEVEL SECURITY;--> statement-breakpoint
+REVOKE ALL ON TABLE "cloud_shop_products" FROM "mezon_app";--> statement-breakpoint
+GRANT SELECT, INSERT, UPDATE ON TABLE "cloud_shop_products" TO "mezon_app";--> statement-breakpoint
+ALTER TABLE "cloud_shop_orders" FORCE ROW LEVEL SECURITY;--> statement-breakpoint
+REVOKE ALL ON TABLE "cloud_shop_orders" FROM "mezon_app";--> statement-breakpoint
+GRANT SELECT, INSERT, UPDATE ON TABLE "cloud_shop_orders" TO "mezon_app";--> statement-breakpoint
+ALTER TABLE "cloud_shop_order_lines" FORCE ROW LEVEL SECURITY;--> statement-breakpoint
+REVOKE ALL ON TABLE "cloud_shop_order_lines" FROM "mezon_app";--> statement-breakpoint
+GRANT SELECT, INSERT, UPDATE ON TABLE "cloud_shop_order_lines" TO "mezon_app";--> statement-breakpoint
+GRANT SELECT ON TABLE "cloud_shops" TO mezon_auth_owner;--> statement-breakpoint
+CREATE POLICY "cloud_shops_slug_lookup" ON "cloud_shops" AS PERMISSIVE FOR SELECT TO "mezon_auth_owner" USING (true);--> statement-breakpoint
+CREATE OR REPLACE FUNCTION shop_lookup_slug(p_slug text)
+RETURNS TABLE (organization_id text, store_id text, shop_id text)
+LANGUAGE sql
+SECURITY DEFINER
+SET search_path = pg_catalog, public
+AS $$
+  SELECT s.organization_id::text, s.store_id, s.id::text
+    FROM cloud_shops s
+    JOIN cloud_organizations o ON o.id = s.organization_id
+   WHERE s.slug = p_slug AND s.is_enabled AND o.status = 'active'
+$$;--> statement-breakpoint
+ALTER FUNCTION shop_lookup_slug(text) OWNER TO mezon_auth_owner;--> statement-breakpoint
+REVOKE ALL ON FUNCTION shop_lookup_slug(text) FROM PUBLIC;--> statement-breakpoint
+GRANT EXECUTE ON FUNCTION shop_lookup_slug(text) TO mezon_app;

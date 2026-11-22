@@ -43,7 +43,9 @@ export const cloudShopProducts = cloudSchemaRegistry.defineTable(
     productId: text('product_id').notNull(),
     isPublished: boolean('is_published').notNull().default(true),
   }),
-  (self) => [uniqueIndex('uidx_cloud_shop_products_product').on(self.organizationId, self.productId)],
+  (self) => [
+    uniqueIndex('uidx_cloud_shop_products_product').on(self.organizationId, self.productId),
+  ],
 );
 
 export const cloudShopOrders = cloudSchemaRegistry.defineTable(
@@ -91,6 +93,9 @@ export const cloudShopOrderLines = cloudSchemaRegistry.defineTable(
   (self) => [
     index('idx_cloud_shop_order_lines_order').on(self.organizationId, self.orderId),
     check('chk_cloud_shop_order_lines_qty', sql`${self.qtyMilli} > 0`),
-    check('chk_cloud_shop_order_lines_money', sql`${self.priceTiyin} >= 0 AND ${self.totalTiyin} >= 0`),
+    check(
+      'chk_cloud_shop_order_lines_money',
+      sql`${self.priceTiyin} >= 0 AND ${self.totalTiyin} >= 0`,
+    ),
   ],
 );

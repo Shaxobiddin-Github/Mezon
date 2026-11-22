@@ -10,6 +10,7 @@ import { CustomersView } from './components/CustomersView.js';
 import { DailyReportView } from './components/DailyReportView.js';
 import { ProductsView } from './components/ProductsView.js';
 import { DevicesView } from './components/DevicesView.js';
+import { OnlineShopView } from './components/OnlineShopView.js';
 
 export const App: React.FC = () => {
   const { isAuthenticated, isLoading, checkSession } = useAuthStore();
@@ -50,6 +51,7 @@ export const App: React.FC = () => {
           {currentTab === 'receipts' && <ReceiptsView />}
           {currentTab === 'customers' && <CustomersView />}
           {currentTab === 'products' && <ProductsView />}
+          {currentTab === 'shop' && <OnlineShopView />}
           {currentTab === 'devices' && <DevicesView />}
           {currentTab === 'reports' && <DailyReportView />}
         </div>
