@@ -8,7 +8,9 @@ import { z } from 'zod';
 import { BigIntStringSchema, UuidV7Schema } from './auth.js';
 import { ProductUnitSchema } from './catalog.js';
 
-export const SignedBigIntStringSchema = z.string().regex(/^-?\d+$/, 'Must be an integer string');
+export const SignedBigIntStringSchema = z
+  .string()
+  .regex(/^-?\d+$/, { message: 'Must be an integer string', abort: true });
 
 export const StockMoveReasonSchema = z.enum(STOCK_MOVE_REASONS);
 export const NegativeStockPolicySchema = z.enum(NEGATIVE_STOCK_POLICIES);
