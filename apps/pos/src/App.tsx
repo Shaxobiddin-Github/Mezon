@@ -327,23 +327,47 @@ export function App() {
           setActiveCart(created.cart);
           cartId = created.cart.id;
         }
-        let scanCode = barcode;
-        // V2 marking: a DataMatrix (GS1) code goes to the marking check; goods that do not need
-        // one are added by the GTIN inside the code, like an ordinary barcode.
+        // V2 marking: a DataMatrix (GS1) code goes to the marking check first. When the product
+        // needs no marking code (or the code is not readable / not found by its GTIN), the scan falls back to the ordinary
+        // barcode path: the raw code as scanned (a shop may have saved it as a barcode), then the
+        // GTIN inside the code.
         if (looksLikeMarkingCode(barcode)) {
           try {
             const marked = await api.scanMark(cartId, barcode);
             setActiveCart(marked.cart);
             return;
           } catch (err) {
-            if (!(err instanceof HubApiError) || err.code !== 'MARKING_NOT_REQUIRED') throw err;
-            const gtin = parseMarkingCode(barcode).gtin;
-            scanCode = gtinToEan13(gtin) ?? gtin;
+            const fallback =
+              err instanceof HubApiError &&
+              (err.code === 'MARKING_NOT_REQUIRED' ||
+                err.code === 'MARKING_CODE_INVALID' ||
+                err.code === 'PRODUCT_NOT_FOUND');
+            if (!fallback) throw err;
+          }
+          try {
+            const raw = await api.addCartLine(cartId, { kind: 'scan', barcode, qty: '1000' });
+            setActiveCart(raw.cart);
+            return;
+          } catch (err) {
+            if (!(err instanceof HubApiError)) throw err;
+            let gtin: string;
+            try {
+              gtin = parseMarkingCode(barcode).gtin;
+            } catch {
+              throw err; // not a readable GS1 code: the raw barcode answer stands
+            }
+            const byGtin = await api.addCartLine(cartId, {
+              kind: 'scan',
+              barcode: gtinToEan13(gtin) ?? gtin,
+              qty: '1000',
+            });
+            setActiveCart(byGtin.cart);
+            return;
           }
         }
         const updated = await api.addCartLine(cartId, {
           kind: 'scan',
-          barcode: scanCode,
+          barcode,
           qty: '1000',
         });
         setActiveCart(updated.cart);
