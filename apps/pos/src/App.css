@@ -1463,3 +1463,164 @@ select.pos-btn {
   min-height: 62px;
   flex-wrap: nowrap;
 }
+
+/* ---------- Camera scan button (Android shell, T4.4) ---------- */
+.pos-camera-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  flex-shrink: 0;
+}
+
+/* ---------- Phone layout (T4.4: Android phone as a kassa) ---------- */
+@media (max-width: 760px) {
+  html,
+  body {
+    overflow-x: hidden;
+  }
+  .pos-shell {
+    padding-top: var(--safe-area-inset-top, env(safe-area-inset-top, 0px));
+  }
+  .pos-header {
+    min-height: 52px;
+    padding: 6px 10px;
+    gap: 6px;
+  }
+  .pos-header-title,
+  .pos-non-fiscal-badge,
+  .pos-user-role,
+  [data-testid='active-shift-badge'] {
+    display: none;
+  }
+  .pos-header .pos-top-actions .pos-btn {
+    min-height: 38px;
+    padding: 4px 8px;
+    font-size: 12px;
+  }
+
+  /* Side menu becomes a bottom tab bar. */
+  .pos-layout {
+    grid-template-columns: 1fr;
+    padding-bottom: calc(64px + var(--safe-area-inset-bottom, env(safe-area-inset-bottom, 0px)));
+  }
+  .pos-sidenav {
+    position: fixed;
+    top: auto;
+    bottom: 0;
+    left: 0;
+    right: 0;
+    z-index: 40;
+    height: auto;
+    flex-direction: row;
+    justify-content: space-around;
+    gap: 0;
+    padding: 4px 4px calc(4px + var(--safe-area-inset-bottom, env(safe-area-inset-bottom, 0px)));
+    border-right: none;
+    border-top: 1px solid var(--border-color);
+    overflow: visible;
+  }
+  /* One even row of tabs: the two menu groups do not split the bar in halves. */
+  .pos-nav-group,
+  .pos-nav-group-bottom {
+    display: contents;
+  }
+  .pos-nav-item {
+    flex: 1;
+    flex-direction: column;
+    gap: 2px;
+    min-height: 54px;
+    padding: 4px 2px;
+    justify-content: center;
+  }
+  .pos-nav-label {
+    display: block;
+    flex: none;
+    font-size: 10px;
+    line-height: 1.1;
+    text-align: center;
+  }
+  .pos-nav-hint,
+  [data-testid='nav-shortcuts'] {
+    display: none;
+  }
+
+  /* Sale: search and products on top, cart and payment under them. */
+  .pos-workspace {
+    grid-template-columns: 1fr;
+    gap: 10px;
+    padding: 8px;
+  }
+  .pos-workspace > .pos-pane:last-child {
+    order: -1;
+  }
+  .pos-pane {
+    padding: 10px;
+    min-width: 0;
+  }
+  /* Cart fits the phone width: no row number / discount columns, compact cells. */
+  .pos-cart-table-wrap {
+    overflow-x: auto;
+  }
+  [data-testid='cart-lines-table'] th:nth-child(1),
+  [data-testid='cart-lines-table'] td:nth-child(1),
+  [data-testid='cart-lines-table'] th:nth-child(5),
+  [data-testid='cart-lines-table'] td:nth-child(5) {
+    display: none;
+  }
+  .pos-cart-table th,
+  .pos-cart-table td {
+    padding: 6px 4px;
+    font-size: 13px;
+  }
+  .pos-qty-controls .pos-btn {
+    min-width: 36px;
+    min-height: 40px;
+    padding: 2px 6px;
+  }
+  .pos-action-grid {
+    grid-template-columns: 1fr 1fr;
+  }
+  .pos-action-grid .pos-btn-success {
+    grid-column: 1 / -1;
+  }
+  .pos-search-bar {
+    flex-wrap: wrap;
+  }
+  .pos-search-bar .pos-input {
+    flex: 1 1 100%;
+    order: -1;
+  }
+  .pos-camera-btn {
+    flex: 1;
+    min-height: 48px;
+    justify-content: center;
+  }
+  .pos-product-list {
+    max-height: 42vh;
+    grid-template-columns: repeat(auto-fill, minmax(120px, 1fr));
+    gap: 8px;
+  }
+
+  /* Pages and dialogs use the whole screen. */
+  .pos-page {
+    padding: 10px;
+  }
+  .pos-page-header {
+    flex-wrap: wrap;
+    gap: 8px;
+  }
+  .pos-form-row {
+    grid-template-columns: 1fr;
+  }
+  .pos-modal {
+    width: 100%;
+    max-width: none;
+    max-height: 100vh;
+    border-radius: 0;
+  }
+  .pos-auth-container {
+    margin: 12px;
+    padding: 18px;
+    max-width: none;
+  }
+}

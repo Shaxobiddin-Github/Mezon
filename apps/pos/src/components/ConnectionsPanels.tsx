@@ -22,12 +22,12 @@ function Fingerprint({ value, testId }: { readonly value: string; readonly testI
  * v1: a fresh install joins an existing shop as a second cash register (LAN terminal).
  * Shown on the first-setup screen; the desktop main process does the pinned TLS pairing.
  */
-export function TerminalPairForm({ onCancel }: { readonly onCancel: () => void }) {
+export function TerminalPairForm({ onCancel }: { readonly onCancel?: () => void }) {
   const bridge = window.mezonBridge;
   const [host, setHost] = useState('');
   const [port, setPort] = useState(String(DEFAULT_LAN_PORT));
   const [code, setCode] = useState('');
-  const [name, setName] = useState('Kassa 2');
+  const [name, setName] = useState(bridge?.thinClient === true ? 'Telefon' : 'Kassa 2');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [paired, setPaired] = useState<string | null>(null);
@@ -147,9 +147,11 @@ export function TerminalPairForm({ onCancel }: { readonly onCancel: () => void }
         >
           {busy ? t('common.loading') : t('terminal.pair.submit')}
         </button>
-        <button type="button" className="pos-btn" onClick={onCancel} disabled={busy}>
-          {t('terminal.pair.back')}
-        </button>
+        {onCancel !== undefined && (
+          <button type="button" className="pos-btn" onClick={onCancel} disabled={busy}>
+            {t('terminal.pair.back')}
+          </button>
+        )}
       </form>
     </div>
   );

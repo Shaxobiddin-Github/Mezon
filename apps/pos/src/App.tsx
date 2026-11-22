@@ -81,11 +81,21 @@ export function App() {
   // v1 LAN: is this computer the main register (hub) or a second register (terminal)?
   const [terminalInfo, setTerminalInfo] = useState<TerminalInfo>({ mode: 'hub' });
   const [showTerminalPair, setShowTerminalPair] = useState(false);
+  const [terminalInfoReady, setTerminalInfoReady] = useState(false);
   useEffect(() => {
     const bridge = window.mezonBridge;
     if (bridge?.getTerminalInfo === undefined) return;
-    bridge.getTerminalInfo().then(setTerminalInfo, () => undefined);
+    bridge.getTerminalInfo().then(
+      (info) => {
+        setTerminalInfo(info);
+        setTerminalInfoReady(true);
+      },
+      () => undefined,
+    );
   }, []);
+  // T4.4: a phone/tablet has no hub of its own; until paired it can only join a main kassa.
+  const thinClientUnpaired =
+    window.mezonBridge?.thinClient === true && terminalInfoReady && terminalInfo.mode === 'hub';
   const clearSession = usePosStore((s) => s.clearSession);
   const setLoginOptions = usePosStore((s) => s.setLoginOptions);
   const currentShift = usePosStore((s) => s.currentShift);
@@ -717,7 +727,9 @@ export function App() {
         </div>
       )}
 
-      {screen === 'loading' && (
+      {thinClientUnpaired && <TerminalPairForm />}
+
+      {screen === 'loading' && !thinClientUnpaired && (
         <div className="pos-auth-container" data-testid="screen-loading">
           <h2>{t('app.title')}</h2>
           <p>{t('common.loading')}</p>
@@ -811,6 +823,7 @@ export function App() {
                 onSearchProducts={handleSearchProducts}
                 onOpenParkedModal={handleOpenParkedModal}
                 onOpenCustomerModal={handleOpenCustomerModal}
+                onScanBarcode={handleScanBarcode}
                 onError={handleError}
               />
             )}
@@ -841,7 +854,7 @@ export function App() {
         </div>
       )}
 
-      {screen !== 'pos' && (
+      {screen !== 'pos' && !thinClientUnpaired && (
         <footer className="pos-status-footer">
           <div className="pos-telemetry" data-testid="pos-telemetry-bar">
             <span className="pos-telemetry-item">

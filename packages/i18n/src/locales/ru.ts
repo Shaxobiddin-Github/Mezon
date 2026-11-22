@@ -91,6 +91,10 @@ export const RU_MESSAGES: Readonly<Record<I18nKey, string>> = {
   'pos.scannerReady': 'Сканер готов',
   'pos.lastScan': 'Последний скан: {code}',
   'pos.searchPlaceholder': 'Поиск товара (название, SKU) — F2',
+  'pos.camera.scan': 'Камера',
+  'pos.camera.permissionDenied':
+    'Нет доступа к камере. Разрешите камеру для Guzar Kassa в настройках телефона.',
+  'pos.camera.installing': 'Сканер загружается в первый раз. Нажмите ещё раз через минуту.',
   'pos.allCategories': 'Все категории',
   'pos.noSearchResults': 'Товар не найден',
   'pos.cartEmpty': 'Корзина пуста. Отсканируйте штрихкод или добавьте товар через поиск.',
@@ -736,7 +740,7 @@ export const RU_MESSAGES: Readonly<Record<I18nKey, string>> = {
   'terminal.connectedTo': 'Касса «{name}» подключена к основной: {host}',
   'terminal.leave': 'Отключиться от основной кассы',
   'terminal.leaveConfirm':
-    'Компьютер будет отключён от основной кассы, программа перезапустится. Продолжить?',
+    'Устройство будет отключено от основной кассы, программа перезапустится. Продолжить?',
   'error.LAN_HUB_UNREACHABLE':
     'Нет связи с основной кассой. Проверьте, что основной компьютер включён, и сеть.',
   'error.LAN_PIN_MISMATCH': 'Сертификат основной кассы изменился. Подключите эту кассу заново.',

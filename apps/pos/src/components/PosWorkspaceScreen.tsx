@@ -12,6 +12,7 @@ export function PosWorkspaceScreen({
   onSearchProducts,
   onOpenParkedModal,
   onOpenCustomerModal,
+  onScanBarcode,
   onError,
 }: {
   readonly api: HubApiClient;
@@ -19,8 +20,30 @@ export function PosWorkspaceScreen({
   readonly onSearchProducts: (q: string, categoryId: UuidV7 | null) => Promise<void>;
   readonly onOpenParkedModal: () => Promise<void>;
   readonly onOpenCustomerModal: () => Promise<void>;
+  readonly onScanBarcode: (barcode: string) => Promise<void>;
   readonly onError: (err: unknown) => void;
 }) {
+  const scanBarcode = window.mezonBridge?.scanBarcode;
+  const [cameraBusy, setCameraBusy] = useState(false);
+  const scanWithCamera = async () => {
+    if (scanBarcode === undefined || cameraBusy) return;
+    setCameraBusy(true);
+    try {
+      const code = await scanBarcode();
+      if (code !== null) await onScanBarcode(code);
+    } catch (err) {
+      const message = err instanceof Error ? err.message : '';
+      onError(
+        message === 'CAMERA_PERMISSION_DENIED'
+          ? new Error(t('pos.camera.permissionDenied'))
+          : message === 'SCANNER_MODULE_INSTALLING'
+            ? new Error(t('pos.camera.installing'))
+            : err,
+      );
+    } finally {
+      setCameraBusy(false);
+    }
+  };
   const activeCart = usePosStore((s) => s.activeCart);
   const setActiveCart = usePosStore((s) => s.setActiveCart);
   const parkedCarts = usePosStore((s) => s.parkedCarts);
@@ -328,6 +351,33 @@ export function PosWorkspaceScreen({
       {/* Right Pane: Catalog Search & Category Filter */}
       <div className="pos-pane">
         <div className="pos-search-bar">
+          {scanBarcode !== undefined && (
+            <button
+              type="button"
+              className="pos-btn pos-btn-primary pos-camera-btn"
+              data-testid="camera-scan-btn"
+              disabled={cameraBusy}
+              onClick={() => void scanWithCamera()}
+              aria-label={t('pos.camera.scan')}
+              title={t('pos.camera.scan')}
+            >
+              <svg
+                viewBox="0 0 24 24"
+                width="20"
+                height="20"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="1.8"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                aria-hidden="true"
+              >
+                <path d="M4 8V6a2 2 0 0 1 2-2h2M16 4h2a2 2 0 0 1 2 2v2M20 16v2a2 2 0 0 1-2 2h-2M8 20H6a2 2 0 0 1-2-2v-2" />
+                <path d="M7 9v6M10 9v6M13 9v6M16 9v6" />
+              </svg>
+              <span className="pos-camera-label">{t('pos.camera.scan')}</span>
+            </button>
+          )}
           <input
             ref={searchInputRef}
             className="pos-input"

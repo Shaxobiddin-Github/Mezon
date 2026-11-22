@@ -85,6 +85,10 @@ export const UZ_LATN_MESSAGES = {
   'pos.scannerReady': 'Skaner tayyor',
   'pos.lastScan': 'Oxirgi skan: {code}',
   'pos.searchPlaceholder': 'Tovar qidirish (nomi, SKU) — F2',
+  'pos.camera.scan': 'Kamera',
+  'pos.camera.permissionDenied':
+    'Kameraga ruxsat berilmagan. Telefon sozlamalarida Guzar Kassa uchun kamerani yoqing.',
+  'pos.camera.installing': 'Skaner birinchi marta yuklanmoqda. Bir daqiqadan keyin qayta bosing.',
   'pos.allCategories': 'Barcha kategoriyalar',
   'pos.noSearchResults': 'Tovar topilmadi',
   'pos.cartEmpty': 'Savat boʻsh. Shtrix-kodni skanerlang yoki qidiruvdan tovar qoʻshing.',
@@ -721,7 +725,7 @@ export const UZ_LATN_MESSAGES = {
   'terminal.pair.compareFingerprint': 'Barmoq izini asosiy kassadagi bilan solishtiring:',
   'terminal.pair.restartHint': 'Dastur qayta ishga tushadi va asosiy kassa bilan ishlaydi.',
   'terminal.pair.error.INVALID_INPUT': 'Manzil, port, kod yoki nom notoʻgʻri.',
-  'terminal.pair.error.ALREADY_TERMINAL': 'Bu kompyuter allaqachon ikkinchi kassa.',
+  'terminal.pair.error.ALREADY_TERMINAL': 'Bu qurilma allaqachon ikkinchi kassa.',
   'terminal.pair.error.LOCAL_DATA_EXISTS':
     'Bu kassada maʼlumot bor. Faqat yangi oʻrnatilgan dastur ikkinchi kassa boʻla oladi.',
   'terminal.pair.error.LOCAL_HUB_NOT_READY':
@@ -735,7 +739,7 @@ export const UZ_LATN_MESSAGES = {
   'terminal.connectedTo': '"{name}" asosiy kassaga ulangan: {host}',
   'terminal.leave': 'Asosiy kassadan uzish',
   'terminal.leaveConfirm':
-    'Bu kompyuter asosiy kassadan uziladi va dastur qayta ishga tushadi. Davom etasizmi?',
+    'Bu qurilma asosiy kassadan uziladi va dastur qayta ishga tushadi. Davom etasizmi?',
   'error.LAN_HUB_UNREACHABLE':
     'Asosiy kassa bilan aloqa yoʻq. Asosiy kompyuter yoqilganini va tarmoqni tekshiring.',
   'error.LAN_PIN_MISMATCH': 'Asosiy kassa sertifikati oʻzgargan. Bu kassani qaytadan ulang.',
