@@ -7,6 +7,7 @@ import { type HubApiClient, HubApiError } from '../api/hub-client.js';
 import { generateBrowserUuidV7 } from '../utils/browser-uuid.js';
 import { describeHubError } from '../utils/error-text.js';
 import { lineRefundTiyin, planRefund, remainingQtyMilli } from '../utils/return-plan.js';
+import { Icon } from './Icon.js';
 
 type Period = 'today' | 'yesterday' | 'week' | 'all';
 const PAGE = 50;
@@ -121,7 +122,10 @@ export function ReceiptsPage(props: {
     <section className="pos-page" data-testid="receipts-page">
       <header className="pos-page-header">
         <div>
-          <h2 className="pos-page-title">{t('receipts.title')}</h2>
+          <h2 className="pos-page-title pos-title-icon">
+            <Icon name="receipts" />
+            {t('receipts.title')}
+          </h2>
           <p className="pos-page-subtitle">{t('receipts.subtitle')}</p>
         </div>
         <div className="pos-toolbar-row">
@@ -414,6 +418,7 @@ function ReturnModal(props: {
             {t('return.title', { code: `№${ctx.sale.receiptNo}` })}
           </h3>
           <button type="button" className="pos-btn" onClick={onClose}>
+            <Icon name="close" />
             {t('common.close')}
           </button>
         </div>
@@ -539,6 +544,7 @@ function ReturnModal(props: {
         </div>
         <div className="pos-modal-footer">
           <button type="button" className="pos-btn" onClick={onClose}>
+            <Icon name="close" />
             {t('common.close')}
           </button>
           <button

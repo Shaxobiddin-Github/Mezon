@@ -26,6 +26,7 @@ import { formatMilliToQtyString, formatTiyinToSom, parseSomInputToTiyinString } 
 import { type FormEvent, useCallback, useEffect, useState } from 'react';
 import type { HubApiClient } from '../api/hub-client.js';
 import { describeHubError } from '../utils/error-text.js';
+import { Icon } from './Icon.js';
 
 const UNITS: readonly ProductUnit[] = ['dona', 'kg', 'g', 'litr', 'metr', 'm2', 'qadoq'];
 const PAGE_SIZE = 100;
@@ -323,6 +324,7 @@ function ProductFormModal(props: {
             {product ? t('catalog.form.editTitle') : t('catalog.form.createTitle')}
           </h3>
           <button type="button" className="pos-btn" onClick={onClose}>
+            <Icon name="close" />
             {t('common.close')}
           </button>
         </div>
@@ -460,6 +462,7 @@ function ProductFormModal(props: {
         </div>
         <div className="pos-modal-footer">
           <button type="button" className="pos-btn" onClick={onClose}>
+            <Icon name="close" />
             {t('common.close')}
           </button>
           <button
@@ -677,7 +680,10 @@ export function CatalogScreen(props: {
     <div className="pos-modal-backdrop" data-testid="catalog-screen">
       <div className="pos-modal-card pos-modal-wide">
         <div className="pos-modal-header">
-          <h3 className="pos-modal-title">{t('catalog.title')}</h3>
+          <h3 className="pos-modal-title pos-title-icon">
+            <Icon name="products" />
+            {t('catalog.title')}
+          </h3>
           <div className="pos-tabs">
             <button
               type="button"
@@ -685,6 +691,7 @@ export function CatalogScreen(props: {
               data-testid="catalog-tab-products"
               onClick={() => setTab('products')}
             >
+              <Icon name="products" />
               {t('catalog.openButton')}
             </button>
             <button
@@ -693,6 +700,7 @@ export function CatalogScreen(props: {
               data-testid="catalog-tab-tax"
               onClick={() => setTab('tax')}
             >
+              <Icon name="tag" />
               {t('taxSettings.tabTitle')}
             </button>
             <button
@@ -701,6 +709,7 @@ export function CatalogScreen(props: {
               data-testid="catalog-close-btn"
               onClick={onClose}
             >
+              <Icon name="close" />
               {t('common.close')}
             </button>
           </div>

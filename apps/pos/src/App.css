@@ -2204,3 +2204,802 @@ select.pos-btn {
   background: var(--bg-warning);
   border: 1px solid var(--warning-border);
 }
+
+/* ===== C17: big kassa (owner 11-22: simple, clear, icons; large for touch screens) =====
+ * The sale screen is worked with fingers all day: everything tappable is at least 48px, the
+ * numbers that matter (line total, amount to pay, change) are the biggest things on screen, and
+ * every action has an icon. One header button scales the whole kassa for bigger touch monitors. */
+
+/* Screen size: normal / large / extra large. Phones keep their own layout. */
+:root {
+  --ui-zoom: 1;
+}
+@media (min-width: 761px) {
+  :root[data-ui-size='large'] {
+    --ui-zoom: 1.12;
+  }
+  :root[data-ui-size='xlarge'] {
+    --ui-zoom: 1.25;
+  }
+  :root[data-ui-size='large'] body,
+  :root[data-ui-size='xlarge'] body {
+    zoom: var(--ui-zoom);
+  }
+  /* Under zoom, 100vh would grow with it: divide so the kassa still fits the screen exactly. */
+  .pos-shell {
+    height: calc(100vh / var(--ui-zoom));
+  }
+  .pos-modal-card,
+  .pos-modal {
+    max-height: calc(92vh / var(--ui-zoom));
+  }
+}
+.pos-shell,
+.pos-app {
+  min-height: calc(100vh / var(--ui-zoom));
+}
+
+body {
+  font-size: 16px;
+}
+
+/* Icons inside buttons and titles */
+.pos-btn .pos-nav-icon {
+  width: 20px;
+  height: 20px;
+  flex-shrink: 0;
+}
+.pos-title-icon {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.pos-title-icon > .pos-nav-icon {
+  width: 26px;
+  height: 26px;
+  color: var(--brand);
+  flex-shrink: 0;
+}
+.pos-label-icon {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 15px;
+  color: var(--text-primary);
+}
+.pos-label-icon > .pos-nav-icon {
+  width: 22px;
+  height: 22px;
+  color: var(--brand);
+}
+.pos-btn {
+  font-size: 15px;
+}
+.pos-btn-xl {
+  width: 100%;
+  min-height: 68px;
+  font-size: 20px;
+  font-weight: 800;
+  border-radius: var(--radius);
+  gap: 10px;
+}
+.pos-btn-xl .pos-nav-icon {
+  width: 26px;
+  height: 26px;
+}
+.pos-input,
+.pos-select {
+  min-height: 52px;
+  font-size: 16px;
+}
+.pos-form-label {
+  font-size: 14px;
+}
+.pos-modal-title {
+  font-size: 21px;
+}
+.pos-modal-close {
+  min-width: 52px;
+  min-height: 52px;
+  padding: 0;
+}
+.pos-modal-close .pos-nav-icon {
+  width: 24px;
+  height: 24px;
+}
+.pos-tabs .pos-btn {
+  min-height: 48px;
+  font-size: 15px;
+}
+.pos-segmented button {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 44px;
+  font-size: 15px;
+}
+.pos-segmented button .pos-nav-icon {
+  width: 20px;
+  height: 20px;
+}
+
+/* Header */
+.pos-header {
+  padding: 8px 16px;
+}
+.pos-header .pos-top-actions .pos-btn {
+  min-height: 46px;
+  font-size: 14px;
+  gap: 8px;
+}
+.pos-header .pos-top-actions [data-testid='theme-toggle-btn'] {
+  min-width: 46px;
+  padding: 0;
+}
+.pos-header .pos-top-actions .pos-nav-icon {
+  width: 22px;
+  height: 22px;
+}
+.pos-user-chip {
+  font-size: 14px;
+  padding: 4px 12px 4px 4px;
+}
+.pos-user-avatar {
+  width: 30px;
+  height: 30px;
+  font-size: 14px;
+}
+.pos-header .pos-telemetry-item {
+  font-size: 13px;
+  padding: 4px 10px;
+}
+
+/* Side menu */
+.pos-nav-item {
+  min-height: 54px;
+  font-size: 16px;
+  gap: 14px;
+  padding: 8px 14px;
+}
+.pos-nav-icon {
+  width: 24px;
+  height: 24px;
+}
+
+/* Cart */
+.pos-cart-table {
+  font-size: 16px;
+}
+.pos-cart-table th {
+  font-size: 12px;
+  padding: 10px 12px;
+}
+.pos-cart-table td {
+  padding: 8px 12px;
+}
+.pos-cart-table td:first-child {
+  color: var(--text-secondary);
+  font-weight: 600;
+  width: 36px;
+}
+.pos-line-item {
+  width: 100%;
+}
+.pos-line-name {
+  display: block;
+  font-size: 17px;
+  font-weight: 600;
+  line-height: 1.3;
+}
+.pos-line-price {
+  display: block;
+  margin-top: 2px;
+  font-size: 14px;
+  color: var(--text-secondary);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+.pos-cart-table td {
+  white-space: nowrap;
+}
+.pos-cart-table td.pos-line-item {
+  white-space: normal;
+}
+[data-testid^='cart-line-total-'] strong {
+  font-size: 18px;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+.pos-qty-controls {
+  gap: 6px;
+}
+.pos-qty-controls .pos-btn.pos-qty-step {
+  min-width: 48px;
+  min-height: 48px;
+  padding: 0;
+  border-radius: 12px;
+  background-color: var(--bg-elevated);
+}
+.pos-qty-step .pos-nav-icon {
+  width: 22px;
+  height: 22px;
+}
+.pos-qty-controls .pos-btn.pos-qty-value {
+  min-height: 48px;
+  min-width: 96px;
+  font-size: 17px;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+.pos-line-del {
+  min-width: 48px;
+  min-height: 48px;
+  padding: 0;
+  border-radius: 12px;
+}
+.pos-line-del .pos-nav-icon {
+  width: 22px;
+  height: 22px;
+}
+.pos-empty-state p {
+  font-size: 17px;
+}
+.pos-empty-icon {
+  width: 80px;
+  height: 80px;
+  border-radius: 24px;
+}
+.pos-empty-icon .pos-nav-icon {
+  width: 40px;
+  height: 40px;
+}
+
+/* Totals: the amount to pay is the biggest number on the screen. */
+.pos-totals-row {
+  font-size: 15px;
+}
+.pos-totals-grand {
+  font-size: 17px;
+  align-items: center;
+}
+.pos-totals-grand span:last-child {
+  font-size: 38px;
+}
+
+/* Sale actions: big tiles, icon on top, words under it; the pay button is a wide bar of its own. */
+.pos-action-grid {
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  gap: 8px;
+}
+.pos-action-grid .pos-action {
+  position: relative;
+  flex-direction: column;
+  justify-content: center;
+  align-items: center;
+  text-align: center;
+  gap: 6px;
+  min-height: 82px;
+  padding: 10px 6px 8px;
+  font-size: 14px;
+  line-height: 1.2;
+}
+.pos-action-grid .pos-action .pos-nav-icon {
+  width: 28px;
+  height: 28px;
+}
+.pos-action-grid .pos-action .pos-action-text {
+  flex: none;
+}
+.pos-action-grid .pos-action .pos-kbd {
+  position: absolute;
+  top: 5px;
+  right: 5px;
+  font-size: 10px;
+  padding: 2px 5px;
+}
+.pos-action-grid .pos-action .pos-count {
+  position: absolute;
+  top: 5px;
+  left: 5px;
+}
+.pos-action-grid .pos-pay-btn {
+  grid-column: 1 / -1;
+  flex-direction: row;
+  min-height: 76px;
+  font-size: 24px;
+  font-weight: 800;
+  gap: 14px;
+  border-radius: var(--radius);
+}
+.pos-action-grid .pos-pay-btn .pos-nav-icon {
+  width: 32px;
+  height: 32px;
+}
+.pos-action-grid .pos-pay-btn .pos-kbd {
+  position: static;
+  font-size: 13px;
+  padding: 4px 8px;
+}
+
+/* Search, categories and product tiles */
+.pos-search-field .pos-input,
+.pos-search-bar .pos-input {
+  min-height: 56px;
+  font-size: 17px;
+}
+.pos-search-field > .pos-nav-icon {
+  width: 24px;
+  height: 24px;
+}
+.pos-search-field .pos-input {
+  padding-left: 48px;
+}
+.pos-chip {
+  min-height: 48px;
+  padding: 8px 18px;
+  font-size: 15px;
+}
+.pos-product-list {
+  grid-template-columns: repeat(auto-fill, minmax(168px, 1fr));
+  gap: 10px;
+}
+.pos-product-list .pos-product-item {
+  min-height: 136px;
+  padding: 14px;
+  gap: 8px;
+}
+.pos-product-list .pos-product-item > .pos-tile-badge {
+  width: 44px;
+  height: 44px;
+  border-radius: 12px;
+  font-size: 20px;
+}
+.pos-product-list .pos-product-item > .pos-tile-name {
+  font-size: 16px;
+}
+.pos-product-list .pos-product-item > .pos-tile-price {
+  font-size: 15px;
+}
+.pos-product-list .pos-product-item > .pos-tile-price strong {
+  font-size: 18px;
+}
+
+/* Payment dialog: money in on the left, the total and the big finish button on the right. */
+.pos-modal-card.pos-pay-card {
+  max-width: 1000px;
+}
+.pos-pay-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1.2fr) minmax(300px, 1fr);
+  gap: 22px;
+  align-items: start;
+}
+.pos-pay-main,
+.pos-pay-aside {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  min-width: 0;
+}
+.pos-pay-main > .pos-form-group {
+  margin-bottom: 0;
+}
+.pos-pay-aside {
+  position: sticky;
+  top: 0;
+}
+.pos-pay-hero {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 16px 18px;
+  border-radius: var(--radius-lg);
+  background-color: var(--brand-soft);
+  color: var(--brand-text);
+}
+.pos-pay-hero span:first-child {
+  font-size: 15px;
+  font-weight: 600;
+}
+.pos-pay-hero span:last-child {
+  font-size: 40px;
+  font-weight: 800;
+  letter-spacing: -0.02em;
+  line-height: 1.1;
+  font-variant-numeric: tabular-nums;
+}
+[data-theme='dark'] .pos-pay-hero {
+  color: var(--text-primary);
+}
+.pos-input.pos-input-money {
+  min-height: 68px;
+  font-size: 32px;
+  font-weight: 800;
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+.pos-cash-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+}
+.pos-cash-grid .pos-btn {
+  min-height: 58px;
+  font-size: 18px;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+}
+.pos-method-row {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+  gap: 10px;
+}
+.pos-method-btn {
+  min-height: 64px;
+  justify-content: flex-start;
+  gap: 12px;
+  padding: 10px 16px;
+  font-size: 16px;
+  text-align: left;
+}
+.pos-method-btn .pos-nav-icon {
+  width: 28px;
+  height: 28px;
+  color: var(--brand);
+}
+.pos-method-qr {
+  border-color: var(--brand);
+  background-color: var(--brand-soft);
+  color: var(--brand-text);
+}
+.pos-noncash-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.pos-noncash-list:empty {
+  display: none;
+}
+.pos-noncash-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) auto;
+  gap: 8px;
+  padding: 10px;
+  border-radius: var(--radius);
+  background-color: var(--bg-elevated);
+  border: 1px solid var(--border-color);
+}
+.pos-noncash-row > .pos-select {
+  grid-column: 1 / -1;
+}
+.pos-noncash-row .pos-btn {
+  min-width: 52px;
+  padding: 0;
+}
+.pos-pay-aside .pos-totals-box {
+  gap: 8px;
+}
+.pos-pay-aside .pos-totals-row {
+  align-items: center;
+  font-size: 15px;
+}
+.pos-pay-aside .pos-totals-row strong {
+  font-size: 18px;
+  color: var(--text-primary);
+  font-variant-numeric: tabular-nums;
+}
+.pos-change-row.pos-change-due strong {
+  font-size: 26px;
+  color: var(--text-success);
+}
+.pos-pay-submit {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.pos-qr-paid-ok .pos-nav-icon {
+  width: 14px;
+  height: 14px;
+  stroke-width: 3;
+}
+@media (max-width: 900px) {
+  .pos-pay-grid {
+    grid-template-columns: 1fr;
+  }
+  .pos-pay-aside {
+    position: static;
+  }
+}
+
+/* Login PIN pad: big keys */
+.pos-numpad {
+  gap: 10px;
+}
+.pos-numpad-btn {
+  min-height: 64px;
+  font-size: 24px;
+}
+
+/* Pages */
+.pos-page-title.pos-title-icon > .pos-nav-icon {
+  width: 30px;
+  height: 30px;
+}
+.pos-table {
+  font-size: 15px;
+}
+.pos-table td .pos-btn {
+  min-height: 44px;
+}
+
+/* Narrower screens: the action tiles keep their words, the header drops the size word. */
+@media (max-width: 1180px) {
+  .pos-size-label {
+    display: none;
+  }
+  .pos-action-grid .pos-action {
+    font-size: 13px;
+  }
+}
+@media (max-width: 760px) {
+  .pos-size-btn,
+  .pos-logout-label {
+    display: none;
+  }
+  .pos-action-grid {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+  .pos-action-grid .pos-action {
+    min-height: 68px;
+  }
+  .pos-action-grid .pos-pay-btn {
+    min-height: 64px;
+    font-size: 20px;
+  }
+  .pos-totals-grand span:last-child {
+    font-size: 30px;
+  }
+  .pos-cash-grid .pos-btn {
+    font-size: 16px;
+  }
+}
+
+/* Login: on a wide screen, people on the left and the PIN pad on the right (no page scroll). */
+@media (min-width: 900px) {
+  .pos-auth-container.pos-login {
+    max-width: 880px;
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+    gap: 32px;
+    align-items: start;
+  }
+  .pos-login .pos-user-cards {
+    grid-template-columns: 1fr;
+  }
+}
+.pos-login-form {
+  display: flex;
+  flex-direction: column;
+}
+.pos-input.pos-pin-input {
+  min-height: 60px;
+  font-size: 28px;
+  text-align: center;
+  letter-spacing: 0.3em;
+}
+.pos-input.pos-pin-input::placeholder {
+  font-size: 16px;
+  letter-spacing: normal;
+}
+.pos-numpad-btn .pos-nav-icon {
+  width: 28px;
+  height: 28px;
+}
+.pos-numpad-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+.pos-auth-container form > .pos-btn-primary,
+.pos-auth-container form > button[type='submit'] {
+  min-height: 60px;
+  font-size: 18px;
+}
+.pos-user-card {
+  min-height: 68px;
+}
+
+/* The cart pane decides how many action tiles fit in a row: five on a wide pane, three on a
+ * narrow one (long words such as "Kechiktirilganlar" must never break in the middle). */
+.pos-workspace > .pos-pane:first-child {
+  container-type: inline-size;
+}
+@container (max-width: 640px) {
+  .pos-action-grid {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+  .pos-action-grid .pos-action {
+    min-height: 70px;
+  }
+  .pos-action-grid .pos-action:nth-child(5) {
+    grid-column: span 2;
+  }
+}
+
+/* The cart gets the wider half: it is what the cashier and the customer look at. */
+@media (min-width: 761px) {
+  .pos-workspace {
+    grid-template-columns: minmax(0, 1.4fr) minmax(320px, 1fr);
+  }
+}
+@media (max-width: 760px) {
+  .pos-qty-controls .pos-btn.pos-qty-step,
+  .pos-line-del {
+    min-width: 42px;
+    min-height: 42px;
+  }
+  .pos-qty-controls .pos-btn.pos-qty-value {
+    min-width: 64px;
+    min-height: 42px;
+    font-size: 15px;
+  }
+  .pos-line-name {
+    font-size: 15px;
+  }
+  .pos-line-price {
+    font-size: 12px;
+  }
+}
+
+/* The kassa-wide error is a toast above every dialog: a cashier inside the payment dialog must
+ * see why the sale did not go through. */
+[data-testid='pos-error-banner'] {
+  position: fixed;
+  top: 12px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 90;
+  width: min(760px, calc(100% - 32px));
+  margin: 0;
+  padding: 12px 12px 12px 18px;
+  font-size: 16px;
+  box-shadow: var(--shadow-lg);
+  border-width: 2px;
+  border-color: var(--bg-danger);
+}
+[data-testid='pos-error-banner'] .pos-btn {
+  flex-shrink: 0;
+  min-width: 48px;
+  padding: 0;
+}
+
+/* On a short or zoomed screen the cart list gives way first: the total and the pay bar never
+ * leave the screen. */
+@media (min-width: 761px) {
+  .pos-workspace > .pos-pane:first-child .pos-cart-table-wrap {
+    min-height: 96px;
+  }
+  .pos-workspace > .pos-pane:first-child > :not(.pos-cart-table-wrap) {
+    flex-shrink: 0;
+  }
+}
+
+/* Narrow cart pane: no row number, tighter cells, so the delete button is always in view. */
+@container (max-width: 600px) {
+  .pos-cart-table th:first-child,
+  .pos-cart-table td:first-child {
+    display: none;
+  }
+  .pos-cart-table th,
+  .pos-cart-table td {
+    padding-left: 6px;
+    padding-right: 6px;
+  }
+  .pos-qty-controls {
+    gap: 4px;
+  }
+  .pos-qty-controls .pos-btn.pos-qty-value {
+    min-width: 70px;
+    padding: 0 6px;
+  }
+}
+
+/* Media queries see the real screen, not the zoomed one: under "Katta" / "Juda katta" the side
+ * menu turns into icons at the same effective width as without zoom (1180px). */
+@media (min-width: 761px) and (max-width: 1322px) {
+  :root[data-ui-size='large'] .pos-layout {
+    grid-template-columns: 72px 1fr;
+  }
+  :root[data-ui-size='large'] .pos-nav-label,
+  :root[data-ui-size='large'] .pos-nav-hint {
+    display: none;
+  }
+  :root[data-ui-size='large'] .pos-nav-item {
+    justify-content: center;
+    padding: 8px;
+  }
+}
+@media (min-width: 761px) and (max-width: 1475px) {
+  :root[data-ui-size='xlarge'] .pos-layout {
+    grid-template-columns: 72px 1fr;
+  }
+  :root[data-ui-size='xlarge'] .pos-nav-label,
+  :root[data-ui-size='xlarge'] .pos-nav-hint {
+    display: none;
+  }
+  :root[data-ui-size='xlarge'] .pos-nav-item {
+    justify-content: center;
+    padding: 8px;
+  }
+}
+
+/* Phone (Android kassa): the C17 sizes above are for desktop/tablet; a phone keeps compact
+ * tiles and a cart that fits its width. */
+@media (max-width: 760px) {
+  .pos-product-list {
+    grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
+    gap: 8px;
+  }
+  .pos-product-list .pos-product-item {
+    min-height: 104px;
+    padding: 10px;
+    gap: 4px;
+  }
+  .pos-product-list .pos-product-item > .pos-tile-badge {
+    width: 32px;
+    height: 32px;
+    font-size: 15px;
+  }
+  .pos-product-list .pos-product-item > .pos-tile-name {
+    font-size: 14px;
+  }
+  .pos-product-list .pos-product-item > .pos-tile-price strong {
+    font-size: 15px;
+  }
+  .pos-qty-controls {
+    gap: 2px;
+  }
+  .pos-qty-controls .pos-btn.pos-qty-step,
+  .pos-line-del {
+    min-width: 36px;
+    min-height: 42px;
+  }
+  .pos-qty-controls .pos-btn.pos-qty-value {
+    min-width: 46px;
+    padding: 0 4px;
+    font-size: 14px;
+  }
+  .pos-cart-table td,
+  .pos-cart-table th {
+    padding: 6px 3px;
+  }
+  [data-testid^='cart-line-total-'] strong {
+    font-size: 15px;
+  }
+  .pos-line-price {
+    white-space: normal;
+  }
+  .pos-totals-grand {
+    flex-wrap: wrap;
+    gap: 4px 12px;
+  }
+  .pos-totals-grand span:last-child {
+    font-size: 30px;
+    white-space: nowrap;
+  }
+  /* No keyboard on a phone: hotkey chips are noise there. */
+  .pos-action-grid .pos-kbd {
+    display: none;
+  }
+  .pos-user-chip {
+    padding: 2px;
+    font-size: 0;
+  }
+  .pos-user-chip .pos-user-avatar {
+    font-size: 14px;
+  }
+  .pos-header .pos-top-actions .pos-btn {
+    min-height: 42px;
+  }
+}

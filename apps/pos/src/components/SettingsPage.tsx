@@ -6,6 +6,7 @@ import type { TerminalInfo } from '../bridge.js';
 import { ConnectionsModal } from './ConnectionsPanels.js';
 import { IntegrationsPanel } from './IntegrationsPanel.js';
 import { SyncConflictsModal } from './SyncConflictsModal.js';
+import { Icon } from './Icon.js';
 
 /** Owner/manager settings as a section: connections (cloud, second kassa) and sync conflicts. */
 export function SettingsPage(props: {
@@ -20,7 +21,10 @@ export function SettingsPage(props: {
   return (
     <section className="pos-page" data-testid="settings-page">
       <header className="pos-page-header">
-        <h2 className="pos-page-title">{t('settings.title')}</h2>
+        <h2 className="pos-page-title pos-title-icon">
+          <Icon name="settings" />
+          {t('settings.title')}
+        </h2>
         <div className="pos-segmented" role="tablist">
           <button
             type="button"
@@ -30,6 +34,7 @@ export function SettingsPage(props: {
             data-testid="settings-tab-connections"
             onClick={() => setTab('connections')}
           >
+            <Icon name="link" />
             {t('settings.tabConnections')}
           </button>
           <button
@@ -40,6 +45,7 @@ export function SettingsPage(props: {
             data-testid="settings-tab-integrations"
             onClick={() => setTab('integrations')}
           >
+            <Icon name="shield" />
             {t('settings.tabIntegrations')}
           </button>
           <button
@@ -50,6 +56,7 @@ export function SettingsPage(props: {
             data-testid="settings-tab-sync"
             onClick={() => setTab('sync')}
           >
+            <Icon name="refresh" />
             {t('settings.tabSync')}
           </button>
         </div>
