@@ -163,3 +163,14 @@ export {
 } from './licence-store.js';
 
 export { isDockerAvailable, shouldRunPgTests } from './pg-test-helper.js';
+export {
+  CloudShopStore,
+  SHOP_ORDER_TRANSITIONS,
+  type ShopFulfilment,
+  type ShopLookup,
+  type ShopOrderLineRow,
+  type ShopOrderRow,
+  type ShopOrderStatus,
+  type ShopProductRow,
+  type ShopSettings,
+} from './shop-store.js';

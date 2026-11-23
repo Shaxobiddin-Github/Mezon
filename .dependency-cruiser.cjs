@@ -190,7 +190,7 @@ module.exports = {
     {
       name: 'pos-src-imports',
       comment:
-        'apps/pos browser UI source files can only import internal files, domain, contracts, i18n, ui, react, react-dom, zod, and zustand (no node builtins, electron, db-local, db-cloud, drivers, or hub)',
+        'apps/pos browser UI source files can only import internal files, domain, contracts, i18n, ui, react, react-dom, zod, zustand and qrcode-generator, a pure browser QR encoder (no node builtins, electron, db-local, db-cloud, drivers, or hub)',
       severity: 'error',
       from: {
         path: '^apps/pos/src/',
@@ -198,7 +198,7 @@ module.exports = {
       },
       to: {
         pathNot:
-          '^(apps/pos/src/|packages/(domain|contracts|i18n|ui)/|node_modules/(\\.pnpm/)?(react|react-dom|zod|zustand)@)',
+          '^(apps/pos/src/|packages/(domain|contracts|i18n|ui)/|node_modules/(\\.pnpm/)?(react|react-dom|zod|zustand|qrcode-generator)@)',
       },
     },
     {

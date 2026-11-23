@@ -5,6 +5,26 @@ import { formatMilliToQtyString, formatTiyinToSom, stepMilliQuantity } from '@me
 import { type KeyboardEvent, type RefObject, useState } from 'react';
 import type { HubApiClient } from '../api/hub-client.js';
 import { usePosStore } from '../store/pos-store.js';
+import { type IconName, NavIcon, splitHotkey } from './SideNav.js';
+
+/** Soft tile colours: the same product always gets the same one (by name). */
+const TILE_TONES = 6;
+function toneOf(name: string): number {
+  let h = 0;
+  for (const ch of name) h = (h * 31 + (ch.codePointAt(0) ?? 0)) >>> 0;
+  return h % TILE_TONES;
+}
+
+function ActionLabel({ icon, label }: { readonly icon: IconName; readonly label: string }) {
+  const [text, key] = splitHotkey(label);
+  return (
+    <>
+      <NavIcon name={icon} />
+      <span className="pos-action-text">{text}</span>
+      {key !== null && <kbd className="pos-kbd">{key}</kbd>}
+    </>
+  );
+}
 
 export function PosWorkspaceScreen({
   api,
@@ -129,6 +149,10 @@ export function PosWorkspaceScreen({
   };
 
   const lines = activeCart?.lines ?? [];
+  // The discount column is shown only when some line actually has a discount.
+  const anyLineDiscount = lines.some(
+    (l) => BigInt(l.promoDiscount) + BigInt(l.allocatedOrderDiscount) > 0n,
+  );
 
   return (
     <div className="pos-workspace" data-testid="pos-workspace">
@@ -165,7 +189,12 @@ export function PosWorkspaceScreen({
 
         <div className="pos-cart-table-wrap">
           {lines.length === 0 ? (
-            <p data-testid="cart-empty-message">{t('pos.cartEmpty')}</p>
+            <div className="pos-empty-state" data-testid="cart-empty-message">
+              <span className="pos-empty-icon" aria-hidden="true">
+                <NavIcon name="scan" />
+              </span>
+              <p>{t('pos.cartEmpty')}</p>
+            </div>
           ) : (
             <table className="pos-cart-table" data-testid="cart-lines-table">
               <thead>
@@ -174,7 +203,7 @@ export function PosWorkspaceScreen({
                   <th>{t('pos.colItem')}</th>
                   <th>{t('pos.colQty')}</th>
                   <th>{t('pos.colPrice')}</th>
-                  <th>{t('pos.colDiscount')}</th>
+                  {anyLineDiscount && <th className="pos-line-discount">{t('pos.colDiscount')}</th>}
                   <th>{t('pos.colTotal')}</th>
                   <th />
                 </tr>
@@ -233,7 +262,11 @@ export function PosWorkspaceScreen({
                         </div>
                       </td>
                       <td>{formatTiyinToSom(line.unitPriceSnapshot)}</td>
-                      <td>{lineDiscount > 0n ? `-${formatTiyinToSom(lineDiscount)}` : '0'}</td>
+                      {anyLineDiscount && (
+                        <td className="pos-line-discount">
+                          {lineDiscount > 0n ? `−${formatTiyinToSom(lineDiscount)}` : '—'}
+                        </td>
+                      )}
                       <td data-testid={`cart-line-total-${String(index)}`}>
                         <strong>{formatTiyinToSom(line.finalTotal)}</strong>
                       </td>
@@ -259,34 +292,51 @@ export function PosWorkspaceScreen({
         </div>
 
         <div className="pos-totals-box">
-          <div className="pos-totals-row">
-            <span>{t('pos.subtotalGross')}:</span>
-            <span data-testid="cart-subtotal-gross">
-              {formatTiyinToSom(activeCart?.subtotalGross ?? '0')} {t('common.currency')}
-            </span>
-          </div>
-          <div className="pos-totals-row">
-            <span>{t('pos.promoDiscount')}:</span>
-            <span data-testid="cart-promo-discount">
-              {(activeCart?.totalPromoDiscount ?? '0') === '0' ? '' : '−'}
-              {formatTiyinToSom(activeCart?.totalPromoDiscount ?? '0')} {t('common.currency')}
-            </span>
-          </div>
-          <div className="pos-totals-row">
-            <span>{t('pos.manualDiscount')}:</span>
-            <span data-testid="cart-manual-discount">
-              {(activeCart?.effectiveOrderDiscount ?? '0') === '0' ? '' : '−'}
-              {formatTiyinToSom(activeCart?.effectiveOrderDiscount ?? '0')} {t('common.currency')}
-            </span>
-          </div>
-          <div className="pos-totals-row">
-            <span>{t('pos.vatTotal')}:</span>
-            <span data-testid="cart-vat-total">
-              {formatTiyinToSom(activeCart?.totalVat ?? '0')} {t('common.currency')}
-            </span>
-          </div>
+          {(() => {
+            const promo = activeCart?.totalPromoDiscount ?? '0';
+            const manual = activeCart?.effectiveOrderDiscount ?? '0';
+            const vat = activeCart?.totalVat ?? '0';
+            const gross = activeCart?.subtotalGross ?? '0';
+            const anyAdjustment = promo !== '0' || manual !== '0' || vat !== '0';
+            return (
+              <>
+                {anyAdjustment && (
+                  <div className="pos-totals-row">
+                    <span>{t('pos.subtotalGross')}</span>
+                    <span data-testid="cart-subtotal-gross">
+                      {formatTiyinToSom(gross)} {t('common.currency')}
+                    </span>
+                  </div>
+                )}
+                {promo !== '0' && (
+                  <div className="pos-totals-row pos-totals-discount">
+                    <span>{t('pos.promoDiscount')}</span>
+                    <span data-testid="cart-promo-discount">
+                      −{formatTiyinToSom(promo)} {t('common.currency')}
+                    </span>
+                  </div>
+                )}
+                {manual !== '0' && (
+                  <div className="pos-totals-row pos-totals-discount">
+                    <span>{t('pos.manualDiscount')}</span>
+                    <span data-testid="cart-manual-discount">
+                      −{formatTiyinToSom(manual)} {t('common.currency')}
+                    </span>
+                  </div>
+                )}
+                {vat !== '0' && (
+                  <div className="pos-totals-row">
+                    <span>{t('pos.vatTotal')}</span>
+                    <span data-testid="cart-vat-total">
+                      {formatTiyinToSom(vat)} {t('common.currency')}
+                    </span>
+                  </div>
+                )}
+              </>
+            );
+          })()}
           <div className="pos-totals-grand">
-            <span>{t('pos.totalPayable')}:</span>
+            <span>{t('pos.totalPayable')}</span>
             <span data-testid="cart-total-final">
               {formatTiyinToSom(activeCart?.totalFinal ?? '0')} {t('common.currency')}
             </span>
@@ -296,54 +346,55 @@ export function PosWorkspaceScreen({
         <div className="pos-action-grid">
           <button
             type="button"
-            className="pos-btn"
+            className="pos-btn pos-action"
             data-testid="pos-quick-sale-btn"
             onClick={() => setActiveModal('quick_sale')}
           >
-            {t('pos.quickSaleBtn')}
+            <ActionLabel icon="bolt" label={t('pos.quickSaleBtn')} />
           </button>
           <button
             type="button"
-            className="pos-btn"
+            className="pos-btn pos-action"
             data-testid="pos-discount-btn"
             disabled={lines.length === 0}
             onClick={() => setActiveModal('discount')}
           >
-            {t('pos.discountBtn')}
+            <ActionLabel icon="percent" label={t('pos.discountBtn')} />
           </button>
           <button
             type="button"
-            className="pos-btn"
+            className="pos-btn pos-action"
             data-testid="pos-park-btn"
             disabled={lines.length === 0}
             onClick={() => setActiveModal('park_cart')}
           >
-            {t('pos.parkBtn')}
+            <ActionLabel icon="pause" label={t('pos.parkBtn')} />
           </button>
           <button
             type="button"
-            className="pos-btn"
+            className="pos-btn pos-action"
             data-testid="pos-parked-list-btn"
             onClick={() => void onOpenParkedModal()}
           >
-            {t('pos.parkedListBtn')} ({parkedCarts.length})
+            <ActionLabel icon="stack" label={t('pos.parkedListBtn')} />
+            {parkedCarts.length > 0 && <span className="pos-count">{parkedCarts.length}</span>}
           </button>
           <button
             type="button"
-            className="pos-btn"
+            className="pos-btn pos-action"
             data-testid="pos-customer-btn"
             onClick={() => void onOpenCustomerModal()}
           >
-            {t('pos.customerBtn')}
+            <ActionLabel icon="user" label={t('pos.customerBtn')} />
           </button>
           <button
             type="button"
-            className="pos-btn pos-btn-success"
+            className="pos-btn pos-btn-success pos-pay-btn"
             data-testid="pos-pay-btn"
             disabled={lines.length === 0}
             onClick={() => setActiveModal('payment')}
           >
-            {t('pos.payBtn')}
+            <ActionLabel icon="wallet" label={t('pos.payBtn')} />
           </button>
         </div>
       </div>
@@ -378,39 +429,49 @@ export function PosWorkspaceScreen({
               <span className="pos-camera-label">{t('pos.camera.scan')}</span>
             </button>
           )}
-          <input
-            ref={searchInputRef}
-            className="pos-input"
-            data-testid="catalog-search-input"
-            placeholder={t('pos.searchPlaceholder')}
-            value={searchQuery}
-            onChange={(e) => {
-              const q = e.target.value;
-              setSearchQuery(q);
-              setFocusedResultIdx(0);
-              void onSearchProducts(q, selectedCategoryId);
-            }}
-            onKeyDown={handleSearchKeyDown}
-          />
-          <select
-            className="pos-select"
-            data-testid="catalog-category-select"
-            value={selectedCategoryId ?? ''}
-            onChange={(e) => {
-              const nextCat = e.target.value.length > 0 ? (e.target.value as UuidV7) : null;
-              setSelectedCategoryId(nextCat);
-              setFocusedResultIdx(0);
-              void onSearchProducts(searchQuery, nextCat);
-            }}
-          >
-            <option value="">{t('pos.allCategories')}</option>
-            {categories.map((cat) => (
-              <option key={cat.id} value={cat.id}>
-                {cat.name}
-              </option>
-            ))}
-          </select>
+          <label className="pos-search-field">
+            <NavIcon name="search" />
+            <input
+              ref={searchInputRef}
+              className="pos-input"
+              data-testid="catalog-search-input"
+              placeholder={t('pos.searchPlaceholder')}
+              value={searchQuery}
+              onChange={(e) => {
+                const q = e.target.value;
+                setSearchQuery(q);
+                setFocusedResultIdx(0);
+                void onSearchProducts(q, selectedCategoryId);
+              }}
+              onKeyDown={handleSearchKeyDown}
+            />
+          </label>
         </div>
+
+        {categories.length > 0 && (
+          <div className="pos-chips" role="tablist" data-testid="catalog-category-select">
+            {[{ id: null, name: t('pos.allCategories') }, ...categories].map((cat) => {
+              const active = (cat.id ?? null) === (selectedCategoryId ?? null);
+              return (
+                <button
+                  key={cat.id ?? 'all'}
+                  type="button"
+                  role="tab"
+                  aria-selected={active}
+                  className={`pos-chip ${active ? 'pos-chip-active' : ''}`}
+                  onClick={() => {
+                    const nextCat = cat.id ?? null;
+                    setSelectedCategoryId(nextCat);
+                    setFocusedResultIdx(0);
+                    void onSearchProducts(searchQuery, nextCat);
+                  }}
+                >
+                  {cat.name}
+                </button>
+              );
+            })}
+          </div>
+        )}
 
         <div className="pos-product-list" data-testid="catalog-search-results">
           {searchResults.length === 0 ? (
@@ -424,16 +485,22 @@ export function PosWorkspaceScreen({
                 data-testid={`catalog-result-${String(idx)}`}
                 onClick={() => void handleAddProduct(prod)}
               >
-                <div>
-                  <strong>{prod.name}</strong>
-                  {prod.sku ? ` (${prod.sku})` : ''}
-                </div>
-                <div>
+                <span
+                  className={`pos-tile-badge pos-tone-${String(toneOf(prod.name))}`}
+                  aria-hidden="true"
+                >
+                  {prod.name.trim().charAt(0).toUpperCase()}
+                </span>
+                <span className="pos-tile-name">
+                  {prod.name}
+                  {prod.sku ? <small> · {prod.sku}</small> : null}
+                </span>
+                <span className="pos-tile-price">
                   <strong>
                     {formatTiyinToSom(prod.salePrice)} {t('common.currency')}
-                  </strong>{' '}
-                  / {t(`unit.${prod.unit}`)}
-                </div>
+                  </strong>
+                  <small> / {t(`unit.${prod.unit}`)}</small>
+                </span>
               </button>
             ))
           )}

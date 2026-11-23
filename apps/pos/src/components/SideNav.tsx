@@ -47,9 +47,61 @@ const ICONS: Readonly<Record<string, ReactNode>> = {
       <path d="M6 10h.01M10 10h.01M14 10h.01M18 10h.01M7 14h10" />
     </>
   ),
+  bolt: <path d="M13 2 4 14h7l-1 8 9-12h-7z" />,
+  percent: (
+    <>
+      <path d="M19 5 5 19" />
+      <circle cx="6.5" cy="6.5" r="2.5" />
+      <circle cx="17.5" cy="17.5" r="2.5" />
+    </>
+  ),
+  pause: (
+    <>
+      <circle cx="12" cy="12" r="9" />
+      <path d="M10 9v6M14 9v6" />
+    </>
+  ),
+  stack: (
+    <>
+      <path d="m12 3 9 5-9 5-9-5z" />
+      <path d="m3 13 9 5 9-5" />
+    </>
+  ),
+  user: (
+    <>
+      <circle cx="12" cy="8" r="4" />
+      <path d="M4 21c1.5-4 4.5-6 8-6s6.5 2 8 6" />
+    </>
+  ),
+  wallet: (
+    <>
+      <rect x="3" y="6" width="18" height="14" rx="2" />
+      <path d="M3 10h18M16 15h2" />
+    </>
+  ),
+  search: (
+    <>
+      <circle cx="11" cy="11" r="7" />
+      <path d="m20 20-3.5-3.5" />
+    </>
+  ),
+  scan: (
+    <>
+      <path d="M4 8V6a2 2 0 0 1 2-2h2M16 4h2a2 2 0 0 1 2 2v2M20 16v2a2 2 0 0 1-2 2h-2M8 20H6a2 2 0 0 1-2-2v-2" />
+      <path d="M7 9v6M10 9v6M13 9v6M16 9v6" />
+    </>
+  ),
 };
 
-export function NavIcon({ name }: { readonly name: keyof typeof ICONS }) {
+/** A label with its hotkey kept apart: "Tez savdo (F3)" → ["Tez savdo", "F3"]. */
+export function splitHotkey(label: string): readonly [string, string | null] {
+  const m = /^(.*?)\s*\((F\d{1,2})\)\s*$/.exec(label);
+  return m ? [m[1] ?? label, m[2] ?? null] : [label, null];
+}
+
+export type IconName = keyof typeof ICONS;
+
+export function NavIcon({ name }: { readonly name: IconName }) {
   return (
     <svg
       className="pos-nav-icon"

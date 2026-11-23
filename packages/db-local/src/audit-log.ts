@@ -36,6 +36,9 @@ export const AUDIT_EVENT_TYPES = [
   'payment.manual_confirmed',
   'payment.amount_mismatch',
   'payment.refunded',
+  'payment.demo_paid',
+  'settings.demo_mode_changed',
+  'settings.marking_prefixes_changed',
 ] as const;
 export type AuditEventType = (typeof AUDIT_EVENT_TYPES)[number];
 
