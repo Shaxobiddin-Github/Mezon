@@ -90,7 +90,7 @@ const PriceEditor: React.FC<{
           type="button"
           disabled={saving}
           onClick={() => void save()}
-          className="rounded bg-indigo-600 px-3 py-1.5 text-sm font-semibold text-white disabled:opacity-50"
+          className="btn btn-primary"
         >
           {t('admin.products.save')}
         </button>
@@ -159,8 +159,8 @@ export const ProductsView: React.FC = () => {
   return (
     <div className="space-y-4">
       <div>
-        <h1 className="text-xl font-bold text-slate-900">{t('admin.products.title')}</h1>
-        <p className="text-sm text-slate-500">{t('admin.products.subtitle')}</p>
+        <h1 className="page-title">{t('admin.products.title')}</h1>
+        <p className="page-subtitle">{t('admin.products.subtitle')}</p>
       </div>
       <input
         className="w-full sm:w-80 rounded border border-slate-300 px-3 py-2 text-sm"
@@ -169,7 +169,7 @@ export const ProductsView: React.FC = () => {
         onChange={(e) => setSearch(e.target.value)}
       />
       {error && <p className="text-sm text-red-600">{error}</p>}
-      <div className="bg-white rounded-lg border border-slate-200 divide-y divide-slate-100">
+      <div className="card divide-y divide-slate-100">
         {!loading && items.length === 0 && (
           <p className="p-4 text-sm text-slate-400">{t('admin.products.empty')}</p>
         )}

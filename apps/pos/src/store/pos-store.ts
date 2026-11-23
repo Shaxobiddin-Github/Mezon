@@ -40,6 +40,16 @@ function persistLocale(locale: Locale): void {
 const initialLocale = readStoredLocale();
 setI18nLocale(initialLocale);
 export type PosScreen = 'loading' | 'setup' | 'login' | 'open_shift' | 'pos';
+/** Professional layout (owner 11-21): the kassa is split into sections with a side menu. */
+export interface PaidQrPayment {
+  readonly intentId: string;
+  readonly providerRef: string;
+  readonly amountTiyin: string;
+  readonly isTestDriver: boolean;
+}
+
+export type PosSection = 'sale' | 'receipts' | 'products' | 'settings';
+
 export type PosModal =
   | 'none'
   | 'quick_sale'
@@ -87,6 +97,7 @@ export interface PosStoreState {
   readonly locale: Locale;
   readonly screen: PosScreen;
   readonly activeModal: PosModal;
+  readonly section: PosSection;
 
   // Auth
   readonly token: string | null;
@@ -121,6 +132,11 @@ export interface PosStoreState {
   readonly isSubmittingPayment: boolean;
   readonly totalChangedPrompt: TotalChangedPrompt | null;
   readonly lastCompletedSale: CompleteSaleResponseDto | null;
+  /**
+   * V2: QR payments the hub confirmed as paid but no receipt used yet, per cart. Kept outside the
+   * payment dialog so closing and reopening it never loses money already taken.
+   */
+  readonly paidQrByCart: Readonly<Record<string, readonly PaidQrPayment[]>>;
 
   // Banner / Error
   readonly errorBanner: string | null;
@@ -136,6 +152,7 @@ export interface PosStoreState {
   readonly setLocale: (locale: Locale) => void;
   readonly setScreen: (screen: PosScreen) => void;
   readonly setActiveModal: (modal: PosModal) => void;
+  readonly setSection: (section: PosSection) => void;
   readonly setLoginOptions: (options: readonly LoginOptionDto[]) => void;
   readonly setAuthenticated: (token: string, user: UserSummaryDto) => void;
   readonly clearSession: () => void;
@@ -163,6 +180,8 @@ export interface PosStoreState {
   readonly setIsSubmittingPayment: (submitting: boolean) => void;
   readonly setTotalChangedPrompt: (prompt: TotalChangedPrompt | null) => void;
   readonly setLastCompletedSale: (sale: CompleteSaleResponseDto | null) => void;
+  readonly addPaidQr: (cartId: string, payment: PaidQrPayment) => void;
+  readonly clearPaidQr: (cartId: string) => void;
   readonly setErrorBanner: (message: string | null) => void;
 }
 
@@ -178,6 +197,7 @@ export const usePosStore = create<PosStoreState>((set) => ({
   locale: initialLocale,
   screen: 'loading',
   activeModal: 'none',
+  section: 'sale',
 
   token: null,
   user: null,
@@ -207,6 +227,7 @@ export const usePosStore = create<PosStoreState>((set) => ({
   isSubmittingPayment: false,
   totalChangedPrompt: null,
   lastCompletedSale: null,
+  paidQrByCart: {},
 
   errorBanner: null,
 
@@ -236,6 +257,8 @@ export const usePosStore = create<PosStoreState>((set) => ({
     })),
 
   setScreen: (screen) => set({ screen }),
+
+  setSection: (section) => set({ section, activeModal: 'none', errorBanner: null }),
 
   setActiveModal: (modal) =>
     set((state) => {
@@ -271,6 +294,7 @@ export const usePosStore = create<PosStoreState>((set) => ({
       selectedLineId: null,
       selectedCustomer: null,
       activeModal: 'none',
+      section: 'sale',
       screen: 'login',
       errorBanner: null,
     }),
@@ -342,6 +366,21 @@ export const usePosStore = create<PosStoreState>((set) => ({
     set({
       insufficientLines: [],
       shortLineIds: new Set<string>(),
+    }),
+
+  addPaidQr: (cartId, payment) =>
+    set((state) => {
+      const list = state.paidQrByCart[cartId] ?? [];
+      if (list.some((p) => p.intentId === payment.intentId)) return {};
+      return { paidQrByCart: { ...state.paidQrByCart, [cartId]: [...list, payment] } };
+    }),
+
+  clearPaidQr: (cartId) =>
+    set((state) => {
+      if (!(cartId in state.paidQrByCart)) return {};
+      const next = { ...state.paidQrByCart };
+      delete next[cartId];
+      return { paidQrByCart: next };
     }),
 
   rotatePaymentClientRequestId: () => {

@@ -263,3 +263,64 @@ export const SalesLinesReportSummarySchema = z.strictObject({
   grossProfit: SignedBigIntStringSchema,
 });
 export type SalesLinesReportSummaryDto = z.infer<typeof SalesLinesReportSummarySchema>;
+
+// --- C12: receipts history and return context (kassa) ---
+
+export const ListSalesQuerySchema = z.strictObject({
+  /** Receipt code fragment or receipt number. */
+  q: z.string().trim().max(64).optional(),
+  fromMs: BigIntStringSchema.optional(),
+  toMs: BigIntStringSchema.optional(),
+  limit: z.coerce.number().int().min(1).max(200).default(50),
+  offset: z.coerce.number().int().min(0).max(1_000_000).default(0),
+});
+export type ListSalesQueryDto = z.infer<typeof ListSalesQuerySchema>;
+
+export const SaleListItemSchema = z.strictObject({
+  id: UuidV7Schema,
+  receiptNo: PositiveBigIntStringSchema,
+  receiptCode: z.string(),
+  createdAtMs: BigIntStringSchema,
+  totalFinal: BigIntStringSchema,
+  totalPaid: BigIntStringSchema,
+  debtAmount: BigIntStringSchema,
+  cashierName: z.string().nullable(),
+  customerName: z.string().nullable(),
+  lineCount: z.number().int().nonnegative(),
+  status: z.enum(['completed', 'voided']),
+  returnedTotal: BigIntStringSchema,
+  paymentMethods: z.array(PaymentMethodSchema),
+});
+export type SaleListItemDto = z.infer<typeof SaleListItemSchema>;
+
+export const ListSalesResponseSchema = z.strictObject({
+  sales: z.array(SaleListItemSchema),
+});
+export type ListSalesResponseDto = z.infer<typeof ListSalesResponseSchema>;
+
+export const SaleReturnContextLineSchema = z.strictObject({
+  id: UuidV7Schema,
+  itemName: z.string(),
+  unit: ProductUnitSchema,
+  qty: PositiveBigIntStringSchema,
+  unitPriceSnapshot: BigIntStringSchema,
+  finalTotal: BigIntStringSchema,
+  netExVat: BigIntStringSchema,
+  vatTotal: BigIntStringSchema,
+  returnedQty: BigIntStringSchema,
+  refundedAmount: BigIntStringSchema,
+  returnedNetExVat: BigIntStringSchema,
+  returnedVatTotal: BigIntStringSchema,
+});
+export type SaleReturnContextLineDto = z.infer<typeof SaleReturnContextLineSchema>;
+
+export const SaleReturnContextResponseSchema = z.strictObject({
+  sale: SaleListItemSchema,
+  lines: z.array(SaleReturnContextLineSchema),
+  /** Still refundable per method (original paid + paid toward this debt - already refunded). */
+  refundableByMethod: z.array(
+    z.strictObject({ method: PaymentMethodSchema, amount: BigIntStringSchema }),
+  ),
+  remainingSaleDebt: BigIntStringSchema,
+});
+export type SaleReturnContextResponseDto = z.infer<typeof SaleReturnContextResponseSchema>;

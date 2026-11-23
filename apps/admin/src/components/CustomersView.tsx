@@ -88,8 +88,8 @@ export const CustomersView: React.FC = () => {
     <div className="space-y-6">
       <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
         <div>
-          <h2 className="text-xl font-bold text-slate-800">{t('admin.customers.title')}</h2>
-          <p className="text-xs text-slate-500 mt-1">{t('admin.customers.subtitle')}</p>
+          <h2 className="page-title">{t('admin.customers.title')}</h2>
+          <p className="page-subtitle">{t('admin.customers.subtitle')}</p>
         </div>
 
         <div className="flex items-center gap-3 w-full sm:w-auto">
@@ -105,7 +105,7 @@ export const CustomersView: React.FC = () => {
             onClick={() => {
               void loadCustomers(true);
             }}
-            className="text-xs px-3 py-2 rounded-lg bg-indigo-50 text-indigo-700 hover:bg-indigo-100 font-medium transition-colors"
+            className="btn btn-soft"
           >
             {t('admin.refresh')}
           </button>
@@ -118,7 +118,7 @@ export const CustomersView: React.FC = () => {
         </div>
       )}
 
-      <div className="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden">
+      <div className="card overflow-hidden">
         <div className="overflow-x-auto">
           <table className="min-w-full divide-y divide-slate-200 text-left text-sm">
             <thead className="bg-slate-50 text-xs font-semibold text-slate-500 uppercase tracking-wider">

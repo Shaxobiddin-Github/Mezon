@@ -188,3 +188,49 @@ jobs:
           path: apps/desktop/dist-electron/Guzar-Setup-*.exe
           if-no-files-found: error
           retention-days: 14
+
+  android:
+    name: Build & Test Android APK (ubuntu-latest)
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Install pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 12.18.0
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version-file: '.nvmrc'
+          cache: 'pnpm'
+
+      - name: Setup JDK 21
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'temurin'
+          java-version: '21'
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Build POS and Android bridge
+        run: pnpm turbo run build --filter=@mezon/android...
+
+      - name: Build debug APK (assemble www, Capacitor sync, Gradle)
+        run: pnpm --filter @mezon/android run apk
+
+      - name: JVM unit tests (pairing proof and fingerprint parity with the hub)
+        working-directory: apps/android/android
+        run: ./gradlew testDebugUnitTest
+
+      - name: Upload Android APK artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: guzar-kassa-android-debug-apk
+          path: apps/android/android/app/build/outputs/apk/debug/*.apk
+          if-no-files-found: error
+          retention-days: 14

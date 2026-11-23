@@ -105,12 +105,23 @@ export function LoginScreen({
   const setAuthenticated = usePosStore((s) => s.setAuthenticated);
   const setErrorBanner = usePosStore((s) => s.setErrorBanner);
 
-  const [selectedUserId, setSelectedUserId] = useState<string>('');
+  // With one person on this kassa there is nothing to choose: only the PIN is asked.
+  const [selectedUserId, setSelectedUserId] = useState<string>(() =>
+    loginOptions.length === 1 ? (loginOptions[0]?.id ?? '') : '',
+  );
   const [username, setUsername] = useState('');
   const [pin, setPin] = useState('');
 
   const handleSubmit = async (e: FormEvent) => {
     e.preventDefault();
+    if (selectedUserId.length === 0 && username.trim().length === 0) {
+      setErrorBanner(t('auth.chooseUser'));
+      return;
+    }
+    if (pin.length === 0) {
+      setErrorBanner(t('auth.enterPin'));
+      return;
+    }
     try {
       setErrorBanner(null);
       const payload =
@@ -134,8 +145,18 @@ export function LoginScreen({
   };
 
   return (
-    <div className="pos-auth-container" data-testid="login-screen">
-      <h2>{t('auth.title')}</h2>
+    <div className="pos-auth-container pos-login" data-testid="login-screen">
+      <div className="pos-auth-head">
+        <span className="pos-logo-mark pos-logo-lg" aria-hidden="true">
+          G
+        </span>
+        <div>
+          <h2>{t('auth.title')}</h2>
+          <p className="pos-auth-sub">
+            {loginOptions.length > 1 ? t('auth.chooseUserHint') : t('auth.enterPinHint')}
+          </p>
+        </div>
+      </div>
 
       {authRateLimitSeconds > 0 && (
         <div className="pos-error-banner" data-testid="login-rate-limit-banner">
@@ -144,19 +165,27 @@ export function LoginScreen({
       )}
 
       {loginOptions.length > 0 && (
-        <div className="pos-quick-tenders" data-testid="login-options-list">
+        <div className="pos-user-cards" data-testid="login-options-list">
           {loginOptions.map((opt) => (
             <button
               key={opt.id}
               type="button"
-              className={`pos-btn ${selectedUserId === opt.id ? 'pos-btn-primary' : ''}`}
+              className={`pos-user-card ${selectedUserId === opt.id ? 'pos-user-card-active' : ''}`}
               data-testid={`login-option-${opt.id}`}
+              aria-pressed={selectedUserId === opt.id}
               onClick={() => {
                 setSelectedUserId(opt.id);
                 setUsername('');
+                setErrorBanner(null);
               }}
             >
-              {opt.fullName} · {t(`auth.role.${opt.role}`)}
+              <span className="pos-user-avatar" aria-hidden="true">
+                {opt.fullName.trim().charAt(0).toUpperCase()}
+              </span>
+              <span className="pos-user-card-text">
+                <strong>{opt.fullName}</strong>
+                <small>{t(`auth.role.${opt.role}`)}</small>
+              </span>
             </button>
           ))}
         </div>

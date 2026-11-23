@@ -2,3 +2,61 @@
  * generated and the cabinet showed as unstyled HTML). The deploy-images CI checks the built web
  * image contains this stylesheet. */
 @import 'tailwindcss';
+
+/* C14: same type and brand as the kassa (one product, one look). */
+@theme {
+  --font-sans:
+    'Segoe UI Variable Text', 'Segoe UI', system-ui, -apple-system, Roboto, 'Helvetica Neue',
+    sans-serif;
+}
+
+@layer base {
+  body {
+    @apply bg-slate-50 text-slate-800 antialiased;
+  }
+
+  /* Every data table in the cabinet reads the same: quiet header, airy rows, hover. */
+  main table {
+    @apply w-full text-sm;
+  }
+  main thead th {
+    @apply bg-slate-50 text-left text-[11px] font-semibold uppercase tracking-wider text-slate-500;
+  }
+  main tbody tr {
+    @apply transition-colors;
+  }
+  main tbody tr:hover {
+    @apply bg-indigo-50/40;
+  }
+  main tbody td {
+    @apply border-t border-slate-100 text-slate-700;
+  }
+
+  :focus-visible {
+    @apply outline-none ring-2 ring-indigo-500/40 ring-offset-1;
+  }
+}
+
+@layer components {
+  .page-title {
+    @apply text-2xl font-bold tracking-tight text-slate-900;
+  }
+  .page-subtitle {
+    @apply mt-1 text-sm text-slate-500;
+  }
+  .card {
+    @apply rounded-2xl border border-slate-200/80 bg-white shadow-sm;
+  }
+  .btn {
+    @apply inline-flex items-center justify-center gap-2 rounded-lg px-3.5 py-2 text-sm font-semibold transition-colors disabled:cursor-not-allowed disabled:opacity-50;
+  }
+  .btn-primary {
+    @apply bg-indigo-600 text-white shadow-sm hover:bg-indigo-700;
+  }
+  .btn-soft {
+    @apply bg-indigo-50 text-indigo-700 hover:bg-indigo-100;
+  }
+  .btn-outline {
+    @apply border border-slate-300 bg-white text-slate-700 hover:bg-slate-50;
+  }
+}
