@@ -39,7 +39,7 @@ interface Env {
   n: () => string;
   call: (
     token: string,
-    method: 'POST' | 'GET',
+    method: 'POST' | 'GET' | 'PUT',
     url: string,
     payload?: Record<string, unknown>,
   ) => Promise<LightMyRequestResponse>;
@@ -459,6 +459,96 @@ describe('P2-K1/K2: refunds are claimed before the provider; a wrong sum is neve
         (await env.call(env.manager, 'GET', '/payments/attention')).json<{ intents: Intent[] }>()
           .intents,
       ).toEqual([]);
+    } finally {
+      await env.hub.close();
+    }
+  });
+});
+
+describe('V2 demo mode: the QR flow without a real provider, only when the owner allows it', () => {
+  const integrations = async (env: Env, token = env.cashier) =>
+    (await env.call(token, 'GET', '/settings/integrations')).json<{
+      demoMode: boolean;
+      payment: { isTestDriver: boolean };
+      rules: { state: string; isDemoPackage: boolean };
+      marking: { mxikPrefixes: string[] };
+    }>();
+
+  it('demo off (default): "customer paid" is refused and the intent says it is not allowed', async () => {
+    const env = await boot(8701);
+    try {
+      expect((await integrations(env)).demoMode).toBe(false);
+      const intent = await createQr(env, '10000');
+      expect((intent as unknown as { demoPayAllowed: boolean }).demoPayAllowed).toBe(false);
+      const r = await env.call(env.cashier, 'POST', `/payments/intents/${intent.id}/demo-pay`);
+      expect(r.statusCode).toBeGreaterThanOrEqual(400);
+      expect(code(r)).toBe('PAYMENT_INTENT_INVALID_STATE');
+      expect(env.driver.stateOf(intent.providerRef)).toBe('pending');
+      expect((await integrations(env)).rules.state).toBe('missing');
+    } finally {
+      await env.hub.close();
+    }
+  });
+
+  it('only the owner switches demo mode; cashier and manager get 403', async () => {
+    const env = await boot(8702);
+    try {
+      for (const token of [env.cashier, env.manager]) {
+        const r = await env.call(token, 'PUT', '/settings/demo', { enabled: true });
+        expect(r.statusCode).toBe(403);
+      }
+      const r = await env.call(env.owner, 'PUT', '/settings/demo', { enabled: true });
+      expect(r.statusCode, r.body).toBe(200);
+      const st = await integrations(env);
+      expect(st.demoMode).toBe(true);
+      expect(st.rules).toMatchObject({ state: 'ok', isDemoPackage: true });
+      await env.call(env.owner, 'PUT', '/settings/demo', { enabled: false });
+      expect((await integrations(env)).rules.state).toBe('missing');
+    } finally {
+      await env.hub.close();
+    }
+  });
+
+  it('demo on: QR → "customer paid" → the receipt closes once with UzQR', async () => {
+    const env = await boot(8703);
+    try {
+      await env.call(env.owner, 'PUT', '/settings/demo', { enabled: true });
+      const cart = await cartOf(env);
+      const intent = await createQr(env, '10000');
+      expect((intent as unknown as { demoPayAllowed: boolean }).demoPayAllowed).toBe(true);
+      const paid = await env.call(env.cashier, 'POST', `/payments/intents/${intent.id}/demo-pay`);
+      expect(paid.statusCode, paid.body).toBe(200);
+      expect(paid.json<{ intent: Intent }>().intent.status).toBe('paid');
+      // a second "paid" on the same QR is refused (no double money)
+      const again = await env.call(env.cashier, 'POST', `/payments/intents/${intent.id}/demo-pay`);
+      expect(code(again)).toBe('PAYMENT_INTENT_INVALID_STATE');
+      const sale = await payByQr(env, cart, intent.providerRef);
+      expect(sale.statusCode, sale.body).toBe(200);
+      const cart2 = await cartOf(env);
+      expect((await payByQr(env, cart2, intent.providerRef)).statusCode).toBeGreaterThanOrEqual(
+        400,
+      );
+    } finally {
+      await env.hub.close();
+    }
+  });
+
+  it('marking prefixes: digits only, manager may set them, cashier may not', async () => {
+    const env = await boot(8704);
+    try {
+      expect(
+        (await env.call(env.cashier, 'PUT', '/settings/marking-prefixes', { prefixes: ['0220'] }))
+          .statusCode,
+      ).toBe(403);
+      expect(
+        (await env.call(env.manager, 'PUT', '/settings/marking-prefixes', { prefixes: ['02x'] }))
+          .statusCode,
+      ).toBe(400);
+      const ok = await env.call(env.manager, 'PUT', '/settings/marking-prefixes', {
+        prefixes: ['02202', '02202', '0330'],
+      });
+      expect(ok.statusCode, ok.body).toBe(200);
+      expect((await integrations(env)).marking.mxikPrefixes).toEqual(['02202', '0330']);
     } finally {
       await env.hub.close();
     }

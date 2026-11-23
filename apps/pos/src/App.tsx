@@ -1,5 +1,5 @@
 import { useEffect, useCallback, useRef, useState } from 'react';
-import type { UuidV7 } from '@mezon/domain';
+import { type UuidV7, gtinToEan13, looksLikeMarkingCode, parseMarkingCode } from '@mezon/domain';
 import { LOCALE_LABELS, SUPPORTED_LOCALES, isLocale, t } from '@mezon/i18n';
 import { stepMilliQuantity } from '@mezon/ui';
 import { normalizeLoopbackHubBaseUrl } from './bridge.js';
@@ -18,12 +18,10 @@ import { CatalogScreen } from './components/CatalogScreen.js';
 import { FiscalOfflineBanner, FiscalUnsettledModal } from './components/FiscalPanels.js';
 import { LicenceBanner } from './components/LicenceBanner.js';
 import { UpdateBanner } from './components/UpdateBanner.js';
-import { SyncConflictsModal } from './components/SyncConflictsModal.js';
-import {
-  ConnectionsModal,
-  TerminalModeSection,
-  TerminalPairForm,
-} from './components/ConnectionsPanels.js';
+import { SideNav } from './components/SideNav.js';
+import { ReceiptsPage } from './components/ReceiptsPage.js';
+import { SettingsPage } from './components/SettingsPage.js';
+import { TerminalModeSection, TerminalPairForm } from './components/ConnectionsPanels.js';
 import type { TerminalInfo } from './bridge.js';
 import {
   ShortcutsModal,
@@ -40,6 +38,7 @@ import {
   ShiftManagementModal,
 } from './components/PaymentAndShiftModals.js';
 import './App.css';
+import { describeHubError } from './utils/error-text.js';
 
 function resolveBrowserFallbackBaseUrl(): string | null {
   if (typeof window.__MEZON_HUB_URL__ === 'string' && window.__MEZON_HUB_URL__.trim().length > 0) {
@@ -79,14 +78,25 @@ export function App() {
   const user = usePosStore((s) => s.user);
   // v1: fiscal mode is off by default; its screens are shown only when it is on.
   const [fiscalModeEnabled, setFiscalModeEnabled] = useState(false);
+  const [demoMode, setDemoMode] = useState(false);
   // v1 LAN: is this computer the main register (hub) or a second register (terminal)?
   const [terminalInfo, setTerminalInfo] = useState<TerminalInfo>({ mode: 'hub' });
   const [showTerminalPair, setShowTerminalPair] = useState(false);
+  const [terminalInfoReady, setTerminalInfoReady] = useState(false);
   useEffect(() => {
     const bridge = window.mezonBridge;
     if (bridge?.getTerminalInfo === undefined) return;
-    bridge.getTerminalInfo().then(setTerminalInfo, () => undefined);
+    bridge.getTerminalInfo().then(
+      (info) => {
+        setTerminalInfo(info);
+        setTerminalInfoReady(true);
+      },
+      () => undefined,
+    );
   }, []);
+  // T4.4: a phone/tablet has no hub of its own; until paired it can only join a main kassa.
+  const thinClientUnpaired =
+    window.mezonBridge?.thinClient === true && terminalInfoReady && terminalInfo.mode === 'hub';
   const clearSession = usePosStore((s) => s.clearSession);
   const setLoginOptions = usePosStore((s) => s.setLoginOptions);
   const currentShift = usePosStore((s) => s.currentShift);
@@ -99,6 +109,8 @@ export function App() {
   const setCustomerList = usePosStore((s) => s.setCustomerList);
   const activeModal = usePosStore((s) => s.activeModal);
   const setActiveModal = usePosStore((s) => s.setActiveModal);
+  const section = usePosStore((s) => s.section);
+  const setSection = usePosStore((s) => s.setSection);
   const errorBanner = usePosStore((s) => s.errorBanner);
   const setErrorBanner = usePosStore((s) => s.setErrorBanner);
   const setLastScannedBarcode = usePosStore((s) => s.setLastScannedBarcode);
@@ -146,10 +158,10 @@ export function App() {
           setErrorBanner(t(`error.${err.code}`));
           return;
         }
-        setErrorBanner(`${err.code}: ${err.message}`);
+        setErrorBanner(describeHubError(err));
         return;
       }
-      setErrorBanner(err instanceof Error ? err.message : String(err));
+      setErrorBanner(describeHubError(err));
     },
     [setErrorBanner],
   );
@@ -315,6 +327,44 @@ export function App() {
           setActiveCart(created.cart);
           cartId = created.cart.id;
         }
+        // V2 marking: a DataMatrix (GS1) code goes to the marking check first. When the product
+        // needs no marking code (or the code is not readable / not found by its GTIN), the scan falls back to the ordinary
+        // barcode path: the raw code as scanned (a shop may have saved it as a barcode), then the
+        // GTIN inside the code.
+        if (looksLikeMarkingCode(barcode)) {
+          try {
+            const marked = await api.scanMark(cartId, barcode);
+            setActiveCart(marked.cart);
+            return;
+          } catch (err) {
+            const fallback =
+              err instanceof HubApiError &&
+              (err.code === 'MARKING_NOT_REQUIRED' ||
+                err.code === 'MARKING_CODE_INVALID' ||
+                err.code === 'PRODUCT_NOT_FOUND');
+            if (!fallback) throw err;
+          }
+          try {
+            const raw = await api.addCartLine(cartId, { kind: 'scan', barcode, qty: '1000' });
+            setActiveCart(raw.cart);
+            return;
+          } catch (err) {
+            if (!(err instanceof HubApiError)) throw err;
+            let gtin: string;
+            try {
+              gtin = parseMarkingCode(barcode).gtin;
+            } catch {
+              throw err; // not a readable GS1 code: the raw barcode answer stands
+            }
+            const byGtin = await api.addCartLine(cartId, {
+              kind: 'scan',
+              barcode: gtinToEan13(gtin) ?? gtin,
+              qty: '1000',
+            });
+            setActiveCart(byGtin.cart);
+            return;
+          }
+        }
         const updated = await api.addCartLine(cartId, {
           kind: 'scan',
           barcode,
@@ -392,7 +442,9 @@ export function App() {
           focusedInputRef.current = null;
           preBurstValueRef.current = null;
 
-          void handleScanBarcode(outcome.barcode);
+          if (usePosStore.getState().section === 'sale') {
+            void handleScanBarcode(outcome.barcode);
+          }
           return;
         }
       }
@@ -410,6 +462,18 @@ export function App() {
         if (usePosStore.getState().activeModal !== 'none') {
           event.preventDefault();
           setActiveModal('none');
+          return;
+        }
+      }
+
+      if (
+        usePosStore.getState().section !== 'sale' &&
+        ['F2', 'F3', 'F4', 'F5', 'F6', 'F7', 'F9'].includes(event.key)
+      ) {
+        setSection('sale');
+        if (event.key === 'F2') {
+          event.preventDefault();
+          requestAnimationFrame(() => searchInputRef.current?.focus());
           return;
         }
       }
@@ -480,7 +544,11 @@ export function App() {
       }
 
       // Cart line navigation & adjustment when no modal is open and no input is focused
-      if (usePosStore.getState().activeModal === 'none' && !isInputFocused) {
+      if (
+        usePosStore.getState().activeModal === 'none' &&
+        usePosStore.getState().section === 'sale' &&
+        !isInputFocused
+      ) {
         const state = usePosStore.getState();
         const cart = state.activeCart;
         const line = cart?.lines.find((l) => l.id === state.selectedLineId);
@@ -608,6 +676,12 @@ export function App() {
         if (!cancelled) setFiscalModeEnabled(st.modeEnabled);
       })
       .catch(() => undefined);
+    api
+      .getIntegrations()
+      .then((st) => {
+        if (!cancelled) setDemoMode(st.demoMode);
+      })
+      .catch(() => undefined);
     return () => {
       cancelled = true;
     };
@@ -618,67 +692,42 @@ export function App() {
     <div className="pos-shell" data-testid="pos-shell" key={locale}>
       <header className="pos-header">
         <div className="pos-header-brand">
-          <h1 className="pos-header-title">{t('app.title')}</h1>
-          <span className="pos-non-fiscal-badge" data-testid="non-fiscal-badge">
-            {t('receipt.nonFiscalBanner')}
+          <span className="pos-logo-mark" aria-hidden="true">
+            G
           </span>
+          <h1 className="pos-header-title">{t('app.title')}</h1>
+          {demoMode ? (
+            <span
+              className="pos-demo-badge"
+              data-testid="demo-mode-badge"
+              title={t('demo.badgeHint')}
+            >
+              {t('demo.badge')}
+            </span>
+          ) : (
+            <span className="pos-non-fiscal-badge" data-testid="non-fiscal-badge">
+              {t('receipt.nonFiscalBanner')}
+            </span>
+          )}
           {user && (
-            <span className="pos-telemetry-item" data-testid="active-user-badge">
-              {user.fullName} ({user.role})
+            <span className="pos-user-chip" data-testid="active-user-badge">
+              <span className="pos-user-avatar" aria-hidden="true">
+                {user.fullName.trim().charAt(0).toUpperCase()}
+              </span>
+              {user.fullName}
+              <span className="pos-user-role">· {t(`auth.role.${user.role}`)}</span>
             </span>
           )}
           {currentShift && (
             <span className="pos-telemetry-item" data-testid="active-shift-badge">
-              Smena #{currentShift.shiftNo}
+              {t('shift.badge', { no: String(currentShift.shiftNo) })}
             </span>
           )}
         </div>
 
-        {screen !== 'pos' && (
-          <div className="pos-telemetry" data-testid="pos-telemetry-bar">
-            <span className="pos-telemetry-item">
-              {t('app.hub.status')}: <strong data-testid="hub-status">{hubStatus}</strong>
-            </span>
-            <span className="pos-telemetry-item">
-              <strong data-testid="hub-url">{hubBaseUrl ?? 'kutilyapti...'}</strong>
-            </span>
-            <span className="pos-telemetry-item">
-              <strong data-testid="hub-origin">{window.location.origin}</strong>
-            </span>
-            <span className="pos-telemetry-item">
-              {t('app.hub.restarts')}:{' '}
-              <strong data-testid="hub-restart-count">{hubRestartCount}</strong>
-            </span>
-            <span className="pos-telemetry-item">
-              {t('app.hub.health')}: <strong data-testid="health-status">{healthStatus}</strong>
-            </span>
-            <span className="pos-telemetry-item">
-              {t('app.hub.needsSetup')}:{' '}
-              <strong data-testid="health-needs-setup">
-                {needsSetup === null ? 'unknown' : String(needsSetup)}
-              </strong>
-            </span>
-            <span className="pos-telemetry-item">
-              <strong data-testid="health-check-count">{healthCheckCount}</strong>
-            </span>
-          </div>
-        )}
-
         <div className="pos-top-actions">
-          {screen !== 'pos' && (
-            <button
-              type="button"
-              className="pos-btn"
-              data-testid="refresh-health-btn"
-              onClick={() => {
-                void checkHubHealth(hubBaseUrl);
-              }}
-            >
-              {t('app.hub.refresh')}
-            </button>
-          )}
           <select
-            className="pos-btn"
+            className="pos-btn pos-btn-ghost"
             data-testid="locale-select"
             aria-label="Til / Тил / Язык"
             value={locale}
@@ -694,79 +743,23 @@ export function App() {
           </select>
           <button
             type="button"
-            className="pos-btn"
+            className="pos-btn pos-btn-ghost"
             data-testid="theme-toggle-btn"
             onClick={toggleTheme}
+            title={theme === 'light' ? t('app.theme.dark') : t('app.theme.light')}
+            aria-label={theme === 'light' ? t('app.theme.dark') : t('app.theme.light')}
           >
-            {theme === 'light' ? t('app.theme.dark') : t('app.theme.light')}
+            {theme === 'light' ? '☾' : '☀'}
           </button>
           {screen === 'pos' && (
-            <>
-              <button
-                type="button"
-                className="pos-btn"
-                data-testid="topbar-shortcuts-btn"
-                onClick={() => setActiveModal('shortcuts')}
-              >
-                {t('pos.shortcutsBtn')}
-              </button>
-              {(user?.role === 'owner' || user?.role === 'manager') && (
-                <button
-                  type="button"
-                  className="pos-btn"
-                  data-testid="topbar-catalog-btn"
-                  onClick={() => setActiveModal('catalog')}
-                >
-                  {t('catalog.openButton')}
-                </button>
-              )}
-              {fiscalModeEnabled && (user?.role === 'owner' || user?.role === 'manager') && (
-                <button
-                  type="button"
-                  className="pos-btn"
-                  data-testid="topbar-fiscal-btn"
-                  onClick={() => setActiveModal('fiscal_unsettled')}
-                >
-                  {t('fiscal.unsettled.openButton')}
-                </button>
-              )}
-              {(user?.role === 'owner' || user?.role === 'manager') && (
-                <button
-                  type="button"
-                  className="pos-btn"
-                  data-testid="topbar-connections-btn"
-                  onClick={() => setActiveModal('connections')}
-                >
-                  {t('connections.openButton')}
-                </button>
-              )}
-              {(user?.role === 'owner' || user?.role === 'manager') && (
-                <button
-                  type="button"
-                  className="pos-btn"
-                  data-testid="topbar-sync-conflicts-btn"
-                  onClick={() => setActiveModal('sync_conflicts')}
-                >
-                  {t('sync.conflicts.openButton')}
-                </button>
-              )}
-              <button
-                type="button"
-                className="pos-btn"
-                data-testid="topbar-shift-btn"
-                onClick={() => setActiveModal('shift_manage')}
-              >
-                {t('shift.manageButton')}
-              </button>
-              <button
-                type="button"
-                className="pos-btn pos-btn-danger"
-                data-testid="topbar-logout-btn"
-                onClick={() => void handleLogout()}
-              >
-                {t('auth.logoutButton')}
-              </button>
-            </>
+            <button
+              type="button"
+              className="pos-btn pos-btn-danger-soft"
+              data-testid="topbar-logout-btn"
+              onClick={() => void handleLogout()}
+            >
+              {t('auth.logoutButton')}
+            </button>
           )}
         </div>
       </header>
@@ -789,7 +782,9 @@ export function App() {
         </div>
       )}
 
-      {screen === 'loading' && (
+      {thinClientUnpaired && <TerminalPairForm />}
+
+      {screen === 'loading' && !thinClientUnpaired && (
         <div className="pos-auth-container" data-testid="screen-loading">
           <h2>{t('app.title')}</h2>
           <p>{t('common.loading')}</p>
@@ -865,20 +860,106 @@ export function App() {
       )}
 
       {screen === 'pos' && (
-        <PosWorkspaceScreen
-          api={api}
-          searchInputRef={searchInputRef}
-          onSearchProducts={handleSearchProducts}
-          onOpenParkedModal={handleOpenParkedModal}
-          onOpenCustomerModal={handleOpenCustomerModal}
-          onError={handleError}
-        />
+        <div className="pos-layout">
+          <SideNav
+            section={section}
+            role={user?.role ?? null}
+            fiscalMode={fiscalModeEnabled}
+            onSection={setSection}
+            onShift={() => setActiveModal('shift_manage')}
+            onFiscal={() => setActiveModal('fiscal_unsettled')}
+            onShortcuts={() => setActiveModal('shortcuts')}
+          />
+          <main className="pos-main" data-testid={`section-${section}`}>
+            {section === 'sale' && (
+              <PosWorkspaceScreen
+                api={api}
+                searchInputRef={searchInputRef}
+                onSearchProducts={handleSearchProducts}
+                onOpenParkedModal={handleOpenParkedModal}
+                onOpenCustomerModal={handleOpenCustomerModal}
+                onScanBarcode={handleScanBarcode}
+                onError={handleError}
+              />
+            )}
+            {section === 'receipts' && (
+              <ReceiptsPage api={api} role={user?.role ?? null} onError={handleError} />
+            )}
+            {section === 'products' && (user?.role === 'owner' || user?.role === 'manager') && (
+              <div className="pos-page-host">
+                <CatalogScreen
+                  api={api}
+                  fiscalMode={fiscalModeEnabled}
+                  onClose={() => setSection('sale')}
+                  onError={handleError}
+                />
+              </div>
+            )}
+            {section === 'settings' &&
+              user !== null &&
+              (user.role === 'owner' || user.role === 'manager') && (
+                <SettingsPage
+                  api={api}
+                  role={user.role}
+                  terminalInfo={terminalInfo}
+                  onError={handleError}
+                  onIntegrationsChanged={(st) => {
+                    setDemoMode(st.demoMode);
+                    setFiscalModeEnabled(st.fiscal.modeEnabled);
+                  }}
+                />
+              )}
+          </main>
+        </div>
+      )}
+
+      {screen !== 'pos' && !thinClientUnpaired && (
+        <footer className="pos-status-footer">
+          {/* Technical status for support: folded away, one click to open. */}
+          <details className="pos-status-details">
+            <summary>{t('app.systemStatus')}</summary>
+            <div className="pos-telemetry" data-testid="pos-telemetry-bar">
+              <span className="pos-telemetry-item">
+                {t('app.hub.status')}: <strong data-testid="hub-status">{hubStatus}</strong>
+              </span>
+              <span className="pos-telemetry-item">
+                <strong data-testid="hub-url">{hubBaseUrl ?? 'kutilyapti...'}</strong>
+              </span>
+              <span className="pos-telemetry-item">
+                <strong data-testid="hub-origin">{window.location.origin}</strong>
+              </span>
+              <span className="pos-telemetry-item">
+                {t('app.hub.restarts')}:{' '}
+                <strong data-testid="hub-restart-count">{hubRestartCount}</strong>
+              </span>
+              <span className="pos-telemetry-item">
+                {t('app.hub.health')}: <strong data-testid="health-status">{healthStatus}</strong>
+              </span>
+              <span className="pos-telemetry-item">
+                {t('app.hub.needsSetup')}:{' '}
+                <strong data-testid="health-needs-setup">
+                  {needsSetup === null ? 'unknown' : String(needsSetup)}
+                </strong>
+              </span>
+              <span className="pos-telemetry-item">
+                <strong data-testid="health-check-count">{healthCheckCount}</strong>
+              </span>
+            </div>
+            <button
+              type="button"
+              className="pos-btn"
+              data-testid="refresh-health-btn"
+              onClick={() => {
+                void checkHubHealth(hubBaseUrl);
+              }}
+            >
+              {t('app.hub.refresh')}
+            </button>
+          </details>
+        </footer>
       )}
 
       {activeModal === 'shortcuts' && <ShortcutsModal />}
-      {activeModal === 'catalog' && (user?.role === 'owner' || user?.role === 'manager') && (
-        <CatalogScreen api={api} onClose={() => setActiveModal('none')} onError={handleError} />
-      )}
       {activeModal === 'fiscal_unsettled' &&
         (user?.role === 'owner' || user?.role === 'manager') && (
           <FiscalUnsettledModal
@@ -887,24 +968,6 @@ export function App() {
             onError={handleError}
           />
         )}
-      {activeModal === 'connections' &&
-        user !== null &&
-        (user.role === 'owner' || user.role === 'manager') && (
-          <ConnectionsModal
-            api={api}
-            role={user.role}
-            terminalInfo={terminalInfo}
-            onClose={() => setActiveModal('none')}
-            onError={handleError}
-          />
-        )}
-      {activeModal === 'sync_conflicts' && (user?.role === 'owner' || user?.role === 'manager') && (
-        <SyncConflictsModal
-          api={api}
-          onClose={() => setActiveModal('none')}
-          onError={handleError}
-        />
-      )}
       {activeModal === 'diagnostics' && (user?.role === 'owner' || user?.role === 'manager') && (
         <div className="pos-modal-backdrop" data-testid="diagnostics-modal">
           <div className="pos-modal" style={{ maxWidth: '520px' }}>

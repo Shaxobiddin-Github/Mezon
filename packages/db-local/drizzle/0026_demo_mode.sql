@@ -1,0 +1,1 @@
+ALTER TABLE `local_hub_config` ADD `demo_mode_enabled` integer DEFAULT false NOT NULL;

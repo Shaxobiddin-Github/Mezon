@@ -38,6 +38,7 @@ import {
   createSqliteCloudStore,
   SqliteOutboxSyncStore,
   runInRegisterScope,
+  readDemoModeSync,
 } from '@mezon/db-local';
 import {
   type Clock,
@@ -106,6 +107,7 @@ import {
 } from './lan-server.js';
 import { HubLanService } from './lan-service.js';
 import { registerPaymentRoutes } from './payment-routes.js';
+import { registerDemoRoutes } from './demo-routes.js';
 import { HubPaymentService } from './payment-service.js';
 import { HubMarkingService } from './marking-service.js';
 import { registerSyncConflictRoutes } from './sync-conflicts-routes.js';
@@ -254,6 +256,8 @@ export async function createHubServer(options: CreateHubServerOptions): Promise<
   });
 
   const connection = openLocalSqliteDatabase(options.dbPath);
+  /** V2 demo mode (owner switch in `local_hub_config`); read on every use, never cached. */
+  const isDemoMode = (): boolean => readDemoModeSync(connection.sqlite);
   let store: SqliteHubAuthStore;
   let catalogStore: SqliteCatalogStore;
   let taxSettingsStore: SqliteTaxSettingsStore;
@@ -352,6 +356,7 @@ export async function createHubServer(options: CreateHubServerOptions): Promise<
       verifier: nodeEd25519RulesVerifier,
       getOrganizationId: () => store.getActiveRuntimeContext()?.config.organizationId ?? null,
       nowMs: () => BigInt(clock.now()),
+      isDemoMode,
       logger,
     });
     if (store.getActiveRuntimeContext() !== null) {
@@ -394,6 +399,7 @@ export async function createHubServer(options: CreateHubServerOptions): Promise<
       rulesService,
       nowMs: () => BigInt(clock.now()),
       getOrganizationId: () => store.getActiveRuntimeContext()?.config.organizationId ?? null,
+      isDemoMode,
       logger,
     });
     // C1: Hub never injects `__testHooks` into SqliteSaleStore in production/server runtime
@@ -684,6 +690,23 @@ export async function createHubServer(options: CreateHubServerOptions): Promise<
     );
     registerRulesRoutes(app, authService, rulesService, cartService, () => BigInt(clock.now()));
     registerFiscalRoutes(app, authService, fiscalService);
+    const markingDriver = options.markingDriver ?? new FakeMarkingDriver();
+    const paymentDriver = options.paymentDriver ?? new FakePaymentDriver();
+    registerDemoRoutes(app, authService, {
+      connection,
+      rulesService,
+      drivers: {
+        fiscal: {
+          driverId: fiscalService.driver.driverId,
+          isTestDriver: fiscalService.driver.isTestDriver,
+        },
+        payment: { driverId: paymentDriver.driverId, isTestDriver: paymentDriver.isTestDriver },
+        marking: { driverId: markingDriver.driverId, isTestDriver: markingDriver.isTestDriver },
+      },
+      getOrganizationId: () => store.getActiveRuntimeContext()?.config.organizationId ?? null,
+      nowMs: () => clock.now(),
+      nextId: () => idGen.nextId(),
+    });
     registerMarkingRoutes(
       app,
       authService,
@@ -691,7 +714,7 @@ export async function createHubServer(options: CreateHubServerOptions): Promise<
         connection,
         cartStore,
         catalogStore,
-        driver: options.markingDriver ?? new FakeMarkingDriver(),
+        driver: markingDriver,
         getContext: () => {
           const ctx = store.getActiveRuntimeContext();
           return ctx
@@ -708,7 +731,8 @@ export async function createHubServer(options: CreateHubServerOptions): Promise<
       authService,
       new HubPaymentService({
         connection,
-        driver: options.paymentDriver ?? new FakePaymentDriver(),
+        driver: paymentDriver,
+        isDemoMode,
         getContext: () => {
           const ctx = store.getActiveRuntimeContext();
           return ctx

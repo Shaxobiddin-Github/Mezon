@@ -224,6 +224,13 @@ export const localHubConfig = localSchemaRegistry.defineTable(
      * array). Legal configuration, not product data: empty = nothing requires marking.
      */
     markingMxikPrefixesJson: text('marking_mxik_prefixes_json').notNull().default('[]'),
+    /**
+     * V2 demo mode (owner 11-22: "demo bo'lib ishlab turishi kerak"). When on, the test drivers
+     * (fiscal / QR payment / marking) may be used for real-looking flows, every screen and receipt
+     * says SINOV, and a built-in demo rules package stands in until a signed one is imported.
+     * Owner-only switch; off by default, so a cashier can never record a fake QR payment.
+     */
+    demoModeEnabled: sqliteBoolean('demo_mode_enabled').notNull().default(false),
   }),
   (self) => [
     uniqueIndex('uidx_local_hub_config_singleton').on(self.singletonGuard),

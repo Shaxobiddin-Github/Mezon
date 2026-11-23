@@ -49,9 +49,9 @@ export const LicenceCard: React.FC = () => {
   return (
     <div
       data-testid="admin-licence-card"
-      className={`rounded-xl border shadow-sm p-4 space-y-1 text-sm ${tone}`}
+      className={`rounded-2xl border shadow-sm p-5 space-y-1.5 text-sm ${tone}`}
     >
-      <div className="font-semibold">{t('admin.licence.title')}</div>
+      <div className="text-base font-semibold">{t('admin.licence.title')}</div>
       <div>{message}</div>
       {info.invalidLicence && <div className="text-red-700">{t('admin.licence.invalid')}</div>}
       <div className="text-xs opacity-80">

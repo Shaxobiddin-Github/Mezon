@@ -9,6 +9,7 @@ import {
 } from '@mezon/db-local';
 import { DomainError, type UnixMs, type UuidV7 } from '@mezon/domain';
 import {
+  FakePaymentDriver,
   type PaymentDriver,
   type PaymentStatusResult,
   PaymentUnavailableError,
@@ -32,6 +33,8 @@ export interface PaymentIntentDto {
   /** What the provider actually took (differs from `amount` only for `amount_mismatch`). */
   readonly receivedAmount: string | null;
   readonly isTestDriver: boolean;
+  /** V2: the kassa may show "customer paid (demo)" for this intent. */
+  readonly demoPayAllowed: boolean;
 }
 
 /** T3.6 default QR lifetime [TASDIQLANSIN]: how long the cashier waits before the QR expires. */
@@ -55,6 +58,8 @@ export class HubPaymentService {
       readonly nowMs: () => UnixMs;
       readonly nextId: () => UuidV7;
       readonly ttlMs?: bigint;
+      /** V2 demo mode switch (owner only); demo payments need it AND the test driver. */
+      readonly isDemoMode?: () => boolean;
     },
   ) {}
 
@@ -81,6 +86,7 @@ export class HubPaymentService {
       consumedBySaleId: r.consumedBySaleId,
       receivedAmount: r.receivedAmountTiyin?.toString() ?? null,
       isTestDriver: this.o.driver.isTestDriver,
+      demoPayAllowed: this.o.driver instanceof FakePaymentDriver && this.o.isDemoMode?.() === true,
     };
   }
 
@@ -271,6 +277,37 @@ export class HubPaymentService {
     return listPaymentIntentsNeedingAttentionSync(this.sqlite, this.ctx().organizationId).map((r) =>
       this.dto(r),
     );
+  }
+
+  /**
+   * V2 demo: "the customer paid" for a dynamic QR of the TEST provider, so the whole QR flow can be
+   * shown without a real provider. Only in demo mode (owner switch) and only with the test driver;
+   * a real driver can never be told that money arrived. Every use leaves an audit row.
+   */
+  async demoPay(id: UuidV7, userId: UuidV7): Promise<PaymentIntentDto> {
+    const driver = this.o.driver;
+    if (!(driver instanceof FakePaymentDriver) || this.o.isDemoMode?.() !== true) {
+      throw new DomainError('PAYMENT_INTENT_INVALID_STATE', 'Demo payments are off');
+    }
+    const r = this.require(id);
+    if (r.kind !== 'dynamic' || r.status !== 'pending') {
+      throw new DomainError('PAYMENT_INTENT_INVALID_STATE', 'Only a waiting QR can be paid');
+    }
+    driver.pay(r.providerRef);
+    const nowMs = this.o.nowMs();
+    this.sqlite.transaction(() => {
+      appendAuditInTxSync(this.sqlite, {
+        organizationId: r.organizationId,
+        eventType: 'payment.demo_paid',
+        actorUserId: userId,
+        entity: 'payment_intents',
+        entityId: id,
+        details: { amount: r.amountTiyin.toString(), providerRef: r.providerRef },
+        nowMs,
+        nextId: this.o.nextId,
+      });
+    })();
+    return this.refresh(id);
   }
 
   cancel(id: UuidV7): PaymentIntentDto {

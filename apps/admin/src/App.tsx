@@ -10,6 +10,7 @@ import { CustomersView } from './components/CustomersView.js';
 import { DailyReportView } from './components/DailyReportView.js';
 import { ProductsView } from './components/ProductsView.js';
 import { DevicesView } from './components/DevicesView.js';
+import { OnlineShopView } from './components/OnlineShopView.js';
 
 export const App: React.FC = () => {
   const { isAuthenticated, isLoading, checkSession } = useAuthStore();
@@ -41,16 +42,19 @@ export const App: React.FC = () => {
 
   // `key={locale}` re-renders every view with the newly selected language.
   return (
-    <div key={locale} className="min-h-screen bg-slate-50 flex flex-col font-sans">
+    <div key={locale} className="min-h-screen bg-slate-50 font-sans lg:flex">
       <Navbar currentTab={currentTab} onSelectTab={setCurrentTab} />
 
-      <main className="flex-1 max-w-7xl w-full mx-auto px-4 sm:px-6 lg:px-8 py-8">
-        {currentTab === 'dashboard' && <DashboardView />}
-        {currentTab === 'receipts' && <ReceiptsView />}
-        {currentTab === 'customers' && <CustomersView />}
-        {currentTab === 'products' && <ProductsView />}
-        {currentTab === 'devices' && <DevicesView />}
-        {currentTab === 'reports' && <DailyReportView />}
+      <main className="min-w-0 flex-1 px-4 py-6 sm:px-6 lg:px-10 lg:py-8">
+        <div className="mx-auto w-full max-w-6xl">
+          {currentTab === 'dashboard' && <DashboardView />}
+          {currentTab === 'receipts' && <ReceiptsView />}
+          {currentTab === 'customers' && <CustomersView />}
+          {currentTab === 'products' && <ProductsView />}
+          {currentTab === 'shop' && <OnlineShopView />}
+          {currentTab === 'devices' && <DevicesView />}
+          {currentTab === 'reports' && <DailyReportView />}
+        </div>
       </main>
     </div>
   );

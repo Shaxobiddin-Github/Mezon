@@ -1,5 +1,6 @@
 import {
   CreateReturnRequestSchema,
+  ListSalesQuerySchema,
   ReturnIdParamsSchema,
   SaleIdParamsSchema,
   SalesLinesReportQuerySchema,
@@ -88,6 +89,19 @@ export function registerReturnRoutes(
     );
 
     return reply.code(response.idempotentReplay ? 200 : 201).send(response);
+  });
+
+  // C12: receipts history for the kassa (same permission as making a return).
+  app.get('/sales', async (request) => {
+    await authorize(authService, request, 'cart:write');
+    const query = ListSalesQuerySchema.parse(request.query);
+    return returnService.listSales(query);
+  });
+
+  app.get('/sales/:id/return-context', async (request) => {
+    await authorize(authService, request, 'cart:write');
+    const params = SaleIdParamsSchema.parse(request.params);
+    return returnService.getSaleReturnContext(params.id);
   });
 
   app.get('/sales/:id/returns', async (request) => {

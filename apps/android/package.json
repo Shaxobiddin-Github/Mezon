@@ -1,12 +1,22 @@
 {
   "name": "@mezon/android",
-  "version": "0.1.0",
+  "version": "1.0.0",
   "private": true,
   "type": "module",
-  "main": "./dist/index.js",
-  "types": "./dist/index.d.ts",
   "scripts": {
-    "build": "tsc -b",
-    "typecheck": "tsc --noEmit"
+    "build": "tsc --noEmit && vite build",
+    "typecheck": "tsc --noEmit",
+    "www": "node scripts/assemble-www.mjs",
+    "apk": "node scripts/build-apk.mjs"
+  },
+  "dependencies": {
+    "@capacitor-mlkit/barcode-scanning": "8.2.2",
+    "@capacitor/android": "8.6.0",
+    "@capacitor/core": "8.6.0"
+  },
+  "devDependencies": {
+    "@capacitor/cli": "8.6.0",
+    "@mezon/pos": "workspace:*",
+    "vite": "8.3.7"
   }
 }
