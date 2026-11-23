@@ -78,6 +78,13 @@
       "when": 1795174215208,
       "tag": "0010_telegram_retry",
       "breakpoints": true
+    },
+    {
+      "idx": 11,
+      "version": "7",
+      "when": 1795337227111,
+      "tag": "0011_online_shop",
+      "breakpoints": true
     }
   ]
 }

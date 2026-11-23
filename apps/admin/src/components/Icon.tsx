@@ -79,6 +79,19 @@ const PATHS = {
       <circle cx="12" cy="12" r="3" />
     </>
   ),
+  search: (
+    <>
+      <circle cx="11" cy="11" r="6.5" />
+      <path d="m20 20-4.2-4.2" />
+    </>
+  ),
+  cart: (
+    <>
+      <path d="M3 4h2l2.4 11h11.2L21 7H6.2" />
+      <circle cx="9" cy="19.5" r="1.5" />
+      <circle cx="17" cy="19.5" r="1.5" />
+    </>
+  ),
   store: (
     <>
       <path d="M4 10V20h16V10" />
