@@ -9,6 +9,7 @@ import {
 } from '@mezon/ui';
 import { type FormEvent, useEffect, useRef, useState } from 'react';
 import { ReceiptFiscalBadge } from './FiscalPanels.js';
+import { Icon } from './Icon.js';
 import { QrPayPanel } from './QrPayPanel.js';
 import { RulesPanel } from './RulesPanel.js';
 import { type HubApiClient, HubApiError } from '../api/hub-client.js';
@@ -290,324 +291,351 @@ export function PaymentModal({
 
   return (
     <div className="pos-modal-backdrop" data-testid="payment-modal">
-      <form className="pos-modal-card" onSubmit={handleFormSubmit}>
+      <form className="pos-modal-card pos-pay-card" onSubmit={handleFormSubmit}>
         <div className="pos-modal-header">
-          <h3 className="pos-modal-title">{t('payment.title')}</h3>
-          <button type="button" className="pos-btn" onClick={() => setActiveModal('none')}>
-            {t('common.close')}
-          </button>
-        </div>
-
-        <div className="pos-totals-grand" data-testid="payment-total-display">
-          <span>{t('payment.totalToPay')}:</span>
-          <span>
-            {formatTiyinToSom(expectedTotalTiyin)} {t('common.currency')}
-          </span>
-        </div>
-
-        {totalChangedPrompt && (
-          <div className="pos-error-banner" data-testid="sale-total-changed-box">
-            <span>
-              {t('payment.totalChangedConfirm', {
-                oldTotal: `${formatTiyinToSom(totalChangedPrompt.expectedTotal)} ${t('common.currency')}`,
-                newTotal: `${formatTiyinToSom(totalChangedPrompt.actualTotal)} ${t('common.currency')}`,
-              })}
-            </span>
-            <button
-              type="button"
-              className="pos-btn pos-btn-primary"
-              data-testid="accept-new-total-btn"
-              onClick={handleAcceptNewTotal}
-            >
-              {t('payment.acceptNewTotalBtn')}
-            </button>
-          </div>
-        )}
-
-        <div className="pos-form-group">
-          <label className="pos-form-label" htmlFor="pay-tendered-cash">
-            {t('payment.tenderedCash')}
-          </label>
-          <input
-            id="pay-tendered-cash"
-            className="pos-input"
-            data-testid="payment-tendered-cash-input"
-            value={tenderedCashSom}
-            onChange={(e) => {
-              onInputsChanged();
-              setTenderedCashSom(e.target.value);
-            }}
-            autoFocus
-          />
-          <div className="pos-quick-tenders">
-            <button
-              type="button"
-              className="pos-btn"
-              data-testid="payment-exact-cash-btn"
-              onClick={() => {
-                onInputsChanged();
-                setTenderedCashSom(tiyinToSomInputString(remainingForCashTiyin.toString()));
-              }}
-            >
-              {t('payment.exactCashBtn')}
-            </button>
-            {['10000', '20000', '50000', '100000', '200000'].map((som) => (
-              <button
-                key={som}
-                type="button"
-                className="pos-btn"
-                data-testid={`payment-quick-cash-${som}`}
-                onClick={() => {
-                  onInputsChanged();
-                  setTenderedCashSom(som);
-                }}
-              >
-                {formatTiyinToSom((BigInt(som) * 100n).toString())}
-              </button>
-            ))}
-          </div>
-        </div>
-
-        <div className="pos-totals-box">
-          <div className="pos-totals-row">
-            <span>{t('payment.cashApplied')}:</span>
-            <strong data-testid="payment-cash-applied">
-              {formatTiyinToSom(cashAppliedTiyin)} {t('common.currency')}
-            </strong>
-          </div>
-          <div className="pos-totals-row">
-            <span>{t('payment.changeDue')}:</span>
-            <strong data-testid="payment-change-due">
-              {formatTiyinToSom(changeDueTiyin)} {t('common.currency')}
-            </strong>
-          </div>
-        </div>
-
-        {paidQr.length > 0 && (
-          <div className="pos-qr-paid-list" data-testid="payment-qr-paid-list">
-            {paidQr.map((qr) => (
-              <div key={qr.intentId} className="pos-qr-paid-row">
-                <span className="pos-qr-paid-ok" aria-hidden="true">
-                  ✓
-                </span>
-                <span>
-                  {t('payment.method.uzqr')} · {formatTiyinToSom(qr.amountTiyin)}{' '}
-                  {t('common.currency')}
-                </span>
-                <small>
-                  {qr.isTestDriver ? `${t('payment.qr.testShort')} · ` : ''}
-                  {qr.providerRef}
-                </small>
-              </div>
-            ))}
-          </div>
-        )}
-
-        {qrAmountTiyin !== null && (
-          <QrPayPanel
-            api={api}
-            cartId={activeCart.id}
-            amountTiyin={qrAmountTiyin}
-            onError={onError}
-            onClose={() => setQrAmountTiyin(null)}
-            onPaid={(intent) => {
-              onInputsChanged();
-              const paid: PaidQrPayment = {
-                intentId: intent.id,
-                providerRef: intent.providerRef,
-                amountTiyin: intent.amount,
-                isTestDriver: intent.isTestDriver,
-              };
-              addPaidQr(activeCart.id, paid);
-              const left = remainingForCashTiyin - BigInt(intent.amount);
-              setTenderedCashSom(tiyinToSomInputString((left > 0n ? left : 0n).toString()));
-              setQrAmountTiyin(null);
-            }}
-          />
-        )}
-
-        <div className="pos-quick-tenders">
-          {qrAvailable && qrAmountTiyin === null && remainingForCashTiyin > 0n && (
-            <button
-              type="button"
-              className="pos-btn pos-btn-primary"
-              data-testid="payment-qr-btn"
-              onClick={() => setQrAmountTiyin(remainingForCashTiyin.toString())}
-            >
-              {t('payment.qr.button')}
-            </button>
-          )}
+          <h3 className="pos-modal-title pos-title-icon">
+            <Icon name="wallet" />
+            {t('payment.title')}
+          </h3>
           <button
             type="button"
-            className="pos-btn"
-            data-testid="payment-add-noncash-btn"
-            onClick={() => {
-              onInputsChanged();
-              setNonCashRows((rows) => [
-                ...rows,
-                {
-                  key: generateBrowserUuidV7(),
-                  method: 'card',
-                  amountSom: tiyinToSomInputString(remainingForCashTiyin.toString()),
-                  providerRef: '',
-                },
-              ]);
-              setTenderedCashSom('0');
-            }}
+            className="pos-btn pos-modal-close"
+            aria-label={t('common.close')}
+            title={t('common.close')}
+            onClick={() => setActiveModal('none')}
           >
-            {t('payment.addNonCashBtn')}
+            <Icon name="close" />
           </button>
         </div>
-        <div>
-          {nonCashRows.map((row, index) => (
-            <div
-              key={row.key}
-              className="pos-search-bar"
-              data-testid={`payment-noncash-row-${String(index)}`}
-            >
-              <select
-                className="pos-select"
-                data-testid={`payment-noncash-method-${String(index)}`}
-                value={row.method}
-                onChange={(e) => {
-                  onInputsChanged();
-                  const nextMethod = e.target.value as NonCashMethod;
-                  setNonCashRows((prev) =>
-                    prev.map((r) => (r.key === row.key ? { ...r, method: nextMethod } : r)),
-                  );
-                }}
-              >
-                {NON_CASH_METHODS.map((m) => (
-                  <option key={m} value={m}>
-                    {t(`payment.method.${m}`)}
-                  </option>
-                ))}
-              </select>
-              <input
-                className="pos-input"
-                data-testid={`payment-noncash-amount-${String(index)}`}
-                value={row.amountSom}
-                onChange={(e) => {
-                  onInputsChanged();
-                  const val = e.target.value;
-                  setNonCashRows((prev) =>
-                    prev.map((r) => (r.key === row.key ? { ...r, amountSom: val } : r)),
-                  );
-                }}
-              />
-              <input
-                className="pos-input"
-                data-testid={`payment-noncash-ref-${String(index)}`}
-                placeholder={t('payment.providerRefPlaceholder')}
-                value={row.providerRef}
-                onChange={(e) => {
-                  onInputsChanged();
-                  const val = e.target.value;
-                  setNonCashRows((prev) =>
-                    prev.map((r) => (r.key === row.key ? { ...r, providerRef: val } : r)),
-                  );
-                }}
-              />
-              <button
-                type="button"
-                className="pos-btn pos-btn-danger"
-                onClick={() => {
-                  onInputsChanged();
-                  setNonCashRows((prev) => prev.filter((r) => r.key !== row.key));
-                }}
-              >
-                {t('common.delete')}
-              </button>
-            </div>
-          ))}
-        </div>
 
-        <div className="pos-form-group">
-          <label className="pos-form-label" htmlFor="pay-debt-som">
-            {t('payment.debtAmount')} {selectedCustomer ? `(${selectedCustomer.fullName})` : ''}
-          </label>
-          <div className="pos-search-bar">
-            <input
-              id="pay-debt-som"
-              className="pos-input"
-              data-testid="payment-debt-input"
-              value={debtSom}
-              onChange={(e) => {
-                onInputsChanged();
-                setDebtSom(e.target.value);
-              }}
-            />
-            {debtTiyin > 0n && (
+        <div className="pos-pay-grid">
+          <div className="pos-pay-main">
+            {totalChangedPrompt && (
+              <div className="pos-error-banner" data-testid="sale-total-changed-box">
+                <span>
+                  {t('payment.totalChangedConfirm', {
+                    oldTotal: `${formatTiyinToSom(totalChangedPrompt.expectedTotal)} ${t('common.currency')}`,
+                    newTotal: `${formatTiyinToSom(totalChangedPrompt.actualTotal)} ${t('common.currency')}`,
+                  })}
+                </span>
+                <button
+                  type="button"
+                  className="pos-btn pos-btn-primary"
+                  data-testid="accept-new-total-btn"
+                  onClick={handleAcceptNewTotal}
+                >
+                  {t('payment.acceptNewTotalBtn')}
+                </button>
+              </div>
+            )}
+
+            <div className="pos-form-group">
+              <label className="pos-form-label pos-label-icon" htmlFor="pay-tendered-cash">
+                <Icon name="cash" />
+                {t('payment.tenderedCash')}
+              </label>
               <input
-                className="pos-input"
-                data-testid="payment-due-days-input"
-                placeholder={t('payment.dueDays')}
-                value={dueDaysStr}
+                id="pay-tendered-cash"
+                className="pos-input pos-input-money"
+                inputMode="numeric"
+                data-testid="payment-tendered-cash-input"
+                value={tenderedCashSom}
                 onChange={(e) => {
                   onInputsChanged();
-                  setDueDaysStr(e.target.value);
+                  setTenderedCashSom(e.target.value);
+                }}
+                autoFocus
+              />
+              <div className="pos-cash-grid">
+                <button
+                  type="button"
+                  className="pos-btn pos-btn-secondary"
+                  data-testid="payment-exact-cash-btn"
+                  onClick={() => {
+                    onInputsChanged();
+                    setTenderedCashSom(tiyinToSomInputString(remainingForCashTiyin.toString()));
+                  }}
+                >
+                  <Icon name="check" />
+                  {t('payment.exactCashBtn')}
+                </button>
+                {['10000', '20000', '50000', '100000', '200000'].map((som) => (
+                  <button
+                    key={som}
+                    type="button"
+                    className="pos-btn"
+                    data-testid={`payment-quick-cash-${som}`}
+                    onClick={() => {
+                      onInputsChanged();
+                      setTenderedCashSom(som);
+                    }}
+                  >
+                    {formatTiyinToSom((BigInt(som) * 100n).toString())}
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            {qrAmountTiyin !== null && (
+              <QrPayPanel
+                api={api}
+                cartId={activeCart.id}
+                amountTiyin={qrAmountTiyin}
+                onError={onError}
+                onClose={() => setQrAmountTiyin(null)}
+                onPaid={(intent) => {
+                  onInputsChanged();
+                  const paid: PaidQrPayment = {
+                    intentId: intent.id,
+                    providerRef: intent.providerRef,
+                    amountTiyin: intent.amount,
+                    isTestDriver: intent.isTestDriver,
+                  };
+                  addPaidQr(activeCart.id, paid);
+                  const left = remainingForCashTiyin - BigInt(intent.amount);
+                  setTenderedCashSom(tiyinToSomInputString((left > 0n ? left : 0n).toString()));
+                  setQrAmountTiyin(null);
                 }}
               />
             )}
+
+            <div className="pos-method-row">
+              {qrAvailable && qrAmountTiyin === null && remainingForCashTiyin > 0n && (
+                <button
+                  type="button"
+                  className="pos-btn pos-method-btn pos-method-qr"
+                  data-testid="payment-qr-btn"
+                  onClick={() => setQrAmountTiyin(remainingForCashTiyin.toString())}
+                >
+                  <Icon name="qr" />
+                  {t('payment.qr.button')}
+                </button>
+              )}
+              <button
+                type="button"
+                className="pos-btn pos-method-btn"
+                data-testid="payment-add-noncash-btn"
+                onClick={() => {
+                  onInputsChanged();
+                  setNonCashRows((rows) => [
+                    ...rows,
+                    {
+                      key: generateBrowserUuidV7(),
+                      method: 'card',
+                      amountSom: tiyinToSomInputString(remainingForCashTiyin.toString()),
+                      providerRef: '',
+                    },
+                  ]);
+                  setTenderedCashSom('0');
+                }}
+              >
+                <Icon name="card" />
+                {t('payment.addNonCashBtn')}
+              </button>
+            </div>
+            <div className="pos-noncash-list">
+              {nonCashRows.map((row, index) => (
+                <div
+                  key={row.key}
+                  className="pos-noncash-row"
+                  data-testid={`payment-noncash-row-${String(index)}`}
+                >
+                  <select
+                    className="pos-select"
+                    data-testid={`payment-noncash-method-${String(index)}`}
+                    value={row.method}
+                    onChange={(e) => {
+                      onInputsChanged();
+                      const nextMethod = e.target.value as NonCashMethod;
+                      setNonCashRows((prev) =>
+                        prev.map((r) => (r.key === row.key ? { ...r, method: nextMethod } : r)),
+                      );
+                    }}
+                  >
+                    {NON_CASH_METHODS.map((m) => (
+                      <option key={m} value={m}>
+                        {t(`payment.method.${m}`)}
+                      </option>
+                    ))}
+                  </select>
+                  <input
+                    className="pos-input"
+                    data-testid={`payment-noncash-amount-${String(index)}`}
+                    value={row.amountSom}
+                    onChange={(e) => {
+                      onInputsChanged();
+                      const val = e.target.value;
+                      setNonCashRows((prev) =>
+                        prev.map((r) => (r.key === row.key ? { ...r, amountSom: val } : r)),
+                      );
+                    }}
+                  />
+                  <input
+                    className="pos-input"
+                    data-testid={`payment-noncash-ref-${String(index)}`}
+                    placeholder={t('payment.providerRefPlaceholder')}
+                    value={row.providerRef}
+                    onChange={(e) => {
+                      onInputsChanged();
+                      const val = e.target.value;
+                      setNonCashRows((prev) =>
+                        prev.map((r) => (r.key === row.key ? { ...r, providerRef: val } : r)),
+                      );
+                    }}
+                  />
+                  <button
+                    type="button"
+                    className="pos-btn pos-btn-danger-soft"
+                    aria-label={t('common.delete')}
+                    title={t('common.delete')}
+                    onClick={() => {
+                      onInputsChanged();
+                      setNonCashRows((prev) => prev.filter((r) => r.key !== row.key));
+                    }}
+                  >
+                    <Icon name="trash" />
+                  </button>
+                </div>
+              ))}
+            </div>
+
+            <div className="pos-form-group">
+              <label className="pos-form-label pos-label-icon" htmlFor="pay-debt-som">
+                <Icon name="debt" />
+                {t('payment.debtAmount')} {selectedCustomer ? `(${selectedCustomer.fullName})` : ''}
+              </label>
+              <div className="pos-search-bar">
+                <input
+                  id="pay-debt-som"
+                  className="pos-input"
+                  inputMode="numeric"
+                  data-testid="payment-debt-input"
+                  value={debtSom}
+                  onChange={(e) => {
+                    onInputsChanged();
+                    setDebtSom(e.target.value);
+                  }}
+                />
+                {debtTiyin > 0n && (
+                  <input
+                    className="pos-input"
+                    data-testid="payment-due-days-input"
+                    placeholder={t('payment.dueDays')}
+                    value={dueDaysStr}
+                    onChange={(e) => {
+                      onInputsChanged();
+                      setDueDaysStr(e.target.value);
+                    }}
+                  />
+                )}
+              </div>
+            </div>
+
+            {needsCreditOverride && (
+              <div className="pos-pane" data-testid="payment-credit-override-box">
+                <strong>{t('supervisor.title')}</strong>
+                <input
+                  className="pos-input"
+                  data-testid="payment-supervisor-username"
+                  placeholder={t('supervisor.username')}
+                  value={supervisorUsername}
+                  onChange={(e) => setSupervisorUsername(e.target.value)}
+                />
+                <input
+                  type="password"
+                  className="pos-input"
+                  data-testid="payment-supervisor-pin"
+                  placeholder={t('supervisor.pin')}
+                  value={supervisorPin}
+                  onChange={(e) => setSupervisorPin(e.target.value)}
+                />
+              </div>
+            )}
           </div>
-        </div>
 
-        {needsCreditOverride && (
-          <div className="pos-pane" data-testid="payment-credit-override-box">
-            <strong>{t('supervisor.title')}</strong>
-            <input
-              className="pos-input"
-              data-testid="payment-supervisor-username"
-              placeholder={t('supervisor.username')}
-              value={supervisorUsername}
-              onChange={(e) => setSupervisorUsername(e.target.value)}
+          <aside className="pos-pay-aside">
+            <div className="pos-pay-hero" data-testid="payment-total-display">
+              <span>{t('payment.totalToPay')}:</span>
+              <span>
+                {formatTiyinToSom(expectedTotalTiyin)} {t('common.currency')}
+              </span>
+            </div>
+            <div className="pos-totals-box">
+              <div className="pos-totals-row">
+                <span>{t('payment.cashApplied')}:</span>
+                <strong data-testid="payment-cash-applied">
+                  {formatTiyinToSom(cashAppliedTiyin)} {t('common.currency')}
+                </strong>
+              </div>
+              <div
+                className={`pos-totals-row pos-change-row ${changeDueTiyin > 0n ? 'pos-change-due' : ''}`}
+              >
+                <span>{t('payment.changeDue')}:</span>
+                <strong data-testid="payment-change-due">
+                  {formatTiyinToSom(changeDueTiyin)} {t('common.currency')}
+                </strong>
+              </div>
+            </div>
+
+            {paidQr.length > 0 && (
+              <div className="pos-qr-paid-list" data-testid="payment-qr-paid-list">
+                {paidQr.map((qr) => (
+                  <div key={qr.intentId} className="pos-qr-paid-row">
+                    <span className="pos-qr-paid-ok" aria-hidden="true">
+                      <Icon name="check" />
+                    </span>
+                    <span>
+                      {t('payment.method.uzqr')} · {formatTiyinToSom(qr.amountTiyin)}{' '}
+                      {t('common.currency')}
+                    </span>
+                    <small>
+                      {qr.isTestDriver ? `${t('payment.qr.testShort')} · ` : ''}
+                      {qr.providerRef}
+                    </small>
+                  </div>
+                ))}
+              </div>
+            )}
+
+            <RulesPanel
+              api={api}
+              cartId={activeCart.id}
+              cartVersionKey={`${activeCart.id}:${activeCart.totalFinal}:${String(activeCart.lines.length)}`}
+              payments={buildPayments()}
+              onBlockedChange={setRulesBlocked}
             />
-            <input
-              type="password"
-              className="pos-input"
-              data-testid="payment-supervisor-pin"
-              placeholder={t('supervisor.pin')}
-              value={supervisorPin}
-              onChange={(e) => setSupervisorPin(e.target.value)}
-            />
-          </div>
-        )}
 
-        <RulesPanel
-          api={api}
-          cartId={activeCart.id}
-          cartVersionKey={`${activeCart.id}:${activeCart.totalFinal}:${String(activeCart.lines.length)}`}
-          payments={buildPayments()}
-          onBlockedChange={setRulesBlocked}
-        />
+            <div className="pos-totals-row">
+              <span>{t('payment.remainingUnallocated')}:</span>
+              <strong data-testid="payment-unallocated">
+                {formatTiyinToSom(unallocatedTiyin)} {t('common.currency')}
+              </strong>
+            </div>
 
-        <div className="pos-totals-row">
-          <span>{t('payment.remainingUnallocated')}:</span>
-          <strong data-testid="payment-unallocated">
-            {formatTiyinToSom(unallocatedTiyin)} {t('common.currency')}
-          </strong>
-        </div>
-
-        <div className="pos-top-actions">
-          <button
-            type="submit"
-            className="pos-btn pos-btn-success"
-            data-testid="payment-complete-btn"
-            disabled={isSubmittingPayment || unallocatedTiyin !== 0n || rulesBlocked}
-          >
-            {isSubmittingPayment ? t('payment.submitting') : t('payment.completeBtn')}
-          </button>
-          {networkRetryPending && (
-            <button
-              type="button"
-              className="pos-btn pos-btn-primary"
-              data-testid="payment-retry-btn"
-              disabled={isSubmittingPayment}
-              onClick={() => void submitSale()}
-            >
-              {t('common.retry')}
-            </button>
-          )}
+            <div className="pos-pay-submit">
+              <button
+                type="submit"
+                className="pos-btn pos-btn-success pos-btn-xl"
+                data-testid="payment-complete-btn"
+                disabled={isSubmittingPayment || unallocatedTiyin !== 0n || rulesBlocked}
+              >
+                <Icon name="check" />
+                {isSubmittingPayment ? t('payment.submitting') : t('payment.completeBtn')}
+              </button>
+              {networkRetryPending && (
+                <button
+                  type="button"
+                  className="pos-btn pos-btn-primary"
+                  data-testid="payment-retry-btn"
+                  disabled={isSubmittingPayment}
+                  onClick={() => void submitSale()}
+                >
+                  <Icon name="refresh" />
+                  {t('common.retry')}
+                </button>
+              )}
+            </div>
+          </aside>
         </div>
       </form>
     </div>
@@ -696,7 +724,10 @@ export function ReceiptModal({ api }: { readonly api?: HubApiClient } = {}) {
         </div>
 
         <div className="pos-modal-header">
-          <h3 className="pos-modal-title">{t('receipt.title')}</h3>
+          <h3 className="pos-modal-title pos-title-icon">
+            <Icon name="receipts" />
+            {t('receipt.title')}
+          </h3>
           <span data-testid="receipt-code">{sale.receiptCode}</span>
         </div>
 
@@ -782,17 +813,19 @@ export function ReceiptModal({ api }: { readonly api?: HubApiClient } = {}) {
               void onReprint();
             }}
           >
+            <Icon name="printer" />
             {t('receipt.reprintBtn')}
           </button>
         )}
 
         <button
           type="button"
-          className="pos-btn pos-btn-primary"
+          className="pos-btn pos-btn-primary pos-btn-xl"
           data-testid="receipt-new-sale-btn"
           autoFocus
           onClick={() => setActiveModal('none')}
         >
+          <Icon name="plus" />
           {t('receipt.newSaleBtn')}
         </button>
       </div>
@@ -896,8 +929,12 @@ export function ShiftManagementModal({
     <div className="pos-modal-backdrop" data-testid="shift-manage-modal">
       <div className="pos-modal-card">
         <div className="pos-modal-header">
-          <h3 className="pos-modal-title">{t('shift.manageTitle')}</h3>
+          <h3 className="pos-modal-title pos-title-icon">
+            <Icon name="shift" />
+            {t('shift.manageTitle')}
+          </h3>
           <button type="button" className="pos-btn" onClick={() => setActiveModal('none')}>
+            <Icon name="close" />
             {t('common.close')}
           </button>
         </div>
@@ -916,6 +953,7 @@ export function ShiftManagementModal({
             data-testid="shift-tab-cash-move"
             onClick={() => setTab('cash_move')}
           >
+            <Icon name="cash" />
             {t('shift.tabCashMove')}
           </button>
           <button
@@ -924,6 +962,7 @@ export function ShiftManagementModal({
             data-testid="shift-tab-close-shift"
             onClick={() => setTab('close_shift')}
           >
+            <Icon name="lock" />
             {t('shift.tabCloseShift')}
           </button>
         </div>
@@ -998,9 +1037,10 @@ export function ShiftManagementModal({
 
             <button
               type="submit"
-              className="pos-btn pos-btn-primary"
+              className="pos-btn pos-btn-primary pos-btn-xl"
               data-testid="cash-move-submit-btn"
             >
+              <Icon name="check" />
               {t('shift.recordCashMove')}
             </button>
           </form>
@@ -1070,9 +1110,10 @@ export function ShiftManagementModal({
 
             <button
               type="submit"
-              className="pos-btn pos-btn-danger"
+              className="pos-btn pos-btn-danger pos-btn-xl"
               data-testid="close-shift-submit-btn"
             >
+              <Icon name="lock" />
               {t('shift.closeButton')}
             </button>
           </form>

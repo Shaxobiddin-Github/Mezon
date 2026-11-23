@@ -5,7 +5,8 @@ import { formatMilliToQtyString, formatTiyinToSom, stepMilliQuantity } from '@me
 import { type KeyboardEvent, type RefObject, useState } from 'react';
 import type { HubApiClient } from '../api/hub-client.js';
 import { usePosStore } from '../store/pos-store.js';
-import { type IconName, NavIcon, splitHotkey } from './SideNav.js';
+import { Icon, type IconName } from './Icon.js';
+import { splitHotkey } from './SideNav.js';
 
 /** Soft tile colours: the same product always gets the same one (by name). */
 const TILE_TONES = 6;
@@ -19,7 +20,7 @@ function ActionLabel({ icon, label }: { readonly icon: IconName; readonly label:
   const [text, key] = splitHotkey(label);
   return (
     <>
-      <NavIcon name={icon} />
+      <Icon name={icon} />
       <span className="pos-action-text">{text}</span>
       {key !== null && <kbd className="pos-kbd">{key}</kbd>}
     </>
@@ -191,7 +192,7 @@ export function PosWorkspaceScreen({
           {lines.length === 0 ? (
             <div className="pos-empty-state" data-testid="cart-empty-message">
               <span className="pos-empty-icon" aria-hidden="true">
-                <NavIcon name="scan" />
+                <Icon name="scan" />
               </span>
               <p>{t('pos.cartEmpty')}</p>
             </div>
@@ -202,7 +203,6 @@ export function PosWorkspaceScreen({
                   <th>#</th>
                   <th>{t('pos.colItem')}</th>
                   <th>{t('pos.colQty')}</th>
-                  <th>{t('pos.colPrice')}</th>
                   {anyLineDiscount && <th className="pos-line-discount">{t('pos.colDiscount')}</th>}
                   <th>{t('pos.colTotal')}</th>
                   <th />
@@ -222,23 +222,35 @@ export function PosWorkspaceScreen({
                       onClick={() => setSelectedLineId(line.id)}
                     >
                       <td>{index + 1}</td>
-                      <td data-testid={`cart-line-name-${String(index)}`}>{line.name}</td>
+                      <td className="pos-line-item">
+                        <span
+                          className="pos-line-name"
+                          data-testid={`cart-line-name-${String(index)}`}
+                        >
+                          {line.name}
+                        </span>
+                        <span className="pos-line-price">
+                          {formatTiyinToSom(line.unitPriceSnapshot)} {t('common.currency')} /{' '}
+                          {t(`unit.${line.unit}`)}
+                        </span>
+                      </td>
                       <td>
                         <div className="pos-qty-controls">
                           <button
                             type="button"
-                            className="pos-btn"
+                            className="pos-btn pos-qty-step"
                             data-testid={`cart-line-dec-${String(index)}`}
+                            aria-label={t('pos.qtyDecrease')}
                             onClick={(e) => {
                               e.stopPropagation();
                               void handleStepLineQty(line.id, line.qty, -1);
                             }}
                           >
-                            -
+                            <Icon name="minus" />
                           </button>
                           <button
                             type="button"
-                            className="pos-btn"
+                            className="pos-btn pos-qty-value"
                             data-testid={`cart-line-qty-${String(index)}`}
                             onClick={(e) => {
                               e.stopPropagation();
@@ -250,18 +262,18 @@ export function PosWorkspaceScreen({
                           </button>
                           <button
                             type="button"
-                            className="pos-btn"
+                            className="pos-btn pos-qty-step"
                             data-testid={`cart-line-inc-${String(index)}`}
+                            aria-label={t('pos.qtyIncrease')}
                             onClick={(e) => {
                               e.stopPropagation();
                               void handleStepLineQty(line.id, line.qty, 1);
                             }}
                           >
-                            +
+                            <Icon name="plus" />
                           </button>
                         </div>
                       </td>
-                      <td>{formatTiyinToSom(line.unitPriceSnapshot)}</td>
                       {anyLineDiscount && (
                         <td className="pos-line-discount">
                           {lineDiscount > 0n ? `−${formatTiyinToSom(lineDiscount)}` : '—'}
@@ -273,14 +285,16 @@ export function PosWorkspaceScreen({
                       <td>
                         <button
                           type="button"
-                          className="pos-btn pos-btn-danger-soft"
+                          className="pos-btn pos-btn-danger-soft pos-line-del"
                           data-testid={`cart-line-del-${String(index)}`}
+                          aria-label={t('pos.removeLine')}
+                          title={t('pos.removeLine')}
                           onClick={(e) => {
                             e.stopPropagation();
                             void handleRemoveLine(line.id);
                           }}
                         >
-                          ×
+                          <Icon name="trash" />
                         </button>
                       </td>
                     </tr>
@@ -412,25 +426,12 @@ export function PosWorkspaceScreen({
               aria-label={t('pos.camera.scan')}
               title={t('pos.camera.scan')}
             >
-              <svg
-                viewBox="0 0 24 24"
-                width="20"
-                height="20"
-                fill="none"
-                stroke="currentColor"
-                strokeWidth="1.8"
-                strokeLinecap="round"
-                strokeLinejoin="round"
-                aria-hidden="true"
-              >
-                <path d="M4 8V6a2 2 0 0 1 2-2h2M16 4h2a2 2 0 0 1 2 2v2M20 16v2a2 2 0 0 1-2 2h-2M8 20H6a2 2 0 0 1-2-2v-2" />
-                <path d="M7 9v6M10 9v6M13 9v6M16 9v6" />
-              </svg>
+              <Icon name="scan" />
               <span className="pos-camera-label">{t('pos.camera.scan')}</span>
             </button>
           )}
           <label className="pos-search-field">
-            <NavIcon name="search" />
+            <Icon name="search" />
             <input
               ref={searchInputRef}
               className="pos-input"

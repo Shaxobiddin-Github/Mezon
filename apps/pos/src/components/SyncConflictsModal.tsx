@@ -2,6 +2,7 @@ import type { CloudParkedEventDto, SyncConflictDto } from '@mezon/contracts';
 import { type I18nKey, t } from '@mezon/i18n';
 import { useCallback, useEffect, useState } from 'react';
 import type { HubApiClient } from '../api/hub-client.js';
+import { Icon } from './Icon.js';
 
 const KNOWN_REASONS = new Set([
   'CUSTOMER_OVERPAID',
@@ -78,7 +79,10 @@ export function SyncConflictsModal(props: {
     <div className="pos-modal-backdrop" data-testid="sync-conflicts-modal">
       <div className="pos-modal-card">
         <div className="pos-modal-header">
-          <h3 className="pos-modal-title">{t('sync.conflicts.title')}</h3>
+          <h3 className="pos-modal-title pos-title-icon">
+            <Icon name="refresh" />
+            {t('sync.conflicts.title')}
+          </h3>
           <button
             type="button"
             className="pos-btn"

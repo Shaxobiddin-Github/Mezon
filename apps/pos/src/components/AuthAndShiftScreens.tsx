@@ -4,6 +4,7 @@ import { type FormEvent, useState } from 'react';
 import { type HubApiClient, HubApiError } from '../api/hub-client.js';
 import { usePosStore } from '../store/pos-store.js';
 import { generateBrowserUuidV7 } from '../utils/browser-uuid.js';
+import { Icon } from './Icon.js';
 
 export function SetupScreen({
   api,
@@ -146,52 +147,54 @@ export function LoginScreen({
 
   return (
     <div className="pos-auth-container pos-login" data-testid="login-screen">
-      <div className="pos-auth-head">
-        <span className="pos-logo-mark pos-logo-lg" aria-hidden="true">
-          G
-        </span>
-        <div>
-          <h2>{t('auth.title')}</h2>
-          <p className="pos-auth-sub">
-            {loginOptions.length > 1 ? t('auth.chooseUserHint') : t('auth.enterPinHint')}
-          </p>
+      <div className="pos-login-users">
+        <div className="pos-auth-head">
+          <span className="pos-logo-mark pos-logo-lg" aria-hidden="true">
+            G
+          </span>
+          <div>
+            <h2>{t('auth.title')}</h2>
+            <p className="pos-auth-sub">
+              {loginOptions.length > 1 ? t('auth.chooseUserHint') : t('auth.enterPinHint')}
+            </p>
+          </div>
         </div>
+
+        {authRateLimitSeconds > 0 && (
+          <div className="pos-error-banner" data-testid="login-rate-limit-banner">
+            {t('auth.rateLimited', { seconds: authRateLimitSeconds })}
+          </div>
+        )}
+
+        {loginOptions.length > 0 && (
+          <div className="pos-user-cards" data-testid="login-options-list">
+            {loginOptions.map((opt) => (
+              <button
+                key={opt.id}
+                type="button"
+                className={`pos-user-card ${selectedUserId === opt.id ? 'pos-user-card-active' : ''}`}
+                data-testid={`login-option-${opt.id}`}
+                aria-pressed={selectedUserId === opt.id}
+                onClick={() => {
+                  setSelectedUserId(opt.id);
+                  setUsername('');
+                  setErrorBanner(null);
+                }}
+              >
+                <span className="pos-user-avatar" aria-hidden="true">
+                  {opt.fullName.trim().charAt(0).toUpperCase()}
+                </span>
+                <span className="pos-user-card-text">
+                  <strong>{opt.fullName}</strong>
+                  <small>{t(`auth.role.${opt.role}`)}</small>
+                </span>
+              </button>
+            ))}
+          </div>
+        )}
       </div>
 
-      {authRateLimitSeconds > 0 && (
-        <div className="pos-error-banner" data-testid="login-rate-limit-banner">
-          {t('auth.rateLimited', { seconds: authRateLimitSeconds })}
-        </div>
-      )}
-
-      {loginOptions.length > 0 && (
-        <div className="pos-user-cards" data-testid="login-options-list">
-          {loginOptions.map((opt) => (
-            <button
-              key={opt.id}
-              type="button"
-              className={`pos-user-card ${selectedUserId === opt.id ? 'pos-user-card-active' : ''}`}
-              data-testid={`login-option-${opt.id}`}
-              aria-pressed={selectedUserId === opt.id}
-              onClick={() => {
-                setSelectedUserId(opt.id);
-                setUsername('');
-                setErrorBanner(null);
-              }}
-            >
-              <span className="pos-user-avatar" aria-hidden="true">
-                {opt.fullName.trim().charAt(0).toUpperCase()}
-              </span>
-              <span className="pos-user-card-text">
-                <strong>{opt.fullName}</strong>
-                <small>{t(`auth.role.${opt.role}`)}</small>
-              </span>
-            </button>
-          ))}
-        </div>
-      )}
-
-      <form onSubmit={(e) => void handleSubmit(e)}>
+      <form className="pos-login-form" onSubmit={(e) => void handleSubmit(e)}>
         {selectedUserId.length === 0 && (
           <div className="pos-form-group">
             <label className="pos-form-label" htmlFor="login-username">
@@ -216,7 +219,8 @@ export function LoginScreen({
           <input
             id="login-pin"
             type="password"
-            className="pos-input"
+            className="pos-input pos-pin-input"
+            inputMode="numeric"
             data-testid="login-pin-input"
             placeholder={t('auth.pinPlaceholder')}
             value={pin}
@@ -258,13 +262,15 @@ export function LoginScreen({
             type="button"
             className="pos-numpad-btn"
             data-testid="login-numpad-backspace"
+            aria-label={t('common.delete')}
             onClick={() => setPin((p) => p.slice(0, -1))}
           >
-            {t('auth.Backspace')}
+            <Icon name="backspace" />
           </button>
         </div>
 
         <button type="submit" className="pos-btn pos-btn-primary" data-testid="login-submit-btn">
+          <Icon name="lock" />
           {t('auth.loginButton')}
         </button>
       </form>
@@ -313,7 +319,10 @@ export function OpenShiftScreen({
 
   return (
     <div className="pos-auth-container" data-testid="open-shift-screen">
-      <h2>{t('shift.openTitle')}</h2>
+      <h2 className="pos-title-icon">
+        <Icon name="shift" />
+        {t('shift.openTitle')}
+      </h2>
       <p>{t('shift.openSubtitle')}</p>
 
       {lastShiftClosure && (
@@ -391,9 +400,10 @@ export function OpenShiftScreen({
 
         <button
           type="submit"
-          className="pos-btn pos-btn-primary"
+          className="pos-btn pos-btn-primary pos-btn-xl"
           data-testid="open-shift-submit-btn"
         >
+          <Icon name="shift" />
           {t('shift.openButton')}
         </button>
       </form>

@@ -2,6 +2,7 @@ import type { FiscalDocDto, FiscalOfflineWarning } from '@mezon/contracts';
 import { type I18nKey, t } from '@mezon/i18n';
 import { useCallback, useEffect, useState } from 'react';
 import type { HubApiClient } from '../api/hub-client.js';
+import { Icon } from './Icon.js';
 
 function statusText(status: FiscalDocDto['status'] | null): string {
   return t(`fiscal.status.${status ?? 'none'}` as I18nKey);
@@ -155,7 +156,10 @@ export function FiscalUnsettledModal(props: {
     <div className="pos-modal-backdrop" data-testid="fiscal-unsettled-modal">
       <div className="pos-modal-card">
         <div className="pos-modal-header">
-          <h3 className="pos-modal-title">{t('fiscal.unsettled.title')}</h3>
+          <h3 className="pos-modal-title pos-title-icon">
+            <Icon name="fiscal" />
+            {t('fiscal.unsettled.title')}
+          </h3>
           <button
             type="button"
             className="pos-btn"

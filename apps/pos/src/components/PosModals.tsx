@@ -10,6 +10,7 @@ import { type FormEvent, useState } from 'react';
 import type { HubApiClient } from '../api/hub-client.js';
 import { customerBalanceLabel } from '../utils/customer-balance.js';
 import { usePosStore } from '../store/pos-store.js';
+import { Icon } from './Icon.js';
 
 const UNITS: readonly ProductUnit[] = ['dona', 'kg', 'g', 'litr', 'metr', 'm2', 'qadoq'];
 
@@ -20,13 +21,17 @@ export function ShortcutsModal() {
     <div className="pos-modal-backdrop" data-testid="shortcuts-modal">
       <div className="pos-modal-card">
         <div className="pos-modal-header">
-          <h3 className="pos-modal-title">{t('shortcuts.title')}</h3>
+          <h3 className="pos-modal-title pos-title-icon">
+            <Icon name="keyboard" />
+            {t('shortcuts.title')}
+          </h3>
           <button
             type="button"
             className="pos-btn"
             data-testid="shortcuts-close-btn"
             onClick={() => setActiveModal('none')}
           >
+            <Icon name="close" />
             {t('common.close')}
           </button>
         </div>
@@ -92,8 +97,12 @@ export function QuickSaleModal({
     <div className="pos-modal-backdrop" data-testid="quick-sale-modal">
       <form className="pos-modal-card" onSubmit={(e) => void handleSubmit(e)}>
         <div className="pos-modal-header">
-          <h3 className="pos-modal-title">{t('quickSale.title')}</h3>
+          <h3 className="pos-modal-title pos-title-icon">
+            <Icon name="bolt" />
+            {t('quickSale.title')}
+          </h3>
           <button type="button" className="pos-btn" onClick={() => setActiveModal('none')}>
+            <Icon name="close" />
             {t('common.close')}
           </button>
         </div>
@@ -162,6 +171,7 @@ export function QuickSaleModal({
 
         <div className="pos-top-actions">
           <button type="submit" className="pos-btn pos-btn-primary" data-testid="quick-sale-submit">
+            <Icon name="check" />
             {t('quickSale.addBtn')}
           </button>
           <button type="button" className="pos-btn" onClick={() => setActiveModal('none')}>
@@ -210,10 +220,12 @@ export function EditQtyModal({
     <div className="pos-modal-backdrop" data-testid="edit-qty-modal">
       <form className="pos-modal-card" onSubmit={(e) => void handleSubmit(e)}>
         <div className="pos-modal-header">
-          <h3 className="pos-modal-title">
+          <h3 className="pos-modal-title pos-title-icon">
+            <Icon name="edit" />
             {t('pos.editQtyTitle')}: {line.name}
           </h3>
           <button type="button" className="pos-btn" onClick={() => setActiveModal('none')}>
+            <Icon name="close" />
             {t('common.close')}
           </button>
         </div>
@@ -233,6 +245,7 @@ export function EditQtyModal({
         </div>
         <div className="pos-top-actions">
           <button type="submit" className="pos-btn pos-btn-primary" data-testid="edit-qty-submit">
+            <Icon name="check" />
             {t('common.save')}
           </button>
         </div>
@@ -318,8 +331,12 @@ export function DiscountModal({
     <div className="pos-modal-backdrop" data-testid="discount-modal">
       <form className="pos-modal-card" onSubmit={(e) => void handleSubmit(e)}>
         <div className="pos-modal-header">
-          <h3 className="pos-modal-title">{t('discount.title')}</h3>
+          <h3 className="pos-modal-title pos-title-icon">
+            <Icon name="percent" />
+            {t('discount.title')}
+          </h3>
           <button type="button" className="pos-btn" onClick={() => setActiveModal('none')}>
+            <Icon name="close" />
             {t('common.close')}
           </button>
         </div>
@@ -464,8 +481,12 @@ export function ParkCartModal({
     <div className="pos-modal-backdrop" data-testid="park-cart-modal">
       <form className="pos-modal-card" onSubmit={(e) => void handleSubmit(e)}>
         <div className="pos-modal-header">
-          <h3 className="pos-modal-title">{t('park.modalTitle')}</h3>
+          <h3 className="pos-modal-title pos-title-icon">
+            <Icon name="pause" />
+            {t('park.modalTitle')}
+          </h3>
           <button type="button" className="pos-btn" onClick={() => setActiveModal('none')}>
+            <Icon name="close" />
             {t('common.close')}
           </button>
         </div>
@@ -481,6 +502,7 @@ export function ParkCartModal({
         </div>
         <div className="pos-top-actions">
           <button type="submit" className="pos-btn pos-btn-primary" data-testid="park-confirm-btn">
+            <Icon name="check" />
             {t('park.confirmBtn')}
           </button>
         </div>
@@ -526,8 +548,12 @@ export function ParkedCartsListModal({
     <div className="pos-modal-backdrop" data-testid="parked-carts-modal">
       <div className="pos-modal-card">
         <div className="pos-modal-header">
-          <h3 className="pos-modal-title">{t('parked.listTitle')}</h3>
+          <h3 className="pos-modal-title pos-title-icon">
+            <Icon name="stack" />
+            {t('parked.listTitle')}
+          </h3>
           <button type="button" className="pos-btn" onClick={() => setActiveModal('none')}>
+            <Icon name="close" />
             {t('common.close')}
           </button>
         </div>
@@ -616,8 +642,12 @@ export function CustomerModal({
     <div className="pos-modal-backdrop" data-testid="customer-modal">
       <div className="pos-modal-card">
         <div className="pos-modal-header">
-          <h3 className="pos-modal-title">{t('customer.modalTitle')}</h3>
+          <h3 className="pos-modal-title pos-title-icon">
+            <Icon name="user" />
+            {t('customer.modalTitle')}
+          </h3>
           <button type="button" className="pos-btn" onClick={() => setActiveModal('none')}>
+            <Icon name="close" />
             {t('common.close')}
           </button>
         </div>

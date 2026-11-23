@@ -19,6 +19,8 @@ import { FiscalOfflineBanner, FiscalUnsettledModal } from './components/FiscalPa
 import { LicenceBanner } from './components/LicenceBanner.js';
 import { UpdateBanner } from './components/UpdateBanner.js';
 import { SideNav } from './components/SideNav.js';
+import { Icon } from './components/Icon.js';
+import { nextUiSize, readUiSize, type UiSize, writeUiSize } from './utils/ui-size.js';
 import { ReceiptsPage } from './components/ReceiptsPage.js';
 import { SettingsPage } from './components/SettingsPage.js';
 import { TerminalModeSection, TerminalPairForm } from './components/ConnectionsPanels.js';
@@ -132,6 +134,13 @@ export function App() {
   useEffect(() => {
     document.documentElement.setAttribute('data-theme', theme);
   }, [theme]);
+
+  // Screen size (C17): one tap makes the whole kassa bigger for a touch screen; kept per device.
+  const [uiSize, setUiSize] = useState<UiSize>(readUiSize);
+  useEffect(() => {
+    document.documentElement.setAttribute('data-ui-size', uiSize);
+    writeUiSize(uiSize);
+  }, [uiSize]);
 
   useEffect(() => {
     document.documentElement.setAttribute('lang', locale);
@@ -749,7 +758,18 @@ export function App() {
             title={theme === 'light' ? t('app.theme.dark') : t('app.theme.light')}
             aria-label={theme === 'light' ? t('app.theme.dark') : t('app.theme.light')}
           >
-            {theme === 'light' ? '☾' : '☀'}
+            <Icon name={theme === 'light' ? 'moon' : 'sun'} />
+          </button>
+          <button
+            type="button"
+            className="pos-btn pos-btn-ghost pos-size-btn"
+            data-testid="ui-size-btn"
+            onClick={() => setUiSize(nextUiSize)}
+            title={t('app.uiSize.hint', { size: t(`app.uiSize.${uiSize}`) })}
+            aria-label={t('app.uiSize.hint', { size: t(`app.uiSize.${uiSize}`) })}
+          >
+            <Icon name="textSize" />
+            <span className="pos-size-label">{t(`app.uiSize.${uiSize}`)}</span>
           </button>
           {screen === 'pos' && (
             <button
@@ -758,7 +778,8 @@ export function App() {
               data-testid="topbar-logout-btn"
               onClick={() => void handleLogout()}
             >
-              {t('auth.logoutButton')}
+              <Icon name="logout" />
+              <span className="pos-logout-label">{t('auth.logoutButton')}</span>
             </button>
           )}
         </div>
@@ -775,9 +796,10 @@ export function App() {
             type="button"
             className="pos-btn"
             data-testid="dismiss-error-btn"
+            aria-label={t('common.close')}
             onClick={() => setErrorBanner(null)}
           >
-            ✕
+            <Icon name="close" />
           </button>
         </div>
       )}
@@ -1027,6 +1049,7 @@ export function App() {
                 className="pos-btn pos-btn-primary"
                 onClick={() => setActiveModal('none')}
               >
+                <Icon name="close" />
                 {t('common.close')}
               </button>
             </div>
