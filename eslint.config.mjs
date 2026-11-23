@@ -48,6 +48,8 @@ export default tseslint.config(
       '**/*.config.*',
       '.dependency-cruiser.cjs',
       '.mezon/**',
+      'apps/android/www/**',
+      'apps/android/android/**',
     ],
   },
   ...tseslint.configs.recommendedTypeChecked,

@@ -49,8 +49,8 @@ export const DailyReportView: React.FC = () => {
     <div className="space-y-6">
       <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
         <div>
-          <h2 className="text-xl font-bold text-slate-800">{t('admin.report.title')}</h2>
-          <p className="text-xs text-slate-500 mt-1">{t('admin.report.subtitle')}</p>
+          <h2 className="page-title">{t('admin.report.title')}</h2>
+          <p className="page-subtitle">{t('admin.report.subtitle')}</p>
         </div>
 
         <div className="flex flex-wrap items-center gap-3">
@@ -89,7 +89,7 @@ export const DailyReportView: React.FC = () => {
         </div>
       )}
 
-      <div className="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden">
+      <div className="card overflow-hidden">
         <div className="overflow-x-auto">
           <table className="min-w-full divide-y divide-slate-200 text-left text-xs">
             <thead className="bg-slate-50 font-semibold text-slate-500 uppercase tracking-wider">

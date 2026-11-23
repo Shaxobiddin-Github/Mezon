@@ -5,7 +5,10 @@ import {
   type RulesCartInput,
   type RulesContext,
   type RulesPackageState,
+  RULES_PACKAGE_FORMAT,
+  RULES_PACKAGE_FORMAT_VERSION,
   type RulesPaymentInput,
+  type RulesPayload,
   type RulesResult,
   type RulesSignatureVerifier,
   type TrustedRuleKey,
@@ -50,6 +53,41 @@ function dateKeyResolver(timeZone: string): (unixMs: bigint) => string {
     );
 }
 
+/** Key id of the built-in demo package; never a trusted production key. */
+export const DEMO_RULES_KEY_ID = 'demo';
+
+const DEMO_RULES_PAYLOAD: RulesPayload = {
+  packageVersion: 0n,
+  issuedAtMs: 0n,
+  validUntilMs: 4_102_444_800_000n, // 2100-01-01
+  sourceRefs: ['DEMO: Guzar sinov paketi, rasmiy roʻyxat emas'],
+  cashForbidden: { exact: [], prefixes: [] },
+  // Owner 11-16: the cash limit is 176 mln soʻm (400 BHM); whether it is per cash part is open.
+  perMxikCashLimit: {
+    limitTiyin: 17_600_000_000n,
+    appliesTo: 'cash',
+    inclusive: true,
+    exempt: { exact: [], prefixes: [] },
+  },
+  expiredGoods: { enabled: true },
+};
+
+/**
+ * V2 demo mode: stands in for a signed package only while demo mode is on AND no package was
+ * imported. It is never stored, never synced and an imported signed package always wins.
+ */
+export const DEMO_RULES_PACKAGE: VerifiedRulesPackage = {
+  keyId: DEMO_RULES_KEY_ID,
+  payload: DEMO_RULES_PAYLOAD,
+  envelope: {
+    format: RULES_PACKAGE_FORMAT,
+    formatVersion: RULES_PACKAGE_FORMAT_VERSION,
+    keyId: DEMO_RULES_KEY_ID,
+    payload: DEMO_RULES_PAYLOAD,
+    signature: '',
+  },
+};
+
 export interface RulesPackageStatus {
   readonly state: RulesPackageState;
   readonly fiscalMode: boolean;
@@ -62,6 +100,8 @@ export interface HubRulesServiceOptions {
   readonly verifier: RulesSignatureVerifier;
   readonly getOrganizationId: () => UuidV7 | null;
   readonly nowMs: () => bigint;
+  /** V2: demo mode on → the built-in demo package is used while none is imported. */
+  readonly isDemoMode?: () => boolean;
   readonly logger?: Logger;
 }
 
@@ -93,6 +133,13 @@ export class HubRulesService {
     const orgId = this.opts.getOrganizationId();
     const row = orgId === null ? null : this.opts.store.getActivePackageSync(orgId);
     if (row === null) {
+      if (orgId !== null && this.opts.isDemoMode?.() === true) {
+        return {
+          state: resolveRulesPackageState(DEMO_RULES_PACKAGE, false, nowMs),
+          fiscalMode,
+          package: DEMO_RULES_PACKAGE,
+        };
+      }
       return { state: 'missing', fiscalMode, package: null };
     }
     if (

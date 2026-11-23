@@ -1,4 +1,13 @@
 import {
+  type CartMarkDto,
+  CartMarksListResponseSchema,
+  type CartMarksResponseDto,
+  CartMarksResponseSchema,
+  type IntegrationsStatusResponse,
+  IntegrationsStatusResponseSchema,
+  type PaymentIntentDto,
+  PaymentIntentResponseSchema,
+  SetFiscalModeResponseSchema,
   type LicenceStatusResponseDto,
   LicenceStatusResponseSchema,
   type FiscalDocDto,
@@ -22,6 +31,14 @@ import {
   type MissingMxikCountResponseDto,
   ProductDetailResponseSchema,
   type ProductDetailResponseDto,
+  ListSalesResponseSchema,
+  type ListSalesResponseDto,
+  SaleReturnContextResponseSchema,
+  type SaleReturnContextResponseDto,
+  CreateReturnRequestSchema,
+  type CreateReturnRequestDto,
+  CreateReturnResponseSchema,
+  type CreateReturnResponseDto,
   BarcodeResponseSchema,
   type BarcodeResponseDto,
   CategoryResponseSchema,
@@ -487,6 +504,110 @@ export class HubApiClient {
     });
   }
 
+  /** Owner: fiscal mode on/off (the hub checks rules package, driver, MXIK and receipt fields). */
+  async setFiscalMode(enabled: boolean): Promise<boolean> {
+    const res = await this.request({
+      method: 'PUT',
+      path: '/fiscal/mode',
+      body: { enabled },
+      responseSchema: SetFiscalModeResponseSchema,
+    });
+    return res.modeEnabled;
+  }
+
+  /** V2: what is real and what is a demo (fiscal, QR payment, marking, rules package). */
+  async getIntegrations(): Promise<IntegrationsStatusResponse> {
+    return this.request({
+      method: 'GET',
+      path: '/settings/integrations',
+      responseSchema: IntegrationsStatusResponseSchema,
+    });
+  }
+
+  async setDemoMode(enabled: boolean): Promise<IntegrationsStatusResponse> {
+    return this.request({
+      method: 'PUT',
+      path: '/settings/demo',
+      body: { enabled },
+      responseSchema: IntegrationsStatusResponseSchema,
+    });
+  }
+
+  async setMarkingPrefixes(prefixes: readonly string[]): Promise<IntegrationsStatusResponse> {
+    return this.request({
+      method: 'PUT',
+      path: '/settings/marking-prefixes',
+      body: { prefixes },
+      responseSchema: IntegrationsStatusResponseSchema,
+    });
+  }
+
+  /** V2 UzQR: a dynamic QR for `amountTiyin` (the provider dedupes on the intent id). */
+  async createPaymentIntent(cartId: string | null, amountTiyin: string): Promise<PaymentIntentDto> {
+    const res = await this.request({
+      method: 'POST',
+      path: '/payments/intents',
+      body: { cartId, amount: amountTiyin, kind: 'dynamic' },
+      responseSchema: PaymentIntentResponseSchema,
+    });
+    return res.intent;
+  }
+
+  async refreshPaymentIntent(id: string): Promise<PaymentIntentDto> {
+    const res = await this.request({
+      method: 'GET',
+      path: `/payments/intents/${encodeURIComponent(id)}`,
+      responseSchema: PaymentIntentResponseSchema,
+    });
+    return res.intent;
+  }
+
+  async cancelPaymentIntent(id: string): Promise<PaymentIntentDto> {
+    const res = await this.request({
+      method: 'POST',
+      path: `/payments/intents/${encodeURIComponent(id)}/cancel`,
+      responseSchema: PaymentIntentResponseSchema,
+    });
+    return res.intent;
+  }
+
+  /** Demo mode only: "the customer paid" for a test-provider QR. */
+  async demoPayPaymentIntent(id: string): Promise<PaymentIntentDto> {
+    const res = await this.request({
+      method: 'POST',
+      path: `/payments/intents/${encodeURIComponent(id)}/demo-pay`,
+      responseSchema: PaymentIntentResponseSchema,
+    });
+    return res.intent;
+  }
+
+  /** V2 marking: a scanned DataMatrix (GS1) code for a product that needs one per unit. */
+  async scanMark(cartId: string, code: string): Promise<CartMarksResponseDto> {
+    return this.request({
+      method: 'POST',
+      path: `/carts/${encodeURIComponent(cartId)}/marks`,
+      body: { code },
+      responseSchema: CartMarksResponseSchema,
+    });
+  }
+
+  async listMarks(cartId: string): Promise<readonly CartMarkDto[]> {
+    const res = await this.request({
+      method: 'GET',
+      path: `/carts/${encodeURIComponent(cartId)}/marks`,
+      responseSchema: CartMarksListResponseSchema,
+    });
+    return res.marks;
+  }
+
+  async removeMark(cartId: string, markId: string): Promise<CartMarksResponseDto> {
+    return this.request({
+      method: 'DELETE',
+      path: `/carts/${encodeURIComponent(cartId)}/marks/${encodeURIComponent(markId)}`,
+      responseSchema: CartMarksResponseSchema,
+    });
+  }
+
   async getFiscalStatus(): Promise<FiscalStatusResponse> {
     return this.request({
       method: 'GET',
@@ -751,6 +872,63 @@ export class HubApiClient {
   }
 
   /** Same `clientRequestId` is reused on retry so the hub never prints the receipt twice (P1). */
+  // --- C12: receipts history and returns ---
+
+  async listSales(query: {
+    readonly q?: string;
+    readonly fromMs?: string;
+    readonly toMs?: string;
+    readonly limit?: number;
+    readonly offset?: number;
+  }): Promise<ListSalesResponseDto> {
+    return this.request({
+      method: 'GET',
+      path: '/sales',
+      query: {
+        q: query.q !== undefined && query.q.trim() !== '' ? query.q.trim() : undefined,
+        fromMs: query.fromMs,
+        toMs: query.toMs,
+        limit: query.limit,
+        offset: query.offset,
+      },
+      responseSchema: ListSalesResponseSchema,
+    });
+  }
+
+  async getSaleReturnContext(saleId: string): Promise<SaleReturnContextResponseDto> {
+    return this.request({
+      method: 'GET',
+      path: `/sales/${encodeURIComponent(saleId)}/return-context`,
+      responseSchema: SaleReturnContextResponseSchema,
+    });
+  }
+
+  async createReturn(
+    saleId: string,
+    input: z.input<typeof CreateReturnRequestSchema>,
+  ): Promise<CreateReturnResponseDto> {
+    const validated: CreateReturnRequestDto = CreateReturnRequestSchema.parse(input);
+    return this.request({
+      method: 'POST',
+      path: `/sales/${encodeURIComponent(saleId)}/returns`,
+      body: validated,
+      responseSchema: CreateReturnResponseSchema,
+    });
+  }
+
+  async printReturnReceipt(
+    returnId: string,
+    input: z.input<typeof PrintDocumentRequestSchema>,
+  ): Promise<PrintDocumentResponseDto> {
+    const validated: PrintDocumentRequestDto = PrintDocumentRequestSchema.parse(input);
+    return this.request({
+      method: 'POST',
+      path: `/returns/${encodeURIComponent(returnId)}/print`,
+      body: validated,
+      responseSchema: PrintDocumentResponseSchema,
+    });
+  }
+
   async printSaleReceipt(
     saleId: string,
     input: z.input<typeof PrintDocumentRequestSchema>,

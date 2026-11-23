@@ -2,6 +2,10 @@ import type {
   CreateReturnRequestDto,
   CreateReturnResponseDto,
   ListSaleReturnsResponseDto,
+  ListSalesQueryDto,
+  ListSalesResponseDto,
+  SaleListItemDto,
+  SaleReturnContextResponseDto,
   ReturnDto,
   ReturnLineDto,
   ReturnPaymentDto,
@@ -13,6 +17,7 @@ import type {
 } from '@mezon/contracts';
 import type {
   AuthenticatedSessionSnapshot,
+  SaleListItemRecord,
   SqliteReturnStore,
   StoredReturnLineRecord,
   StoredReturnPaymentRecord,
@@ -21,6 +26,7 @@ import type {
 } from '@mezon/db-local';
 import {
   DomainError,
+  type PaymentMethod,
   type ReturnPaymentInput,
   type UuidV7,
   ZERO_MONEY,
@@ -138,6 +144,24 @@ function toVoidedSaleDto(sale: StoredVoidedSaleRecord): VoidedSaleDto {
     voidReason: sale.voidReason,
     lines: sale.lines.map(toSaleLineDto),
     payments: sale.payments.map(toSalePaymentDto),
+  };
+}
+
+function toSaleListItemDto(r: SaleListItemRecord): SaleListItemDto {
+  return {
+    id: r.id,
+    receiptNo: r.receiptNo.toString(),
+    receiptCode: r.receiptCode,
+    createdAtMs: r.createdAtMs.toString(),
+    totalFinal: r.totalFinal.toString(),
+    totalPaid: r.totalPaid.toString(),
+    debtAmount: r.debtAmount.toString(),
+    cashierName: r.cashierName,
+    customerName: r.customerName,
+    lineCount: r.lineCount,
+    status: r.voided ? 'voided' : 'completed',
+    returnedTotal: r.returnedTotal.toString(),
+    paymentMethods: [...r.paymentMethods],
   };
 }
 
@@ -266,6 +290,42 @@ export class HubReturnService {
       throw new DomainError('RETURN_NOT_FOUND', `Return "${returnId}" was not found`);
     }
     return toReturnDto(row);
+  }
+
+  async listSales(query: ListSalesQueryDto): Promise<ListSalesResponseDto> {
+    const rows = await this.store.listSales({
+      q: query.q,
+      fromMs: query.fromMs !== undefined ? BigInt(query.fromMs) : undefined,
+      toMs: query.toMs !== undefined ? BigInt(query.toMs) : undefined,
+      limit: query.limit,
+      offset: query.offset,
+    });
+    return { sales: rows.map(toSaleListItemDto) };
+  }
+
+  async getSaleReturnContext(saleId: UuidV7): Promise<SaleReturnContextResponseDto> {
+    const ctx = await this.store.getSaleReturnContext(saleId);
+    return {
+      sale: toSaleListItemDto(ctx.sale),
+      lines: ctx.lines.map((l) => ({
+        id: l.id,
+        itemName: l.itemName,
+        unit: l.unit,
+        qty: l.qty.toString(),
+        unitPriceSnapshot: l.unitPriceSnapshot.toString(),
+        finalTotal: l.finalTotal.toString(),
+        netExVat: l.netExVat.toString(),
+        vatTotal: l.vatTotal.toString(),
+        returnedQty: l.returnedQty.toString(),
+        refundedAmount: l.refundedAmount.toString(),
+        returnedNetExVat: l.returnedNetExVat.toString(),
+        returnedVatTotal: l.returnedVatTotal.toString(),
+      })),
+      refundableByMethod: (Object.keys(ctx.refundableByMethod) as PaymentMethod[])
+        .map((method) => ({ method, amount: ctx.refundableByMethod[method].toString() }))
+        .filter((r) => r.amount !== '0'),
+      remainingSaleDebt: ctx.remainingSaleDebt.toString(),
+    };
   }
 
   async getSalesLinesReportSummary(

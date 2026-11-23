@@ -459,6 +459,159 @@ function allocateSaleLinesToStockLegsSync(
   return legsBySaleLineId;
 }
 
+/**
+ * Net applied payments of a sale per method; for a delivered order the 'advance' row is expanded
+ * into the real order payment methods (O1 / T1.6). Shared by createReturn and the C12 return context
+ * so the kassa shows exactly the limits the return will be checked against.
+ */
+function originalPaidByMethodSync(
+  db: BetterSQLite3Database,
+  ctx: { readonly organizationId: UuidV7; readonly storeId: UuidV7 },
+  saleRow: typeof sales.$inferSelect,
+  salePaymentRows: readonly (typeof payments.$inferSelect)[],
+): Record<PaymentMethod, Money> {
+  let originalPaidByMethod = createEmptyPaymentMethodMap();
+  if (saleRow.sourceOrderId !== null) {
+    const ordPayRows = db
+      .select()
+      .from(orderPayments)
+      .where(
+        and(
+          eq(orderPayments.organizationId, ctx.organizationId),
+          eq(orderPayments.storeId, ctx.storeId),
+          eq(orderPayments.orderId, saleRow.sourceOrderId),
+        ),
+      )
+      .orderBy(asc(orderPayments.createdAtMs), asc(orderPayments.id))
+      .all();
+    const advSummary = summarizeOrderPayments(
+      ordPayRows.map((op) => ({
+        kind: op.kind as 'advance' | 'advance_refund',
+        method: parsePaymentMethod(op.method),
+        amount: op.amount,
+      })),
+    );
+    originalPaidByMethod = resolveOrderReturnEffectivePaidByMethod({
+      salePayments: salePaymentRows.map((p) => ({
+        method: parseSalePaymentMethod(p.method),
+        amount: p.amount,
+      })),
+      netAdvanceByMethod: advSummary.netAdvanceByMethod,
+      netAdvanceTotal: advSummary.netAdvance,
+    });
+  } else {
+    for (const p of salePaymentRows) {
+      const m = parsePaymentMethod(p.method);
+      originalPaidByMethod[m] = moneyFromTiyin(
+        moneyToTiyin(originalPaidByMethod[m]) + moneyToTiyin(p.amount),
+      );
+    }
+  }
+  return originalPaidByMethod;
+}
+
+export interface SaleListFilter {
+  /** Receipt code fragment or receipt number. */
+  readonly q?: string;
+  readonly fromMs?: bigint;
+  readonly toMs?: bigint;
+  readonly limit: number;
+  readonly offset: number;
+}
+
+export interface SaleListItemRecord {
+  readonly id: UuidV7;
+  readonly receiptNo: bigint;
+  readonly receiptCode: string;
+  readonly createdAtMs: bigint;
+  readonly totalFinal: bigint;
+  readonly totalPaid: bigint;
+  readonly debtAmount: bigint;
+  readonly cashierName: string | null;
+  readonly customerName: string | null;
+  readonly lineCount: number;
+  readonly voided: boolean;
+  readonly returnedTotal: bigint;
+  readonly paymentMethods: readonly PaymentMethod[];
+}
+
+export interface SaleReturnContextLineRecord {
+  readonly id: UuidV7;
+  readonly itemName: string;
+  readonly unit: ProductUnit;
+  readonly qty: Quantity;
+  readonly unitPriceSnapshot: Money;
+  readonly finalTotal: Money;
+  readonly netExVat: Money;
+  readonly vatTotal: Money;
+  readonly returnedQty: Quantity;
+  readonly refundedAmount: Money;
+  readonly returnedNetExVat: Money;
+  readonly returnedVatTotal: Money;
+}
+
+export interface SaleReturnContextRecord {
+  readonly sale: SaleListItemRecord;
+  readonly lines: readonly SaleReturnContextLineRecord[];
+  /** What each method can still refund: original paid + paid toward this debt - already refunded. */
+  readonly refundableByMethod: Readonly<Record<PaymentMethod, Money>>;
+  readonly remainingSaleDebt: Money;
+}
+
+const SALE_LIST_SQL = `
+  SELECT s.id, s.receipt_no, s.receipt_code, s.created_at_ms, s.total_final, s.total_paid,
+         s.debt_amount, s.voided_at_ms,
+         u.full_name AS cashier_name, c.full_name AS customer_name,
+         (SELECT COUNT(*) FROM sale_lines sl WHERE sl.sale_id = s.id) AS line_count,
+         (SELECT COALESCE(SUM(r.total_refund), 0) FROM returns r WHERE r.sale_id = s.id) AS returned_total,
+         (SELECT GROUP_CONCAT(DISTINCT p.method) FROM payments p WHERE p.sale_id = s.id) AS methods
+    FROM sales s
+    LEFT JOIN users u ON u.id = s.cashier_user_id
+    LEFT JOIN customers c ON c.id = s.customer_id
+`;
+
+interface SaleListRow {
+  readonly id: string;
+  readonly receipt_no: bigint;
+  readonly receipt_code: string;
+  readonly created_at_ms: bigint;
+  readonly total_final: bigint;
+  readonly total_paid: bigint;
+  readonly debt_amount: bigint | null;
+  readonly voided_at_ms: bigint | null;
+  readonly cashier_name: string | null;
+  readonly customer_name: string | null;
+  readonly line_count: bigint;
+  readonly returned_total: bigint;
+  readonly methods: string | null;
+}
+
+function toSaleListItem(r: SaleListRow): SaleListItemRecord {
+  return {
+    id: parseUuidV7(r.id),
+    receiptNo: BigInt(r.receipt_no),
+    receiptCode: r.receipt_code,
+    createdAtMs: BigInt(r.created_at_ms),
+    totalFinal: BigInt(r.total_final),
+    totalPaid: BigInt(r.total_paid),
+    debtAmount: BigInt(r.debt_amount ?? 0n),
+    cashierName: r.cashier_name,
+    customerName: r.customer_name,
+    lineCount: Number(r.line_count),
+    voided: r.voided_at_ms !== null,
+    returnedTotal: BigInt(r.returned_total),
+    paymentMethods: (r.methods ?? '')
+      .split(',')
+      .filter((m) => m.length > 0)
+      .map((m) => parsePaymentMethod(m)),
+  };
+}
+
+/** LIKE pattern for a literal fragment: `%`, `_` and the escape character itself are escaped. */
+function likeContains(fragment: string): string {
+  return `%${fragment.replace(/[!%_]/g, (ch) => `!${ch}`)}%`;
+}
+
 export class SqliteReturnStore {
   private readonly connection: LocalSqliteConnection;
   private readonly getRuntimeContext: () => ReturnRuntimeContext | null;
@@ -1110,44 +1263,12 @@ export class SqliteReturnStore {
       }
 
       // 5) Validate per-method refund limits (`payments.amount` - prior returned), T1.7 hook, & drawer cash
-      let originalPaidByMethod = createEmptyPaymentMethodMap();
-      if (saleRow.sourceOrderId !== null) {
-        // O1 / T1.6: Expand 'advance' row in delivered order sale payments into real order_payments methods.
-        const ordPayRows = session.db
-          .select()
-          .from(orderPayments)
-          .where(
-            and(
-              eq(orderPayments.organizationId, ctx.organizationId),
-              eq(orderPayments.storeId, ctx.storeId),
-              eq(orderPayments.orderId, saleRow.sourceOrderId),
-            ),
-          )
-          .orderBy(asc(orderPayments.createdAtMs), asc(orderPayments.id))
-          .all();
-        const advSummary = summarizeOrderPayments(
-          ordPayRows.map((op) => ({
-            kind: op.kind as 'advance' | 'advance_refund',
-            method: parsePaymentMethod(op.method),
-            amount: op.amount,
-          })),
-        );
-        originalPaidByMethod = resolveOrderReturnEffectivePaidByMethod({
-          salePayments: salePaymentRows.map((p) => ({
-            method: parseSalePaymentMethod(p.method),
-            amount: p.amount,
-          })),
-          netAdvanceByMethod: advSummary.netAdvanceByMethod,
-          netAdvanceTotal: advSummary.netAdvance,
-        });
-      } else {
-        for (const p of salePaymentRows) {
-          const m = parsePaymentMethod(p.method);
-          originalPaidByMethod[m] = moneyFromTiyin(
-            moneyToTiyin(originalPaidByMethod[m]) + moneyToTiyin(p.amount),
-          );
-        }
-      }
+      const originalPaidByMethod = originalPaidByMethodSync(
+        session.db,
+        ctx,
+        saleRow,
+        salePaymentRows,
+      );
 
       const priorReturnPaymentRows = session.db
         .select()
@@ -1482,6 +1603,164 @@ export class SqliteReturnStore {
         .all();
 
       return Promise.resolve(retRows.map((r) => this.loadReturnRecordSync(this.connection.db, r)));
+    });
+  }
+
+  /** C12: the store's receipts, newest first; search by receipt code fragment or receipt number. */
+  async listSales(filter: SaleListFilter): Promise<readonly SaleListItemRecord[]> {
+    const ctx = this.requireContext();
+    return runConnectionReadOnly(this.connection, () => {
+      const where: string[] = ['s.organization_id = ?', 's.store_id = ?'];
+      const args: (string | bigint | number)[] = [ctx.organizationId, ctx.storeId];
+      const q = filter.q?.trim() ?? '';
+      if (q.length > 0) {
+        if (/^[0-9]{1,18}$/.test(q)) {
+          where.push(`(s.receipt_no = ? OR s.receipt_code LIKE ? ESCAPE '!')`);
+          args.push(BigInt(q), likeContains(q));
+        } else {
+          where.push(`s.receipt_code LIKE ? ESCAPE '!'`);
+          args.push(likeContains(q));
+        }
+      }
+      if (filter.fromMs !== undefined) {
+        where.push('s.created_at_ms >= ?');
+        args.push(filter.fromMs);
+      }
+      if (filter.toMs !== undefined) {
+        where.push('s.created_at_ms < ?');
+        args.push(filter.toMs);
+      }
+      args.push(filter.limit, filter.offset);
+      const rows = this.connection.sqlite
+        .prepare<(string | bigint | number)[], SaleListRow>(
+          `${SALE_LIST_SQL} WHERE ${where.join(' AND ')}
+           ORDER BY s.created_at_ms DESC, s.id DESC LIMIT ? OFFSET ?`,
+        )
+        .all(...args);
+      return Promise.resolve(rows.map(toSaleListItem));
+    });
+  }
+
+  /**
+   * C12: everything the kassa needs to build a return: lines with what was already returned, and
+   * the per-method refund limits the return will be validated against (same helpers as createReturn).
+   */
+  async getSaleReturnContext(saleId: UuidV7): Promise<SaleReturnContextRecord> {
+    const ctx = this.requireContext();
+    const validSaleId = parseUuidV7(saleId);
+    return ctx.uow.execute<SaleReturnContextRecord>((session) => {
+      const listRow = this.connection.sqlite
+        .prepare<[string, string, string], SaleListRow>(
+          `${SALE_LIST_SQL} WHERE s.id = ? AND s.organization_id = ? AND s.store_id = ?`,
+        )
+        .get(validSaleId, ctx.organizationId, ctx.storeId);
+      const saleRow = session.db
+        .select()
+        .from(sales)
+        .where(
+          and(
+            eq(sales.id, validSaleId),
+            eq(sales.organizationId, ctx.organizationId),
+            eq(sales.storeId, ctx.storeId),
+          ),
+        )
+        .limit(1)
+        .all()[0];
+      if (!listRow || !saleRow) {
+        throw new DomainError('SALE_NOT_FOUND', `Sale "${validSaleId}" was not found`);
+      }
+
+      const lineRows = session.db
+        .select()
+        .from(saleLines)
+        .where(eq(saleLines.saleId, saleRow.id))
+        .orderBy(asc(saleLines.sortOrder))
+        .all();
+      const priorLineRows = session.db
+        .select()
+        .from(returnLines)
+        .where(
+          and(
+            eq(returnLines.organizationId, ctx.organizationId),
+            eq(returnLines.storeId, ctx.storeId),
+            eq(returnLines.saleId, saleRow.id),
+          ),
+        )
+        .all();
+      const prior = new Map<UuidV7, { q: bigint; r: bigint; n: bigint; v: bigint }>();
+      for (const rl of priorLineRows) {
+        const cur = prior.get(rl.saleLineId) ?? { q: 0n, r: 0n, n: 0n, v: 0n };
+        cur.q += quantityToMilli(rl.qty);
+        cur.r += moneyToTiyin(rl.refundAmount);
+        cur.n += moneyToTiyin(rl.netExVat);
+        cur.v += moneyToTiyin(rl.vatTotal);
+        prior.set(rl.saleLineId, cur);
+      }
+
+      const salePaymentRows = session.db
+        .select()
+        .from(payments)
+        .where(eq(payments.saleId, saleRow.id))
+        .orderBy(asc(payments.createdAtMs))
+        .all();
+      const paid = originalPaidByMethodSync(session.db, ctx, saleRow, salePaymentRows);
+      const priorPayRows = session.db
+        .select()
+        .from(returnPayments)
+        .where(
+          and(
+            eq(returnPayments.organizationId, ctx.organizationId),
+            eq(returnPayments.storeId, ctx.storeId),
+            eq(returnPayments.saleId, saleRow.id),
+          ),
+        )
+        .all();
+      const priorByMethod = createEmptyPaymentMethodMap();
+      for (const rp of priorPayRows) {
+        const m = parsePaymentMethod(rp.method);
+        priorByMethod[m] = moneyFromTiyin(moneyToTiyin(priorByMethod[m]) + moneyToTiyin(rp.amount));
+      }
+      const debtContext =
+        saleRow.voidedAtMs === null
+          ? prepareReturnSaleDebtContextInTxSync(session, {
+              organizationId: ctx.organizationId,
+              customerId: saleRow.customerId,
+              saleId: saleRow.id,
+              saleDebtAmount: saleRow.debtAmount,
+              nowMs: session.nowUnixMs(),
+            })
+          : null;
+      const refundable = createEmptyPaymentMethodMap();
+      for (const m of Object.keys(refundable) as PaymentMethod[]) {
+        const cap =
+          moneyToTiyin(paid[m]) +
+          (debtContext ? moneyToTiyin(debtContext.paidTowardDebtByMethod[m]) : 0n) -
+          moneyToTiyin(priorByMethod[m]);
+        refundable[m] = moneyFromTiyin(cap > 0n ? cap : 0n);
+      }
+
+      return Promise.resolve({
+        sale: toSaleListItem(listRow),
+        lines: lineRows.map((l) => {
+          const pr = prior.get(l.id) ?? { q: 0n, r: 0n, n: 0n, v: 0n };
+          return {
+            id: l.id,
+            itemName: l.itemName,
+            unit: parseProductUnit(l.unit),
+            qty: l.qty,
+            unitPriceSnapshot: l.unitPriceSnapshot,
+            finalTotal: l.finalTotal,
+            netExVat: l.netExVat,
+            vatTotal: l.vatTotal,
+            returnedQty: quantityFromMilli(pr.q),
+            refundedAmount: moneyFromTiyin(pr.r),
+            returnedNetExVat: moneyFromTiyin(pr.n),
+            returnedVatTotal: moneyFromTiyin(pr.v),
+          };
+        }),
+        refundableByMethod: refundable,
+        remainingSaleDebt: debtContext ? debtContext.remainingSaleDebt : ZERO_MONEY,
+      });
     });
   }
 

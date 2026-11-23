@@ -394,6 +394,10 @@ export {
   type StoredReturnRecord,
   type CreateReturnOutcome,
   type SalesLinesReportSummaryRecord,
+  type SaleListFilter,
+  type SaleListItemRecord,
+  type SaleReturnContextLineRecord,
+  type SaleReturnContextRecord,
   SqliteReturnStore,
   createSqliteReturnStore,
 } from './return-repo.js';
@@ -591,6 +595,9 @@ export {
   isMarkedMxik,
   listCartMarksSync,
   readMarkingPrefixesSync,
+  writeMarkingPrefixesSync,
+  readDemoModeSync,
+  writeDemoModeSync,
   releaseSaleMarksInTxSync,
 } from './marking-repo.js';
 export {
