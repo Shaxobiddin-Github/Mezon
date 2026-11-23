@@ -929,6 +929,7 @@ export function App() {
                     setDemoMode(st.demoMode);
                     setFiscalModeEnabled(st.fiscal.modeEnabled);
                   }}
+                  onCatalogLoaded={() => void ensureActiveCartAndCatalog()}
                 />
               )}
           </main>

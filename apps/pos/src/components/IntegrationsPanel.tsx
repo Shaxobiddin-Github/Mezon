@@ -1,4 +1,4 @@
-import type { IntegrationsStatusResponse } from '@mezon/contracts';
+import type { IntegrationsStatusResponse, LoadDemoCatalogResponse } from '@mezon/contracts';
 import { t } from '@mezon/i18n';
 import { useCallback, useEffect, useState } from 'react';
 import { type HubApiClient, HubApiError } from '../api/hub-client.js';
@@ -41,8 +41,10 @@ export function IntegrationsPanel(props: {
   readonly role: 'owner' | 'manager';
   readonly onError: (err: unknown) => void;
   readonly onChanged?: (st: IntegrationsStatusResponse) => void;
+  readonly onCatalogLoaded?: () => void;
 }) {
-  const { api, role, onError, onChanged } = props;
+  const { api, role, onError, onChanged, onCatalogLoaded } = props;
+  const [catalogLoaded, setCatalogLoaded] = useState<LoadDemoCatalogResponse | null>(null);
   const [st, setSt] = useState<IntegrationsStatusResponse | null>(null);
   const [prefixes, setPrefixes] = useState('');
   const [busy, setBusy] = useState(false);
@@ -77,6 +79,18 @@ export function IntegrationsPanel(props: {
     setBusy(true);
     try {
       apply(await api.setDemoMode(!st.demoMode));
+    } catch (err) {
+      onError(err);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const loadCatalog = async () => {
+    setBusy(true);
+    try {
+      setCatalogLoaded(await api.loadDemoCatalog());
+      onCatalogLoaded?.();
     } catch (err) {
       onError(err);
     } finally {
@@ -159,6 +173,34 @@ export function IntegrationsPanel(props: {
           <p className="pos-int-need">{t('integrations.demo.ownerOnly')}</p>
         )}
       </div>
+
+      {role === 'owner' && (
+        <div className="pos-int-card" data-testid="demo-catalog-card">
+          <div className="pos-int-row">
+            <strong>{t('integrations.catalog.title')}</strong>
+          </div>
+          <p className="pos-int-text">{t('integrations.catalog.text')}</p>
+          {catalogLoaded ? (
+            <p className="pos-int-ok" data-testid="demo-catalog-done">
+              {t('integrations.catalog.done', {
+                products: String(catalogLoaded.products),
+                categories: String(catalogLoaded.categories),
+                customers: String(catalogLoaded.customers),
+              })}
+            </p>
+          ) : (
+            <button
+              type="button"
+              className="pos-btn pos-btn-primary"
+              data-testid="demo-catalog-load"
+              disabled={busy}
+              onClick={() => void loadCatalog()}
+            >
+              {t('integrations.catalog.load')}
+            </button>
+          )}
+        </div>
+      )}
 
       <div className="pos-int-card">
         <div className="pos-int-row">

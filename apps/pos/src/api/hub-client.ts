@@ -5,6 +5,8 @@ import {
   CartMarksResponseSchema,
   type IntegrationsStatusResponse,
   IntegrationsStatusResponseSchema,
+  type LoadDemoCatalogResponse,
+  LoadDemoCatalogResponseSchema,
   type PaymentIntentDto,
   PaymentIntentResponseSchema,
   SetFiscalModeResponseSchema,
@@ -521,6 +523,16 @@ export class HubApiClient {
       method: 'GET',
       path: '/settings/integrations',
       responseSchema: IntegrationsStatusResponseSchema,
+    });
+  }
+
+  /** C18: owner loads the 100-goods starter catalog into an empty kassa. */
+  async loadDemoCatalog(): Promise<LoadDemoCatalogResponse> {
+    return this.request({
+      method: 'POST',
+      path: '/settings/demo-catalog',
+      body: {},
+      responseSchema: LoadDemoCatalogResponseSchema,
     });
   }
 

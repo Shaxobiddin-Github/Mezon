@@ -470,6 +470,12 @@ export const UZ_LATN_MESSAGES = {
   'pos.qtyDecrease': 'Bittaga kamaytirish',
   'pos.qtyIncrease': 'Bittaga koʻpaytirish',
   'pos.removeLine': 'Qatorni oʻchirish',
+  'integrations.catalog.title': 'Namuna katalog (100 tovar)',
+  'integrations.catalog.text':
+    'Kassani haqiqiy doʻkondagidek sinash uchun: 10 kategoriyada 100 ta kundalik tovar (non, sut, ichimlik, bakaleya, goʻsht, meva-sabzavot, maishiy kimyo…), boshlangʻich qoldiq va 5 ta nasiya mijoz. Faqat katalog boʻsh boʻlganda yuklanadi.',
+  'integrations.catalog.load': 'Namuna katalogni yuklash',
+  'integrations.catalog.done':
+    'Yuklandi: {products} ta tovar, {categories} ta kategoriya, {customers} ta mijoz. «Sotuv» boʻlimiga oʻting.',
   'error.CART_EMPTY': 'Savat boʻsh.',
 
   // T3.1 Catalog management (MXIK, qadoq kodi, QQS)
