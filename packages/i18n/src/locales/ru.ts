@@ -483,6 +483,21 @@ export const RU_MESSAGES: Readonly<Record<I18nKey, string>> = {
   'integrations.catalog.load': 'Загрузить образец каталога',
   'integrations.catalog.done':
     'Загружено: {products} товаров, {categories} категорий, {customers} покупателей. Перейдите в «Продажа».',
+  'pos.unknown.title': 'Этого штрих-кода нет в кассе: {code}',
+  'pos.unknown.link': 'Привязать к товару',
+  'pos.unknown.askOwner': 'Владелец или менеджер должен привязать его к товару в разделе «Товары».',
+  'pos.link.title': 'Привязать штрих-код к товару',
+  'pos.link.tabExisting': 'Существующий товар',
+  'pos.link.tabNew': 'Новый товар',
+  'pos.link.searchPlaceholder': 'Введите название товара',
+  'pos.link.name': 'Название товара',
+  'pos.link.price': 'Цена продажи (сум)',
+  'pos.link.unit': 'Единица измерения',
+  'pos.link.create': 'Добавить и положить в корзину',
+  'pos.live.hint': 'Наведите рамку на штрих-код или QR-код',
+  'pos.live.added': 'Добавлено: {name}',
+  'pos.live.empty': 'Пока ничего не отсканировано',
+  'pos.live.finish': 'Завершить — оплата',
   'error.CART_EMPTY': 'Корзина пуста.',
 
   // T3.1 Catalog management (MXIK, qadoq kodi, QQS)

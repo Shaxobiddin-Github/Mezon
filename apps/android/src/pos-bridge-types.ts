@@ -48,6 +48,7 @@ export interface AndroidMezonBridge {
   leaveTerminal(): Promise<{ readonly ok: boolean }>;
   relaunchApp(): Promise<void>;
   readonly scanBarcode: () => Promise<string | null>;
+  readonly startLiveScan: (onCode: (code: string) => void) => Promise<() => Promise<void>>;
 }
 
 declare global {
