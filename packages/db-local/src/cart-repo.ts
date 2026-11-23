@@ -1237,7 +1237,9 @@ export class SqliteCartStore {
         .limit(1)
         .all()[0];
       if (!hit) {
-        throw new DomainError('BARCODE_NOT_FOUND', `Barcode "${input.barcode}" was not found`);
+        throw new DomainError('BARCODE_NOT_FOUND', `Barcode "${input.barcode}" was not found`, {
+          details: { barcode: input.barcode },
+        });
       }
       productId = hit.productId;
       variantId = hit.variantId;

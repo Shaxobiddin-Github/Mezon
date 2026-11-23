@@ -476,6 +476,21 @@ export const UZ_LATN_MESSAGES = {
   'integrations.catalog.load': 'Namuna katalogni yuklash',
   'integrations.catalog.done':
     'Yuklandi: {products} ta tovar, {categories} ta kategoriya, {customers} ta mijoz. «Sotuv» boʻlimiga oʻting.',
+  'pos.unknown.title': 'Bu shtrix-kod kassada yoʻq: {code}',
+  'pos.unknown.link': 'Tovarga bogʻlash',
+  'pos.unknown.askOwner': 'Egasi yoki menejer uni «Mahsulotlar» boʻlimida tovarga bogʻlashi kerak.',
+  'pos.link.title': 'Shtrix-kodni tovarga bogʻlash',
+  'pos.link.tabExisting': 'Mavjud tovar',
+  'pos.link.tabNew': 'Yangi tovar',
+  'pos.link.searchPlaceholder': 'Tovar nomini yozing',
+  'pos.link.name': 'Tovar nomi',
+  'pos.link.price': 'Sotuv narxi (soʻm)',
+  'pos.link.unit': 'Oʻlchov birligi',
+  'pos.link.create': 'Qoʻshish va savatga solish',
+  'pos.live.hint': 'Shtrix-kod yoki QR kodni ramkaga tuting',
+  'pos.live.added': 'Qoʻshildi: {name}',
+  'pos.live.empty': 'Hali hech narsa skanerlanmadi',
+  'pos.live.finish': 'Yakunlash — toʻlov',
   'error.CART_EMPTY': 'Savat boʻsh.',
 
   // T3.1 Catalog management (MXIK, qadoq kodi, QQS)

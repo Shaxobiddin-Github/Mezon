@@ -7,6 +7,8 @@ import type { HubApiClient } from '../api/hub-client.js';
 import { usePosStore } from '../store/pos-store.js';
 import { Icon, type IconName } from './Icon.js';
 import { splitHotkey } from './SideNav.js';
+import { LiveScanOverlay } from './LiveScanOverlay.js';
+import type { ScanResult } from '../utils/live-scan.js';
 
 /** Soft tile colours: the same product always gets the same one (by name). */
 const TILE_TONES = 6;
@@ -34,6 +36,7 @@ export function PosWorkspaceScreen({
   onOpenParkedModal,
   onOpenCustomerModal,
   onScanBarcode,
+  onLinkBarcode,
   onError,
 }: {
   readonly api: HubApiClient;
@@ -41,12 +44,21 @@ export function PosWorkspaceScreen({
   readonly onSearchProducts: (q: string, categoryId: UuidV7 | null) => Promise<void>;
   readonly onOpenParkedModal: () => Promise<void>;
   readonly onOpenCustomerModal: () => Promise<void>;
-  readonly onScanBarcode: (barcode: string) => Promise<void>;
+  readonly onScanBarcode: (barcode: string) => Promise<ScanResult>;
+  /** C19: owner/manager may link an unknown scanned code to a product (null for a cashier). */
+  readonly onLinkBarcode: ((barcode: string) => void) | null;
   readonly onError: (err: unknown) => void;
 }) {
   const scanBarcode = window.mezonBridge?.scanBarcode;
+  const startLiveScan = window.mezonBridge?.startLiveScan;
   const [cameraBusy, setCameraBusy] = useState(false);
+  // C19: the phone keeps the camera open and scans item after item.
+  const [liveOpen, setLiveOpen] = useState(false);
   const scanWithCamera = async () => {
+    if (startLiveScan !== undefined) {
+      setLiveOpen(true);
+      return;
+    }
     if (scanBarcode === undefined || cameraBusy) return;
     setCameraBusy(true);
     try {
@@ -412,6 +424,27 @@ export function PosWorkspaceScreen({
           </button>
         </div>
       </div>
+
+      {liveOpen && startLiveScan !== undefined && (
+        <LiveScanOverlay
+          startLiveScan={startLiveScan}
+          onScan={onScanBarcode}
+          onClose={() => setLiveOpen(false)}
+          onFinish={() => {
+            setLiveOpen(false);
+            setActiveModal('payment');
+          }}
+          onLink={
+            onLinkBarcode === null
+              ? null
+              : (code) => {
+                  setLiveOpen(false);
+                  onLinkBarcode(code);
+                }
+          }
+          onError={onError}
+        />
+      )}
 
       {/* Right Pane: Catalog Search & Category Filter */}
       <div className="pos-pane">

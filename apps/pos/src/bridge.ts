@@ -72,6 +72,12 @@ export interface MezonBridge {
   readonly thinClient?: boolean;
   /** Camera barcode scan (Android shell). Resolves `null` when the cashier cancels. */
   readonly scanBarcode?: () => Promise<string | null>;
+  /**
+   * C19: continuous camera scan (Android shell). The camera is drawn behind the WebView and every
+   * code it sees is passed to `onCode` (the same code repeats on every frame). Resolves to the
+   * function that stops the camera.
+   */
+  readonly startLiveScan?: (onCode: (code: string) => void) => Promise<() => Promise<void>>;
 }
 
 /** Fingerprint shown in groups of 4 so two screens can be compared by eye. */
