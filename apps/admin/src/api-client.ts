@@ -1,4 +1,9 @@
 import type {
+  AdminShopProductDto,
+  AdminShopSettingsDto,
+  SaveAdminShopRequestDto,
+  ShopOrderDto,
+  ShopOrderStatusDto,
   AdminCustomerDetailResponseDto,
   AdminCustomersQueryDto,
   AdminCustomersResponseDto,
@@ -197,6 +202,49 @@ export class AdminApiClient {
 
   async deleteTelegramLink(): Promise<void> {
     await this.request<unknown>('/api/v1/admin/telegram/link', { method: 'DELETE' });
+  }
+
+  // ---- V2 online shop (cabinet side) ----
+  async getShop(): Promise<{ shop: AdminShopSettingsDto | null }> {
+    return this.request('/api/v1/admin/shop');
+  }
+
+  async saveShop(body: SaveAdminShopRequestDto): Promise<{ shop: AdminShopSettingsDto | null }> {
+    return this.request('/api/v1/admin/shop', {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    });
+  }
+
+  async getShopProducts(): Promise<{ items: AdminShopProductDto[] }> {
+    return this.request('/api/v1/admin/shop/products');
+  }
+
+  async setShopProducts(
+    productIds: readonly string[],
+    isPublished: boolean,
+  ): Promise<{ changed: number }> {
+    return this.request('/api/v1/admin/shop/products', {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ productIds, isPublished }),
+    });
+  }
+
+  async getShopOrders(status: 'open' | 'all' = 'open'): Promise<{ orders: ShopOrderDto[] }> {
+    return this.request(`/api/v1/admin/shop/orders?status=${status}`);
+  }
+
+  async setShopOrderStatus(
+    id: string,
+    status: ShopOrderStatusDto,
+  ): Promise<{ order: ShopOrderDto }> {
+    return this.request(`/api/v1/admin/shop/orders/${encodeURIComponent(id)}/status`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ status }),
+    });
   }
 
   async getProducts(params?: {

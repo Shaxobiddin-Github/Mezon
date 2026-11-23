@@ -1,5 +1,5 @@
 import { useEffect, useCallback, useRef, useState } from 'react';
-import type { UuidV7 } from '@mezon/domain';
+import { type UuidV7, gtinToEan13, looksLikeMarkingCode, parseMarkingCode } from '@mezon/domain';
 import { LOCALE_LABELS, SUPPORTED_LOCALES, isLocale, t } from '@mezon/i18n';
 import { stepMilliQuantity } from '@mezon/ui';
 import { normalizeLoopbackHubBaseUrl } from './bridge.js';
@@ -78,6 +78,7 @@ export function App() {
   const user = usePosStore((s) => s.user);
   // v1: fiscal mode is off by default; its screens are shown only when it is on.
   const [fiscalModeEnabled, setFiscalModeEnabled] = useState(false);
+  const [demoMode, setDemoMode] = useState(false);
   // v1 LAN: is this computer the main register (hub) or a second register (terminal)?
   const [terminalInfo, setTerminalInfo] = useState<TerminalInfo>({ mode: 'hub' });
   const [showTerminalPair, setShowTerminalPair] = useState(false);
@@ -325,6 +326,44 @@ export function App() {
           const created = await api.createCart();
           setActiveCart(created.cart);
           cartId = created.cart.id;
+        }
+        // V2 marking: a DataMatrix (GS1) code goes to the marking check first. When the product
+        // needs no marking code (or the code is not readable / not found by its GTIN), the scan falls back to the ordinary
+        // barcode path: the raw code as scanned (a shop may have saved it as a barcode), then the
+        // GTIN inside the code.
+        if (looksLikeMarkingCode(barcode)) {
+          try {
+            const marked = await api.scanMark(cartId, barcode);
+            setActiveCart(marked.cart);
+            return;
+          } catch (err) {
+            const fallback =
+              err instanceof HubApiError &&
+              (err.code === 'MARKING_NOT_REQUIRED' ||
+                err.code === 'MARKING_CODE_INVALID' ||
+                err.code === 'PRODUCT_NOT_FOUND');
+            if (!fallback) throw err;
+          }
+          try {
+            const raw = await api.addCartLine(cartId, { kind: 'scan', barcode, qty: '1000' });
+            setActiveCart(raw.cart);
+            return;
+          } catch (err) {
+            if (!(err instanceof HubApiError)) throw err;
+            let gtin: string;
+            try {
+              gtin = parseMarkingCode(barcode).gtin;
+            } catch {
+              throw err; // not a readable GS1 code: the raw barcode answer stands
+            }
+            const byGtin = await api.addCartLine(cartId, {
+              kind: 'scan',
+              barcode: gtinToEan13(gtin) ?? gtin,
+              qty: '1000',
+            });
+            setActiveCart(byGtin.cart);
+            return;
+          }
         }
         const updated = await api.addCartLine(cartId, {
           kind: 'scan',
@@ -637,6 +676,12 @@ export function App() {
         if (!cancelled) setFiscalModeEnabled(st.modeEnabled);
       })
       .catch(() => undefined);
+    api
+      .getIntegrations()
+      .then((st) => {
+        if (!cancelled) setDemoMode(st.demoMode);
+      })
+      .catch(() => undefined);
     return () => {
       cancelled = true;
     };
@@ -651,9 +696,19 @@ export function App() {
             G
           </span>
           <h1 className="pos-header-title">{t('app.title')}</h1>
-          <span className="pos-non-fiscal-badge" data-testid="non-fiscal-badge">
-            {t('receipt.nonFiscalBanner')}
-          </span>
+          {demoMode ? (
+            <span
+              className="pos-demo-badge"
+              data-testid="demo-mode-badge"
+              title={t('demo.badgeHint')}
+            >
+              {t('demo.badge')}
+            </span>
+          ) : (
+            <span className="pos-non-fiscal-badge" data-testid="non-fiscal-badge">
+              {t('receipt.nonFiscalBanner')}
+            </span>
+          )}
           {user && (
             <span className="pos-user-chip" data-testid="active-user-badge">
               <span className="pos-user-avatar" aria-hidden="true">
@@ -848,6 +903,10 @@ export function App() {
                   role={user.role}
                   terminalInfo={terminalInfo}
                   onError={handleError}
+                  onIntegrationsChanged={(st) => {
+                    setDemoMode(st.demoMode);
+                    setFiscalModeEnabled(st.fiscal.modeEnabled);
+                  }}
                 />
               )}
           </main>

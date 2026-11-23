@@ -4,7 +4,8 @@ import { useAuthStore } from '../state/auth.js';
 import { Icon, type IconName } from './Icon.js';
 import { LocaleSelect } from './LocaleSelect.js';
 
-export type AdminTab = 'dashboard' | 'receipts' | 'customers' | 'products' | 'devices' | 'reports';
+export type AdminTab =
+  'dashboard' | 'receipts' | 'customers' | 'products' | 'shop' | 'devices' | 'reports';
 
 const TABS: ReadonlyArray<{
   readonly id: AdminTab;
@@ -15,6 +16,7 @@ const TABS: ReadonlyArray<{
   { id: 'receipts', label: 'admin.nav.receipts', icon: 'receipt' },
   { id: 'customers', label: 'admin.nav.customers', icon: 'users' },
   { id: 'products', label: 'admin.nav.products', icon: 'box' },
+  { id: 'shop', label: 'admin.nav.shop', icon: 'cart' },
   { id: 'devices', label: 'admin.nav.devices', icon: 'device' },
   { id: 'reports', label: 'admin.nav.reports', icon: 'chart' },
 ];

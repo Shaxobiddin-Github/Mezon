@@ -33,6 +33,7 @@ import {
   CloudLicenceStore,
   CloudAuthStore,
   CloudCabinetStore,
+  CloudShopStore,
   CloudEventWriter,
   CloudDeviceStore,
   type CloudParkedEventRecord,
@@ -55,6 +56,7 @@ import { planLimitReply, registerLicenceRoutes } from './licence-routes.js';
 import { PRODUCTION_TRUSTED_LICENCE_KEYS, type TrustedLicenceKey } from '@mezon/licensing';
 import { CloudCabinetService } from './cabinet-service.js';
 import { registerCabinetRoutes } from './cabinet-routes.js';
+import { registerShopRoutes } from './shop-routes.js';
 import {
   MIN_CLIENT_VERSION,
   SyncPushRequestSchema,
@@ -944,9 +946,11 @@ export async function buildCloudServer(options: BuildServerOptions): Promise<Fas
   const telegramStore = new CloudTelegramStore(conn.pool, idGen);
   let telegramBot: TelegramBotService | undefined;
   let telegramScheduler: TelegramScheduler | null = null;
+  let telegramClient: TelegramClient | null = null;
   if (isTelegramEnabled(config)) {
     const client =
       options.telegramClient ?? new HttpTelegramClient({ token: config.telegramBotToken ?? '' });
+    telegramClient = client;
     telegramBot = new TelegramBotService({
       store: telegramStore,
       client,
@@ -1013,6 +1017,14 @@ export async function buildCloudServer(options: BuildServerOptions): Promise<Fas
       idGen,
       clock,
     }),
+  });
+  // V2 / F5: online shop window (public) and its cabinet side.
+  registerShopRoutes(app, {
+    store: new CloudShopStore(conn.pool, () => idGen.nextId()),
+    telegramStore,
+    telegramClient,
+    requireAdminAuth: createRequireAdminAuth(jwtService),
+    clock,
   });
   // T2.6: parked push events of the calling hub's store (device token). View, retry, acknowledge.
   const toParkedDto = (r: CloudParkedEventRecord): CloudParkedEventDto => ({

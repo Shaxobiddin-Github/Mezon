@@ -22,3 +22,9 @@ export {
   cloudTelegramDeliveries,
 } from './telegram-tables.js';
 export { cloudLicences, cloudPlatformInvoices } from './licence-tables.js';
+export {
+  cloudShops,
+  cloudShopProducts,
+  cloudShopOrders,
+  cloudShopOrderLines,
+} from './shop-tables.js';

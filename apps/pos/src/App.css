@@ -2016,3 +2016,191 @@ select.pos-btn {
 .pos-status-details[open] > summary {
   width: 100%;
 }
+
+/* ===== V2: demo badge, QR payment, integrations ===== */
+.pos-demo-badge {
+  display: inline-flex;
+  align-items: center;
+  padding: 3px 10px;
+  border-radius: 999px;
+  font-size: 11px;
+  font-weight: 800;
+  letter-spacing: 0.06em;
+  color: #fff;
+  background: repeating-linear-gradient(-45deg, #d97706 0 10px, #b45309 10px 20px);
+  cursor: help;
+}
+
+.pos-qr-panel {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 10px;
+  padding: 16px;
+  margin: 4px 0 12px;
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-lg);
+  background: var(--bg-elevated);
+}
+.pos-qr-head {
+  display: flex;
+  width: 100%;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+}
+.pos-qr-amount {
+  font-size: 20px;
+  font-weight: 800;
+  font-variant-numeric: tabular-nums;
+}
+.pos-qr-test {
+  width: 100%;
+  padding: 6px 10px;
+  border-radius: var(--radius-sm);
+  text-align: center;
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--warning-text);
+  background: var(--bg-warning);
+  border: 1px solid var(--warning-border);
+}
+.pos-qr-image {
+  border-radius: var(--radius);
+  box-shadow: var(--shadow);
+}
+.pos-qr-hint {
+  margin: 0;
+  max-width: 340px;
+  text-align: center;
+  color: var(--text-secondary);
+  font-size: 13px;
+}
+.pos-qr-bad {
+  color: var(--text-danger);
+  font-weight: 600;
+}
+.pos-qr-timer {
+  margin: 0;
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+  color: var(--text-secondary);
+}
+.pos-qr-actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 8px;
+}
+.pos-qr-paid-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-bottom: 10px;
+}
+.pos-qr-paid-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 12px;
+  border-radius: var(--radius-sm);
+  background: color-mix(in srgb, var(--bg-success) 10%, transparent);
+  border: 1px solid color-mix(in srgb, var(--bg-success) 35%, transparent);
+  font-weight: 600;
+}
+.pos-qr-paid-row small {
+  margin-left: auto;
+  color: var(--text-secondary);
+  font-weight: 500;
+}
+.pos-qr-paid-ok {
+  display: grid;
+  place-items: center;
+  width: 22px;
+  height: 22px;
+  border-radius: 999px;
+  color: #fff;
+  background: var(--bg-success);
+  font-size: 13px;
+}
+
+.pos-int {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  max-width: 760px;
+}
+.pos-int-head h3 {
+  margin: 0;
+  font-size: 18px;
+}
+.pos-int-head p {
+  margin: 4px 0 0;
+  color: var(--text-secondary);
+  font-size: 13px;
+}
+.pos-int-card {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 14px 16px;
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius);
+  background: var(--bg-surface);
+  box-shadow: var(--shadow-sm);
+}
+.pos-int-card-demo {
+  border-color: var(--warning-border);
+  background: var(--bg-warning);
+}
+.pos-int-card .pos-btn {
+  align-self: flex-start;
+}
+.pos-int-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+.pos-int-text {
+  margin: 0;
+  font-size: 13px;
+}
+.pos-int-need {
+  margin: 0;
+  font-size: 12px;
+  color: var(--text-secondary);
+}
+.pos-int-chip {
+  flex-shrink: 0;
+  padding: 3px 10px;
+  border-radius: 999px;
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--text-secondary);
+  background: var(--bg-muted);
+}
+.pos-int-chip-real {
+  color: var(--text-success);
+  background: color-mix(in srgb, var(--bg-success) 14%, transparent);
+}
+.pos-int-chip-test {
+  color: var(--warning-text);
+  background: var(--bg-warning);
+  border: 1px solid var(--warning-border);
+}
+.pos-int-problems {
+  margin: 0;
+  padding-left: 18px;
+  font-size: 13px;
+  color: var(--text-danger);
+}
+.pos-int-warn {
+  margin: 0;
+  padding: 8px 10px;
+  border-radius: var(--radius-sm);
+  font-size: 13px;
+  color: var(--warning-text);
+  background: var(--bg-warning);
+  border: 1px solid var(--warning-border);
+}
