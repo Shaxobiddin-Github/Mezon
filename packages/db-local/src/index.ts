@@ -595,6 +595,9 @@ export {
   isMarkedMxik,
   listCartMarksSync,
   readMarkingPrefixesSync,
+  writeMarkingPrefixesSync,
+  readDemoModeSync,
+  writeDemoModeSync,
   releaseSaleMarksInTxSync,
 } from './marking-repo.js';
 export {

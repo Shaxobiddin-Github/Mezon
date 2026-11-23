@@ -62,9 +62,11 @@ export const LoginPinInputSchema = z
   .min(1, 'PIN is required')
   .max(64, 'PIN exceeds maximum length');
 
+// `abort`: a non-numeric string stops here, so refinements built on top (`BigInt(val)`) never
+// see it and throw (that was a 500 instead of a 400 for e.g. `expectedTotal: "abc"`).
 export const BigIntStringSchema = z
   .string()
-  .regex(/^\d+$/, 'Must be a non-negative integer string');
+  .regex(/^\d+$/, { message: 'Must be a non-negative integer string', abort: true });
 
 export const UserRoleSchema = z.enum(USER_ROLES);
 

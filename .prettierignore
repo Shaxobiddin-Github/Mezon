@@ -11,3 +11,5 @@ coverage/
 pnpm-lock.yaml
 GEMINI.md
 .mezon/
+apps/android/www/
+apps/android/android/

@@ -26,19 +26,25 @@ export const TelegramCard: React.FC = () => {
   return (
     <div
       data-testid="admin-telegram-card"
-      className="bg-white rounded-xl border border-slate-200 shadow-sm p-4 flex flex-wrap items-center justify-between gap-3"
+      className="card flex flex-wrap items-center justify-between gap-3 p-5"
     >
-      <div className="text-sm font-semibold text-slate-800">{t('admin.telegram.title')}</div>
+      <div>
+        <div className="text-base font-semibold text-slate-900">{t('admin.telegram.title')}</div>
+      </div>
       {!status.enabled ? (
-        <span className="text-xs text-slate-500">{t('admin.telegram.disabled')}</span>
+        <span className="rounded-full bg-slate-100 px-2.5 py-1 text-xs font-medium text-slate-600">
+          {t('admin.telegram.disabled')}
+        </span>
       ) : status.linked ? (
         <div className="flex items-center gap-3">
-          <span className="text-xs text-emerald-700">{t('admin.telegram.connected')}</span>
+          <span className="inline-flex items-center rounded-full bg-emerald-50 px-2.5 py-1 text-xs font-semibold text-emerald-800 ring-1 ring-emerald-200">
+            {t('admin.telegram.connected')}
+          </span>
           <button
             onClick={() => {
               void adminApi.deleteTelegramLink().then(load);
             }}
-            className="text-xs px-3 py-1.5 rounded border border-slate-200 hover:bg-slate-50"
+            className="btn btn-outline"
           >
             {t('admin.telegram.disconnect')}
           </button>
@@ -52,7 +58,7 @@ export const TelegramCard: React.FC = () => {
                 .then(setLink)
                 .catch((err: unknown) => setError(describeApiError(err)));
             }}
-            className="text-xs px-3 py-1.5 rounded bg-indigo-600 text-white hover:bg-indigo-700"
+            className="btn btn-primary"
           >
             {t('admin.telegram.connect')}
           </button>

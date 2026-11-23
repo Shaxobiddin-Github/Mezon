@@ -80,8 +80,17 @@ export interface HubFiscalServiceOptions {
   readonly rulesService: HubRulesService;
   readonly nowMs: () => bigint;
   readonly getOrganizationId: () => UuidV7 | null;
+  /** V2: demo mode on + empty field config → the demo receipt fields below are printed. */
+  readonly isDemoMode?: () => boolean;
   readonly logger?: Logger;
 }
+
+/** V2 demo receipt fields (the real list comes with the fiscal provider's documentation). */
+export const DEMO_RECEIPT_FIELDS: FiscalReceiptFieldsConfig = [
+  { key: 'fiscalSign', label: 'FP (sinov)' },
+  { key: 'fiscalNumber', label: 'FN (sinov)' },
+  { key: 'confirmedAt', label: 'Vaqt' },
+];
 
 export class HubFiscalService {
   private readonly o: HubFiscalServiceOptions;
@@ -165,7 +174,16 @@ export class HubFiscalService {
   }
 
   receiptFields(): FiscalReceiptFieldsConfig {
-    return parseReceiptFieldsConfig(this.o.store.readConfigSync().receiptFieldsJson) ?? [];
+    const configured = parseReceiptFieldsConfig(this.o.store.readConfigSync().receiptFieldsJson);
+    if ((configured === null || configured.length === 0) && this.isDemoActive()) {
+      return DEMO_RECEIPT_FIELDS;
+    }
+    return configured ?? [];
+  }
+
+  /** Demo fallbacks apply only with a test driver: a real driver never gets demo receipt fields. */
+  private isDemoActive(): boolean {
+    return this.o.driver.isTestDriver && this.o.isDemoMode?.() === true;
   }
 
   /** Manager retry: only re-queues; the worker (single path) is nudged, never the driver directly. */

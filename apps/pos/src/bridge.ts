@@ -65,6 +65,13 @@ export interface MezonBridge {
   }): Promise<TerminalPairResult>;
   leaveTerminal?(): Promise<{ readonly ok: boolean }>;
   relaunchApp?(): Promise<void>;
+  /**
+   * Thin client (Android phone/tablet shell): there is no local hub, so until the device is paired
+   * as a LAN terminal the POS shows only the pairing form.
+   */
+  readonly thinClient?: boolean;
+  /** Camera barcode scan (Android shell). Resolves `null` when the cashier cancels. */
+  readonly scanBarcode?: () => Promise<string | null>;
 }
 
 /** Fingerprint shown in groups of 4 so two screens can be compared by eye. */

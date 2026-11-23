@@ -899,3 +899,50 @@ export {
 } from './fiscal.js';
 
 export { LicenceStatusResponseSchema, type LicenceStatusResponseDto } from './licence.js';
+
+export {
+  PaymentIntentStatusSchema,
+  PaymentIntentDtoSchema,
+  type PaymentIntentDto,
+  PaymentIntentResponseSchema,
+  IntegrationsStatusResponseSchema,
+  type IntegrationsStatusResponse,
+  SetDemoModeRequestSchema,
+  SetMarkingPrefixesRequestSchema,
+  CartMarkDtoSchema,
+  type CartMarkDto,
+  CartMarksResponseSchema,
+  type CartMarksResponseDto,
+  CartMarksListResponseSchema,
+} from './integrations.js';
+
+export {
+  ShopSlugSchema,
+  ShopOrderStatusSchema,
+  type ShopOrderStatusDto,
+  ShopFulfilmentSchema,
+  PublicShopProductSchema,
+  type PublicShopProductDto,
+  PublicShopResponseSchema,
+  type PublicShopResponseDto,
+  ShopPhoneSchema,
+  PlaceShopOrderRequestSchema,
+  type PlaceShopOrderRequestDto,
+  ShopOrderLineDtoSchema,
+  ShopOrderDtoSchema,
+  type ShopOrderDto,
+  PlaceShopOrderResponseSchema,
+  type PlaceShopOrderResponseDto,
+  PublicShopOrderResponseSchema,
+  AdminShopSettingsSchema,
+  type AdminShopSettingsDto,
+  AdminShopResponseSchema,
+  SaveAdminShopRequestSchema,
+  type SaveAdminShopRequestDto,
+  AdminShopProductSchema,
+  type AdminShopProductDto,
+  AdminShopProductsResponseSchema,
+  SetShopProductsRequestSchema,
+  AdminShopOrdersResponseSchema,
+  SetShopOrderStatusRequestSchema,
+} from './shop.js';
