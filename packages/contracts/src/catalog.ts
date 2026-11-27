@@ -385,6 +385,11 @@ export const ListProductsQuerySchema = z.strictObject({
     .enum(['true', 'false'])
     .transform((v) => v === 'true')
     .optional(),
+  /** C20: only this store's starred products. */
+  favoritesOnly: z
+    .enum(['true', 'false'])
+    .transform((v) => v === 'true')
+    .optional(),
 });
 export type ListProductsQueryDto = z.infer<typeof ListProductsQuerySchema>;
 
@@ -436,3 +441,53 @@ export const ScanBarcodeResponseSchema = z.strictObject({
   quantity: BigIntStringSchema.nullable(),
 });
 export type ScanBarcodeResponseDto = z.infer<typeof ScanBarcodeResponseSchema>;
+
+// ---------------------------------------------------------------------------
+// C20: wholesale price tiers and favourite products
+// ---------------------------------------------------------------------------
+
+/** Quantity in milli-units (1 dona = "1000"), price in tiyin. */
+export const PriceTierSchema = z.strictObject({
+  id: UuidV7Schema,
+  productId: UuidV7Schema,
+  minQty: BigIntStringSchema,
+  unitPrice: BigIntStringSchema,
+});
+export type PriceTierDto = z.infer<typeof PriceTierSchema>;
+
+export const PriceTierInputSchema = z.strictObject({
+  minQty: BigIntStringSchema,
+  unitPrice: BigIntStringSchema,
+});
+export type PriceTierInputDto = z.infer<typeof PriceTierInputSchema>;
+
+export const ReplacePriceTiersRequestSchema = z.strictObject({
+  tiers: z.array(PriceTierInputSchema).max(5),
+});
+export type ReplacePriceTiersRequestDto = z.infer<typeof ReplacePriceTiersRequestSchema>;
+
+export const ListPriceTiersQuerySchema = z.strictObject({
+  /** Comma-separated product ids; absent = every product. */
+  productIds: z
+    .string()
+    .max(200 * 37)
+    .transform((v) => v.split(',').filter((x) => x.length > 0))
+    .pipe(z.array(UuidV7Schema).max(200))
+    .optional(),
+});
+export type ListPriceTiersQueryDto = z.infer<typeof ListPriceTiersQuerySchema>;
+
+export const ListPriceTiersResponseSchema = z.strictObject({
+  tiers: z.array(PriceTierSchema),
+});
+export type ListPriceTiersResponseDto = z.infer<typeof ListPriceTiersResponseSchema>;
+
+export const FavoriteProductsResponseSchema = z.strictObject({
+  productIds: z.array(UuidV7Schema),
+});
+export type FavoriteProductsResponseDto = z.infer<typeof FavoriteProductsResponseSchema>;
+
+export const SetFavoriteRequestSchema = z.strictObject({
+  favorite: z.boolean(),
+});
+export type SetFavoriteRequestDto = z.infer<typeof SetFavoriteRequestSchema>;

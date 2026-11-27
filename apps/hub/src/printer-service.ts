@@ -32,6 +32,7 @@ import {
   parseUuidV7,
   quantityToMilli,
   roleHasPermission,
+  unixMsToBigInt,
 } from '@mezon/domain';
 import {
   NullPrinterDriver,
@@ -533,9 +534,18 @@ export class HubPrinterService {
           userIds: [sale.cashierUserId],
           customerId: sale.customerId,
           shiftId: sale.shiftId,
+          customerBalanceAtMs: unixMsToBigInt(sale.createdAtMs),
         });
+        const debtTiyin = moneyToTiyin(sale.debtAmount);
+        const balanceAfter = labels.customerBalanceTiyin;
+        const customerDebt =
+          balanceAfter !== null && (balanceAfter > 0n || debtTiyin > 0n)
+            ? { beforeTiyin: balanceAfter - debtTiyin, afterTiyin: balanceAfter }
+            : undefined;
         const doc: SaleReceiptDocument = {
           kind: 'sale',
+          ...(customerDebt !== undefined ? { customerDebt } : {}),
+          lookupQr: sale.receiptCode,
           headerTitle: config.receiptHeaderTitle,
           footerText: config.receiptFooterText,
           receiptNo: sale.receiptNo,

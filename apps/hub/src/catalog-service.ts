@@ -11,16 +11,20 @@ import type {
   DeleteCategoryResponseDto,
   DeleteProductResponseDto,
   DeleteVariantResponseDto,
+  FavoriteProductsResponseDto,
   ListCategoriesResponseDto,
   ListPriceChangesResponseDto,
+  ListPriceTiersResponseDto,
   ListProductsQueryDto,
   ListProductsResponseDto,
   PriceChangeSummaryDto,
+  PriceTierDto,
   ProductBarcodeSummaryDto,
   ProductDetailResponseDto,
   ProductResponseDto,
   ProductSummaryDto,
   ProductVariantSummaryDto,
+  ReplacePriceTiersRequestDto,
   ScanBarcodeResponseDto,
   UpdateCategoryRequestDto,
   UpdateProductRequestDto,
@@ -31,11 +35,19 @@ import type {
   SqliteCatalogStore,
   StoredCategoryRecord,
   StoredPriceChangeRecord,
+  StoredPriceTierRecord,
   StoredProductBarcodeRecord,
   StoredProductRecord,
   StoredProductVariantRecord,
 } from '@mezon/db-local';
-import { DomainError, type UuidV7 } from '@mezon/domain';
+import {
+  DomainError,
+  type UuidV7,
+  moneyFromTiyin,
+  moneyToTiyin,
+  quantityFromMilli,
+  quantityToMilli,
+} from '@mezon/domain';
 
 /**
  * Explicit allow-listed DTO mappers (`GEMINI.md` 3.4).
@@ -99,6 +111,15 @@ function toBarcodeDto(bc: StoredProductBarcodeRecord): ProductBarcodeSummaryDto 
     format: bc.format,
     createdAtMs: bc.createdAtMs.toString(),
     updatedAtMs: bc.updatedAtMs.toString(),
+  };
+}
+
+function toPriceTierDto(t: StoredPriceTierRecord): PriceTierDto {
+  return {
+    id: t.id,
+    productId: t.productId,
+    minQty: quantityToMilli(t.minQty).toString(),
+    unitPrice: moneyToTiyin(t.unitPrice).toString(),
   };
 }
 
@@ -247,6 +268,36 @@ export class HubCatalogService {
   async listPriceChanges(productId: UuidV7): Promise<ListPriceChangesResponseDto> {
     const rows = await this.store.listPriceChanges(productId);
     return { priceChanges: rows.map(toPriceChangeDto) };
+  }
+
+  /** C20 wholesale tiers. */
+  async listPriceTiers(productIds?: readonly UuidV7[]): Promise<ListPriceTiersResponseDto> {
+    const rows = await this.store.listPriceTiers(productIds);
+    return { tiers: rows.map(toPriceTierDto) };
+  }
+
+  async replacePriceTiers(
+    productId: UuidV7,
+    input: ReplacePriceTiersRequestDto,
+  ): Promise<ListPriceTiersResponseDto> {
+    const rows = await this.store.replacePriceTiers(
+      productId,
+      input.tiers.map((t) => ({
+        minQty: quantityFromMilli(BigInt(t.minQty)),
+        unitPrice: moneyFromTiyin(BigInt(t.unitPrice)),
+      })),
+    );
+    return { tiers: rows.map(toPriceTierDto) };
+  }
+
+  /** C20 favourite products of this store. */
+  async listFavorites(): Promise<FavoriteProductsResponseDto> {
+    return { productIds: [...(await this.store.listFavoriteProductIds())] };
+  }
+
+  async setFavorite(productId: UuidV7, favorite: boolean): Promise<FavoriteProductsResponseDto> {
+    await this.store.setFavorite(productId, favorite);
+    return this.listFavorites();
   }
 
   async scanBarcode(code: string): Promise<ScanBarcodeResponseDto> {

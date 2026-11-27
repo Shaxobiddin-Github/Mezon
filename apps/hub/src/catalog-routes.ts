@@ -4,11 +4,14 @@ import {
   CreateCategoryRequestSchema,
   CreateProductRequestSchema,
   CreateVariantRequestSchema,
+  ListPriceTiersQuerySchema,
   ListProductsQuerySchema,
   ProductBarcodeParamsSchema,
   ProductIdParamsSchema,
   ProductVariantParamsSchema,
+  ReplacePriceTiersRequestSchema,
   ScanBarcodeQuerySchema,
+  SetFavoriteRequestSchema,
   UpdateCategoryRequestSchema,
   UpdateProductRequestSchema,
   UpdateVariantRequestSchema,
@@ -140,6 +143,33 @@ export function registerCatalogRoutes(
     await authorize(authService, request, 'catalog:write');
     const params = ProductIdParamsSchema.parse(request.params);
     return catalogService.listPriceChanges(params.id);
+  });
+
+  // C20 wholesale price tiers: read by every till (the sale screen hint), changed by owner/manager.
+  app.get('/catalog/price-tiers', async (request) => {
+    await authorize(authService, request, 'catalog:read');
+    const query = ListPriceTiersQuerySchema.parse(request.query);
+    return catalogService.listPriceTiers(query.productIds);
+  });
+
+  app.put('/products/:id/price-tiers', async (request) => {
+    await authorize(authService, request, 'catalog:write');
+    const params = ProductIdParamsSchema.parse(request.params);
+    const body = ReplacePriceTiersRequestSchema.parse(request.body);
+    return catalogService.replacePriceTiers(params.id, body);
+  });
+
+  // C20 favourite (starred) goods of this store: any cashier may star.
+  app.get('/catalog/favorites', async (request) => {
+    await authorize(authService, request, 'catalog:read');
+    return catalogService.listFavorites();
+  });
+
+  app.put('/catalog/favorites/:id', async (request) => {
+    await authorize(authService, request, 'catalog:read');
+    const params = ProductIdParamsSchema.parse(request.params);
+    const body = SetFavoriteRequestSchema.parse(request.body);
+    return catalogService.setFavorite(params.id, body.favorite);
   });
 
   // Fast checkout barcode scan lookup

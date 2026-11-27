@@ -1769,7 +1769,7 @@ describe('@mezon/db-local - T1.6 Void, Return, V1-V5, Oracle Parity, C1 Crash & 
     } finally {
       env.connection.close();
     }
-  });
+  }, 60_000); // seeded model over many sales: ~1.5 s locally, 10-16 s on the Windows CI runner
 
   it('T1.6 test debt (2): half-tiyin cumulative rounding in createReturn (final_total=10, 2.000 kg: 0.250->1, next 0.250->2)', async () => {
     const env = await setupReturnEnv({ seed: 916 });

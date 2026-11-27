@@ -126,6 +126,37 @@ const scanBarcode = async (): Promise<string | null> => {
   }
 };
 
+/**
+ * C19: the camera stays open (drawn behind the transparent WebView) and reports every code it
+ * sees, so the cashier scans item after item without reopening it. Uses the bundled ML Kit
+ * library: no Google Play module download.
+ */
+const startLiveScan = async (onCode: (code: string) => void): Promise<() => Promise<void>> => {
+  const { camera } = await BarcodeScanner.requestPermissions();
+  if (camera !== 'granted' && camera !== 'limited') {
+    throw new Error('CAMERA_PERMISSION_DENIED');
+  }
+  const listener = await BarcodeScanner.addListener('barcodesScanned', (event) => {
+    for (const b of event.barcodes) {
+      const value = b.rawValue?.trim();
+      if (value !== undefined && value !== '') onCode(value);
+    }
+  });
+  try {
+    await BarcodeScanner.startScan();
+  } catch (err) {
+    await listener.remove();
+    throw err;
+  }
+  let stopped = false;
+  return async () => {
+    if (stopped) return;
+    stopped = true;
+    await listener.remove();
+    await BarcodeScanner.stopScan();
+  };
+};
+
 const bridge: AndroidMezonBridge = {
   thinClient: true,
   getHubState: hubState,
@@ -144,6 +175,7 @@ const bridge: AndroidMezonBridge = {
   relaunchApp: () => MezonHub.restart(),
 
   scanBarcode,
+  startLiveScan,
 };
 
 window.mezonBridge = bridge;

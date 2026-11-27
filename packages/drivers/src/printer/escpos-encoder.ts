@@ -336,7 +336,42 @@ function buildSaleReceiptLines(
     }
   }
 
+  // C20: the customer's running debt, so the buyer sees what they owe after this purchase.
+  if (doc.customerDebt !== undefined) {
+    out.push({ text: repeatDivider('-', width) });
+    out.push({ text: centerLine(norm('MIJOZ QARZI'), width), bold: true });
+    for (const row of formatKeyValueRows(
+      norm('Xariddan oldin:'),
+      `${formatTiyinAmount(doc.customerDebt.beforeTiyin)} so'm`,
+      width,
+    )) {
+      out.push({ text: row });
+    }
+    if (doc.debtAmountTiyin > 0n) {
+      for (const row of formatKeyValueRows(
+        norm('Shu chekda:'),
+        `+${formatTiyinAmount(doc.debtAmountTiyin)} so'm`,
+        width,
+      )) {
+        out.push({ text: row });
+      }
+    }
+    for (const row of formatKeyValueRows(
+      norm('Xariddan keyin:'),
+      `${formatTiyinAmount(doc.customerDebt.afterTiyin)} so'm`,
+      width,
+    )) {
+      out.push({ text: row, bold: true });
+    }
+  }
+
   out.push(...fiscalBodyLines(doc.fiscal, width, norm));
+  // C20: a non-fiscal receipt carries its code as a QR (scan it at the till to find the receipt).
+  if (doc.fiscal === undefined && doc.lookupQr !== undefined && doc.lookupQr.length > 0) {
+    out.push({ text: repeatDivider('-', width) });
+    out.push({ text: centerLine('[QR]', width), qr: doc.lookupQr });
+    out.push({ text: centerLine(norm(`Chek: ${doc.lookupQr}`), width) });
+  }
   out.push({ text: repeatDivider('=', width) });
   for (const footerLine of wrapTextLines(
     norm(doc.footerText || 'Xaridingiz uchun rahmat!'),

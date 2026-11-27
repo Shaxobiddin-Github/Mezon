@@ -1,12 +1,15 @@
-import type { ProductSummaryDto } from '@mezon/contracts';
+import type { PriceTierDto, ProductSummaryDto } from '@mezon/contracts';
 import type { UuidV7 } from '@mezon/domain';
 import { t } from '@mezon/i18n';
 import { formatMilliToQtyString, formatTiyinToSom, stepMilliQuantity } from '@mezon/ui';
-import { type KeyboardEvent, type RefObject, useState } from 'react';
+import { type KeyboardEvent, type RefObject, useEffect, useState } from 'react';
 import type { HubApiClient } from '../api/hub-client.js';
 import { usePosStore } from '../store/pos-store.js';
 import { Icon, type IconName } from './Icon.js';
 import { splitHotkey } from './SideNav.js';
+import { LiveScanOverlay } from './LiveScanOverlay.js';
+import type { ScanResult } from '../utils/live-scan.js';
+import { WHOLESALE_LINE_NAME, tierHint } from '../utils/price-tiers.js';
 
 /** Soft tile colours: the same product always gets the same one (by name). */
 const TILE_TONES = 6;
@@ -34,6 +37,7 @@ export function PosWorkspaceScreen({
   onOpenParkedModal,
   onOpenCustomerModal,
   onScanBarcode,
+  onLinkBarcode,
   onError,
 }: {
   readonly api: HubApiClient;
@@ -41,12 +45,21 @@ export function PosWorkspaceScreen({
   readonly onSearchProducts: (q: string, categoryId: UuidV7 | null) => Promise<void>;
   readonly onOpenParkedModal: () => Promise<void>;
   readonly onOpenCustomerModal: () => Promise<void>;
-  readonly onScanBarcode: (barcode: string) => Promise<void>;
+  readonly onScanBarcode: (barcode: string) => Promise<ScanResult>;
+  /** C19: owner/manager may link an unknown scanned code to a product (null for a cashier). */
+  readonly onLinkBarcode: ((barcode: string) => void) | null;
   readonly onError: (err: unknown) => void;
 }) {
   const scanBarcode = window.mezonBridge?.scanBarcode;
+  const startLiveScan = window.mezonBridge?.startLiveScan;
   const [cameraBusy, setCameraBusy] = useState(false);
+  // C19: the phone keeps the camera open and scans item after item.
+  const [liveOpen, setLiveOpen] = useState(false);
   const scanWithCamera = async () => {
+    if (startLiveScan !== undefined) {
+      setLiveOpen(true);
+      return;
+    }
     if (scanBarcode === undefined || cameraBusy) return;
     setCameraBusy(true);
     try {
@@ -83,6 +96,75 @@ export function PosWorkspaceScreen({
   const setActiveModal = usePosStore((s) => s.setActiveModal);
 
   const [focusedResultIdx, setFocusedResultIdx] = useState(0);
+
+  // C20: starred goods (per store) and the "Sevimlilar" filter.
+  const [favoriteIds, setFavoriteIds] = useState<ReadonlySet<string>>(new Set());
+  const [favMode, setFavMode] = useState(false);
+  const [favResults, setFavResults] = useState<readonly ProductSummaryDto[]>([]);
+  // C20: wholesale tiers of the goods on screen, by product id.
+  const [tiersByProduct, setTiersByProduct] = useState<
+    ReadonlyMap<string, readonly PriceTierDto[]>
+  >(new Map());
+
+  useEffect(() => {
+    let alive = true;
+    api
+      .listFavorites()
+      .then((r) => {
+        if (alive) setFavoriteIds(new Set(r.productIds));
+      })
+      .catch(() => undefined);
+    return () => {
+      alive = false;
+    };
+  }, [api]);
+
+  const shownResults = favMode ? favResults : searchResults;
+
+  useEffect(() => {
+    if (!favMode) return;
+    let alive = true;
+    api
+      .listProducts({ q: searchQuery, favoritesOnly: true, limit: 100 })
+      .then((r) => {
+        if (alive) setFavResults(r.products);
+      })
+      .catch(onError);
+    return () => {
+      alive = false;
+    };
+  }, [api, favMode, searchQuery, favoriteIds, onError]);
+
+  const shownIdsKey = shownResults.map((p) => p.id).join(',');
+  useEffect(() => {
+    if (shownIdsKey.length === 0) return;
+    let alive = true;
+    api
+      .listPriceTiers(shownIdsKey.split(','))
+      .then((r) => {
+        if (!alive) return;
+        const map = new Map<string, PriceTierDto[]>();
+        for (const tier of r.tiers) {
+          const list = map.get(tier.productId) ?? [];
+          list.push(tier);
+          map.set(tier.productId, list);
+        }
+        setTiersByProduct(map);
+      })
+      .catch(() => undefined);
+    return () => {
+      alive = false;
+    };
+  }, [api, shownIdsKey]);
+
+  const toggleFavorite = async (productId: string) => {
+    try {
+      const res = await api.setFavorite(productId, !favoriteIds.has(productId));
+      setFavoriteIds(new Set(res.productIds));
+    } catch (err) {
+      onError(err);
+    }
+  };
 
   const handleAddProduct = async (product: ProductSummaryDto) => {
     if (!activeCart) {
@@ -134,13 +216,13 @@ export function PosWorkspaceScreen({
   const handleSearchKeyDown = (e: KeyboardEvent<HTMLInputElement>) => {
     if (e.key === 'ArrowDown') {
       e.preventDefault();
-      setFocusedResultIdx((prev) => Math.min(Math.max(0, searchResults.length - 1), prev + 1));
+      setFocusedResultIdx((prev) => Math.min(Math.max(0, shownResults.length - 1), prev + 1));
     } else if (e.key === 'ArrowUp') {
       e.preventDefault();
       setFocusedResultIdx((prev) => Math.max(0, prev - 1));
     } else if (e.key === 'Enter') {
       e.preventDefault();
-      const target = searchResults[focusedResultIdx] ?? searchResults[0];
+      const target = shownResults[focusedResultIdx] ?? shownResults[0];
       if (target) {
         void handleAddProduct(target);
       } else {
@@ -229,10 +311,31 @@ export function PosWorkspaceScreen({
                         >
                           {line.name}
                         </span>
-                        <span className="pos-line-price">
-                          {formatTiyinToSom(line.unitPriceSnapshot)} {t('common.currency')} /{' '}
-                          {t(`unit.${line.unit}`)}
-                        </span>
+                        {line.appliedPromotionName === WHOLESALE_LINE_NAME ? (
+                          <span className="pos-line-price">
+                            {formatTiyinToSom(
+                              (
+                                (BigInt(line.subtotalAfterPromo) * 1000n) /
+                                BigInt(line.qty)
+                              ).toString(),
+                            )}{' '}
+                            {t('common.currency')} / {t(`unit.${line.unit}`)}{' '}
+                            <s className="pos-line-old-price">
+                              {formatTiyinToSom(line.unitPriceSnapshot)}
+                            </s>
+                            <span
+                              className="pos-wholesale-tag"
+                              data-testid={`cart-line-wholesale-${String(index)}`}
+                            >
+                              {t('pos.wholesale.tag')}
+                            </span>
+                          </span>
+                        ) : (
+                          <span className="pos-line-price">
+                            {formatTiyinToSom(line.unitPriceSnapshot)} {t('common.currency')} /{' '}
+                            {t(`unit.${line.unit}`)}
+                          </span>
+                        )}
                       </td>
                       <td>
                         <div className="pos-qty-controls">
@@ -413,6 +516,27 @@ export function PosWorkspaceScreen({
         </div>
       </div>
 
+      {liveOpen && startLiveScan !== undefined && (
+        <LiveScanOverlay
+          startLiveScan={startLiveScan}
+          onScan={onScanBarcode}
+          onClose={() => setLiveOpen(false)}
+          onFinish={() => {
+            setLiveOpen(false);
+            setActiveModal('payment');
+          }}
+          onLink={
+            onLinkBarcode === null
+              ? null
+              : (code) => {
+                  setLiveOpen(false);
+                  onLinkBarcode(code);
+                }
+          }
+          onError={onError}
+        />
+      )}
+
       {/* Right Pane: Catalog Search & Category Filter */}
       <div className="pos-pane">
         <div className="pos-search-bar">
@@ -449,10 +573,25 @@ export function PosWorkspaceScreen({
           </label>
         </div>
 
-        {categories.length > 0 && (
-          <div className="pos-chips" role="tablist" data-testid="catalog-category-select">
-            {[{ id: null, name: t('pos.allCategories') }, ...categories].map((cat) => {
-              const active = (cat.id ?? null) === (selectedCategoryId ?? null);
+        <div className="pos-chips" role="tablist" data-testid="catalog-category-select">
+          <button
+            type="button"
+            role="tab"
+            aria-selected={favMode}
+            data-testid="catalog-favorites-chip"
+            className={`pos-chip pos-chip-fav ${favMode ? 'pos-chip-active' : ''}`}
+            onClick={() => {
+              setFavMode((v) => !v);
+              setFocusedResultIdx(0);
+            }}
+          >
+            <Icon name="star" />
+            {t('pos.favorites.chip')}
+            {favoriteIds.size > 0 && <span className="pos-count">{favoriteIds.size}</span>}
+          </button>
+          {categories.length > 0 &&
+            [{ id: null, name: t('pos.allCategories') }, ...categories].map((cat) => {
+              const active = !favMode && (cat.id ?? null) === (selectedCategoryId ?? null);
               return (
                 <button
                   key={cat.id ?? 'all'}
@@ -462,6 +601,7 @@ export function PosWorkspaceScreen({
                   className={`pos-chip ${active ? 'pos-chip-active' : ''}`}
                   onClick={() => {
                     const nextCat = cat.id ?? null;
+                    setFavMode(false);
                     setSelectedCategoryId(nextCat);
                     setFocusedResultIdx(0);
                     void onSearchProducts(searchQuery, nextCat);
@@ -471,39 +611,68 @@ export function PosWorkspaceScreen({
                 </button>
               );
             })}
-          </div>
-        )}
+        </div>
 
         <div className="pos-product-list" data-testid="catalog-search-results">
-          {searchResults.length === 0 ? (
-            <p data-testid="catalog-no-results">{t('pos.noSearchResults')}</p>
+          {shownResults.length === 0 ? (
+            <p data-testid="catalog-no-results">
+              {favMode ? t('pos.favorites.empty') : t('pos.noSearchResults')}
+            </p>
           ) : (
-            searchResults.map((prod, idx) => (
-              <button
-                key={prod.id}
-                type="button"
-                className={`pos-product-item ${idx === focusedResultIdx ? 'pos-cart-row-selected' : ''}`}
-                data-testid={`catalog-result-${String(idx)}`}
-                onClick={() => void handleAddProduct(prod)}
-              >
-                <span
-                  className={`pos-tile-badge pos-tone-${String(toneOf(prod.name))}`}
-                  aria-hidden="true"
-                >
-                  {prod.name.trim().charAt(0).toUpperCase()}
-                </span>
-                <span className="pos-tile-name">
-                  {prod.name}
-                  {prod.sku ? <small> · {prod.sku}</small> : null}
-                </span>
-                <span className="pos-tile-price">
-                  <strong>
-                    {formatTiyinToSom(prod.salePrice)} {t('common.currency')}
-                  </strong>
-                  <small> / {t(`unit.${prod.unit}`)}</small>
-                </span>
-              </button>
-            ))
+            shownResults.map((prod, idx) => {
+              const isFav = favoriteIds.has(prod.id);
+              const hint = tierHint(tiersByProduct.get(prod.id));
+              return (
+                <div key={prod.id} className="pos-product-cell">
+                  <button
+                    type="button"
+                    className={`pos-product-item ${idx === focusedResultIdx ? 'pos-cart-row-selected' : ''}`}
+                    data-testid={`catalog-result-${String(idx)}`}
+                    onClick={() => void handleAddProduct(prod)}
+                  >
+                    <span
+                      className={`pos-tile-badge pos-tone-${String(toneOf(prod.name))}`}
+                      aria-hidden="true"
+                    >
+                      {prod.name.trim().charAt(0).toUpperCase()}
+                    </span>
+                    <span className="pos-tile-name">
+                      {prod.name}
+                      {prod.sku ? <small> · {prod.sku}</small> : null}
+                    </span>
+                    <span className="pos-tile-price">
+                      <strong>
+                        {formatTiyinToSom(prod.salePrice)} {t('common.currency')}
+                      </strong>
+                      <small> / {t(`unit.${prod.unit}`)}</small>
+                      {hint !== null && (
+                        <small
+                          className="pos-tile-tier"
+                          data-testid={`catalog-result-tier-${String(idx)}`}
+                        >
+                          {t('pos.wholesale.hint', {
+                            qty: hint.qty,
+                            unit: t(`unit.${prod.unit}`),
+                            price: formatTiyinToSom(hint.price),
+                          })}
+                        </small>
+                      )}
+                    </span>
+                  </button>
+                  <button
+                    type="button"
+                    className={`pos-fav-btn ${isFav ? 'pos-fav-on' : ''}`}
+                    data-testid={`catalog-result-fav-${String(idx)}`}
+                    aria-pressed={isFav}
+                    aria-label={isFav ? t('pos.favorites.remove') : t('pos.favorites.add')}
+                    title={isFav ? t('pos.favorites.remove') : t('pos.favorites.add')}
+                    onClick={() => void toggleFavorite(prod.id)}
+                  >
+                    <Icon name="star" />
+                  </button>
+                </div>
+              );
+            })
           )}
         </div>
       </div>

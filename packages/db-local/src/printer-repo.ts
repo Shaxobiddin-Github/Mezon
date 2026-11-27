@@ -381,10 +381,14 @@ export class SqlitePrinterStore {
     readonly userIds: readonly UuidV7[];
     readonly customerId: UuidV7 | null;
     readonly shiftId: UuidV7 | null;
+    /** C20: also return the customer's debt as of this moment (ledger entries up to it). */
+    readonly customerBalanceAtMs?: bigint;
   }): Promise<{
     readonly userNames: ReadonlyMap<string, string>;
     readonly customerName: string | null;
     readonly shiftCode: string | null;
+    /** C20: tiyin; null when no customer or not asked. */
+    readonly customerBalanceTiyin: bigint | null;
   }> {
     const ctx = this.requireContext();
     return runConnectionReadOnly(this.connection, () => {
@@ -422,10 +426,23 @@ export class SqlitePrinterStore {
               .limit(1)
               .all()[0]
           : undefined;
+      let customerBalanceTiyin: bigint | null = null;
+      if (params.customerId !== null && params.customerBalanceAtMs !== undefined) {
+        const row = this.connection.sqlite
+          .prepare(
+            `SELECT COALESCE(SUM("amount_delta"), 0) AS "total" FROM "customer_ledger"
+             WHERE "organization_id" = ? AND "customer_id" = ? AND "created_at_ms" <= ?`,
+          )
+          .safeIntegers(true)
+          .get(ctx.organizationId, params.customerId, params.customerBalanceAtMs) as
+          { readonly total: bigint } | undefined;
+        customerBalanceTiyin = row?.total ?? 0n;
+      }
       return Promise.resolve({
         userNames: new Map(userRows.map((u) => [u.id as string, u.fullName])),
         customerName: customerRow?.fullName ?? null,
         shiftCode: shiftRow?.shiftCode ?? null,
+        customerBalanceTiyin,
       });
     });
   }

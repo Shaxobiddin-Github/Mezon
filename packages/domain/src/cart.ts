@@ -56,11 +56,27 @@ export type CartStatus = (typeof CART_STATUSES)[number];
 export const CART_LINE_KINDS = ['catalog', 'quick_sale'] as const;
 export type CartLineKind = (typeof CART_LINE_KINDS)[number];
 
+/**
+ * C20: a wholesale price tier is evaluated like a promotion but never stored in `promotions`:
+ * it is built in memory from `product_price_tiers`. It applies to a product line when the summed
+ * quantity of that product/variant in the cart reaches `minQty`; the line is then charged
+ * `unitPrice` per unit (never more than the shelf price).
+ */
+export const WHOLESALE_RULE_TYPE = 'wholesale' as const;
+export type PromotionRuleType = PromotionType | typeof WHOLESALE_RULE_TYPE;
+
+export interface WholesaleTierRule {
+  readonly minQty: Quantity;
+  readonly unitPrice: Money;
+}
+
 export interface PromotionRule {
   readonly id: UuidV7;
   readonly storeId: UuidV7 | null;
   readonly name: string;
-  readonly type: PromotionType;
+  readonly type: PromotionRuleType;
+  /** Set only for `type === 'wholesale'` (scope is always `product`). */
+  readonly wholesale?: WholesaleTierRule | null;
   readonly scope: PromotionScope;
   readonly targetProductId: UuidV7 | null;
   readonly targetCategoryId: UuidV7 | null;
@@ -305,9 +321,17 @@ function computeSingleLineNonBundleDiscountTiyin(
   line: CartLineInput,
   grossTiyin: bigint,
   promo: PromotionRule,
+  groupQtyMilli: bigint,
 ): bigint {
   if (grossTiyin <= 0n || !doesLineMatchPromotionScope(line, promo)) {
     return 0n;
+  }
+  if (promo.type === WHOLESALE_RULE_TYPE) {
+    const tier = promo.wholesale;
+    if (tier === undefined || tier === null || line.lineKind !== 'catalog') return 0n;
+    if (groupQtyMilli < quantityToMilli(tier.minQty)) return 0n;
+    const tierGross = moneyToTiyin(multiply(tier.unitPrice, line.qty));
+    return clampBigInt(grossTiyin - tierGross, 0n, grossTiyin);
   }
   if (promo.type === 'percent' && promo.discountPercentBp !== null) {
     const raw = divideRoundHalfAwayFromZero(grossTiyin * promo.discountPercentBp, 10_000n);
@@ -346,6 +370,10 @@ function assignGroupPromotions(params: {
   const nonBundlePromos = params.activePromos.filter((p) => p.type !== 'buy_x_get_y');
   const bundlePromos = params.activePromos.filter((p) => p.type === 'buy_x_get_y');
 
+  // C20: wholesale tiers look at the pooled quantity of the product/variant group.
+  let groupQtyMilli = 0n;
+  for (const item of params.groupLines) groupQtyMilli += quantityToMilli(item.line.qty);
+
   // 1) Best independent non-N+M promo per line
   const bestNonBundle = new Map<number, LinePromoAssignment>();
   let nonBundleGroupSum = 0n;
@@ -356,7 +384,12 @@ function assignGroupPromotions(params: {
     let bestDisc = 0n;
 
     for (const promo of nonBundlePromos) {
-      const disc = computeSingleLineNonBundleDiscountTiyin(item.line, item.grossTiyin, promo);
+      const disc = computeSingleLineNonBundleDiscountTiyin(
+        item.line,
+        item.grossTiyin,
+        promo,
+        groupQtyMilli,
+      );
       if (disc <= 0n) {
         continue;
       }

@@ -269,6 +269,22 @@ export const ProductBarcodesPayloadSchema = z
   })
   .strict();
 
+/** C20 wholesale price tiers (ATTR). */
+export const ProductPriceTiersPayloadSchema = z
+  .object({
+    id: UuidV7Schema,
+    organizationId: UuidV7Schema,
+    deviceId: UuidV7Schema,
+    hlc: z.string().length(58),
+    createdAtMs: UnixMsPayloadSchema,
+    updatedAtMs: UnixMsPayloadSchema,
+    deletedAtMs: UnixMsPayloadSchema.nullable().optional(),
+    productId: UuidV7Schema,
+    minQty: QuantityPayloadSchema,
+    unitPrice: MoneyPayloadSchema,
+  })
+  .strict();
+
 export const PriceChangesPayloadSchema = z
   .object({
     id: UuidV7Schema,
@@ -1113,6 +1129,7 @@ export const SYNC_PAYLOAD_SCHEMAS: Readonly<Record<string, z.ZodType<Record<stri
   products: ProductsPayloadSchema,
   product_variants: ProductVariantsPayloadSchema,
   product_barcodes: ProductBarcodesPayloadSchema,
+  product_price_tiers: ProductPriceTiersPayloadSchema,
   price_changes: PriceChangesPayloadSchema,
   batches: BatchesPayloadSchema,
   stock_moves: StockMovesPayloadSchema,
@@ -1499,6 +1516,7 @@ export const SYNC_FOREIGN_REFERENCES: Readonly<Record<string, readonly ForeignKe
     { payloadKey: 'productId', targetEntity: 'products' },
     { payloadKey: 'variantId', targetEntity: 'product_variants' },
   ],
+  product_price_tiers: [{ payloadKey: 'productId', targetEntity: 'products' }],
   price_changes: [
     { payloadKey: 'productId', targetEntity: 'products' },
     { payloadKey: 'variantId', targetEntity: 'product_variants' },
