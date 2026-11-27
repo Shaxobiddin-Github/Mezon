@@ -21,6 +21,7 @@ import { UpdateBanner } from './components/UpdateBanner.js';
 import { SideNav } from './components/SideNav.js';
 import { Icon } from './components/Icon.js';
 import { nextUiSize, readUiSize, type UiSize, writeUiSize } from './utils/ui-size.js';
+import { DashboardPage } from './components/DashboardPage.js';
 import { ReceiptsPage } from './components/ReceiptsPage.js';
 import { SettingsPage } from './components/SettingsPage.js';
 import { TerminalModeSection, TerminalPairForm } from './components/ConnectionsPanels.js';
@@ -41,6 +42,9 @@ import {
 } from './components/PaymentAndShiftModals.js';
 import './App.css';
 import { describeHubError } from './utils/error-text.js';
+import { findTouchedLine, type ScanResult } from './utils/live-scan.js';
+import { LinkBarcodeModal } from './components/LinkBarcodeModal.js';
+import type { CartDetailDto } from '@mezon/contracts';
 
 function resolveBrowserFallbackBaseUrl(): string | null {
   if (typeof window.__MEZON_HUB_URL__ === 'string' && window.__MEZON_HUB_URL__.trim().length > 0) {
@@ -116,6 +120,10 @@ export function App() {
   const errorBanner = usePosStore((s) => s.errorBanner);
   const setErrorBanner = usePosStore((s) => s.setErrorBanner);
   const setLastScannedBarcode = usePosStore((s) => s.setLastScannedBarcode);
+  // C19: a scanned code that is not in the catalog (offered for linking to a product).
+  const [unknownBarcode, setUnknownBarcode] = useState<string | null>(null);
+  const [linkBarcode, setLinkBarcode] = useState<string | null>(null);
+  const canManageCatalog = user?.role === 'owner' || user?.role === 'manager';
 
   const searchInputRef = useRef<HTMLInputElement | null>(null);
   const scannerStateRef = useRef<ScannerDetectorState>(INITIAL_SCANNER_DETECTOR_STATE);
@@ -326,9 +334,15 @@ export function App() {
   }, [setBridgeInfo, checkHubHealth, bootstrapFlow]);
 
   const handleScanBarcode = useCallback(
-    async (barcode: string) => {
+    async (barcode: string): Promise<ScanResult> => {
       setLastScannedBarcode(barcode);
       setErrorBanner(null);
+      setUnknownBarcode(null);
+      const before = usePosStore.getState().activeCart?.lines ?? [];
+      const added = (cart: CartDetailDto): ScanResult => {
+        setActiveCart(cart);
+        return { ok: true, name: findTouchedLine(before, cart.lines)?.name ?? '' };
+      };
       try {
         let cartId = usePosStore.getState().activeCart?.id;
         if (!cartId) {
@@ -343,8 +357,7 @@ export function App() {
         if (looksLikeMarkingCode(barcode)) {
           try {
             const marked = await api.scanMark(cartId, barcode);
-            setActiveCart(marked.cart);
-            return;
+            return added(marked.cart);
           } catch (err) {
             const fallback =
               err instanceof HubApiError &&
@@ -355,8 +368,7 @@ export function App() {
           }
           try {
             const raw = await api.addCartLine(cartId, { kind: 'scan', barcode, qty: '1000' });
-            setActiveCart(raw.cart);
-            return;
+            return added(raw.cart);
           } catch (err) {
             if (!(err instanceof HubApiError)) throw err;
             let gtin: string;
@@ -370,8 +382,7 @@ export function App() {
               barcode: gtinToEan13(gtin) ?? gtin,
               qty: '1000',
             });
-            setActiveCart(byGtin.cart);
-            return;
+            return added(byGtin.cart);
           }
         }
         const updated = await api.addCartLine(cartId, {
@@ -379,9 +390,20 @@ export function App() {
           barcode,
           qty: '1000',
         });
-        setActiveCart(updated.cart);
+        return added(updated.cart);
       } catch (err) {
+        // C19: an unknown code gets its own bar with "link to a product", not a dead-end error.
+        if (err instanceof HubApiError && err.code === 'BARCODE_NOT_FOUND') {
+          setUnknownBarcode(barcode);
+          return {
+            ok: false,
+            code: barcode,
+            notFound: true,
+            message: t('pos.unknown.title', { code: barcode }),
+          };
+        }
         handleError(err);
+        return { ok: false, code: barcode, notFound: false, message: describeHubError(err) };
       }
     },
     [api, setActiveCart, setErrorBanner, setLastScannedBarcode, handleError],
@@ -804,6 +826,54 @@ export function App() {
         </div>
       )}
 
+      {screen === 'pos' && unknownBarcode !== null && linkBarcode === null && (
+        <div
+          className="pos-error-banner pos-unknown-bar"
+          role="alert"
+          data-testid="unknown-barcode-bar"
+        >
+          <span>
+            {t('pos.unknown.title', { code: unknownBarcode })}
+            {!canManageCatalog && (
+              <span className="pos-unknown-hint"> {t('pos.unknown.askOwner')}</span>
+            )}
+          </span>
+          {canManageCatalog && (
+            <button
+              type="button"
+              className="pos-btn pos-btn-primary"
+              data-testid="unknown-barcode-link"
+              onClick={() => setLinkBarcode(unknownBarcode)}
+            >
+              <Icon name="link" />
+              {t('pos.unknown.link')}
+            </button>
+          )}
+          <button
+            type="button"
+            className="pos-btn"
+            aria-label={t('common.close')}
+            onClick={() => setUnknownBarcode(null)}
+          >
+            <Icon name="close" />
+          </button>
+        </div>
+      )}
+
+      {linkBarcode !== null && (
+        <LinkBarcodeModal
+          api={api}
+          barcode={linkBarcode}
+          onClose={() => setLinkBarcode(null)}
+          onError={handleError}
+          onLinked={() => {
+            setLinkBarcode(null);
+            setUnknownBarcode(null);
+            void handleScanBarcode(linkBarcode);
+          }}
+        />
+      )}
+
       {thinClientUnpaired && <TerminalPairForm />}
 
       {screen === 'loading' && !thinClientUnpaired && (
@@ -901,6 +971,15 @@ export function App() {
                 onOpenParkedModal={handleOpenParkedModal}
                 onOpenCustomerModal={handleOpenCustomerModal}
                 onScanBarcode={handleScanBarcode}
+                onLinkBarcode={canManageCatalog ? setLinkBarcode : null}
+                onError={handleError}
+              />
+            )}
+            {section === 'dashboard' && (user?.role === 'owner' || user?.role === 'manager') && (
+              <DashboardPage
+                api={api}
+                isOwner={user.role === 'owner'}
+                onGo={(s) => setSection(s)}
                 onError={handleError}
               />
             )}

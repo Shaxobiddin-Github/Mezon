@@ -39,6 +39,9 @@ export function SideNav(props: {
   const isManager = role === 'owner' || role === 'manager';
 
   const main: NavItem[] = [
+    ...(isManager
+      ? [{ key: 'dashboard' as const, label: t('nav.dashboard'), icon: 'chart' as const }]
+      : []),
     { key: 'sale', label: t('nav.sale'), icon: 'sale' },
     { key: 'receipts', label: t('nav.receipts'), icon: 'receipts' },
     ...(isManager

@@ -128,9 +128,9 @@ test('Playwright unfused Electron against identical app.asar: app://mezon, CSP, 
     await expect(page.getByTestId('health-needs-setup')).toHaveText('true');
     await expect(page.getByTestId('hub-restart-count')).toHaveText('0');
 
-    const initialHubUrl = (await page.getByTestId('hub-url').innerText()).trim();
+    const initialHubUrl = ((await page.getByTestId('hub-url').textContent()) ?? '').trim();
     expect(initialHubUrl).toMatch(/^http:\/\/127\.0\.0\.1:\d+$/);
-    const initialCountText = await page.getByTestId('health-check-count').innerText();
+    const initialCountText = (await page.getByTestId('health-check-count').textContent()) ?? '';
     const initialCheckCount = Number(initialCountText);
     expect(initialCheckCount).toBeGreaterThanOrEqual(1);
 
@@ -291,7 +291,7 @@ test('Playwright unfused Electron against identical app.asar: app://mezon, CSP, 
     await expect(page.getByTestId('health-status')).toHaveText('ok', { timeout: 15_000 });
     await expect(page.getByTestId('hub-url')).toHaveText(initialHubUrl);
     await expect
-      .poll(async () => Number(await page.getByTestId('health-check-count').innerText()))
+      .poll(async () => Number((await page.getByTestId('health-check-count').textContent()) ?? ''))
       .toBeGreaterThan(initialCheckCount);
 
     // 4b. T1 Part 2: Kill Hub utilityProcess again while occupying its preferred port so
@@ -305,7 +305,7 @@ test('Playwright unfused Electron against identical app.asar: app://mezon, CSP, 
     try {
       await expect(page.getByTestId('hub-restart-count')).toHaveText('2', { timeout: 15_000 });
       await expect(page.getByTestId('health-status')).toHaveText('ok', { timeout: 15_000 });
-      const recoveredHubUrl = (await page.getByTestId('hub-url').innerText()).trim();
+      const recoveredHubUrl = ((await page.getByTestId('hub-url').textContent()) ?? '').trim();
       expect(recoveredHubUrl).toMatch(/^http:\/\/127\.0\.0\.1:\d+$/);
       expect(recoveredHubUrl).not.toBe(initialHubUrl);
 

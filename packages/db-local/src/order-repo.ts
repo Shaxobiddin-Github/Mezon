@@ -59,6 +59,7 @@ import {
   type SetCartDiscountInput,
   toDiscountSettings,
   toPromotionRule,
+  readWholesaleRulesInDbSync,
 } from './cart-repo.js';
 import type { LocalSqliteConnection } from './connection.js';
 import type { SaleRulesEvaluator } from './sale-rules-port.js';
@@ -716,9 +717,16 @@ export class SqliteOrderStore {
         }
       }
 
-      const promoRules = readOrgPromotionsInDbSync(session.db, ctx.organizationId).map(
-        toPromotionRule,
-      );
+      const promoRules = [
+        ...readOrgPromotionsInDbSync(session.db, ctx.organizationId).map(toPromotionRule),
+        ...readWholesaleRulesInDbSync(
+          session.db,
+          ctx.organizationId,
+          resolvedDraftLines.flatMap((l) =>
+            l.lineKind === 'catalog' && l.productId !== null ? [l.productId] : [],
+          ),
+        ),
+      ];
 
       const draftLinesForEval = resolvedDraftLines.map((l) => ({
         ...l,

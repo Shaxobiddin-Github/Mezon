@@ -395,3 +395,52 @@ export const StageRestoreResponseSchema = z
   .strict();
 
 export type StageRestoreResponseDto = z.infer<typeof StageRestoreResponseSchema>;
+
+// ---------------------------------------------------------------------------
+// C23: owner dashboard (one call for the phone / kassa home)
+// ---------------------------------------------------------------------------
+
+export const DashboardDaySchema = z
+  .object({
+    date: DateStringSchema,
+    netSales: BigIntStringSchema,
+    salesCount: z.number().int().min(0),
+  })
+  .strict();
+
+export const DashboardResponseSchema = z
+  .object({
+    date: DateStringSchema,
+    today: z
+      .object({
+        netSales: BigIntStringSchema,
+        salesCount: z.number().int().min(0),
+        returnsTotal: BigIntStringSchema,
+        cashSales: BigIntStringSchema,
+        nonCashSales: BigIntStringSchema,
+        /** Owner only. */
+        grossProfit: BigIntStringSchema.nullable(),
+        newDebt: BigIntStringSchema,
+        debtCollected: BigIntStringSchema,
+        expenses: BigIntStringSchema,
+      })
+      .strict(),
+    yesterdayNetSales: BigIntStringSchema,
+    /** Oldest first, today last; 7 days. */
+    week: z.array(DashboardDaySchema),
+    customerDebtTotal: BigIntStringSchema,
+    supplierDebtTotal: BigIntStringSchema,
+    stock: z
+      .object({
+        /** Owner only (purchase prices). */
+        costValue: BigIntStringSchema.nullable(),
+        retailValue: BigIntStringSchema,
+        productsInStock: z.number().int().min(0),
+        outOfStock: z.number().int().min(0),
+        lowStock: z.number().int().min(0),
+      })
+      .strict(),
+  })
+  .strict();
+
+export type DashboardResponseDto = z.infer<typeof DashboardResponseSchema>;

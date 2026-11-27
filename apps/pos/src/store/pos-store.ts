@@ -48,7 +48,7 @@ export interface PaidQrPayment {
   readonly isTestDriver: boolean;
 }
 
-export type PosSection = 'sale' | 'receipts' | 'products' | 'settings';
+export type PosSection = 'dashboard' | 'sale' | 'receipts' | 'products' | 'settings';
 
 export type PosModal =
   | 'none'
