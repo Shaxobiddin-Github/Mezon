@@ -184,6 +184,114 @@ export class SqliteReportStore {
     return row?.storeTimezone ?? 'Asia/Tashkent';
   }
 
+  /**
+   * C23 owner dashboard extras for one store-local day (`dateKey`, store timezone): new customer
+   * debt, debt collected, cash expenses, plus the stock value now (at cost and at shelf price) and
+   * how many goods are out of stock. Only the last 3 days of rows are scanned for the day sums.
+   */
+  public async getDashboardExtras(params: { readonly nowMs: bigint }): Promise<{
+    readonly dateKey: string;
+    readonly yesterdayKey: string;
+    /** The last 7 store-local dates, oldest first (today last). */
+    readonly weekKeys: readonly string[];
+    readonly newDebtTiyin: bigint;
+    readonly debtCollectedTiyin: bigint;
+    readonly expensesTiyin: bigint;
+    readonly stockCostTiyin: bigint;
+    readonly stockRetailTiyin: bigint;
+    readonly productsInStock: number;
+    readonly outOfStockCount: number;
+  }> {
+    const ctx = this.requireContext();
+    return runConnectionReadOnly(this.connection, () => {
+      const tz = this.readStoreTimezoneSync();
+      const dateKey = resolveIntlDateKey(unixMsFromBigInt(params.nowMs), tz);
+      const yesterdayKey = resolveIntlDateKey(unixMsFromBigInt(params.nowMs - 86_400_000n), tz);
+      const weekKeys: string[] = [];
+      for (let i = 6n; i >= 0n; i -= 1n) {
+        weekKeys.push(resolveIntlDateKey(unixMsFromBigInt(params.nowMs - i * 86_400_000n), tz));
+      }
+      const since = params.nowMs - 3n * 86_400_000n;
+      const sqlite = this.connection.sqlite;
+
+      let newDebtTiyin = 0n;
+      let debtCollectedTiyin = 0n;
+      const ledger = sqlite
+        .prepare(
+          `SELECT "created_at_ms", "entry_type", "amount_delta" FROM "customer_ledger"
+           WHERE "organization_id" = ? AND "store_id" = ? AND "created_at_ms" >= ?
+             AND "entry_type" IN ('sale_debt', 'debt_payment')`,
+        )
+        .safeIntegers(true);
+      for (const row of ledger.iterate(ctx.organizationId, ctx.storeId, since) as Iterable<{
+        readonly created_at_ms: bigint;
+        readonly entry_type: string;
+        readonly amount_delta: bigint;
+      }>) {
+        if (resolveIntlDateKey(unixMsFromBigInt(row.created_at_ms), tz) !== dateKey) continue;
+        if (row.entry_type === 'sale_debt') newDebtTiyin += row.amount_delta;
+        else debtCollectedTiyin += -row.amount_delta;
+      }
+
+      let expensesTiyin = 0n;
+      const moves = sqlite
+        .prepare(
+          `SELECT "created_at_ms", "amount_delta" FROM "cash_moves"
+           WHERE "organization_id" = ? AND "store_id" = ? AND "created_at_ms" >= ?
+             AND "type" = 'cash_out' AND "expense_category" IS NOT NULL`,
+        )
+        .safeIntegers(true);
+      for (const row of moves.iterate(ctx.organizationId, ctx.storeId, since) as Iterable<{
+        readonly created_at_ms: bigint;
+        readonly amount_delta: bigint;
+      }>) {
+        if (resolveIntlDateKey(unixMsFromBigInt(row.created_at_ms), tz) !== dateKey) continue;
+        expensesTiyin += row.amount_delta < 0n ? -row.amount_delta : row.amount_delta;
+      }
+
+      const stock = sqlite
+        .prepare(
+          `SELECT COALESCE(SUM(CASE WHEN sb."qty_on_hand" > 0 THEN sb."total_value" ELSE 0 END), 0)
+                    AS "cost",
+                  COALESCE(SUM(CASE WHEN sb."qty_on_hand" > 0
+                    THEN (sb."qty_on_hand" * COALESCE(v."sale_price", p."sale_price")) / 1000
+                    ELSE 0 END), 0) AS "retail",
+                  COALESCE(SUM(CASE WHEN sb."qty_on_hand" > 0 THEN 1 ELSE 0 END), 0) AS "in_stock"
+           FROM "local_stock_balances" sb
+           JOIN "products" p ON p."id" = sb."product_id" AND p."deleted_at_ms" IS NULL
+           LEFT JOIN "product_variants" v ON v."id" = sb."variant_id"
+           WHERE sb."organization_id" = ? AND sb."store_id" = ?`,
+        )
+        .safeIntegers(true)
+        .get(ctx.organizationId, ctx.storeId) as
+        { readonly cost: bigint; readonly retail: bigint; readonly in_stock: bigint } | undefined;
+
+      const out = sqlite
+        .prepare(
+          `SELECT COUNT(*) AS "n" FROM "products" p
+           WHERE p."organization_id" = ? AND p."deleted_at_ms" IS NULL AND p."unlimited" = 0
+             AND NOT p."has_variants"
+             AND COALESCE((SELECT SUM(sb."qty_on_hand") FROM "local_stock_balances" sb
+                           WHERE sb."product_id" = p."id" AND sb."store_id" = ?), 0) <= 0`,
+        )
+        .safeIntegers(true)
+        .get(ctx.organizationId, ctx.storeId) as { readonly n: bigint } | undefined;
+
+      return Promise.resolve({
+        dateKey,
+        yesterdayKey,
+        weekKeys,
+        newDebtTiyin,
+        debtCollectedTiyin,
+        expensesTiyin,
+        stockCostTiyin: stock?.cost ?? 0n,
+        stockRetailTiyin: stock?.retail ?? 0n,
+        productsInStock: Number(stock?.in_stock ?? 0n),
+        outOfStockCount: Number(out?.n ?? 0n),
+      });
+    });
+  }
+
   public async getDailySalesReport(params: {
     readonly fromDate?: string;
     readonly toDate?: string;

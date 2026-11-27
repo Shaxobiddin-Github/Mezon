@@ -551,7 +551,7 @@ export async function createHubServer(options: CreateHubServerOptions): Promise<
           : null;
       },
     });
-    const reportService = new HubReportService(reportStore);
+    const reportService = new HubReportService(reportStore, () => BigInt(clock.now()));
     const backupService = new SqliteBackupService({
       connection,
       dbPath: options.dbPath,

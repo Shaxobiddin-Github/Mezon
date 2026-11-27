@@ -104,6 +104,8 @@ import {
   ListPriceTiersResponseSchema,
   type ReplacePriceTiersRequestDto,
   type FavoriteProductsResponseDto,
+  type DashboardResponseDto,
+  DashboardResponseSchema,
   type ReceiptPreviewResponseDto,
   ReceiptPreviewResponseSchema,
   type ProductImageDataResponseDto,
@@ -478,6 +480,16 @@ export class HubApiClient {
         favoritesOnly: query.favoritesOnly === true ? 'true' : undefined,
       },
       responseSchema: ListProductsResponseSchema,
+    });
+  }
+
+  // --- C23 owner dashboard ---
+
+  async getDashboard(): Promise<DashboardResponseDto> {
+    return this.request({
+      method: 'GET',
+      path: '/reports/dashboard',
+      responseSchema: DashboardResponseSchema,
     });
   }
 

@@ -21,6 +21,7 @@ import { UpdateBanner } from './components/UpdateBanner.js';
 import { SideNav } from './components/SideNav.js';
 import { Icon } from './components/Icon.js';
 import { nextUiSize, readUiSize, type UiSize, writeUiSize } from './utils/ui-size.js';
+import { DashboardPage } from './components/DashboardPage.js';
 import { ReceiptsPage } from './components/ReceiptsPage.js';
 import { SettingsPage } from './components/SettingsPage.js';
 import { TerminalModeSection, TerminalPairForm } from './components/ConnectionsPanels.js';
@@ -971,6 +972,14 @@ export function App() {
                 onOpenCustomerModal={handleOpenCustomerModal}
                 onScanBarcode={handleScanBarcode}
                 onLinkBarcode={canManageCatalog ? setLinkBarcode : null}
+                onError={handleError}
+              />
+            )}
+            {section === 'dashboard' && (user?.role === 'owner' || user?.role === 'manager') && (
+              <DashboardPage
+                api={api}
+                isOwner={user.role === 'owner'}
+                onGo={(s) => setSection(s)}
                 onError={handleError}
               />
             )}

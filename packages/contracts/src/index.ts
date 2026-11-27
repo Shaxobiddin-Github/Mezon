@@ -681,6 +681,8 @@ export {
   LowStockItemSchema,
   type LowStockItemDto,
   LowStockReportResponseSchema,
+  DashboardResponseSchema,
+  type DashboardResponseDto,
   type LowStockReportResponseDto,
   ExpiringBatchesReportQuerySchema,
   type ExpiringBatchesReportQueryDto,
