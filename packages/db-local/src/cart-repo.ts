@@ -16,6 +16,7 @@ import {
   ZERO_MONEY,
   assertCartDiscountAuthorized,
   buildScanBarcodeCandidates,
+  WHOLESALE_RULE_TYPE,
   evaluateCart,
   isPromotionActiveAt,
   moneyFromTiyin,
@@ -44,6 +45,7 @@ import {
   localCarts,
   localHubConfig,
   productBarcodes,
+  productPriceTiers,
   productVariants,
   products,
   promotions,
@@ -234,6 +236,49 @@ function toStoredPromotion(row: typeof promotions.$inferSelect): StoredPromotion
     createdAtMs: row.createdAtMs,
     updatedAtMs: row.updatedAtMs,
   };
+}
+
+/** Name shown on cart lines, receipts and reports for a wholesale tier price. */
+export const WHOLESALE_PROMOTION_NAME = 'Ulgurji narx';
+
+/**
+ * C20: live wholesale tiers of the given products as in-memory promotion rules (never stored in
+ * `promotions`). `appliedPromotionId` on a line then carries the tier id.
+ */
+export function readWholesaleRulesInDbSync(
+  db: BetterSQLite3Database,
+  organizationId: UuidV7,
+  productIds: readonly UuidV7[],
+): PromotionRule[] {
+  if (productIds.length === 0) return [];
+  const rows = db
+    .select()
+    .from(productPriceTiers)
+    .where(
+      and(
+        eq(productPriceTiers.organizationId, organizationId),
+        isNull(productPriceTiers.deletedAtMs),
+        inArray(productPriceTiers.productId, [...new Set(productIds)]),
+      ),
+    )
+    .all();
+  return rows.map((row) => ({
+    id: row.id,
+    storeId: null,
+    name: WHOLESALE_PROMOTION_NAME,
+    type: WHOLESALE_RULE_TYPE,
+    wholesale: { minQty: row.minQty, unitPrice: row.unitPrice },
+    scope: 'product' as const,
+    targetProductId: row.productId,
+    targetCategoryId: null,
+    discountPercentBp: null,
+    discountAmount: null,
+    buyQty: null,
+    freeQty: null,
+    startsAtMs: row.createdAtMs,
+    endsAtMs: null,
+    isActive: true,
+  }));
 }
 
 export function toPromotionRule(row: StoredPromotionRecord): PromotionRule {
@@ -523,7 +568,16 @@ export function evaluateCartRowInDbSync(params: {
   const lineRows = readCartLineRowsInDbSync(db, cartRow.id);
   const hubConfig = readHubConfigRowInDbSync(db, organizationId);
   const settings = toDiscountSettings(hubConfig);
-  const promoRules = readOrgPromotionsInDbSync(db, organizationId).map(toPromotionRule);
+  const promoRules = [
+    ...readOrgPromotionsInDbSync(db, organizationId).map(toPromotionRule),
+    ...readWholesaleRulesInDbSync(
+      db,
+      organizationId,
+      lineRows.flatMap((l) =>
+        l.lineKind === 'catalog' && l.productId !== null ? [l.productId] : [],
+      ),
+    ),
+  ];
   const { warningsMap, productsById, variantsById } = buildCartPriceWarningsAndCatalogMapSync(
     db,
     organizationId,

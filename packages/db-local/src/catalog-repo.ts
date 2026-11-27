@@ -10,6 +10,7 @@ import {
   buildFtsPrefixQuery,
   canonicalizeVariantAttributes,
   moneyFromTiyin,
+  moneyToTiyin,
   normalizeCatalogDisplayName,
   normalizeCatalogSearchText,
   normalizeCatalogSku,
@@ -21,6 +22,7 @@ import {
   prepareBarcodeForStorage,
   buildScanBarcodeCandidates,
   quantityFromMilli,
+  quantityToMilli,
   tokenizeCatalogSearchQuery,
   validateNonNegativeSalePrice,
   validateQuantityForUnit,
@@ -31,8 +33,10 @@ import { appendAuditInTxSync } from './audit-log.js';
 import type { LocalSqliteConnection } from './connection.js';
 import {
   categories,
+  localProductFavorites,
   priceChanges,
   productBarcodes,
+  productPriceTiers,
   productVariants,
   products,
   stockMoves,
@@ -47,6 +51,8 @@ import { insertAttr, insertFact, tombstoneAttr, updateAttr } from './writers.js'
 export interface CatalogRuntimeContext {
   readonly uow: SqliteUnitOfWork;
   readonly organizationId: UuidV7;
+  /** C20: needed for store-local data (favourites); absent in older callers/tests. */
+  readonly storeId?: UuidV7;
 }
 
 export interface CreateSqliteCatalogStoreOptions {
@@ -107,6 +113,17 @@ export interface StoredProductBarcodeRecord {
   readonly updatedAtMs: UnixMs;
 }
 
+/** C20 wholesale tier: from `minQty` units in one cart every unit costs `unitPrice`. */
+export interface StoredPriceTierRecord {
+  readonly id: UuidV7;
+  readonly productId: UuidV7;
+  readonly minQty: Quantity;
+  readonly unitPrice: Money;
+}
+
+/** At most this many wholesale tiers per product. */
+export const MAX_PRICE_TIERS_PER_PRODUCT = 5;
+
 export interface StoredPriceChangeRecord {
   readonly id: UuidV7;
   readonly organizationId: UuidV7;
@@ -139,6 +156,8 @@ export interface ListProductsFilter {
   readonly offset?: number;
   /** T3.1: only active products without an MXIK code. */
   readonly missingMxik?: boolean;
+  /** C20: only this store's favourite (starred) products. */
+  readonly favoritesOnly?: boolean;
 }
 
 export interface ListProductsPageResult {
@@ -203,6 +222,15 @@ function toStoredVariant(
     effectiveSalePrice: row.salePrice ?? parentSalePrice,
     createdAtMs: row.createdAtMs,
     updatedAtMs: row.updatedAtMs,
+  };
+}
+
+function toStoredPriceTier(row: typeof productPriceTiers.$inferSelect): StoredPriceTierRecord {
+  return {
+    id: row.id,
+    productId: row.productId,
+    minQty: row.minQty,
+    unitPrice: row.unitPrice,
   };
 }
 
@@ -687,7 +715,56 @@ export class SqliteCatalogStore {
     const categoryId = filter.categoryId ? parseUuidV7(filter.categoryId) : undefined;
     const rawQuery = filter.q?.trim() ?? '';
 
+    const storeId = this.getRuntimeContext()?.storeId;
     return uow.runReadOnly(() => {
+      if (filter.favoritesOnly === true) {
+        if (storeId === undefined) {
+          return Promise.resolve({ products: [], total: 0, limit, offset });
+        }
+        const conds = [
+          eq(products.organizationId, organizationId),
+          isNull(products.deletedAtMs),
+          inArray(
+            products.id,
+            this.connection.db
+              .select({ id: localProductFavorites.productId })
+              .from(localProductFavorites)
+              .where(eq(localProductFavorites.storeId, storeId)),
+          ),
+        ];
+        if (categoryId !== undefined) {
+          conds.push(eq(products.categoryId, categoryId));
+        }
+        for (const token of tokenizeCatalogSearchQuery(rawQuery)) {
+          const tokenCond = or(
+            sql`instr(${products.nameSearch}, ${token}) > 0`,
+            sql`instr(coalesce(${products.skuSearch}, ''), ${token}) > 0`,
+          );
+          if (tokenCond !== undefined) {
+            conds.push(tokenCond);
+          }
+        }
+        const totalRow = this.connection.db
+          .select({ count: sql<number>`count(*)` })
+          .from(products)
+          .where(and(...conds))
+          .all()[0];
+        const rows = this.connection.db
+          .select()
+          .from(products)
+          .where(and(...conds))
+          .orderBy(asc(products.nameSearch), asc(products.id))
+          .limit(limit)
+          .offset(offset)
+          .all();
+        return Promise.resolve({
+          products: rows.map(toStoredProduct),
+          total: Number(totalRow?.count ?? 0),
+          limit,
+          offset,
+        });
+      }
+
       if (filter.missingMxik === true) {
         // T3.1 "MXIK'siz mahsulotlar": served from partial index idx_products_org_missing_mxik.
         // Optional text filter uses substring match on normalized name/sku per token (subset is small).
@@ -1797,6 +1874,173 @@ export class SqliteCatalogStore {
         'A category with this name already exists at the same level',
       );
     }
+  }
+
+  /** C20: live wholesale tiers, optionally only for the given products; ordered by product, minQty. */
+  async listPriceTiers(productIds?: readonly UuidV7[]): Promise<readonly StoredPriceTierRecord[]> {
+    const { uow, organizationId } = this.requireContext();
+    const ids = productIds?.map((id) => parseUuidV7(id));
+    return uow.runReadOnly(() => {
+      if (ids !== undefined && ids.length === 0) return Promise.resolve([]);
+      const conds = [
+        eq(productPriceTiers.organizationId, organizationId),
+        isNull(productPriceTiers.deletedAtMs),
+      ];
+      if (ids !== undefined) conds.push(inArray(productPriceTiers.productId, ids));
+      const rows = this.connection.db
+        .select()
+        .from(productPriceTiers)
+        .where(and(...conds))
+        .orderBy(asc(productPriceTiers.productId), asc(productPriceTiers.minQty))
+        .all();
+      return Promise.resolve(rows.map(toStoredPriceTier));
+    });
+  }
+
+  /**
+   * C20: replaces the product's wholesale tiers. Each tier needs a quantity above one unit that is
+   * valid for the product's unit, and a price below the shelf price; quantities must differ and
+   * a bigger quantity may not cost more per unit. An empty list removes all tiers.
+   */
+  async replacePriceTiers(
+    productId: UuidV7,
+    tiers: readonly { readonly minQty: Quantity; readonly unitPrice: Money }[],
+  ): Promise<readonly StoredPriceTierRecord[]> {
+    const { uow, organizationId } = this.requireContext();
+    const targetId = parseUuidV7(productId);
+    if (tiers.length > MAX_PRICE_TIERS_PER_PRODUCT) {
+      throw new DomainError(
+        'VALIDATION_ERROR',
+        `At most ${String(MAX_PRICE_TIERS_PER_PRODUCT)} wholesale tiers per product`,
+      );
+    }
+    return uow.execute((session) => {
+      const prod = this.requireActiveProductSync(session, organizationId, targetId);
+      const unit = parseProductUnit(prod.unit);
+      const sorted = [...tiers].sort((a, b) => {
+        const am = quantityToMilli(a.minQty);
+        const bm = quantityToMilli(b.minQty);
+        return am < bm ? -1 : am > bm ? 1 : 0;
+      });
+      let prevMilli = 0n;
+      let prevPrice: bigint | null = null;
+      for (const tier of sorted) {
+        validateQuantityForUnit(unit, tier.minQty, { allowZero: false });
+        const milli = quantityToMilli(tier.minQty);
+        if (milli <= 1000n) {
+          throw new DomainError('VALIDATION_ERROR', 'Wholesale quantity must be more than 1');
+        }
+        if (milli === prevMilli) {
+          throw new DomainError('VALIDATION_ERROR', 'Wholesale quantities must be different');
+        }
+        const price = moneyToTiyin(validateNonNegativeSalePrice(tier.unitPrice));
+        if (price >= moneyToTiyin(prod.salePrice)) {
+          throw new DomainError(
+            'VALIDATION_ERROR',
+            'Wholesale price must be lower than the sale price',
+          );
+        }
+        if (prevPrice !== null && price > prevPrice) {
+          throw new DomainError(
+            'VALIDATION_ERROR',
+            'A bigger wholesale quantity may not cost more per unit',
+          );
+        }
+        prevMilli = milli;
+        prevPrice = price;
+      }
+
+      const live = session.db
+        .select({ id: productPriceTiers.id })
+        .from(productPriceTiers)
+        .where(
+          and(
+            eq(productPriceTiers.organizationId, organizationId),
+            eq(productPriceTiers.productId, targetId),
+            isNull(productPriceTiers.deletedAtMs),
+          ),
+        )
+        .all();
+      for (const row of live) {
+        tombstoneAttr(session, productPriceTiers, {
+          id: row.id,
+          organizationId,
+          eventType: 'product_price_tier.deleted',
+          schemaVersion: 1,
+        });
+      }
+      const out: StoredPriceTierRecord[] = [];
+      for (const tier of sorted) {
+        const res = insertAttr(session, productPriceTiers, {
+          organizationId,
+          values: {
+            productId: targetId,
+            minQty: tier.minQty,
+            unitPrice: tier.unitPrice,
+          },
+          eventType: 'product_price_tier.created',
+          schemaVersion: 1,
+        });
+        out.push(toStoredPriceTier(res.row));
+      }
+      return Promise.resolve(out);
+    });
+  }
+
+  /** C20: this store's favourite product ids. */
+  async listFavoriteProductIds(): Promise<readonly UuidV7[]> {
+    const ctx = this.requireContext();
+    const storeId = ctx.storeId;
+    if (storeId === undefined) return [];
+    return ctx.uow.runReadOnly(() =>
+      Promise.resolve(
+        this.connection.db
+          .select({ productId: localProductFavorites.productId })
+          .from(localProductFavorites)
+          .where(eq(localProductFavorites.storeId, storeId))
+          .all()
+          .map((r) => r.productId),
+      ),
+    );
+  }
+
+  /** C20: stars or un-stars a product for this store (idempotent). */
+  async setFavorite(productId: UuidV7, favorite: boolean): Promise<void> {
+    const ctx = this.requireContext();
+    const storeId = ctx.storeId;
+    if (storeId === undefined) {
+      throw new DomainError('AUTH_UNAUTHORIZED', 'Hub setup has not been completed');
+    }
+    const targetId = parseUuidV7(productId);
+    await ctx.uow.execute((session) => {
+      if (!favorite) {
+        session.db
+          .delete(localProductFavorites)
+          .where(
+            and(
+              eq(localProductFavorites.storeId, storeId),
+              eq(localProductFavorites.productId, targetId),
+            ),
+          )
+          .run();
+        return Promise.resolve();
+      }
+      this.requireActiveProductSync(session, ctx.organizationId, targetId);
+      const nowMs = session.nowUnixMs();
+      session.db
+        .insert(localProductFavorites)
+        .values({
+          id: session.nextId(),
+          organizationId: ctx.organizationId,
+          storeId,
+          productId: targetId,
+          createdAtMs: nowMs,
+          updatedAtMs: nowMs,
+        })
+        .onConflictDoNothing()
+        .run();
+      return Promise.resolve();
+    });
   }
 
   private requireActiveProductSync(

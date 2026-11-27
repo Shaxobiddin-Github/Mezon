@@ -550,6 +550,52 @@ export const productBarcodes = localSchemaRegistry.defineTable(
 );
 
 /**
+ * C20 wholesale price tiers (`ATTR`): from `min_qty` units of the product in one cart, every unit
+ * is charged `unit_price`. Applied by the cart evaluation as an in-memory promotion; one live
+ * tier per (product, min_qty).
+ */
+export const productPriceTiers = localSchemaRegistry.defineTable(
+  {
+    name: 'product_price_tiers',
+    tableClass: 'ATTR',
+    tenantScope: 'organization',
+  },
+  (common) => ({
+    ...common,
+    productId: sqliteUuidV7('product_id')
+      .notNull()
+      .references(() => products.id),
+    minQty: sqliteQuantity('min_qty').notNull(),
+    unitPrice: sqliteMoney('unit_price').notNull(),
+  }),
+  (self) => [
+    uniqueIndex('uidx_product_price_tiers_org_product_min')
+      .on(self.organizationId, self.productId, self.minQty)
+      .where(sql`${self.deletedAtMs} IS NULL`),
+    check('chk_product_price_tiers_min_qty_pos', sql`${self.minQty} > 0`),
+    check('chk_product_price_tiers_price_nonneg', sql`${self.unitPrice} >= 0`),
+  ],
+);
+
+/** C20 favourite goods of a store (`LOCAL`): the star on the sale screen. */
+export const localProductFavorites = localSchemaRegistry.defineTable(
+  {
+    name: 'local_product_favorites',
+    tableClass: 'LOCAL',
+    tenantScope: 'store',
+  },
+  (common) => ({
+    ...common,
+    productId: sqliteUuidV7('product_id')
+      .notNull()
+      .references(() => products.id),
+  }),
+  (self) => [
+    uniqueIndex('uidx_local_product_favorites_store_product').on(self.storeId, self.productId),
+  ],
+);
+
+/**
  * Append-only sale price change audit trail (`FACT`, T1.1).
  */
 export const priceChanges = localSchemaRegistry.defineTable(

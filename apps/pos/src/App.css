@@ -3238,3 +3238,109 @@ html.pos-camera-live .pos-live * {
   width: 100%;
   justify-content: center;
 }
+
+/* ---------- C20: wholesale tiers and favourite goods ---------- */
+.pos-product-cell {
+  position: relative;
+  display: flex;
+}
+.pos-product-cell > .pos-product-item {
+  flex: 1;
+  min-width: 0;
+  padding-right: 40px;
+}
+.pos-fav-btn {
+  position: absolute;
+  top: 6px;
+  right: 6px;
+  width: 34px;
+  height: 34px;
+  display: grid;
+  place-items: center;
+  border: none;
+  border-radius: 50%;
+  background: transparent;
+  color: var(--text-secondary);
+  cursor: pointer;
+}
+.pos-fav-btn:hover {
+  background: var(--bg-elevated);
+}
+.pos-fav-btn svg {
+  width: 20px;
+  height: 20px;
+}
+.pos-fav-on {
+  color: #f59e0b;
+}
+.pos-fav-on svg {
+  fill: currentColor;
+}
+.pos-chip-fav svg {
+  width: 16px;
+  height: 16px;
+  margin-right: 4px;
+  vertical-align: -3px;
+}
+.pos-chip-fav.pos-chip-active svg {
+  fill: currentColor;
+}
+.pos-tile-tier {
+  display: block;
+  margin-top: 2px;
+  color: var(--text-success) !important;
+  font-weight: 600 !important;
+}
+.pos-wholesale-tag {
+  display: inline-block;
+  margin-left: 6px;
+  padding: 0 6px;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--bg-success) 14%, transparent);
+  color: var(--text-success);
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+}
+.pos-tier-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.pos-tier-row {
+  display: grid;
+  grid-template-columns: 1fr 1fr auto;
+  align-items: end;
+  gap: 8px;
+}
+.pos-tier-del {
+  min-height: 44px;
+}
+.pos-tier-add {
+  align-self: flex-start;
+}
+.pos-form-hint {
+  margin: -4px 0 4px;
+  color: var(--text-secondary);
+  font-size: 13px;
+}
+.pos-debt-info {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 14px;
+  margin: 2px 0 8px;
+  padding: 8px 10px;
+  border-radius: var(--radius-sm);
+  background: var(--bg-warning);
+  color: var(--warning-text);
+  font-size: 14px;
+}
+.pos-debt-info .pos-btn {
+  margin-left: auto;
+}
+.pos-line-old-price {
+  margin-left: 4px;
+  color: var(--text-secondary);
+}

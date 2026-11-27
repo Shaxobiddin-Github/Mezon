@@ -124,6 +124,20 @@ export {
   type ScanBarcodeQueryDto,
   ScanBarcodeResponseSchema,
   type ScanBarcodeResponseDto,
+  PriceTierSchema,
+  type PriceTierDto,
+  PriceTierInputSchema,
+  type PriceTierInputDto,
+  ReplacePriceTiersRequestSchema,
+  type ReplacePriceTiersRequestDto,
+  ListPriceTiersQuerySchema,
+  type ListPriceTiersQueryDto,
+  ListPriceTiersResponseSchema,
+  type ListPriceTiersResponseDto,
+  FavoriteProductsResponseSchema,
+  type FavoriteProductsResponseDto,
+  SetFavoriteRequestSchema,
+  type SetFavoriteRequestDto,
 } from './catalog.js';
 
 export {

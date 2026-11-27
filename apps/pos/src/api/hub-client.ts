@@ -100,6 +100,11 @@ import {
   type ListProductsQueryDto,
   type ListProductsResponseDto,
   ListProductsResponseSchema,
+  type ListPriceTiersResponseDto,
+  ListPriceTiersResponseSchema,
+  type ReplacePriceTiersRequestDto,
+  type FavoriteProductsResponseDto,
+  FavoriteProductsResponseSchema,
   type LoginOptionsResponseDto,
   LoginOptionsResponseSchema,
   type LoginRequestDto,
@@ -461,8 +466,49 @@ export class HubApiClient {
         limit: query.limit,
         offset: query.offset,
         missingMxik: query.missingMxik === true ? 'true' : undefined,
+        favoritesOnly: query.favoritesOnly === true ? 'true' : undefined,
       },
       responseSchema: ListProductsResponseSchema,
+    });
+  }
+
+  // --- C20 wholesale tiers & favourites ---
+
+  async listPriceTiers(productIds?: readonly string[]): Promise<ListPriceTiersResponseDto> {
+    return this.request({
+      method: 'GET',
+      path: '/catalog/price-tiers',
+      query: { productIds: productIds !== undefined ? productIds.join(',') : undefined },
+      responseSchema: ListPriceTiersResponseSchema,
+    });
+  }
+
+  async replacePriceTiers(
+    productId: string,
+    input: ReplacePriceTiersRequestDto,
+  ): Promise<ListPriceTiersResponseDto> {
+    return this.request({
+      method: 'PUT',
+      path: `/products/${encodeURIComponent(productId)}/price-tiers`,
+      body: input,
+      responseSchema: ListPriceTiersResponseSchema,
+    });
+  }
+
+  async listFavorites(): Promise<FavoriteProductsResponseDto> {
+    return this.request({
+      method: 'GET',
+      path: '/catalog/favorites',
+      responseSchema: FavoriteProductsResponseSchema,
+    });
+  }
+
+  async setFavorite(productId: string, favorite: boolean): Promise<FavoriteProductsResponseDto> {
+    return this.request({
+      method: 'PUT',
+      path: `/catalog/favorites/${encodeURIComponent(productId)}`,
+      body: { favorite },
+      responseSchema: FavoriteProductsResponseSchema,
     });
   }
 

@@ -146,6 +146,30 @@ export const productVariants = cloudSchemaRegistry.defineTable(
   ],
 );
 
+/** C20 wholesale price tiers (cloud twin of the hub's `product_price_tiers`). */
+export const productPriceTiers = cloudSchemaRegistry.defineTable(
+  {
+    name: 'product_price_tiers',
+    tableClass: 'ATTR',
+    tenantScope: 'organization',
+  },
+  (common) => ({
+    ...common,
+    productId: pgUuidV7('product_id')
+      .notNull()
+      .references(() => products.id),
+    minQty: pgQuantity('min_qty').notNull(),
+    unitPrice: pgMoney('unit_price').notNull(),
+  }),
+  (self) => [
+    uniqueIndex('uidx_product_price_tiers_org_product_min')
+      .on(self.organizationId, self.productId, self.minQty)
+      .where(sql`${self.deletedAtMs} IS NULL`),
+    check('chk_product_price_tiers_min_qty_pos', sql`${self.minQty} > 0`),
+    check('chk_product_price_tiers_price_nonneg', sql`${self.unitPrice} >= 0`),
+  ],
+);
+
 export const productBarcodes = cloudSchemaRegistry.defineTable(
   {
     name: 'product_barcodes',

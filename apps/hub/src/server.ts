@@ -307,7 +307,13 @@ export async function createHubServer(options: CreateHubServerOptions): Promise<
       connection,
       getRuntimeContext: () => {
         const ctx = store.getActiveRuntimeContext();
-        return ctx ? { uow: ctx.uow, organizationId: ctx.config.organizationId } : null;
+        return ctx
+          ? {
+              uow: ctx.uow,
+              organizationId: ctx.config.organizationId,
+              storeId: ctx.config.storeId,
+            }
+          : null;
       },
     });
     taxSettingsStore = createSqliteTaxSettingsStore({

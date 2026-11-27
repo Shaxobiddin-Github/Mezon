@@ -190,6 +190,13 @@
       "when": 1795335972078,
       "tag": "0026_demo_mode",
       "breakpoints": true
+    },
+    {
+      "idx": 27,
+      "version": "6",
+      "when": 1795764137716,
+      "tag": "0027_price_tiers_favorites",
+      "breakpoints": true
     }
   ]
 }

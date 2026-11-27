@@ -26,6 +26,7 @@ import { formatMilliToQtyString, formatTiyinToSom, parseSomInputToTiyinString } 
 import { type FormEvent, useCallback, useEffect, useState } from 'react';
 import type { HubApiClient } from '../api/hub-client.js';
 import { describeHubError } from '../utils/error-text.js';
+import { type TierDraft, parseTierDrafts } from '../utils/price-tiers.js';
 import { Icon } from './Icon.js';
 
 const UNITS: readonly ProductUnit[] = ['dona', 'kg', 'g', 'litr', 'metr', 'm2', 'qadoq'];
@@ -218,6 +219,32 @@ function ProductFormModal(props: {
   const [formError, setFormError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
   const productId = product?.id ?? null;
+  // C20 wholesale tiers: rows the owner edits; `tiersLoaded` = what the hub had (for "changed?").
+  const [tiers, setTiers] = useState<readonly TierDraft[]>([]);
+  const [tiersLoaded, setTiersLoaded] = useState(0);
+
+  useEffect(() => {
+    if (productId === null) return;
+    let cancelled = false;
+    api
+      .listPriceTiers([productId])
+      .then((res) => {
+        if (cancelled) return;
+        setTiers(
+          res.tiers.map((tier) => ({
+            qty: formatMilliToQtyString(tier.minQty),
+            priceSom: formatTiyinToSom(tier.unitPrice).replace(/\s/g, ''),
+          })),
+        );
+        setTiersLoaded(res.tiers.length);
+      })
+      .catch((err: unknown) => {
+        if (!cancelled) onError(err);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [api, productId, onError]);
 
   useEffect(() => {
     if (productId === null) return;
@@ -252,6 +279,16 @@ function ProductFormModal(props: {
       setFormError(res.error);
       return;
     }
+    const tierRes = parseTierDrafts(
+      tiers,
+      BigInt(res.value.salePrice),
+      parseMinStockInput,
+      parseSomInputToTiyinString,
+    );
+    if (!tierRes.ok) {
+      setFormError(t(tierRes.error));
+      return;
+    }
     setFormError(null);
     setSaving(true);
     try {
@@ -279,14 +316,20 @@ function ProductFormModal(props: {
         unlimited: v.unlimited,
         minStock: v.minStock,
       };
+      let savedId: string;
       if (productId !== null) {
         await api.updateProduct(productId, common);
         if (v.barcode !== null) await api.addProductBarcode(productId, { barcode: v.barcode });
+        savedId = productId;
       } else {
-        await api.createProduct({
+        const created = await api.createProduct({
           ...common,
           ...(v.barcode !== null ? { barcodes: [{ barcode: v.barcode }] } : {}),
         });
+        savedId = created.product.id;
+      }
+      if (tierRes.tiers.length > 0 || tiersLoaded > 0) {
+        await api.replacePriceTiers(savedId, { tiers: [...tierRes.tiers] });
       }
       onSaved();
     } catch (err) {
@@ -420,6 +463,64 @@ function ProductFormModal(props: {
                 ))}
               </select>
             </label>
+          </div>
+
+          <div className="pos-form-section-title">{t('pos.wholesale.title')}</div>
+          <p className="pos-form-hint">{t('pos.wholesale.formHint')}</p>
+          <div className="pos-tier-list" data-testid="product-form-tiers">
+            {tiers.map((row, i) => (
+              <div key={i} className="pos-tier-row">
+                <label className="pos-form-field">
+                  <span>{t('pos.wholesale.fromQty', { unit: t(`unit.${form.unit}`) })}</span>
+                  <input
+                    className="pos-input"
+                    inputMode="decimal"
+                    data-testid={`product-form-tier-qty-${String(i)}`}
+                    value={row.qty}
+                    onChange={(e) =>
+                      setTiers((prev) =>
+                        prev.map((r, j) => (j === i ? { ...r, qty: e.target.value } : r)),
+                      )
+                    }
+                  />
+                </label>
+                <label className="pos-form-field">
+                  <span>{t('pos.wholesale.price')}</span>
+                  <input
+                    className="pos-input"
+                    inputMode="decimal"
+                    data-testid={`product-form-tier-price-${String(i)}`}
+                    value={row.priceSom}
+                    onChange={(e) =>
+                      setTiers((prev) =>
+                        prev.map((r, j) => (j === i ? { ...r, priceSom: e.target.value } : r)),
+                      )
+                    }
+                  />
+                </label>
+                <button
+                  type="button"
+                  className="pos-btn pos-btn-danger-soft pos-tier-del"
+                  aria-label={t('pos.wholesale.remove')}
+                  title={t('pos.wholesale.remove')}
+                  data-testid={`product-form-tier-del-${String(i)}`}
+                  onClick={() => setTiers((prev) => prev.filter((_, j) => j !== i))}
+                >
+                  <Icon name="trash" />
+                </button>
+              </div>
+            ))}
+            {tiers.length < 5 && (
+              <button
+                type="button"
+                className="pos-btn pos-tier-add"
+                data-testid="product-form-tier-add"
+                onClick={() => setTiers((prev) => [...prev, { qty: '', priceSom: '' }])}
+              >
+                <Icon name="plus" />
+                {t('pos.wholesale.add')}
+              </button>
+            )}
           </div>
 
           <div className="pos-form-section-title">{t('catalog.form.sectionStock')}</div>
