@@ -48,6 +48,13 @@ export interface AndroidMezonBridge {
   leaveTerminal(): Promise<{ readonly ok: boolean }>;
   relaunchApp(): Promise<void>;
   readonly scanBarcode: () => Promise<string | null>;
+  readonly startLiveScan: (onCode: (code: string) => void) => Promise<() => Promise<void>>;
+  /** C22: hands a PNG to the phone's share sheet (Telegram, WhatsApp, gallery…). */
+  readonly shareImage: (input: {
+    readonly base64: string;
+    readonly fileName: string;
+    readonly title: string;
+  }) => Promise<void>;
 }
 
 declare global {

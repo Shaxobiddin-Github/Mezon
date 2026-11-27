@@ -115,6 +115,38 @@ describe('@mezon/drivers - ESC/POS Encoder, Codepages (translit/cp866/cp1251), 5
     openCashDrawer: true,
   };
 
+  it('C20: prints the customer debt before/after and the receipt-code QR on a non-fiscal receipt', () => {
+    const plain = encodeEscPosDocument({
+      document: sampleSaleDoc,
+      paperWidthMm: 58,
+      encoding: 'translit',
+    });
+    expect(plain.textPreview).not.toContain('MIJOZ QARZI');
+    expect(plain.textPreview).not.toContain('[QR]');
+
+    for (const paperWidthMm of [58, 80] as const) {
+      const out = encodeEscPosDocument({
+        document: {
+          ...sampleSaleDoc,
+          customerDebt: { beforeTiyin: 114_000_000n, afterTiyin: 117_000_000n },
+          lookupQr: 'R-000042',
+        },
+        paperWidthMm,
+        encoding: 'translit',
+      });
+      for (const line of out.textPreview.split('\n')) {
+        expect(line.length).toBeLessThanOrEqual(out.lineWidthChars);
+      }
+      expect(out.textPreview).toContain('MIJOZ QARZI');
+      expect(out.textPreview).toMatch(/Xariddan oldin:\s+1 140 000 so'm/);
+      expect(out.textPreview).toMatch(/Shu chekda:\s+\+30 000 so'm/);
+      expect(out.textPreview).toMatch(/Xariddan keyin:\s+1 170 000 so'm/);
+      expect(out.textPreview).toContain('Chek: R-000042');
+      // printer-native QR store command (GS ( k) carries the code
+      expect(containsSubsequence(out.bytes, new TextEncoder().encode('R-000042'))).toBe(true);
+    }
+  });
+
   it('encodes 80mm (48 chars) and 58mm (32 chars) sale receipts with exact width, the non-fiscal banner (v1: no SINOV word), and cash drawer pulse', () => {
     const out80 = encodeEscPosDocument({
       document: sampleSaleDoc,

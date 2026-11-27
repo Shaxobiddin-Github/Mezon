@@ -149,6 +149,19 @@ export const PrintDocumentResponseSchema = z.object({
 });
 export type PrintDocumentResponseDto = z.infer<typeof PrintDocumentResponseSchema>;
 
+/** C22: receipt text for sharing / office printing. */
+export const ReceiptPreviewQuerySchema = z.strictObject({
+  width: z.enum(['58', '80']).optional(),
+});
+export const ReceiptPreviewResponseSchema = z.object({
+  receiptCode: z.string(),
+  text: z.string(),
+  shopTitle: z.string(),
+  customerName: z.string().nullable(),
+  dateText: z.string(),
+});
+export type ReceiptPreviewResponseDto = z.infer<typeof ReceiptPreviewResponseSchema>;
+
 export const ListReceiptPrintsResponseSchema = z.object({
   prints: z.array(ReceiptPrintRecordDtoSchema),
 });

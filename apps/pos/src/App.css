@@ -3015,3 +3015,383 @@ body {
   background: color-mix(in srgb, var(--bg-success) 12%, transparent);
   border: 1px solid color-mix(in srgb, var(--bg-success) 35%, transparent);
 }
+
+/* ---------- C19: unknown barcode bar + link dialog ---------- */
+.pos-unknown-bar {
+  background: var(--bg-warning);
+  border-color: var(--warning-border);
+  color: var(--warning-text);
+  align-items: center;
+  gap: 10px;
+}
+.pos-unknown-bar > span {
+  flex: 1;
+  font-weight: 600;
+}
+.pos-unknown-hint {
+  font-weight: 400;
+}
+.pos-link-card {
+  width: min(560px, 100%);
+}
+.pos-link-code {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0 0 12px;
+  padding: 10px 12px;
+  border-radius: var(--radius-sm);
+  background: var(--bg-elevated);
+  font-family: ui-monospace, 'Cascadia Mono', Consolas, monospace;
+  font-size: 18px;
+  letter-spacing: 0.04em;
+}
+.pos-link-code svg {
+  width: 22px;
+  height: 22px;
+}
+.pos-link-existing {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin-top: 12px;
+}
+.pos-link-results {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  max-height: 50vh;
+  overflow-y: auto;
+}
+.pos-link-result {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  min-height: 52px;
+  text-align: left;
+}
+.pos-link-result-name {
+  font-weight: 600;
+}
+.pos-link-result-price {
+  color: var(--text-secondary);
+  white-space: nowrap;
+}
+.pos-link-new {
+  margin-top: 12px;
+}
+
+/* ---------- C19: continuous camera scan (phone) ----------
+ * The camera is drawn behind the WebView: everything except the overlay is hidden and the page
+ * background is transparent, so the top window shows the camera picture. */
+html.pos-camera-live,
+html.pos-camera-live body {
+  background: transparent !important;
+}
+html.pos-camera-live body * {
+  visibility: hidden;
+}
+html.pos-camera-live .pos-live,
+html.pos-camera-live .pos-live * {
+  visibility: visible;
+}
+.pos-live {
+  position: fixed;
+  inset: 0;
+  z-index: 200;
+  display: grid;
+  grid-template-rows: 40vh minmax(0, 1fr);
+  padding-top: var(--safe-area-inset-top, env(safe-area-inset-top, 0px));
+}
+.pos-live-window {
+  position: relative;
+  overflow: hidden;
+}
+.pos-live-top {
+  position: absolute;
+  inset: 8px 8px auto;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  z-index: 1;
+}
+.pos-live-hint {
+  padding: 6px 12px;
+  border-radius: 999px;
+  background: rgba(15, 23, 42, 0.6);
+  color: #fff;
+  font-size: 14px;
+}
+.pos-live-close {
+  width: 48px;
+  height: 48px;
+  min-height: 48px;
+  padding: 0;
+  justify-content: center;
+  border-radius: 50%;
+  background: rgba(15, 23, 42, 0.6);
+  border-color: transparent;
+  color: #fff;
+}
+.pos-live-frame {
+  position: absolute;
+  left: 12%;
+  right: 12%;
+  top: 28%;
+  bottom: 14%;
+  border: 3px solid rgba(255, 255, 255, 0.9);
+  border-radius: 14px;
+  box-shadow: 0 0 0 100vmax rgba(15, 23, 42, 0.35);
+}
+.pos-live-panel {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  background: var(--bg-surface);
+  color: var(--text-primary);
+  border-radius: var(--radius-lg) var(--radius-lg) 0 0;
+  box-shadow: var(--shadow-lg);
+  padding: 10px 12px calc(10px + env(safe-area-inset-bottom, 0px));
+  gap: 8px;
+}
+.pos-live-flash {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 10px;
+  border-radius: var(--radius-sm);
+  font-weight: 600;
+  font-size: 15px;
+}
+.pos-live-flash > span {
+  flex: 1;
+  min-width: 0;
+}
+.pos-live-flash svg {
+  width: 20px;
+  height: 20px;
+  flex-shrink: 0;
+}
+.pos-live-flash-ok {
+  color: var(--text-success);
+  background: color-mix(in srgb, var(--bg-success) 12%, transparent);
+}
+.pos-live-flash-missing {
+  color: var(--warning-text);
+  background: var(--bg-warning);
+  flex-wrap: wrap;
+}
+.pos-live-flash-error {
+  color: var(--text-danger);
+  background: var(--bg-danger-soft);
+}
+.pos-live-lines {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+}
+.pos-live-line {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto auto;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 2px;
+  border-bottom: 1px solid var(--border-color);
+  font-size: 15px;
+}
+.pos-live-line-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.pos-live-line-qty {
+  color: var(--text-secondary);
+  white-space: nowrap;
+}
+.pos-live-line-sum {
+  white-space: nowrap;
+}
+.pos-live-empty {
+  padding: 16px 0;
+  text-align: center;
+  color: var(--text-secondary);
+}
+.pos-live-footer {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.pos-live-total {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  font-size: 15px;
+}
+.pos-live-total strong {
+  font-size: 24px;
+}
+.pos-live-footer .pos-btn-xl {
+  width: 100%;
+  justify-content: center;
+}
+
+/* ---------- C20: wholesale tiers and favourite goods ---------- */
+.pos-product-cell {
+  position: relative;
+  display: flex;
+}
+.pos-product-cell > .pos-product-item {
+  flex: 1;
+  min-width: 0;
+  padding-right: 40px;
+}
+.pos-fav-btn {
+  position: absolute;
+  top: 6px;
+  right: 6px;
+  width: 34px;
+  height: 34px;
+  display: grid;
+  place-items: center;
+  border: none;
+  border-radius: 50%;
+  background: transparent;
+  color: var(--text-secondary);
+  cursor: pointer;
+}
+.pos-fav-btn:hover {
+  background: var(--bg-elevated);
+}
+.pos-fav-btn svg {
+  width: 20px;
+  height: 20px;
+}
+.pos-fav-on {
+  color: #f59e0b;
+}
+.pos-fav-on svg {
+  fill: currentColor;
+}
+.pos-chip-fav svg {
+  width: 16px;
+  height: 16px;
+  margin-right: 4px;
+  vertical-align: -3px;
+}
+.pos-chip-fav.pos-chip-active svg {
+  fill: currentColor;
+}
+.pos-tile-tier {
+  display: block;
+  margin-top: 2px;
+  color: var(--text-success) !important;
+  font-weight: 600 !important;
+}
+.pos-wholesale-tag {
+  display: inline-block;
+  margin-left: 6px;
+  padding: 0 6px;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--bg-success) 14%, transparent);
+  color: var(--text-success);
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+}
+.pos-tier-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.pos-tier-row {
+  display: grid;
+  grid-template-columns: 1fr 1fr auto;
+  align-items: end;
+  gap: 8px;
+}
+.pos-tier-del {
+  min-height: 44px;
+}
+.pos-tier-add {
+  align-self: flex-start;
+}
+.pos-form-hint {
+  margin: -4px 0 4px;
+  color: var(--text-secondary);
+  font-size: 13px;
+}
+.pos-debt-info {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 14px;
+  margin: 2px 0 8px;
+  padding: 8px 10px;
+  border-radius: var(--radius-sm);
+  background: var(--bg-warning);
+  color: var(--warning-text);
+  font-size: 14px;
+}
+.pos-debt-info .pos-btn {
+  margin-left: auto;
+}
+.pos-line-old-price {
+  margin-left: 4px;
+  color: var(--text-secondary);
+}
+
+/* ---------- C21: product photos ---------- */
+.pos-product-list .pos-product-item > .pos-tile-photo {
+  width: 100%;
+  aspect-ratio: 4 / 3;
+  object-fit: cover;
+  border-radius: 10px;
+  background: var(--bg-elevated);
+  margin-bottom: 2px;
+}
+.pos-photo-field {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+.pos-photo-preview {
+  width: 96px;
+  height: 96px;
+  border-radius: var(--radius);
+  object-fit: cover;
+  background: var(--bg-elevated);
+  border: 1px solid var(--border-color);
+}
+.pos-photo-empty {
+  display: grid;
+  place-items: center;
+  color: var(--text-secondary);
+}
+.pos-photo-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.pos-photo-input {
+  display: none;
+}
+
+/* ---------- C22: share / office print / A4 ---------- */
+.pos-share-bar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin: 4px 0;
+}
+.pos-share-bar > .pos-btn {
+  flex: 1 1 140px;
+  justify-content: center;
+}
+.pos-share-bar > .pos-error-banner {
+  flex-basis: 100%;
+}

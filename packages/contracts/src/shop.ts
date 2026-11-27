@@ -24,6 +24,8 @@ export const PublicShopProductSchema = z.object({
   price: DecimalString,
   category: z.string().nullable(),
   available: z.boolean(),
+  /** C21: photo URL path (relative to the API origin), null when the product has no photo. */
+  image: z.string().nullable().optional(),
 });
 export type PublicShopProductDto = z.infer<typeof PublicShopProductSchema>;
 
@@ -125,6 +127,8 @@ export const AdminShopProductSchema = z.object({
   /** Milli-units at the shop's store; null = unlimited (service). Signed. */
   stock: z.string().nullable(),
   isPublished: z.boolean(),
+  /** C21: photo URL path for the cabinet list, null when none. */
+  image: z.string().nullable().optional(),
 });
 export type AdminShopProductDto = z.infer<typeof AdminShopProductSchema>;
 

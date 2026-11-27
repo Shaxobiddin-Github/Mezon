@@ -100,6 +100,20 @@ import {
   type ListProductsQueryDto,
   type ListProductsResponseDto,
   ListProductsResponseSchema,
+  type ListPriceTiersResponseDto,
+  ListPriceTiersResponseSchema,
+  type ReplacePriceTiersRequestDto,
+  type FavoriteProductsResponseDto,
+  type ReceiptPreviewResponseDto,
+  ReceiptPreviewResponseSchema,
+  type ProductImageDataResponseDto,
+  ProductImageDataResponseSchema,
+  type ProductImageStampDto,
+  ProductImageStampSchema,
+  type ProductImageStampsResponseDto,
+  ProductImageStampsResponseSchema,
+  type SetProductImageRequestDto,
+  FavoriteProductsResponseSchema,
   type LoginOptionsResponseDto,
   LoginOptionsResponseSchema,
   type LoginRequestDto,
@@ -461,8 +475,88 @@ export class HubApiClient {
         limit: query.limit,
         offset: query.offset,
         missingMxik: query.missingMxik === true ? 'true' : undefined,
+        favoritesOnly: query.favoritesOnly === true ? 'true' : undefined,
       },
       responseSchema: ListProductsResponseSchema,
+    });
+  }
+
+  // --- C20 wholesale tiers & favourites ---
+
+  async listPriceTiers(productIds?: readonly string[]): Promise<ListPriceTiersResponseDto> {
+    return this.request({
+      method: 'GET',
+      path: '/catalog/price-tiers',
+      query: { productIds: productIds !== undefined ? productIds.join(',') : undefined },
+      responseSchema: ListPriceTiersResponseSchema,
+    });
+  }
+
+  async replacePriceTiers(
+    productId: string,
+    input: ReplacePriceTiersRequestDto,
+  ): Promise<ListPriceTiersResponseDto> {
+    return this.request({
+      method: 'PUT',
+      path: `/products/${encodeURIComponent(productId)}/price-tiers`,
+      body: input,
+      responseSchema: ListPriceTiersResponseSchema,
+    });
+  }
+
+  // --- C21 product photos ---
+
+  async listImageStamps(productIds?: readonly string[]): Promise<ProductImageStampsResponseDto> {
+    return this.request({
+      method: 'GET',
+      path: '/catalog/image-stamps',
+      query: { productIds: productIds !== undefined ? productIds.join(',') : undefined },
+      responseSchema: ProductImageStampsResponseSchema,
+    });
+  }
+
+  async getProductImageData(productId: string): Promise<ProductImageDataResponseDto> {
+    return this.request({
+      method: 'GET',
+      path: `/products/${encodeURIComponent(productId)}/image-data`,
+      responseSchema: ProductImageDataResponseSchema,
+    });
+  }
+
+  async setProductImage(
+    productId: string,
+    input: SetProductImageRequestDto,
+  ): Promise<ProductImageStampDto> {
+    return this.request({
+      method: 'PUT',
+      path: `/products/${encodeURIComponent(productId)}/image`,
+      body: input,
+      responseSchema: ProductImageStampSchema,
+    });
+  }
+
+  async deleteProductImage(productId: string): Promise<{ readonly deleted: true }> {
+    return this.request({
+      method: 'DELETE',
+      path: `/products/${encodeURIComponent(productId)}/image`,
+      responseSchema: z.object({ deleted: z.literal(true) }),
+    });
+  }
+
+  async listFavorites(): Promise<FavoriteProductsResponseDto> {
+    return this.request({
+      method: 'GET',
+      path: '/catalog/favorites',
+      responseSchema: FavoriteProductsResponseSchema,
+    });
+  }
+
+  async setFavorite(productId: string, favorite: boolean): Promise<FavoriteProductsResponseDto> {
+    return this.request({
+      method: 'PUT',
+      path: `/catalog/favorites/${encodeURIComponent(productId)}`,
+      body: { favorite },
+      responseSchema: FavoriteProductsResponseSchema,
     });
   }
 
@@ -938,6 +1032,16 @@ export class HubApiClient {
       path: `/returns/${encodeURIComponent(returnId)}/print`,
       body: validated,
       responseSchema: PrintDocumentResponseSchema,
+    });
+  }
+
+  /** C22: receipt text (and labels) for sharing or office printing; prints nothing. */
+  async getReceiptPreview(saleId: string, width: '58' | '80'): Promise<ReceiptPreviewResponseDto> {
+    return this.request({
+      method: 'GET',
+      path: `/sales/${encodeURIComponent(saleId)}/receipt-preview`,
+      query: { width },
+      responseSchema: ReceiptPreviewResponseSchema,
     });
   }
 

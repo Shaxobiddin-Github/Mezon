@@ -1,5 +1,7 @@
 import { BarcodeScanner } from '@capacitor-mlkit/barcode-scanning';
 import { registerPlugin } from '@capacitor/core';
+import { Directory, Filesystem } from '@capacitor/filesystem';
+import { Share } from '@capacitor/share';
 import type {
   AndroidMezonBridge,
   HubBridgeState,
@@ -126,6 +128,55 @@ const scanBarcode = async (): Promise<string | null> => {
   }
 };
 
+/**
+ * C19: the camera stays open (drawn behind the transparent WebView) and reports every code it
+ * sees, so the cashier scans item after item without reopening it. Uses the bundled ML Kit
+ * library: no Google Play module download.
+ */
+const startLiveScan = async (onCode: (code: string) => void): Promise<() => Promise<void>> => {
+  const { camera } = await BarcodeScanner.requestPermissions();
+  if (camera !== 'granted' && camera !== 'limited') {
+    throw new Error('CAMERA_PERMISSION_DENIED');
+  }
+  const listener = await BarcodeScanner.addListener('barcodesScanned', (event) => {
+    for (const b of event.barcodes) {
+      const value = b.rawValue?.trim();
+      if (value !== undefined && value !== '') onCode(value);
+    }
+  });
+  try {
+    await BarcodeScanner.startScan();
+  } catch (err) {
+    await listener.remove();
+    throw err;
+  }
+  let stopped = false;
+  return async () => {
+    if (stopped) return;
+    stopped = true;
+    await listener.remove();
+    await BarcodeScanner.stopScan();
+  };
+};
+
+/**
+ * C22: writes the PNG to the app cache and opens the system share sheet. Only a file name made of
+ * safe characters is used; the cache is the app's own (no storage permission needed).
+ */
+const shareImage = async (input: {
+  readonly base64: string;
+  readonly fileName: string;
+  readonly title: string;
+}): Promise<void> => {
+  const safeName = input.fileName.replace(/[^A-Za-z0-9._-]/g, '_').slice(0, 80) || 'chek.png';
+  const written = await Filesystem.writeFile({
+    path: safeName,
+    data: input.base64,
+    directory: Directory.Cache,
+  });
+  await Share.share({ title: input.title, files: [written.uri] });
+};
+
 const bridge: AndroidMezonBridge = {
   thinClient: true,
   getHubState: hubState,
@@ -144,6 +195,8 @@ const bridge: AndroidMezonBridge = {
   relaunchApp: () => MezonHub.restart(),
 
   scanBarcode,
+  startLiveScan,
+  shareImage,
 };
 
 window.mezonBridge = bridge;

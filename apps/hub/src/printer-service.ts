@@ -32,6 +32,7 @@ import {
   parseUuidV7,
   quantityToMilli,
   roleHasPermission,
+  unixMsToBigInt,
 } from '@mezon/domain';
 import {
   NullPrinterDriver,
@@ -510,6 +511,116 @@ export class HubPrinterService {
     });
   }
 
+  /** The sale receipt as a printable document (shared by printing and the C22 preview). */
+  private async buildSaleDocument(
+    sale: NonNullable<Awaited<ReturnType<SqliteSaleStore['getSaleById']>>>,
+    session: AuthenticatedSessionSnapshot,
+    ctx: {
+      readonly config: PrinterConfig;
+      readonly storeTimezone: string;
+      readonly copyNumber: number;
+      readonly isReprint: boolean;
+    },
+  ): Promise<SaleReceiptDocument> {
+    const { config, storeTimezone, copyNumber, isReprint } = ctx;
+    const labels = await this.printerStore.getReceiptLabels({
+      userIds: [sale.cashierUserId],
+      customerId: sale.customerId,
+      shiftId: sale.shiftId,
+      customerBalanceAtMs: unixMsToBigInt(sale.createdAtMs),
+    });
+    const debtTiyin = moneyToTiyin(sale.debtAmount);
+    const balanceAfter = labels.customerBalanceTiyin;
+    const customerDebt =
+      balanceAfter !== null && (balanceAfter > 0n || debtTiyin > 0n)
+        ? { beforeTiyin: balanceAfter - debtTiyin, afterTiyin: balanceAfter }
+        : undefined;
+    const doc: SaleReceiptDocument = {
+      kind: 'sale',
+      ...(customerDebt !== undefined ? { customerDebt } : {}),
+      lookupQr: sale.receiptCode,
+      headerTitle: config.receiptHeaderTitle,
+      footerText: config.receiptFooterText,
+      receiptNo: sale.receiptNo,
+      receiptCode: sale.receiptCode,
+      shiftCode: labels.shiftCode ?? '-',
+      cashierName: labels.userNames.get(sale.cashierUserId) ?? session.user.fullName,
+      customerName: labels.customerName,
+      formattedDateTime: formatUnixMsInTimezone(sale.createdAtMs, storeTimezone),
+      copyNumber,
+      isReprint,
+      lines: sale.lines.map((l, idx) => ({
+        lineNo: idx + 1,
+        itemName: l.itemName,
+        isQuickSale: l.lineKind === 'quick_sale',
+        unit: l.unit,
+        qtyMilli: quantityToMilli(l.qty),
+        unitPriceTiyin: moneyToTiyin(l.unitPriceSnapshot),
+        grossTotalTiyin: moneyToTiyin(l.grossTotal),
+        promoDiscountTiyin: moneyToTiyin(l.promoDiscount),
+        allocatedOrderDiscountTiyin: moneyToTiyin(l.allocatedOrderDiscount),
+        finalTotalTiyin: moneyToTiyin(l.finalTotal),
+        vatRateBp: l.vatRateBpSnapshot,
+        vatTotalTiyin: moneyToTiyin(l.vatTotal),
+      })),
+      subtotalGrossTiyin: moneyToTiyin(sale.subtotalGross),
+      promoDiscountTotalTiyin: moneyToTiyin(sale.totalPromoDiscount),
+      orderDiscountTotalTiyin: moneyToTiyin(sale.orderDiscountAmount),
+      totalFinalTiyin: moneyToTiyin(sale.totalFinal),
+      totalVatTiyin: moneyToTiyin(sale.totalVat),
+      paidAmountTiyin: moneyToTiyin(sale.totalPaid),
+      debtAmountTiyin: moneyToTiyin(sale.debtAmount),
+      changeAmountTiyin: moneyToTiyin(sale.changeAmount),
+      payments: sale.payments.map((p) => ({
+        method: p.method,
+        amountTiyin: moneyToTiyin(p.amount),
+        tenderedAmountTiyin: p.tenderedAmount !== null ? moneyToTiyin(p.tenderedAmount) : null,
+        providerRef: p.providerRef,
+      })),
+      openCashDrawer:
+        !isReprint && config.cashDrawerAutoOpen && sale.payments.some((p) => p.method === 'cash'),
+      fiscal: this.resolveFiscalBlock({ saleId: sale.id }),
+    };
+    return doc;
+  }
+
+  /**
+   * C22: the sale receipt as plain text (the same layout the receipt printer gets), for sharing it
+   * as a picture or printing it on an office printer. Records no print and opens no drawer.
+   */
+  async previewSaleReceipt(
+    saleIdRaw: string,
+    session: AuthenticatedSessionSnapshot,
+    paperWidthMm: 58 | 80,
+  ): Promise<{
+    readonly receiptCode: string;
+    readonly text: string;
+    readonly shopTitle: string;
+    readonly customerName: string | null;
+    readonly dateText: string;
+  }> {
+    const sale = await this.saleStore.getSaleById(parseUuidV7(saleIdRaw));
+    if (sale === null) {
+      throw new DomainError('SALE_NOT_FOUND', 'Chek topilmadi');
+    }
+    const settings = await this.printerStore.getPrinterSettings();
+    const config = toPrinterConfig(settings);
+    const doc = await this.buildSaleDocument(sale, session, {
+      config: { ...config, cashDrawerAutoOpen: false },
+      storeTimezone: settings.storeTimezone,
+      copyNumber: 1,
+      isReprint: false,
+    });
+    const encoded = encodeEscPosDocument({ document: doc, paperWidthMm, encoding: 'translit' });
+    return {
+      receiptCode: sale.receiptCode,
+      text: encoded.textPreview,
+      shopTitle: doc.headerTitle,
+      customerName: doc.customerName,
+      dateText: doc.formattedDateTime,
+    };
+  }
+
   async printSaleReceipt(
     saleIdRaw: string,
     session: AuthenticatedSessionSnapshot,
@@ -528,60 +639,7 @@ export class HubPrinterService {
       body,
       terminalId,
       jobTitle: `Guzar chek ${sale.receiptCode}`,
-      build: async ({ config, storeTimezone, copyNumber, isReprint }) => {
-        const labels = await this.printerStore.getReceiptLabels({
-          userIds: [sale.cashierUserId],
-          customerId: sale.customerId,
-          shiftId: sale.shiftId,
-        });
-        const doc: SaleReceiptDocument = {
-          kind: 'sale',
-          headerTitle: config.receiptHeaderTitle,
-          footerText: config.receiptFooterText,
-          receiptNo: sale.receiptNo,
-          receiptCode: sale.receiptCode,
-          shiftCode: labels.shiftCode ?? '-',
-          cashierName: labels.userNames.get(sale.cashierUserId) ?? session.user.fullName,
-          customerName: labels.customerName,
-          formattedDateTime: formatUnixMsInTimezone(sale.createdAtMs, storeTimezone),
-          copyNumber,
-          isReprint,
-          lines: sale.lines.map((l, idx) => ({
-            lineNo: idx + 1,
-            itemName: l.itemName,
-            isQuickSale: l.lineKind === 'quick_sale',
-            unit: l.unit,
-            qtyMilli: quantityToMilli(l.qty),
-            unitPriceTiyin: moneyToTiyin(l.unitPriceSnapshot),
-            grossTotalTiyin: moneyToTiyin(l.grossTotal),
-            promoDiscountTiyin: moneyToTiyin(l.promoDiscount),
-            allocatedOrderDiscountTiyin: moneyToTiyin(l.allocatedOrderDiscount),
-            finalTotalTiyin: moneyToTiyin(l.finalTotal),
-            vatRateBp: l.vatRateBpSnapshot,
-            vatTotalTiyin: moneyToTiyin(l.vatTotal),
-          })),
-          subtotalGrossTiyin: moneyToTiyin(sale.subtotalGross),
-          promoDiscountTotalTiyin: moneyToTiyin(sale.totalPromoDiscount),
-          orderDiscountTotalTiyin: moneyToTiyin(sale.orderDiscountAmount),
-          totalFinalTiyin: moneyToTiyin(sale.totalFinal),
-          totalVatTiyin: moneyToTiyin(sale.totalVat),
-          paidAmountTiyin: moneyToTiyin(sale.totalPaid),
-          debtAmountTiyin: moneyToTiyin(sale.debtAmount),
-          changeAmountTiyin: moneyToTiyin(sale.changeAmount),
-          payments: sale.payments.map((p) => ({
-            method: p.method,
-            amountTiyin: moneyToTiyin(p.amount),
-            tenderedAmountTiyin: p.tenderedAmount !== null ? moneyToTiyin(p.tenderedAmount) : null,
-            providerRef: p.providerRef,
-          })),
-          openCashDrawer:
-            !isReprint &&
-            config.cashDrawerAutoOpen &&
-            sale.payments.some((p) => p.method === 'cash'),
-          fiscal: this.resolveFiscalBlock({ saleId: sale.id }),
-        };
-        return doc;
-      },
+      build: async (ctx) => this.buildSaleDocument(sale, session, ctx),
     });
   }
 

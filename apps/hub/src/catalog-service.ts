@@ -11,31 +11,48 @@ import type {
   DeleteCategoryResponseDto,
   DeleteProductResponseDto,
   DeleteVariantResponseDto,
+  FavoriteProductsResponseDto,
   ListCategoriesResponseDto,
   ListPriceChangesResponseDto,
+  ListPriceTiersResponseDto,
   ListProductsQueryDto,
   ListProductsResponseDto,
   PriceChangeSummaryDto,
+  PriceTierDto,
+  ProductImageDataResponseDto,
+  ProductImageStampDto,
+  ProductImageStampsResponseDto,
   ProductBarcodeSummaryDto,
   ProductDetailResponseDto,
   ProductResponseDto,
   ProductSummaryDto,
   ProductVariantSummaryDto,
+  ReplacePriceTiersRequestDto,
   ScanBarcodeResponseDto,
+  SetProductImageRequestDto,
   UpdateCategoryRequestDto,
   UpdateProductRequestDto,
   UpdateVariantRequestDto,
   VariantResponseDto,
 } from '@mezon/contracts';
+import { ProductImageMimeSchema } from '@mezon/contracts';
 import type {
   SqliteCatalogStore,
   StoredCategoryRecord,
   StoredPriceChangeRecord,
+  StoredPriceTierRecord,
   StoredProductBarcodeRecord,
   StoredProductRecord,
   StoredProductVariantRecord,
 } from '@mezon/db-local';
-import { DomainError, type UuidV7 } from '@mezon/domain';
+import {
+  DomainError,
+  type UuidV7,
+  moneyFromTiyin,
+  moneyToTiyin,
+  quantityFromMilli,
+  quantityToMilli,
+} from '@mezon/domain';
 
 /**
  * Explicit allow-listed DTO mappers (`GEMINI.md` 3.4).
@@ -99,6 +116,15 @@ function toBarcodeDto(bc: StoredProductBarcodeRecord): ProductBarcodeSummaryDto 
     format: bc.format,
     createdAtMs: bc.createdAtMs.toString(),
     updatedAtMs: bc.updatedAtMs.toString(),
+  };
+}
+
+function toPriceTierDto(t: StoredPriceTierRecord): PriceTierDto {
+  return {
+    id: t.id,
+    productId: t.productId,
+    minQty: quantityToMilli(t.minQty).toString(),
+    unitPrice: moneyToTiyin(t.unitPrice).toString(),
   };
 }
 
@@ -247,6 +273,78 @@ export class HubCatalogService {
   async listPriceChanges(productId: UuidV7): Promise<ListPriceChangesResponseDto> {
     const rows = await this.store.listPriceChanges(productId);
     return { priceChanges: rows.map(toPriceChangeDto) };
+  }
+
+  /** C20 wholesale tiers. */
+  async listPriceTiers(productIds?: readonly UuidV7[]): Promise<ListPriceTiersResponseDto> {
+    const rows = await this.store.listPriceTiers(productIds);
+    return { tiers: rows.map(toPriceTierDto) };
+  }
+
+  async replacePriceTiers(
+    productId: UuidV7,
+    input: ReplacePriceTiersRequestDto,
+  ): Promise<ListPriceTiersResponseDto> {
+    const rows = await this.store.replacePriceTiers(
+      productId,
+      input.tiers.map((t) => ({
+        minQty: quantityFromMilli(BigInt(t.minQty)),
+        unitPrice: moneyFromTiyin(BigInt(t.unitPrice)),
+      })),
+    );
+    return { tiers: rows.map(toPriceTierDto) };
+  }
+
+  /** C21 product photos. */
+  async listImageStamps(productIds?: readonly UuidV7[]): Promise<ProductImageStampsResponseDto> {
+    const rows = await this.store.listProductImageStamps(productIds);
+    return {
+      images: rows.map((r) => ({ productId: r.productId, updatedAtMs: r.updatedAtMs.toString() })),
+    };
+  }
+
+  async getImage(productId: UuidV7): Promise<{ readonly mime: string; readonly bytes: Buffer }> {
+    const img = await this.store.getProductImage(productId);
+    if (img === null) {
+      throw new DomainError('PRODUCT_NOT_FOUND', 'Product has no photo');
+    }
+    return { mime: img.mime, bytes: Buffer.from(img.dataBase64, 'base64') };
+  }
+
+  async getImageData(productId: UuidV7): Promise<ProductImageDataResponseDto> {
+    const img = await this.store.getProductImage(productId);
+    if (img === null) {
+      throw new DomainError('PRODUCT_NOT_FOUND', 'Product has no photo');
+    }
+    return {
+      productId: img.productId,
+      mime: ProductImageMimeSchema.parse(img.mime),
+      dataBase64: img.dataBase64,
+      updatedAtMs: img.updatedAtMs.toString(),
+    };
+  }
+
+  async setImage(
+    productId: UuidV7,
+    input: SetProductImageRequestDto,
+  ): Promise<ProductImageStampDto> {
+    const img = await this.store.setProductImage(productId, input);
+    return { productId: img.productId, updatedAtMs: img.updatedAtMs.toString() };
+  }
+
+  async deleteImage(productId: UuidV7): Promise<{ readonly deleted: true }> {
+    await this.store.deleteProductImage(productId);
+    return { deleted: true };
+  }
+
+  /** C20 favourite products of this store. */
+  async listFavorites(): Promise<FavoriteProductsResponseDto> {
+    return { productIds: [...(await this.store.listFavoriteProductIds())] };
+  }
+
+  async setFavorite(productId: UuidV7, favorite: boolean): Promise<FavoriteProductsResponseDto> {
+    await this.store.setFavorite(productId, favorite);
+    return this.listFavorites();
   }
 
   async scanBarcode(code: string): Promise<ScanBarcodeResponseDto> {

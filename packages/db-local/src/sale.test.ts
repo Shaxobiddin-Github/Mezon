@@ -1432,6 +1432,10 @@ describe('@mezon/db-local - T1.4 completeSale atomic TX, receipts, stock policy,
       }
       // Same for T4.2 `local_carts.terminal_id` (today's cart code writes it); dropped before the upgrade.
       conn.sqlite.exec('ALTER TABLE local_carts ADD terminal_id text');
+      // Same for C20 `product_price_tiers` (today's cart evaluation reads it); dropped below.
+      conn.sqlite.exec(
+        'CREATE TABLE product_price_tiers (id text PRIMARY KEY, organization_id text, device_id text, hlc text, created_at_ms integer, updated_at_ms integer, deleted_at_ms integer, product_id text, min_qty integer, unit_price integer)',
+      );
 
       const authStore = await createSqliteHubAuthStore({ connection: conn, clock, random });
       const setup = await authStore.completeSetup({
@@ -1681,6 +1685,7 @@ describe('@mezon/db-local - T1.4 completeSale atomic TX, receipts, stock policy,
 
       conn.sqlite.exec('DROP TABLE local_audit_log');
       conn.sqlite.exec('ALTER TABLE local_carts DROP COLUMN terminal_id');
+      conn.sqlite.exec('DROP TABLE product_price_tiers');
       // Apply 0007 migration cleanly under PRAGMA foreign_keys = ON inside Drizzle transaction
       migrateLocalDatabase(conn.db, migDir);
 
