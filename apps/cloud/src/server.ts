@@ -956,6 +956,7 @@ export async function buildCloudServer(options: BuildServerOptions): Promise<Fas
       client,
       clock,
       digestHour: config.telegramDigestHour,
+      publicBaseUrl: config.publicBaseUrl ?? null,
       logger: app.log,
     });
     telegramScheduler = new TelegramScheduler({
