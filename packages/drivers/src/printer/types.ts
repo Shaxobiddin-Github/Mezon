@@ -121,6 +121,10 @@ export interface SaleReceiptDocument {
   readonly changeAmountTiyin: bigint;
   readonly payments: readonly SaleReceiptPaymentInput[];
   readonly openCashDrawer: boolean;
+  /** C20: the customer's debt before and after this sale (only when a customer is on the sale). */
+  readonly customerDebt?: { readonly beforeTiyin: bigint; readonly afterTiyin: bigint };
+  /** C20: receipt code printed as a QR on a non-fiscal receipt. */
+  readonly lookupQr?: string;
   /**
    * T3.4 fiscal block. Absent → the legacy non-fiscal receipt (unchanged bytes). Present → mark
    * line, fiscal rows and QR follow `resolveReceiptFiscalBlock` (domain).

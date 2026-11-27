@@ -121,6 +121,51 @@ describe('POST /settings/demo-catalog', () => {
     }
   });
 
+  it('C19: an unknown scanned code is reported with the code, and after linking it sells', async () => {
+    const env = await boot(9103);
+    try {
+      expect((await env.call(env.owner, 'POST', '/settings/demo-catalog')).statusCode).toBe(200);
+      const shift = await env.call(env.owner, 'POST', '/shifts/open', {
+        clientRequestId: '01950000-0000-7000-8000-1700000000c1',
+        openingCash: '0',
+      });
+      expect(shift.statusCode, shift.body).toBe(201);
+      const cart = (await env.call(env.owner, 'POST', '/carts', {})).json<{
+        cart: { id: string };
+      }>().cart;
+      const realCode = '8048158040006';
+      const scan = () =>
+        env.call(env.owner, 'POST', `/carts/${cart.id}/lines`, {
+          kind: 'scan',
+          barcode: realCode,
+          qty: '1000',
+        });
+
+      const missing = await scan();
+      expect(missing.statusCode).toBe(404);
+      expect(
+        missing.json<{ error: { code: string; details?: { barcode?: string } } }>().error,
+      ).toMatchObject({ code: 'BARCODE_NOT_FOUND', details: { barcode: realCode } });
+
+      // the owner links the code to "Non (patir)" from the sale screen
+      const products = (await env.call(env.owner, 'GET', '/products?q=patir')).json<{
+        products: { id: string; name: string }[];
+      }>().products;
+      const patir = products.find((p) => p.name === DEMO_CATALOG[0]?.products[0]?.name);
+      expect(patir).toBeDefined();
+      const link = await env.call(env.owner, 'POST', `/products/${patir?.id ?? ''}/barcodes`, {
+        barcode: realCode,
+      });
+      expect(link.statusCode, link.body).toBe(201);
+
+      const sold = await scan();
+      expect(sold.statusCode, sold.body).toBe(201);
+      expect(sold.body).toContain(patir?.name ?? 'x');
+    } finally {
+      await env.hub.close();
+    }
+  });
+
   it('a manager may not load it', async () => {
     const env = await boot(9102);
     try {

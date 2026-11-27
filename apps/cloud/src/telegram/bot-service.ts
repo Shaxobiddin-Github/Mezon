@@ -3,7 +3,8 @@ import type { UnixMs } from '@mezon/domain';
 import { type TelegramClient, isTelegramSendError } from '@mezon/drivers';
 import { t } from '@mezon/i18n';
 import { z } from 'zod';
-import { clip, localeFromTelegram } from './messages.js';
+import type { Locale } from '@mezon/i18n';
+import { clip, formatCustomerCard, localeFromTelegram, menuAction, menuRows } from './messages.js';
 
 /** The parts of a Telegram `Update` the bot reads; everything else is ignored. */
 const TelegramUpdateSchema = z.object({
@@ -27,12 +28,18 @@ const TelegramUpdateSchema = z.object({
 
 /** Callback data: `c:<linkId>:<y|n>` (≤ 64 bytes). */
 const CONSENT_RE = /^c:([0-9a-f-]{36}):(y|n)$/;
+/** C24 language choice: `l:<locale>`. */
+const LANG_RE = /^l:(uz-Latn|ru)$/;
+/** Store time zone for dates in the bot (all shops are in Uzbekistan for now). */
+const BOT_TZ = 'Asia/Tashkent';
 
 export interface TelegramBotServiceOptions {
   readonly store: CloudTelegramStore;
   readonly client: TelegramClient;
   readonly clock: { nowMs(): UnixMs };
   readonly digestHour: number;
+  /** C24: https origin of the online shop, or null (no shop button). */
+  readonly publicBaseUrl?: string | null;
   readonly logger?: { warn(obj: object, msg: string): void };
 }
 
@@ -67,8 +74,20 @@ export class TelegramBotService {
   }
 
   private async onText(chatId: string, text: string, languageCode: string | undefined) {
-    const locale = localeFromTelegram(languageCode);
+    const locale =
+      (await this.opts.store.getChatLocale(chatId)) ?? localeFromTelegram(languageCode);
+    const action = menuAction(text);
+    if (action !== null) {
+      await this.onMenu(chatId, action, locale);
+      return;
+    }
     const [command, arg] = text.trim().split(/\s+/, 2);
+    if (command === '/menu') {
+      await this.opts.client.sendMessage(chatId, t('telegram.menu.hint', undefined, locale), {
+        menu: menuRows(locale),
+      });
+      return;
+    }
     if (command === '/stop') {
       const n = await this.opts.store.revokeChat(chatId, this.opts.clock.nowMs());
       await this.opts.client.sendMessage(
@@ -79,7 +98,12 @@ export class TelegramBotService {
     }
     if (command !== '/start') return;
     if (!arg) {
-      await this.opts.client.sendMessage(chatId, t('telegram.start.welcome', undefined, locale));
+      const cards = await this.cards(chatId);
+      await this.opts.client.sendMessage(
+        chatId,
+        t('telegram.start.welcome', undefined, locale),
+        cards.length > 0 ? { menu: menuRows(locale) } : undefined,
+      );
       return;
     }
     const target = await this.opts.store.consumeLinkCode(arg, this.opts.clock.nowMs());
@@ -118,6 +142,16 @@ export class TelegramBotService {
     message?: { chat: { id: number } };
   }) {
     await this.opts.client.answerCallback(cb.id);
+    const lang = cb.data ? LANG_RE.exec(cb.data) : null;
+    if (lang?.[1] && cb.message) {
+      const chatId = String(cb.message.chat.id);
+      const next = lang[1] as Locale;
+      await this.opts.store.setChatLocale(chatId, next, this.opts.clock.nowMs());
+      await this.opts.client.sendMessage(chatId, t('telegram.lang.done', undefined, next), {
+        menu: menuRows(next),
+      });
+      return;
+    }
     const m = cb.data ? CONSENT_RE.exec(cb.data) : null;
     if (!m?.[1] || !cb.message) return;
     const chatId = String(cb.message.chat.id);
@@ -129,11 +163,68 @@ export class TelegramBotService {
       nowMs: this.opts.clock.nowMs(),
     });
     if (!ok) return;
-    const locale = localeFromTelegram(cb.from?.language_code);
+    // the language the chat was linked in (or later chose with "Til") wins
+    const locale =
+      (await this.opts.store.getChatLocale(chatId)) ?? localeFromTelegram(cb.from?.language_code);
     await this.opts.client.sendMessage(
       chatId,
       t(consent ? 'telegram.consent.accepted' : 'telegram.consent.declined', undefined, locale),
+      consent ? { menu: menuRows(locale) } : undefined,
     );
+  }
+
+  private cards(chatId: string) {
+    return this.opts.store.listCustomerCardsForChat({
+      chatId,
+      asOfMs: this.opts.clock.nowMs(),
+      tz: BOT_TZ,
+    });
+  }
+
+  /** C24 customer menu: "Qarzlarim", "Do'kon", "Til". */
+  private async onMenu(chatId: string, action: 'debts' | 'shop' | 'lang', locale: Locale) {
+    if (action === 'lang') {
+      await this.opts.client.sendMessage(chatId, t('telegram.lang.choose', undefined, locale), {
+        buttons: [
+          [
+            { text: "O'zbekcha", data: 'l:uz-Latn' },
+            { text: 'Русский', data: 'l:ru' },
+          ],
+        ],
+      });
+      return;
+    }
+    const cards = await this.cards(chatId);
+    if (cards.length === 0) {
+      await this.opts.client.sendMessage(chatId, t('telegram.debts.notLinked', undefined, locale));
+      return;
+    }
+    if (action === 'debts') {
+      for (const card of cards) {
+        await this.opts.client.sendMessage(chatId, formatCustomerCard(card, locale, BOT_TZ), {
+          menu: menuRows(locale),
+        });
+      }
+      return;
+    }
+    const base = this.opts.publicBaseUrl ?? null;
+    const shops = cards.filter((c) => c.shopSlug !== null);
+    if (base === null || shops.length === 0) {
+      await this.opts.client.sendMessage(chatId, t('telegram.shop.none', undefined, locale));
+      return;
+    }
+    const seen = new Set<string>();
+    const buttons = shops
+      .filter((c) => (seen.has(c.organizationId) ? false : (seen.add(c.organizationId), true)))
+      .map((c) => [
+        {
+          text: t('telegram.shop.open', { shop: clip(c.shopName, 40) }, locale),
+          webAppUrl: `${base}/s/${c.shopSlug ?? ''}`,
+        },
+      ]);
+    await this.opts.client.sendMessage(chatId, t('telegram.shop.text', undefined, locale), {
+      buttons,
+    });
   }
 }
 

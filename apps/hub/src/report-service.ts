@@ -1,6 +1,7 @@
 import {
   type DailySalesReportQueryDto,
   type DailySalesReportResponseDto,
+  type DashboardResponseDto,
   type DebtsReportQueryDto,
   type DebtsReportResponseDto,
   type ExpiringBatchesReportQueryDto,
@@ -15,6 +16,7 @@ import {
 import { type SqliteReportStore } from '@mezon/db-local';
 import {
   DomainError,
+  type Money,
   type UserRole,
   moneyToTiyin,
   quantityToMilli,
@@ -23,7 +25,11 @@ import {
 import { ExcelPort } from './excel-port.js';
 
 export class HubReportService {
-  public constructor(private readonly reportStore: SqliteReportStore) {}
+  public constructor(
+    private readonly reportStore: SqliteReportStore,
+    /** Hub clock (tests pass a fixed one). */
+    private readonly nowMs: () => bigint = () => BigInt(Date.now()),
+  ) {}
 
   public async getDailySales(
     query: DailySalesReportQueryDto,
@@ -163,6 +169,56 @@ export class HubReportService {
         name: s.name,
         balance: moneyToTiyin(s.balance).toString(),
       })),
+    };
+  }
+
+  /**
+   * C23: everything the owner's home screen needs in one call. Profit and purchase-price stock
+   * value only for the owner (same rule as the daily report).
+   */
+  public async getDashboard(callerRole: UserRole): Promise<DashboardResponseDto> {
+    const isOwner = callerRole === 'owner';
+    const extras = await this.reportStore.getDashboardExtras({ nowMs: this.nowMs() });
+    const keys = extras.weekKeys;
+    const daily = await this.reportStore.getDailySalesReport({
+      fromDate: keys[0],
+      toDate: extras.dateKey,
+      limit: 8,
+      includeCostAndProfit: isOwner,
+    });
+    const byDate = new Map(daily.days.map((d) => [d.date, d]));
+    const debts = await this.reportStore.getDebtsReport({ type: 'all' });
+    const low = await this.reportStore.getLowStockReport({ limit: 500 });
+    const today = byDate.get(extras.dateKey);
+    const t = (m: Money | undefined | null) => (m ? moneyToTiyin(m).toString() : '0');
+    return {
+      date: extras.dateKey,
+      today: {
+        netSales: t(today?.netSales),
+        salesCount: today?.salesCount ?? 0,
+        returnsTotal: t(today?.returnsTotal),
+        cashSales: t(today?.cashSales),
+        nonCashSales: t(today?.nonCashSales),
+        grossProfit: isOwner ? t(today?.grossProfit) : null,
+        newDebt: extras.newDebtTiyin.toString(),
+        debtCollected: extras.debtCollectedTiyin.toString(),
+        expenses: extras.expensesTiyin.toString(),
+      },
+      yesterdayNetSales: t(byDate.get(extras.yesterdayKey)?.netSales),
+      week: keys.map((date) => ({
+        date,
+        netSales: t(byDate.get(date)?.netSales),
+        salesCount: byDate.get(date)?.salesCount ?? 0,
+      })),
+      customerDebtTotal: t(debts.totalCustomerDebt),
+      supplierDebtTotal: t(debts.totalSupplierDebt),
+      stock: {
+        costValue: isOwner ? extras.stockCostTiyin.toString() : null,
+        retailValue: extras.stockRetailTiyin.toString(),
+        productsInStock: extras.productsInStock,
+        outOfStock: extras.outOfStockCount,
+        lowStock: low.length,
+      },
     };
   }
 

@@ -330,6 +330,42 @@ describePg('@mezon/cloud - T2.8 Telegram bot (link, consent, digest, reminders)'
     expect((await tick()).remindersSent).toBe(1);
   });
 
+  it('C24: a linked customer gets a menu: own debts, the shop, the language', async () => {
+    // after "yes" the bot showed the persistent menu (Russian chat)
+    const consent = tg.messagesTo(CUSTOMER_CHAT).find((m) => m.text.includes('/stop'));
+    expect(consent?.menu.flat()).toEqual(['💳 Мои долги', '🛍 Магазин', '🌐 Язык']);
+
+    await text(CUSTOMER_CHAT, '💳 Мои долги', 'ru');
+    const card = lastTo(CUSTOMER_CHAT)?.text ?? '';
+    expect(card).toContain('Guzar Non');
+    expect(card).toContain('Aziz Karimov');
+    expect(card).toContain('Ваш долг: 50 000 сум');
+    expect(card).toContain('Просрочено: 50 000 сум');
+
+    // no public shop configured: an honest "not yet" instead of a broken button
+    await text(CUSTOMER_CHAT, '🛍 Магазин', 'ru');
+    expect(lastTo(CUSTOMER_CHAT)?.text).toContain('онлайн-заказ ещё не включён');
+
+    // language switch: the menu comes back in Uzbek and the next answer is Uzbek
+    await text(CUSTOMER_CHAT, '🌐 Язык', 'ru');
+    const choose = lastTo(CUSTOMER_CHAT);
+    expect(choose?.buttons[0]?.map((b) => b.data)).toEqual(['l:uz-Latn', 'l:ru']);
+    await press(CUSTOMER_CHAT, 'l:uz-Latn');
+    expect(lastTo(CUSTOMER_CHAT)?.menu.flat()).toEqual(['💳 Qarzlarim', '🛍 Doʻkon', '🌐 Til']);
+    await text(CUSTOMER_CHAT, '💳 Qarzlarim', 'ru');
+    expect(lastTo(CUSTOMER_CHAT)?.text).toContain("Qarzingiz: 50 000 so'm");
+
+    // a chat that is not linked learns how to link, and sees no one's data
+    await text('7777', '💳 Qarzlarim', 'uz');
+    expect(lastTo('7777')?.text).toContain('havola');
+    // the staff chat of the same shop is not a customer: no customer data either
+    await text(OWNER_CHAT, '💳 Qarzlarim', 'uz');
+    expect(lastTo(OWNER_CHAT)?.text).not.toContain('Aziz Karimov');
+
+    // back to Russian for the tests below
+    await press(CUSTOMER_CHAT, 'l:ru');
+  });
+
   it('the cabinet shows the same overdue amount (FIFO), not 0', async () => {
     const token = await login('tg_owner@guzar.uz');
     const res = await server.inject({
@@ -353,7 +389,8 @@ describePg('@mezon/cloud - T2.8 Telegram bot (link, consent, digest, reminders)'
     expect((await tick()).failures).toBe(0);
 
     await text(CUSTOMER_CHAT, '/stop');
-    expect(lastTo(CUSTOMER_CHAT)?.text).toContain("To'xtatildi");
+    // C24: the bot answers in the chat's saved language (this customer linked in Russian)
+    expect(lastTo(CUSTOMER_CHAT)?.text).toContain('Отключено');
     nowMs = at(MON_09_TASHKENT, 2 + 24 * 14);
     expect((await tick()).remindersSent).toBe(0);
   });

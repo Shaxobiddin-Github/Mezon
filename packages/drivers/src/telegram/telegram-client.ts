@@ -6,13 +6,54 @@
  */
 export interface TelegramButton {
   readonly text: string;
-  /** Callback payload, at most 64 bytes (Telegram limit). */
-  readonly data: string;
+  /** Callback payload, at most 64 bytes (Telegram limit). Exactly one of data / url / webAppUrl. */
+  readonly data?: string;
+  /** C24: opens a web page (https only). */
+  readonly url?: string;
+  /** C24: opens the page inside Telegram as a Mini App (https only). */
+  readonly webAppUrl?: string;
 }
 
 export interface TelegramSendOptions {
   /** Inline keyboard rows. */
   readonly buttons?: readonly (readonly TelegramButton[])[];
+  /** C24: a persistent menu under the input field (plain text buttons). */
+  readonly menu?: readonly (readonly string[])[];
+}
+
+/** Telegram `reply_markup` for the options (inline buttons win over the menu). */
+export function toReplyMarkup(options?: TelegramSendOptions): Record<string, unknown> | null {
+  if (options?.buttons && options.buttons.length > 0) {
+    return {
+      inline_keyboard: options.buttons.map((row) =>
+        row.map((b) => {
+          if (b.webAppUrl !== undefined) {
+            assertHttps(b.webAppUrl);
+            return { text: b.text, web_app: { url: b.webAppUrl } };
+          }
+          if (b.url !== undefined) {
+            assertHttps(b.url);
+            return { text: b.text, url: b.url };
+          }
+          return { text: b.text, callback_data: b.data ?? '' };
+        }),
+      ),
+    };
+  }
+  if (options?.menu && options.menu.length > 0) {
+    return {
+      keyboard: options.menu.map((row) => row.map((text) => ({ text }))),
+      resize_keyboard: true,
+      is_persistent: true,
+    };
+  }
+  return null;
+}
+
+function assertHttps(url: string): void {
+  if (!/^https:\/\/[^\s]+$/.test(url)) {
+    throw new TelegramSendError('permanent', 'Telegram button URL must be https');
+  }
 }
 
 export type TelegramErrorKind =
@@ -47,6 +88,8 @@ export interface SentTelegramMessage {
   readonly chatId: string;
   readonly text: string;
   readonly buttons: readonly (readonly TelegramButton[])[];
+  /** C24: the persistent menu sent with the message (empty when none). */
+  readonly menu: readonly (readonly string[])[];
 }
 
 /** In-memory client for tests: records every message; chats can be marked unavailable. */
@@ -73,7 +116,12 @@ export class FakeTelegramClient implements TelegramClient {
     if (this.unavailable.has(chatId)) {
       return Promise.reject(new TelegramSendError('chatUnavailable', 'Forbidden: bot was blocked'));
     }
-    this.sent.push({ chatId, text, buttons: options?.buttons ?? [] });
+    this.sent.push({
+      chatId,
+      text,
+      buttons: options?.buttons ?? [],
+      menu: options?.menu ?? [],
+    });
     return Promise.resolve();
   }
 
@@ -121,13 +169,8 @@ export class HttpTelegramClient implements TelegramClient {
       text,
       disable_web_page_preview: true,
     };
-    if (options?.buttons && options.buttons.length > 0) {
-      body.reply_markup = {
-        inline_keyboard: options.buttons.map((row) =>
-          row.map((b) => ({ text: b.text, callback_data: b.data })),
-        ),
-      };
-    }
+    const markup = toReplyMarkup(options);
+    if (markup !== null) body.reply_markup = markup;
     await this.call('sendMessage', body);
   }
 

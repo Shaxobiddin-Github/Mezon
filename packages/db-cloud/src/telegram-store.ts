@@ -55,6 +55,24 @@ export function parseTelegramLinkCode(code: string): { organizationId: UuidV7; s
   return { organizationId: parseUuidV7(uuid), secret: m[2] };
 }
 
+/** C24: what one customer sees in the bot ("Qarzlarim", "Do'kon") for one shop. */
+export interface TelegramCustomerCard {
+  readonly organizationId: UuidV7;
+  readonly shopName: string;
+  readonly customerName: string;
+  readonly balanceTiyin: bigint;
+  readonly overdueTiyin: bigint;
+  /** Latest credit sales (newest first, at most 5): receipt code, amount, when, due date. */
+  readonly recentDebts: readonly {
+    readonly receiptCode: string | null;
+    readonly amountTiyin: bigint;
+    readonly createdAtMs: bigint;
+    readonly dueAtMs: bigint | null;
+  }[];
+  /** Public online-shop slug when the shop is switched on, else null. */
+  readonly shopSlug: string | null;
+}
+
 /** A transiently failed Telegram delivery is retried once, not earlier than this. */
 export const TELEGRAM_RETRY_AFTER_MS = 15n * 60_000n;
 
@@ -446,6 +464,125 @@ export class CloudTelegramStore {
   }
 
   /** Customer display data for the consent question (name of the business and of the customer). */
+  /**
+   * C24: the customer cards behind a chat — one per shop where this chat is linked to a customer
+   * who said "yes" to messages. Used by the bot menu, never for a chat that did not consent.
+   */
+  async listCustomerCardsForChat(params: {
+    readonly chatId: string;
+    readonly asOfMs: UnixMs;
+    readonly tz: string;
+  }): Promise<TelegramCustomerCard[]> {
+    const orgs = await this.pool.query<{ organization_id: string }>(
+      'SELECT organization_id FROM telegram_orgs_for_chat($1)',
+      [params.chatId],
+    );
+    const cards: TelegramCustomerCard[] = [];
+    for (const { organization_id } of orgs.rows) {
+      const org = parseUuidV7(organization_id);
+      const orgCards = await withPgTenantContext(this.pool, org, async (_tx, client) => {
+        const links = await client.query<{ customer_id: string; full_name: string }>(
+          `SELECT l.customer_id, c.full_name
+             FROM cloud_telegram_links l
+             JOIN customers c ON c.id = l.customer_id::uuid AND c.organization_id = l.organization_id
+            WHERE l.organization_id = $1 AND l.chat_id = $2 AND l.kind = 'customer'
+              AND l.revoked_at_ms IS NULL AND l.consent_at_ms IS NOT NULL
+              AND c.deleted_at_ms IS NULL`,
+          [org, params.chatId],
+        );
+        if (links.rows.length === 0) return [];
+        const debts = await loadCustomerDebts(client, {
+          organizationId: org,
+          customerIds: links.rows.map((r) => r.customer_id),
+          asOfMs: params.asOfMs,
+          tz: params.tz,
+        });
+        const shop = await client.query<{ slug: string }>(
+          'SELECT slug FROM cloud_shops WHERE organization_id = $1 AND is_enabled LIMIT 1',
+          [org],
+        );
+        const name = await client.query<{ name: string }>(
+          'SELECT name FROM cloud_organizations WHERE organization_id = $1 LIMIT 1',
+          [org],
+        );
+        const out: TelegramCustomerCard[] = [];
+        for (const link of links.rows) {
+          const recent = await client.query<{
+            receipt_code: string | null;
+            amount_delta: string;
+            created_at_ms: string;
+            due_at_ms: string | null;
+          }>(
+            `SELECT s.receipt_code, cl.amount_delta, cl.created_at_ms, cl.due_at_ms
+               FROM customer_ledger cl
+               LEFT JOIN sales s ON s.id = cl.sale_id AND s.organization_id = cl.organization_id
+              WHERE cl.organization_id = $1 AND cl.customer_id = $2::uuid
+                AND cl.entry_type = 'sale_debt'
+              ORDER BY cl.created_at_ms DESC
+              LIMIT 5`,
+            [org, link.customer_id],
+          );
+          const d = debts.get(link.customer_id);
+          out.push({
+            organizationId: org,
+            shopName: name.rows[0]?.name ?? 'Guzar',
+            customerName: link.full_name,
+            balanceTiyin: d ? BigInt(d.balance) : 0n,
+            overdueTiyin: d ? BigInt(d.overdueAmount) : 0n,
+            recentDebts: recent.rows.map((r) => ({
+              receiptCode: r.receipt_code,
+              amountTiyin: BigInt(r.amount_delta),
+              createdAtMs: BigInt(r.created_at_ms),
+              dueAtMs: r.due_at_ms !== null ? BigInt(r.due_at_ms) : null,
+            })),
+            shopSlug: shop.rows[0]?.slug ?? null,
+          });
+        }
+        return out;
+      });
+      cards.push(...orgCards);
+    }
+    return cards;
+  }
+
+  /** C24 "Til" button: the language of every active link of this chat. */
+  async setChatLocale(chatId: string, locale: TelegramLocale, nowMs: UnixMs): Promise<void> {
+    const orgs = await this.pool.query<{ organization_id: string }>(
+      'SELECT organization_id FROM telegram_orgs_for_chat($1)',
+      [chatId],
+    );
+    for (const { organization_id } of orgs.rows) {
+      const org = parseUuidV7(organization_id);
+      await withPgTenantContext(this.pool, org, async (_tx, client) => {
+        await client.query(
+          `UPDATE cloud_telegram_links SET locale = $3, updated_at_ms = $4
+            WHERE organization_id = $1 AND chat_id = $2 AND revoked_at_ms IS NULL`,
+          [org, chatId, locale, String(nowMs)],
+        );
+      });
+    }
+  }
+
+  /** C24: the language this chat last chose (null when it has no active link). */
+  async getChatLocale(chatId: string): Promise<TelegramLocale | null> {
+    const orgs = await this.pool.query<{ organization_id: string }>(
+      'SELECT organization_id FROM telegram_orgs_for_chat($1)',
+      [chatId],
+    );
+    const first = orgs.rows[0];
+    if (first === undefined) return null;
+    const org = parseUuidV7(first.organization_id);
+    return withPgTenantContext(this.pool, org, async (_tx, client) => {
+      const res = await client.query<{ locale: TelegramLocale }>(
+        `SELECT locale FROM cloud_telegram_links
+          WHERE organization_id = $1 AND chat_id = $2 AND revoked_at_ms IS NULL
+          ORDER BY updated_at_ms DESC LIMIT 1`,
+        [org, chatId],
+      );
+      return res.rows[0]?.locale ?? null;
+    });
+  }
+
   async getOrganizationName(organizationId: UuidV7): Promise<string> {
     return withPgTenantContext(this.pool, organizationId, async (_tx, client) => {
       const res = await client.query<{ name: string }>(

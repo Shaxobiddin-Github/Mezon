@@ -285,9 +285,19 @@ export const PublicShopPage: React.FC<{ readonly slug: string }> = ({ slug }) =>
                   data-testid="shop-product"
                 >
                   <div className="space-y-1">
-                    <span className="grid h-10 w-10 place-items-center rounded-xl bg-indigo-50 text-sm font-bold text-indigo-700">
-                      {p.name.trim().charAt(0).toUpperCase()}
-                    </span>
+                    {p.image ? (
+                      <img
+                        src={p.image}
+                        alt={p.name}
+                        loading="lazy"
+                        className="aspect-square w-full rounded-xl bg-slate-100 object-cover"
+                        data-testid="shop-product-image"
+                      />
+                    ) : (
+                      <span className="grid h-10 w-10 place-items-center rounded-xl bg-indigo-50 text-sm font-bold text-indigo-700">
+                        {p.name.trim().charAt(0).toUpperCase()}
+                      </span>
+                    )}
                     <div className="text-sm font-semibold leading-snug text-slate-800">
                       {p.name}
                     </div>

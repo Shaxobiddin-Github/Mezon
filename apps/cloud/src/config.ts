@@ -28,6 +28,14 @@ export const CloudConfigSchema = z.object({
   telegramDigestHour: z.coerce.number().int().min(0).max(23).default(21),
   /** Local hour for customer debt reminders (at most once a week per customer). */
   telegramReminderHour: z.coerce.number().int().min(0).max(23).default(10),
+  /**
+   * C24: public https origin of the cabinet / online shop (e.g. https://guzar.example.uz). The bot
+   * opens `<origin>/s/<slug>` as a Telegram Mini App. Without it the bot has no shop button.
+   */
+  publicBaseUrl: z
+    .string()
+    .regex(/^https:\/\/[A-Za-z0-9.-]+(:\d+)?$/, 'PUBLIC_BASE_URL: https origin without a path')
+    .optional(),
 });
 
 export type CloudConfig = z.infer<typeof CloudConfigSchema>;
@@ -46,6 +54,7 @@ export function loadCloudConfig(env: NodeJS.ProcessEnv = process.env): CloudConf
     telegramBotUsername: env.TELEGRAM_BOT_USERNAME || undefined,
     telegramDigestHour: env.TELEGRAM_DIGEST_HOUR,
     telegramReminderHour: env.TELEGRAM_REMINDER_HOUR,
+    publicBaseUrl: env.PUBLIC_BASE_URL || undefined,
   });
 
   if (!result.success) {

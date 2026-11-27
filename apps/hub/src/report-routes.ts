@@ -63,6 +63,12 @@ export function registerReportRoutes(
   });
 
   // Debts Report
+  // C23 owner dashboard (owner and manager; profit and purchase prices only for the owner).
+  app.get('/reports/dashboard', async (request) => {
+    const session = await authorize(authService, request, 'catalog:write');
+    return reportService.getDashboard(session.user.role);
+  });
+
   app.get('/reports/debts', async (request) => {
     await authorize(authService, request, 'customers:read');
     const query = DebtsReportQuerySchema.parse(request.query);

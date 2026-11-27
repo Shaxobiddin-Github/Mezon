@@ -13,6 +13,85 @@ export function som(tiyin: bigint, locale: Locale): string {
   return `${formatTiyinToSom(tiyin)} ${t('common.currency', undefined, locale)}`;
 }
 
+/** C24 customer menu rows in the chat's language. */
+export function menuRows(locale: Locale): string[][] {
+  return [
+    [t('telegram.menu.debts', undefined, locale), t('telegram.menu.shop', undefined, locale)],
+    [t('telegram.menu.lang', undefined, locale)],
+  ];
+}
+
+/** Which menu button a text is (any language), or null. */
+export function menuAction(text: string): 'debts' | 'shop' | 'lang' | null {
+  const clean = text.trim();
+  for (const locale of ['uz-Latn', 'ru'] as const) {
+    if (clean === t('telegram.menu.debts', undefined, locale)) return 'debts';
+    if (clean === t('telegram.menu.shop', undefined, locale)) return 'shop';
+    if (clean === t('telegram.menu.lang', undefined, locale)) return 'lang';
+  }
+  return null;
+}
+
+function dayOf(ms: bigint, tz: string): string {
+  const key = new Intl.DateTimeFormat('en-CA', {
+    timeZone: tz,
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+  }).format(new Date(Number(ms)));
+  const [y, m, d] = key.split('-');
+  return `${d ?? ''}.${m ?? ''}.${y ?? ''}`;
+}
+
+export interface CustomerCardFigures {
+  readonly shopName: string;
+  readonly customerName: string;
+  readonly balanceTiyin: bigint;
+  readonly overdueTiyin: bigint;
+  readonly recentDebts: readonly {
+    readonly receiptCode: string | null;
+    readonly amountTiyin: bigint;
+    readonly createdAtMs: bigint;
+    readonly dueAtMs: bigint | null;
+  }[];
+}
+
+/** C24 "Qarzlarim": one shop's balance and the latest credit receipts (plain text). */
+export function formatCustomerCard(c: CustomerCardFigures, locale: Locale, tz: string): string {
+  const lines = [
+    t('telegram.debts.head', { shop: clip(c.shopName), name: clip(c.customerName) }, locale),
+  ];
+  if (c.balanceTiyin <= 0n) {
+    lines.push(t('telegram.debts.none', undefined, locale));
+    return lines.join('\n');
+  }
+  lines.push(t('telegram.debts.balance', { amount: som(c.balanceTiyin, locale) }, locale));
+  if (c.overdueTiyin > 0n) {
+    lines.push(t('telegram.debts.overdue', { amount: som(c.overdueTiyin, locale) }, locale));
+  }
+  if (c.recentDebts.length > 0) {
+    lines.push('', t('telegram.debts.recent', undefined, locale));
+    for (const d of c.recentDebts) {
+      const due =
+        d.dueAtMs !== null ? t('telegram.debts.due', { date: dayOf(d.dueAtMs, tz) }, locale) : '';
+      lines.push(
+        t(
+          'telegram.debts.line',
+          {
+            date: dayOf(d.createdAtMs, tz),
+            code: d.receiptCode ?? '—',
+            amount: som(d.amountTiyin, locale),
+            due,
+          },
+          locale,
+        ),
+      );
+    }
+  }
+  lines.push('', t('telegram.debts.footer', undefined, locale));
+  return lines.join('\n');
+}
+
 export function localeFromTelegram(languageCode: string | undefined): Locale {
   return languageCode?.toLowerCase().startsWith('ru') ? 'ru' : 'uz-Latn';
 }

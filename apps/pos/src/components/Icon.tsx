@@ -5,6 +5,15 @@ import type { ReactNode } from 'react';
  * looks the same offline. 24x24 viewBox, currentColor stroke; size comes from CSS.
  */
 const ICONS = {
+  star: <path d="m12 3.5 2.6 5.3 5.9.9-4.3 4.1 1 5.8L12 16.9l-5.2 2.7 1-5.8L3.5 9.7l5.9-.9z" />,
+  share: (
+    <>
+      <circle cx="18" cy="5.5" r="2.5" />
+      <circle cx="6" cy="12" r="2.5" />
+      <circle cx="18" cy="18.5" r="2.5" />
+      <path d="m8.2 10.8 7.6-4M8.2 13.2l7.6 4" />
+    </>
+  ),
   sale: (
     <>
       <path d="M3 4h2l2.4 10.2a1.5 1.5 0 0 0 1.5 1.1h8.3a1.5 1.5 0 0 0 1.4-1l2-6.3H6.2" />

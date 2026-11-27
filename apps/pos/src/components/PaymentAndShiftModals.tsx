@@ -11,6 +11,7 @@ import { type FormEvent, useEffect, useRef, useState } from 'react';
 import { ReceiptFiscalBadge } from './FiscalPanels.js';
 import { Icon } from './Icon.js';
 import { QrPayPanel } from './QrPayPanel.js';
+import { ReceiptShareBar } from './ReceiptShareBar.js';
 import { RulesPanel } from './RulesPanel.js';
 import { type HubApiClient, HubApiError } from '../api/hub-client.js';
 import {
@@ -504,6 +505,40 @@ export function PaymentModal({
                 <Icon name="debt" />
                 {t('payment.debtAmount')} {selectedCustomer ? `(${selectedCustomer.fullName})` : ''}
               </label>
+              {selectedCustomer !== null && (
+                <div className="pos-debt-info" data-testid="payment-customer-debt-info">
+                  <span>
+                    {t('payment.debt.now')}{' '}
+                    <strong>
+                      {formatTiyinToSom(selectedCustomer.balance)} {t('common.currency')}
+                    </strong>
+                  </span>
+                  {debtTiyin > 0n && (
+                    <span>
+                      {t('payment.debt.after')}{' '}
+                      <strong data-testid="payment-customer-debt-after">
+                        {formatTiyinToSom(
+                          (BigInt(selectedCustomer.balance) + debtTiyin).toString(),
+                        )}{' '}
+                        {t('common.currency')}
+                      </strong>
+                    </span>
+                  )}
+                  <button
+                    type="button"
+                    className="pos-btn"
+                    data-testid="payment-debt-all-btn"
+                    onClick={() => {
+                      onInputsChanged();
+                      const rest = totalTiyin > nonCashSumTiyin ? totalTiyin - nonCashSumTiyin : 0n;
+                      setDebtSom(tiyinToSomInputString(rest.toString()));
+                      setTenderedCashSom('0');
+                    }}
+                  >
+                    {t('payment.debt.all')}
+                  </button>
+                </div>
+              )}
               <div className="pos-search-bar">
                 <input
                   id="pay-debt-som"
@@ -802,6 +837,8 @@ export function ReceiptModal({ api }: { readonly api?: HubApiClient } = {}) {
               t('receipt.printFailed', { message: printState.message })}
           </div>
         )}
+
+        {api && lastCompletedSale && <ReceiptShareBar api={api} sale={lastCompletedSale.sale} />}
 
         {api && (
           <button
