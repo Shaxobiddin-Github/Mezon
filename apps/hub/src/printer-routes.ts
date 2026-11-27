@@ -6,6 +6,7 @@ import {
   SaleIdParamsSchema,
   ShiftIdParamsSchema,
   UpdatePrinterSettingsRequestSchema,
+  ReceiptPreviewQuerySchema,
 } from '@mezon/contracts';
 import type { HubPermission } from '@mezon/domain';
 import type { FastifyInstance, FastifyRequest } from 'fastify';
@@ -117,6 +118,14 @@ export function registerPrinterRoutes(
       'Processed sale receipt print',
     );
     return res;
+  });
+
+  // C22: the receipt as text for sharing / office printing (no print record, no drawer).
+  app.get('/sales/:id/receipt-preview', async (request) => {
+    const session = await authorize(authService, request, 'cart:write');
+    const params = SaleIdParamsSchema.parse(request.params);
+    const query = ReceiptPreviewQuerySchema.parse(request.query);
+    return printerService.previewSaleReceipt(params.id, session, query.width === '58' ? 58 : 80);
   });
 
   app.get('/sales/:id/prints', async (request) => {

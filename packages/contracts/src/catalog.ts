@@ -491,3 +491,36 @@ export const SetFavoriteRequestSchema = z.strictObject({
   favorite: z.boolean(),
 });
 export type SetFavoriteRequestDto = z.infer<typeof SetFavoriteRequestSchema>;
+
+// ---------------------------------------------------------------------------
+// C21: product photos
+// ---------------------------------------------------------------------------
+
+export const ProductImageMimeSchema = z.enum(['image/jpeg', 'image/webp', 'image/png']);
+
+export const SetProductImageRequestSchema = z.strictObject({
+  mime: ProductImageMimeSchema,
+  /** Base64 body, at most 160 KB decoded (the till resizes before upload). */
+  dataBase64: z.string().min(16).max(220_000),
+});
+export type SetProductImageRequestDto = z.infer<typeof SetProductImageRequestSchema>;
+
+/** C21: photo as JSON (the tills' fetch path works for JSON on every platform, incl. the phone). */
+export const ProductImageDataResponseSchema = z.strictObject({
+  productId: UuidV7Schema,
+  mime: ProductImageMimeSchema,
+  dataBase64: z.string(),
+  updatedAtMs: BigIntStringSchema,
+});
+export type ProductImageDataResponseDto = z.infer<typeof ProductImageDataResponseSchema>;
+
+export const ProductImageStampSchema = z.strictObject({
+  productId: UuidV7Schema,
+  updatedAtMs: BigIntStringSchema,
+});
+export type ProductImageStampDto = z.infer<typeof ProductImageStampSchema>;
+
+export const ProductImageStampsResponseSchema = z.strictObject({
+  images: z.array(ProductImageStampSchema),
+});
+export type ProductImageStampsResponseDto = z.infer<typeof ProductImageStampsResponseSchema>;

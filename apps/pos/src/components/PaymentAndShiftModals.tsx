@@ -11,6 +11,7 @@ import { type FormEvent, useEffect, useRef, useState } from 'react';
 import { ReceiptFiscalBadge } from './FiscalPanels.js';
 import { Icon } from './Icon.js';
 import { QrPayPanel } from './QrPayPanel.js';
+import { ReceiptShareBar } from './ReceiptShareBar.js';
 import { RulesPanel } from './RulesPanel.js';
 import { type HubApiClient, HubApiError } from '../api/hub-client.js';
 import {
@@ -836,6 +837,8 @@ export function ReceiptModal({ api }: { readonly api?: HubApiClient } = {}) {
               t('receipt.printFailed', { message: printState.message })}
           </div>
         )}
+
+        {api && lastCompletedSale && <ReceiptShareBar api={api} sale={lastCompletedSale.sale} />}
 
         {api && (
           <button

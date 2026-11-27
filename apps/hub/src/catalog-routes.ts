@@ -12,6 +12,7 @@ import {
   ReplacePriceTiersRequestSchema,
   ScanBarcodeQuerySchema,
   SetFavoriteRequestSchema,
+  SetProductImageRequestSchema,
   UpdateCategoryRequestSchema,
   UpdateProductRequestSchema,
   UpdateVariantRequestSchema,
@@ -157,6 +158,43 @@ export function registerCatalogRoutes(
     const params = ProductIdParamsSchema.parse(request.params);
     const body = ReplacePriceTiersRequestSchema.parse(request.body);
     return catalogService.replacePriceTiers(params.id, body);
+  });
+
+  // C21 product photos: shown on every till, changed by owner/manager.
+  app.get('/catalog/image-stamps', async (request) => {
+    await authorize(authService, request, 'catalog:read');
+    const query = ListPriceTiersQuerySchema.parse(request.query);
+    return catalogService.listImageStamps(query.productIds);
+  });
+
+  app.get('/products/:id/image', async (request, reply) => {
+    await authorize(authService, request, 'catalog:read');
+    const params = ProductIdParamsSchema.parse(request.params);
+    const img = await catalogService.getImage(params.id);
+    return reply
+      .header('content-type', img.mime)
+      .header('cache-control', 'private, max-age=86400')
+      .header('x-content-type-options', 'nosniff')
+      .send(img.bytes);
+  });
+
+  app.get('/products/:id/image-data', async (request) => {
+    await authorize(authService, request, 'catalog:read');
+    const params = ProductIdParamsSchema.parse(request.params);
+    return catalogService.getImageData(params.id);
+  });
+
+  app.put('/products/:id/image', async (request) => {
+    await authorize(authService, request, 'catalog:write');
+    const params = ProductIdParamsSchema.parse(request.params);
+    const body = SetProductImageRequestSchema.parse(request.body);
+    return catalogService.setImage(params.id, body);
+  });
+
+  app.delete('/products/:id/image', async (request) => {
+    await authorize(authService, request, 'catalog:write');
+    const params = ProductIdParamsSchema.parse(request.params);
+    return catalogService.deleteImage(params.id);
   });
 
   // C20 favourite (starred) goods of this store: any cashier may star.

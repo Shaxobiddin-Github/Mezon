@@ -10,6 +10,7 @@ import { splitHotkey } from './SideNav.js';
 import { LiveScanOverlay } from './LiveScanOverlay.js';
 import type { ScanResult } from '../utils/live-scan.js';
 import { WHOLESALE_LINE_NAME, tierHint } from '../utils/price-tiers.js';
+import { useProductImages } from '../utils/product-images.js';
 
 /** Soft tile colours: the same product always gets the same one (by name). */
 const TILE_TONES = 6;
@@ -136,6 +137,7 @@ export function PosWorkspaceScreen({
   }, [api, favMode, searchQuery, favoriteIds, onError]);
 
   const shownIdsKey = shownResults.map((p) => p.id).join(',');
+  const productImages = useProductImages(api, shownIdsKey.length > 0 ? shownIdsKey.split(',') : []);
   useEffect(() => {
     if (shownIdsKey.length === 0) return;
     let alive = true;
@@ -630,12 +632,21 @@ export function PosWorkspaceScreen({
                     data-testid={`catalog-result-${String(idx)}`}
                     onClick={() => void handleAddProduct(prod)}
                   >
-                    <span
-                      className={`pos-tile-badge pos-tone-${String(toneOf(prod.name))}`}
-                      aria-hidden="true"
-                    >
-                      {prod.name.trim().charAt(0).toUpperCase()}
-                    </span>
+                    {productImages.has(prod.id) ? (
+                      <img
+                        className="pos-tile-photo"
+                        src={productImages.get(prod.id)}
+                        alt=""
+                        data-testid={`catalog-result-photo-${String(idx)}`}
+                      />
+                    ) : (
+                      <span
+                        className={`pos-tile-badge pos-tone-${String(toneOf(prod.name))}`}
+                        aria-hidden="true"
+                      >
+                        {prod.name.trim().charAt(0).toUpperCase()}
+                      </span>
+                    )}
                     <span className="pos-tile-name">
                       {prod.name}
                       {prod.sku ? <small> · {prod.sku}</small> : null}

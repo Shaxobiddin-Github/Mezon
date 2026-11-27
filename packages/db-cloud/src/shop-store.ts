@@ -25,6 +25,8 @@ export interface ShopProductRow {
   /** Stock in milli-units at the shop's store; null for unlimited (service) products. */
   readonly stockMilli: bigint | null;
   readonly isPublished: boolean;
+  /** C21: `updated_at_ms` of the live product photo (cache key), null when there is none. */
+  readonly imageStamp: string | null;
 }
 
 export interface ShopOrderLineRow {
@@ -185,12 +187,17 @@ export class CloudShopStore {
         category_name: string | null;
         stock: string;
         is_published: boolean | null;
+        image_stamp: string | null;
       }>(
         `SELECT p.id, p.name, p.unit, p.sale_price, p.unlimited, c.name AS category_name,
                 COALESCE((SELECT SUM(sm.qty_delta) FROM stock_moves sm
                            WHERE sm.organization_id = p.organization_id AND sm.product_id = p.id
                              AND sm.store_id = $2::uuid), 0) AS stock,
-                sp.is_published
+                sp.is_published,
+                (SELECT pi.updated_at_ms::text FROM product_images pi
+                  WHERE pi.organization_id = p.organization_id AND pi.product_id = p.id
+                    AND pi.deleted_at_ms IS NULL
+                  LIMIT 1) AS image_stamp
            FROM products p
            LEFT JOIN categories c ON c.id = p.category_id AND c.organization_id = p.organization_id
            LEFT JOIN cloud_shop_products sp
@@ -209,7 +216,36 @@ export class CloudShopStore {
         categoryName: r.category_name,
         stockMilli: r.unlimited ? null : BigInt(r.stock),
         isPublished: r.is_published === true,
+        imageStamp: r.image_stamp,
       }));
+    });
+  }
+
+  /**
+   * C21: the live photo of a product. With `onlyPublished`, only for a product that is on sale in
+   * the online shop (the public page must not leak photos of hidden goods).
+   */
+  async getProductImage(
+    organizationId: UuidV7,
+    productId: UuidV7,
+    onlyPublished: boolean,
+  ): Promise<{ readonly mime: string; readonly dataBase64: string } | null> {
+    return withPgTenantContext(this.pool, organizationId, async (_tx, client) => {
+      const res = await client.query<{ mime: string; data_base64: string }>(
+        `SELECT pi.mime, pi.data_base64
+           FROM product_images pi
+           ${
+             onlyPublished
+               ? `JOIN cloud_shop_products sp ON sp.organization_id = pi.organization_id
+                     AND sp.product_id = pi.product_id::text AND sp.is_published IS TRUE`
+               : ''
+           }
+          WHERE pi.organization_id = $1 AND pi.product_id = $2::uuid AND pi.deleted_at_ms IS NULL
+          LIMIT 1`,
+        [organizationId, productId],
+      );
+      const row = res.rows[0];
+      return row ? { mime: row.mime, dataBase64: row.data_base64 } : null;
     });
   }
 

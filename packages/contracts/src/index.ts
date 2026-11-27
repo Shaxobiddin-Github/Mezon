@@ -138,6 +138,15 @@ export {
   type FavoriteProductsResponseDto,
   SetFavoriteRequestSchema,
   type SetFavoriteRequestDto,
+  ProductImageMimeSchema,
+  ProductImageDataResponseSchema,
+  type ProductImageDataResponseDto,
+  SetProductImageRequestSchema,
+  type SetProductImageRequestDto,
+  ProductImageStampSchema,
+  type ProductImageStampDto,
+  ProductImageStampsResponseSchema,
+  type ProductImageStampsResponseDto,
 } from './catalog.js';
 
 export {
@@ -624,6 +633,9 @@ export {
   PrintDocumentResponseSchema,
   type PrintDocumentResponseDto,
   ListReceiptPrintsResponseSchema,
+  ReceiptPreviewQuerySchema,
+  ReceiptPreviewResponseSchema,
+  type ReceiptPreviewResponseDto,
   type ListReceiptPrintsResponseDto,
   TestPrintResponseSchema,
   type TestPrintResponseDto,

@@ -152,6 +152,7 @@ describe('@mezon/db-local - Schema foundation, registry, pragmas, and bigint saf
       ['product_variants', 'ATTR'],
       ['product_barcodes', 'ATTR'],
       ['product_price_tiers', 'ATTR'],
+      ['product_images', 'ATTR'],
       ['local_product_favorites', 'LOCAL'],
       ['price_changes', 'FACT'],
       ['batches', 'FACT'],
@@ -451,7 +452,7 @@ describe('@mezon/db-local - Schema foundation, registry, pragmas, and bigint saf
       const migCountRow = conn.sqlite
         .prepare('SELECT COUNT(*) as cnt FROM __drizzle_migrations')
         .get() as { cnt: bigint };
-      expect(migCountRow.cnt).toBe(28n);
+      expect(migCountRow.cnt).toBe(29n);
     } finally {
       conn.close();
     }

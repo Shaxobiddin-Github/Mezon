@@ -577,6 +577,37 @@ export const productPriceTiers = localSchemaRegistry.defineTable(
   ],
 );
 
+/**
+ * C21 product photo (`ATTR`, one live row per product): a small JPEG/WebP (the till resizes it to
+ * ~480 px before upload) kept as base64 so it syncs like any other row and reaches the cloud shop.
+ */
+export const productImages = localSchemaRegistry.defineTable(
+  {
+    name: 'product_images',
+    tableClass: 'ATTR',
+    tenantScope: 'organization',
+  },
+  (common) => ({
+    ...common,
+    productId: sqliteUuidV7('product_id')
+      .notNull()
+      .references(() => products.id),
+    mime: text('mime').notNull(),
+    dataBase64: text('data_base64').notNull(),
+    byteSize: sqliteInt('byte_size').notNull(),
+  }),
+  (self) => [
+    uniqueIndex('uidx_product_images_org_product')
+      .on(self.organizationId, self.productId)
+      .where(sql`${self.deletedAtMs} IS NULL`),
+    check(
+      'chk_product_images_mime',
+      sql`${self.mime} IN ('image/jpeg', 'image/webp', 'image/png')`,
+    ),
+    check('chk_product_images_size', sql`${self.byteSize} > 0 AND ${self.byteSize} <= 160000`),
+  ],
+);
+
 /** C20 favourite goods of a store (`LOCAL`): the star on the sale screen. */
 export const localProductFavorites = localSchemaRegistry.defineTable(
   {

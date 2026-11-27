@@ -27,6 +27,7 @@ import { type FormEvent, useCallback, useEffect, useState } from 'react';
 import type { HubApiClient } from '../api/hub-client.js';
 import { describeHubError } from '../utils/error-text.js';
 import { type TierDraft, parseTierDrafts } from '../utils/price-tiers.js';
+import { forgetProductImage, preparePhoto } from '../utils/product-images.js';
 import { Icon } from './Icon.js';
 
 const UNITS: readonly ProductUnit[] = ['dona', 'kg', 'g', 'litr', 'metr', 'm2', 'qadoq'];
@@ -222,6 +223,44 @@ function ProductFormModal(props: {
   // C20 wholesale tiers: rows the owner edits; `tiersLoaded` = what the hub had (for "changed?").
   const [tiers, setTiers] = useState<readonly TierDraft[]>([]);
   const [tiersLoaded, setTiersLoaded] = useState(0);
+  // C21 photo: what is shown, plus a pending upload or removal applied on save.
+  const [photoUrl, setPhotoUrl] = useState<string | null>(null);
+  const [photoUpload, setPhotoUpload] = useState<{
+    readonly mime: 'image/jpeg';
+    readonly dataBase64: string;
+  } | null>(null);
+  const [photoRemoved, setPhotoRemoved] = useState(false);
+  const [photoBusy, setPhotoBusy] = useState(false);
+
+  useEffect(() => {
+    if (productId === null) return;
+    let cancelled = false;
+    api
+      .getProductImageData(productId)
+      .then((img) => {
+        if (!cancelled) setPhotoUrl(`data:${img.mime};base64,${img.dataBase64}`);
+      })
+      .catch(() => undefined); // no photo yet
+    return () => {
+      cancelled = true;
+    };
+  }, [api, productId]);
+
+  const pickPhoto = async (file: File | undefined) => {
+    if (file === undefined) return;
+    setPhotoBusy(true);
+    try {
+      const prepared = await preparePhoto(file);
+      setPhotoUrl(prepared.dataUrl);
+      setPhotoUpload({ mime: prepared.mime, dataBase64: prepared.dataBase64 });
+      setPhotoRemoved(false);
+      setFormError(null);
+    } catch {
+      setFormError(t('pos.photo.bad'));
+    } finally {
+      setPhotoBusy(false);
+    }
+  };
 
   useEffect(() => {
     if (productId === null) return;
@@ -331,6 +370,13 @@ function ProductFormModal(props: {
       if (tierRes.tiers.length > 0 || tiersLoaded > 0) {
         await api.replacePriceTiers(savedId, { tiers: [...tierRes.tiers] });
       }
+      if (photoUpload !== null) {
+        await api.setProductImage(savedId, photoUpload);
+        forgetProductImage(savedId);
+      } else if (photoRemoved && productId !== null) {
+        await api.deleteProductImage(savedId);
+        forgetProductImage(savedId);
+      }
       onSaved();
     } catch (err) {
       // Shown inside the form (the page banner sits behind this modal), in the cashier's language.
@@ -374,6 +420,71 @@ function ProductFormModal(props: {
         <div className="pos-modal-body">
           <div className="pos-form-section-title">{t('catalog.form.sectionMain')}</div>
           {field('name', t('catalog.form.name'), 'product-form-name')}
+
+          <div className="pos-form-field">
+            <span>{t('pos.photo.title')}</span>
+            <div className="pos-photo-field">
+              {photoUrl !== null ? (
+                <img
+                  className="pos-photo-preview"
+                  src={photoUrl}
+                  alt=""
+                  data-testid="product-form-photo-preview"
+                />
+              ) : (
+                <span className="pos-photo-preview pos-photo-empty" aria-hidden="true">
+                  <Icon name="products" />
+                </span>
+              )}
+              <div className="pos-photo-actions">
+                <label className="pos-btn" data-testid="product-form-photo-pick">
+                  <Icon name="plus" />
+                  {photoBusy ? t('pos.photo.working') : t('pos.photo.pick')}
+                  <input
+                    className="pos-photo-input"
+                    type="file"
+                    accept="image/*"
+                    data-testid="product-form-photo-input"
+                    disabled={photoBusy}
+                    onChange={(e) => {
+                      void pickPhoto(e.target.files?.[0]);
+                      e.target.value = '';
+                    }}
+                  />
+                </label>
+                <label className="pos-btn" data-testid="product-form-photo-camera">
+                  <Icon name="scan" />
+                  {t('pos.photo.camera')}
+                  <input
+                    className="pos-photo-input"
+                    type="file"
+                    accept="image/*"
+                    capture="environment"
+                    disabled={photoBusy}
+                    onChange={(e) => {
+                      void pickPhoto(e.target.files?.[0]);
+                      e.target.value = '';
+                    }}
+                  />
+                </label>
+                {photoUrl !== null && (
+                  <button
+                    type="button"
+                    className="pos-btn pos-btn-danger-soft"
+                    data-testid="product-form-photo-remove"
+                    onClick={() => {
+                      setPhotoUrl(null);
+                      setPhotoUpload(null);
+                      setPhotoRemoved(true);
+                    }}
+                  >
+                    <Icon name="trash" />
+                    {t('pos.photo.remove')}
+                  </button>
+                )}
+              </div>
+            </div>
+          </div>
 
           <label className="pos-form-field">
             <span>{t('catalog.form.barcode')}</span>

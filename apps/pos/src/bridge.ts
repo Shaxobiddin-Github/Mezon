@@ -78,6 +78,12 @@ export interface MezonBridge {
    * function that stops the camera.
    */
   readonly startLiveScan?: (onCode: (code: string) => void) => Promise<() => Promise<void>>;
+  /** C22 (phone only): hands a PNG to the system share sheet. */
+  readonly shareImage?: (input: {
+    readonly base64: string;
+    readonly fileName: string;
+    readonly title: string;
+  }) => Promise<void>;
 }
 
 /** Fingerprint shown in groups of 4 so two screens can be compared by eye. */

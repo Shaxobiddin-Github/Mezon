@@ -269,6 +269,23 @@ export const ProductBarcodesPayloadSchema = z
   })
   .strict();
 
+/** C21 product photos (ATTR, base64 body). */
+export const ProductImagesPayloadSchema = z
+  .object({
+    id: UuidV7Schema,
+    organizationId: UuidV7Schema,
+    deviceId: UuidV7Schema,
+    hlc: z.string().length(58),
+    createdAtMs: UnixMsPayloadSchema,
+    updatedAtMs: UnixMsPayloadSchema,
+    deletedAtMs: UnixMsPayloadSchema.nullable().optional(),
+    productId: UuidV7Schema,
+    mime: z.enum(['image/jpeg', 'image/webp', 'image/png']),
+    dataBase64: z.string().min(4).max(220_000),
+    byteSize: z.number().int().min(1).max(160_000),
+  })
+  .strict();
+
 /** C20 wholesale price tiers (ATTR). */
 export const ProductPriceTiersPayloadSchema = z
   .object({
@@ -1130,6 +1147,7 @@ export const SYNC_PAYLOAD_SCHEMAS: Readonly<Record<string, z.ZodType<Record<stri
   product_variants: ProductVariantsPayloadSchema,
   product_barcodes: ProductBarcodesPayloadSchema,
   product_price_tiers: ProductPriceTiersPayloadSchema,
+  product_images: ProductImagesPayloadSchema,
   price_changes: PriceChangesPayloadSchema,
   batches: BatchesPayloadSchema,
   stock_moves: StockMovesPayloadSchema,
@@ -1517,6 +1535,7 @@ export const SYNC_FOREIGN_REFERENCES: Readonly<Record<string, readonly ForeignKe
     { payloadKey: 'variantId', targetEntity: 'product_variants' },
   ],
   product_price_tiers: [{ payloadKey: 'productId', targetEntity: 'products' }],
+  product_images: [{ payloadKey: 'productId', targetEntity: 'products' }],
   price_changes: [
     { payloadKey: 'productId', targetEntity: 'products' },
     { payloadKey: 'variantId', targetEntity: 'product_variants' },

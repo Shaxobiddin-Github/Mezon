@@ -1,5 +1,7 @@
 import { BarcodeScanner } from '@capacitor-mlkit/barcode-scanning';
 import { registerPlugin } from '@capacitor/core';
+import { Directory, Filesystem } from '@capacitor/filesystem';
+import { Share } from '@capacitor/share';
 import type {
   AndroidMezonBridge,
   HubBridgeState,
@@ -157,6 +159,24 @@ const startLiveScan = async (onCode: (code: string) => void): Promise<() => Prom
   };
 };
 
+/**
+ * C22: writes the PNG to the app cache and opens the system share sheet. Only a file name made of
+ * safe characters is used; the cache is the app's own (no storage permission needed).
+ */
+const shareImage = async (input: {
+  readonly base64: string;
+  readonly fileName: string;
+  readonly title: string;
+}): Promise<void> => {
+  const safeName = input.fileName.replace(/[^A-Za-z0-9._-]/g, '_').slice(0, 80) || 'chek.png';
+  const written = await Filesystem.writeFile({
+    path: safeName,
+    data: input.base64,
+    directory: Directory.Cache,
+  });
+  await Share.share({ title: input.title, files: [written.uri] });
+};
+
 const bridge: AndroidMezonBridge = {
   thinClient: true,
   getHubState: hubState,
@@ -176,6 +196,7 @@ const bridge: AndroidMezonBridge = {
 
   scanBarcode,
   startLiveScan,
+  shareImage,
 };
 
 window.mezonBridge = bridge;

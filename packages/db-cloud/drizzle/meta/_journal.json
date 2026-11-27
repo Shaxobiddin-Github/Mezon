@@ -92,6 +92,13 @@
       "when": 1795764339740,
       "tag": "0012_price_tiers",
       "breakpoints": true
+    },
+    {
+      "idx": 13,
+      "version": "7",
+      "when": 1795765461749,
+      "tag": "0013_product_images",
+      "breakpoints": true
     }
   ]
 }

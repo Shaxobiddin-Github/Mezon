@@ -263,6 +263,70 @@ describePg('@mezon/cloud - V2 online shop (public window, orders, cabinet)', () 
     expect(JSON.stringify(pub)).not.toMatch(/stock|cost|organization/i);
   });
 
+  it('C21: a synced product photo shows on the window; hidden goods keep theirs private', async () => {
+    const jpeg = Buffer.from([
+      0xff, 0xd8, 0xff, 0xe0, 0x00, 0x10, 0x4a, 0x46, 0x49, 0x46, 0x00, 0x01, 0x01, 0x00, 0xff,
+      0xd9,
+    ]);
+    const writer = new CloudEventWriter(appConn.pool, new CloudSyncPushStore(appConn.pool), idGen);
+    const imagePayload = (productId: UuidV7) => {
+      const id = idGen.nextId();
+      return {
+        entity: 'product_images',
+        entityId: id,
+        type: 'product_image.created',
+        payload: {
+          id,
+          organizationId: orgA,
+          productId,
+          mime: 'image/jpeg',
+          dataBase64: jpeg.toString('base64'),
+          byteSize: jpeg.length,
+          deviceId: id,
+          hlc: '',
+          createdAtMs: String(nowMs),
+          updatedAtMs: String(nowMs),
+          deletedAtMs: null,
+        },
+      };
+    };
+    const res = await writer.write({
+      organizationId: orgA,
+      nowMs,
+      commands: [imagePayload(productA), imagePayload(variantProduct)],
+    });
+    expect(res.results.map((r) => r.status)).toEqual(['accepted', 'accepted']);
+
+    const pub = JSON.parse((await call('GET', '/api/v1/public/shops/non-uyi')).payload) as {
+      products: { id: string; image?: string | null }[];
+    };
+    const non = pub.products.find((p) => p.id === productA);
+    expect(non?.image).toContain(`/products/${productA}/image?v=`);
+    const img = await call('GET', non?.image ?? '/x');
+    expect(img.statusCode).toBe(200);
+    expect(img.headers['content-type']).toBe('image/jpeg');
+    expect(Buffer.compare(img.rawPayload, jpeg)).toBe(0);
+
+    // unpublish the shirt: its photo is no longer public
+    const h = await auth('kab_a@guzar.uz');
+    await call(
+      'PUT',
+      '/api/v1/admin/shop/products',
+      { productIds: [variantProduct], isPublished: false },
+      h,
+    );
+    expect(
+      (await call('GET', `/api/v1/public/shops/non-uyi/products/${variantProduct}/image`))
+        .statusCode,
+    ).toBe(404);
+    await call(
+      'PUT',
+      '/api/v1/admin/shop/products',
+      { productIds: [variantProduct], isPublished: true },
+      h,
+    );
+  });
+
   it('an order is priced by the server, refuses unavailable goods, and shows only with its token', async () => {
     const tamper = await call(
       'POST',

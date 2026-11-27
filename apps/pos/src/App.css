@@ -3344,3 +3344,54 @@ html.pos-camera-live .pos-live * {
   margin-left: 4px;
   color: var(--text-secondary);
 }
+
+/* ---------- C21: product photos ---------- */
+.pos-product-list .pos-product-item > .pos-tile-photo {
+  width: 100%;
+  aspect-ratio: 4 / 3;
+  object-fit: cover;
+  border-radius: 10px;
+  background: var(--bg-elevated);
+  margin-bottom: 2px;
+}
+.pos-photo-field {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+.pos-photo-preview {
+  width: 96px;
+  height: 96px;
+  border-radius: var(--radius);
+  object-fit: cover;
+  background: var(--bg-elevated);
+  border: 1px solid var(--border-color);
+}
+.pos-photo-empty {
+  display: grid;
+  place-items: center;
+  color: var(--text-secondary);
+}
+.pos-photo-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.pos-photo-input {
+  display: none;
+}
+
+/* ---------- C22: share / office print / A4 ---------- */
+.pos-share-bar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin: 4px 0;
+}
+.pos-share-bar > .pos-btn {
+  flex: 1 1 140px;
+  justify-content: center;
+}
+.pos-share-bar > .pos-error-banner {
+  flex-basis: 100%;
+}

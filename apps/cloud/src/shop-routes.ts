@@ -160,10 +160,36 @@ export function registerShopRoutes(
           price: p.priceTiyin.toString(),
           category: p.categoryName,
           available: p.stockMilli === null || p.stockMilli > 0n,
+          image:
+            p.imageStamp !== null
+              ? `/api/v1/public/shops/${settings.slug}/products/${p.productId}/image?v=${p.imageStamp}`
+              : null,
         })),
       };
       void reply.header('cache-control', 'public, max-age=30');
       return body;
+    },
+  );
+
+  // C21: product photo for the public shop page (only goods that are on sale there).
+  app.get<{ Params: { slug: string; id: string } }>(
+    '/api/v1/public/shops/:slug/products/:id/image',
+    { config: { rateLimit: { max: 600, timeWindow: '1 minute' } } },
+    async (req, reply) => {
+      const shop = await o.store.lookupSlug(req.params.slug.toLowerCase());
+      const id = uuid(req.params.id);
+      if (shop === null || id === null) {
+        return reply.code(404).send({ error: 'NOT_FOUND', code: 'IMAGE_NOT_FOUND' });
+      }
+      const img = await o.store.getProductImage(shop.organizationId, id, true);
+      if (img === null) {
+        return reply.code(404).send({ error: 'NOT_FOUND', code: 'IMAGE_NOT_FOUND' });
+      }
+      return reply
+        .header('content-type', img.mime)
+        .header('cache-control', 'public, max-age=86400, immutable')
+        .header('x-content-type-options', 'nosniff')
+        .send(Buffer.from(img.dataBase64, 'base64'));
     },
   );
 

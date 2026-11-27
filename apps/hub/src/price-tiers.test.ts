@@ -53,8 +53,12 @@ async function boot(seed: number) {
     headers: h(owner),
     payload: { fullName: 'Kassir', username: 'kassa', role: 'cashier', pin: '739104' },
   });
-  const call = (token: string, method: 'GET' | 'POST' | 'PUT', url: string, payload?: object) =>
-    hub.app.inject({ method, url, headers: h(token), ...(payload ? { payload } : {}) });
+  const call = (
+    token: string,
+    method: 'GET' | 'POST' | 'PUT' | 'DELETE',
+    url: string,
+    payload?: object,
+  ) => hub.app.inject({ method, url, headers: h(token), ...(payload ? { payload } : {}) });
   return { hub, owner, cashier: await login('kassa', '739104'), call };
 }
 
@@ -138,6 +142,30 @@ describe('C20 wholesale tiers and favourites over the hub API', () => {
         cart: { totalFinal: string };
       }>().cart;
       expect(again.totalFinal).toBe('20000000');
+
+      // C22: the receipt preview gives the paper text and prints / records nothing
+      const sold = await env.call(env.cashier, 'POST', `/carts/${cartId}/complete`, {
+        clientRequestId: '01950000-0000-7000-8000-1700000000d2',
+        expectedTotal: '20000000',
+        payments: [{ method: 'cash', tenderedAmount: '20000000' }],
+      });
+      expect(sold.statusCode, sold.body).toBe(200);
+      const sale = sold.json<{ sale: { id: string; receiptCode: string } }>().sale;
+      const preview = await env.call(
+        env.cashier,
+        'GET',
+        `/sales/${sale.id}/receipt-preview?width=58`,
+      );
+      expect(preview.statusCode, preview.body).toBe(200);
+      const pv = preview.json<{ receiptCode: string; text: string; customerName: string | null }>();
+      expect(pv.receiptCode).toBe(sale.receiptCode);
+      expect(pv.text).toContain(`Chek: ${sale.receiptCode}`);
+      expect(pv.customerName).toBeNull();
+      for (const line of pv.text.split('\n')) expect(line.length).toBeLessThanOrEqual(32);
+      const prints = (await env.call(env.cashier, 'GET', `/sales/${sale.id}/prints`)).json<{
+        prints: unknown[];
+      }>();
+      expect(prints.prints).toHaveLength(0);
     } finally {
       await env.hub.close();
     }
@@ -176,6 +204,67 @@ describe('C20 wholesale tiers and favourites over the hub API', () => {
         favorite: false,
       });
       expect(unstar.json<{ productIds: string[] }>().productIds).toEqual([]);
+    } finally {
+      await env.hub.close();
+    }
+  });
+  it('C21: owner sets a product photo; every till reads it; bad files are refused', async () => {
+    const env = await boot(9203);
+    try {
+      const productId = (
+        await env.call(env.owner, 'POST', '/products', {
+          name: 'Choy',
+          unit: 'dona',
+          salePrice: '500000',
+        })
+      ).json<{ product: { id: string } }>().product.id;
+      const jpeg = Buffer.from([
+        0xff, 0xd8, 0xff, 0xe0, 0x00, 0x10, 0x4a, 0x46, 0x49, 0x46, 0x00, 0x01, 0x01, 0x00, 0xff,
+        0xd9,
+      ]);
+
+      const denied = await env.call(env.cashier, 'PUT', `/products/${productId}/image`, {
+        mime: 'image/jpeg',
+        dataBase64: jpeg.toString('base64'),
+      });
+      expect(denied.statusCode).toBe(403);
+
+      const fake = await env.call(env.owner, 'PUT', `/products/${productId}/image`, {
+        mime: 'image/png',
+        dataBase64: jpeg.toString('base64'),
+      });
+      expect(fake.statusCode).toBe(400);
+
+      const set = await env.call(env.owner, 'PUT', `/products/${productId}/image`, {
+        mime: 'image/jpeg',
+        dataBase64: jpeg.toString('base64'),
+      });
+      expect(set.statusCode, set.body).toBe(200);
+
+      const stamps = (await env.call(env.cashier, 'GET', '/catalog/image-stamps')).json<{
+        images: { productId: string }[];
+      }>();
+      expect(stamps.images.map((i) => i.productId)).toEqual([productId]);
+
+      const got = await env.call(env.cashier, 'GET', `/products/${productId}/image`);
+      expect(got.statusCode).toBe(200);
+      expect(got.headers['content-type']).toBe('image/jpeg');
+      expect(Buffer.compare(got.rawPayload, jpeg)).toBe(0);
+
+      // replacing keeps one live photo
+      await env.call(env.owner, 'PUT', `/products/${productId}/image`, {
+        mime: 'image/jpeg',
+        dataBase64: jpeg.toString('base64'),
+      });
+      expect(
+        (await env.call(env.cashier, 'GET', '/catalog/image-stamps')).json<{ images: unknown[] }>()
+          .images,
+      ).toHaveLength(1);
+
+      await env.call(env.owner, 'DELETE', `/products/${productId}/image`);
+      expect((await env.call(env.cashier, 'GET', `/products/${productId}/image`)).statusCode).toBe(
+        404,
+      );
     } finally {
       await env.hub.close();
     }

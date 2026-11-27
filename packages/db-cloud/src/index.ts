@@ -66,6 +66,7 @@ export {
   productVariants,
   productBarcodes,
   productPriceTiers,
+  productImages,
   priceChanges,
   batches,
   stockMoves,

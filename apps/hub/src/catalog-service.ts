@@ -19,6 +19,9 @@ import type {
   ListProductsResponseDto,
   PriceChangeSummaryDto,
   PriceTierDto,
+  ProductImageDataResponseDto,
+  ProductImageStampDto,
+  ProductImageStampsResponseDto,
   ProductBarcodeSummaryDto,
   ProductDetailResponseDto,
   ProductResponseDto,
@@ -26,11 +29,13 @@ import type {
   ProductVariantSummaryDto,
   ReplacePriceTiersRequestDto,
   ScanBarcodeResponseDto,
+  SetProductImageRequestDto,
   UpdateCategoryRequestDto,
   UpdateProductRequestDto,
   UpdateVariantRequestDto,
   VariantResponseDto,
 } from '@mezon/contracts';
+import { ProductImageMimeSchema } from '@mezon/contracts';
 import type {
   SqliteCatalogStore,
   StoredCategoryRecord,
@@ -288,6 +293,48 @@ export class HubCatalogService {
       })),
     );
     return { tiers: rows.map(toPriceTierDto) };
+  }
+
+  /** C21 product photos. */
+  async listImageStamps(productIds?: readonly UuidV7[]): Promise<ProductImageStampsResponseDto> {
+    const rows = await this.store.listProductImageStamps(productIds);
+    return {
+      images: rows.map((r) => ({ productId: r.productId, updatedAtMs: r.updatedAtMs.toString() })),
+    };
+  }
+
+  async getImage(productId: UuidV7): Promise<{ readonly mime: string; readonly bytes: Buffer }> {
+    const img = await this.store.getProductImage(productId);
+    if (img === null) {
+      throw new DomainError('PRODUCT_NOT_FOUND', 'Product has no photo');
+    }
+    return { mime: img.mime, bytes: Buffer.from(img.dataBase64, 'base64') };
+  }
+
+  async getImageData(productId: UuidV7): Promise<ProductImageDataResponseDto> {
+    const img = await this.store.getProductImage(productId);
+    if (img === null) {
+      throw new DomainError('PRODUCT_NOT_FOUND', 'Product has no photo');
+    }
+    return {
+      productId: img.productId,
+      mime: ProductImageMimeSchema.parse(img.mime),
+      dataBase64: img.dataBase64,
+      updatedAtMs: img.updatedAtMs.toString(),
+    };
+  }
+
+  async setImage(
+    productId: UuidV7,
+    input: SetProductImageRequestDto,
+  ): Promise<ProductImageStampDto> {
+    const img = await this.store.setProductImage(productId, input);
+    return { productId: img.productId, updatedAtMs: img.updatedAtMs.toString() };
+  }
+
+  async deleteImage(productId: UuidV7): Promise<{ readonly deleted: true }> {
+    await this.store.deleteProductImage(productId);
+    return { deleted: true };
   }
 
   /** C20 favourite products of this store. */

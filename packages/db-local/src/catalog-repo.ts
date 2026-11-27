@@ -36,6 +36,7 @@ import {
   localProductFavorites,
   priceChanges,
   productBarcodes,
+  productImages,
   productPriceTiers,
   productVariants,
   products,
@@ -111,6 +112,50 @@ export interface StoredProductBarcodeRecord {
   readonly format: BarcodeFormat;
   readonly createdAtMs: UnixMs;
   readonly updatedAtMs: UnixMs;
+}
+
+/** C21: largest accepted product photo (bytes). The till resizes to ~480 px, usually 30-80 KB. */
+export const MAX_PRODUCT_IMAGE_BYTES = 160_000;
+
+export interface StoredProductImageRecord {
+  readonly productId: UuidV7;
+  readonly mime: string;
+  readonly dataBase64: string;
+  readonly byteSize: number;
+  readonly updatedAtMs: UnixMs;
+}
+
+const IMAGE_MAGIC: Readonly<Record<string, (b: Uint8Array) => boolean>> = {
+  'image/jpeg': (b) => b[0] === 0xff && b[1] === 0xd8 && b[2] === 0xff,
+  'image/png': (b) => b[0] === 0x89 && b[1] === 0x50 && b[2] === 0x4e && b[3] === 0x47,
+  'image/webp': (b) =>
+    b[0] === 0x52 &&
+    b[1] === 0x49 &&
+    b[2] === 0x46 &&
+    b[3] === 0x46 &&
+    b[8] === 0x57 &&
+    b[9] === 0x45 &&
+    b[10] === 0x42 &&
+    b[11] === 0x50,
+};
+
+/** Decodes and checks a product photo: allowed type, size, and matching magic bytes. */
+export function decodeProductImage(mime: string, dataBase64: string): Uint8Array {
+  const check = IMAGE_MAGIC[mime];
+  if (check === undefined) {
+    throw new DomainError('VALIDATION_ERROR', 'Photo must be JPEG, PNG or WebP');
+  }
+  if (!/^[A-Za-z0-9+/]+={0,2}$/.test(dataBase64)) {
+    throw new DomainError('VALIDATION_ERROR', 'Photo data is not valid base64');
+  }
+  const bytes = new Uint8Array(Buffer.from(dataBase64, 'base64'));
+  if (bytes.length === 0 || bytes.length > MAX_PRODUCT_IMAGE_BYTES) {
+    throw new DomainError('VALIDATION_ERROR', 'Photo is too large (max 160 KB)');
+  }
+  if (bytes.length < 12 || !check(bytes)) {
+    throw new DomainError('VALIDATION_ERROR', 'Photo content does not match its type');
+  }
+  return bytes;
 }
 
 /** C20 wholesale tier: from `minQty` units in one cart every unit costs `unitPrice`. */
@@ -1984,6 +2029,139 @@ export class SqliteCatalogStore {
         out.push(toStoredPriceTier(res.row));
       }
       return Promise.resolve(out);
+    });
+  }
+
+  /** C21: `updatedAtMs` of every live product photo (for the tills' image cache). */
+  async listProductImageStamps(
+    productIds?: readonly UuidV7[],
+  ): Promise<readonly { readonly productId: UuidV7; readonly updatedAtMs: UnixMs }[]> {
+    const { uow, organizationId } = this.requireContext();
+    const ids = productIds?.map((id) => parseUuidV7(id));
+    return uow.runReadOnly(() => {
+      if (ids !== undefined && ids.length === 0) return Promise.resolve([]);
+      const conds = [
+        eq(productImages.organizationId, organizationId),
+        isNull(productImages.deletedAtMs),
+      ];
+      if (ids !== undefined) conds.push(inArray(productImages.productId, ids));
+      return Promise.resolve(
+        this.connection.db
+          .select({ productId: productImages.productId, updatedAtMs: productImages.updatedAtMs })
+          .from(productImages)
+          .where(and(...conds))
+          .all(),
+      );
+    });
+  }
+
+  /** C21: the live photo of a product, or null. */
+  async getProductImage(productId: UuidV7): Promise<StoredProductImageRecord | null> {
+    const { uow, organizationId } = this.requireContext();
+    const targetId = parseUuidV7(productId);
+    return uow.runReadOnly(() => {
+      const row = this.connection.db
+        .select()
+        .from(productImages)
+        .where(
+          and(
+            eq(productImages.organizationId, organizationId),
+            eq(productImages.productId, targetId),
+            isNull(productImages.deletedAtMs),
+          ),
+        )
+        .limit(1)
+        .all()[0];
+      return Promise.resolve(
+        row
+          ? {
+              productId: row.productId,
+              mime: row.mime,
+              dataBase64: row.dataBase64,
+              byteSize: row.byteSize,
+              updatedAtMs: row.updatedAtMs,
+            }
+          : null,
+      );
+    });
+  }
+
+  /**
+   * C21: sets (or replaces) the product photo. The body must be a real JPEG / PNG / WebP of at
+   * most `MAX_PRODUCT_IMAGE_BYTES`; the magic bytes must match the declared type.
+   */
+  async setProductImage(
+    productId: UuidV7,
+    input: { readonly mime: string; readonly dataBase64: string },
+  ): Promise<StoredProductImageRecord> {
+    const { uow, organizationId } = this.requireContext();
+    const targetId = parseUuidV7(productId);
+    const bytes = decodeProductImage(input.mime, input.dataBase64);
+    const dataBase64 = Buffer.from(bytes).toString('base64');
+    return uow.execute((session) => {
+      this.requireActiveProductSync(session, organizationId, targetId);
+      const live = session.db
+        .select({ id: productImages.id })
+        .from(productImages)
+        .where(
+          and(
+            eq(productImages.organizationId, organizationId),
+            eq(productImages.productId, targetId),
+            isNull(productImages.deletedAtMs),
+          ),
+        )
+        .limit(1)
+        .all()[0];
+      const values = { mime: input.mime, dataBase64, byteSize: bytes.length };
+      const res = live
+        ? updateAttr(session, productImages, {
+            id: live.id,
+            organizationId,
+            values,
+            eventType: 'product_image.updated',
+            schemaVersion: 1,
+          })
+        : insertAttr(session, productImages, {
+            organizationId,
+            values: { productId: targetId, ...values },
+            eventType: 'product_image.created',
+            schemaVersion: 1,
+          });
+      return Promise.resolve({
+        productId: res.row.productId,
+        mime: res.row.mime,
+        dataBase64: res.row.dataBase64,
+        byteSize: res.row.byteSize,
+        updatedAtMs: res.row.updatedAtMs,
+      });
+    });
+  }
+
+  /** C21: removes the product photo (no-op when there is none). */
+  async deleteProductImage(productId: UuidV7): Promise<void> {
+    const { uow, organizationId } = this.requireContext();
+    const targetId = parseUuidV7(productId);
+    await uow.execute((session) => {
+      const live = session.db
+        .select({ id: productImages.id })
+        .from(productImages)
+        .where(
+          and(
+            eq(productImages.organizationId, organizationId),
+            eq(productImages.productId, targetId),
+            isNull(productImages.deletedAtMs),
+          ),
+        )
+        .all();
+      for (const row of live) {
+        tombstoneAttr(session, productImages, {
+          id: row.id,
+          organizationId,
+          eventType: 'product_image.deleted',
+          schemaVersion: 1,
+        });
+      }
+      return Promise.resolve();
     });
   }
 
